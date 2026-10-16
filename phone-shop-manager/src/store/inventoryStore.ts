@@ -1,0 +1,331 @@
+import { create } from 'zustand';
+import type { PhoneModel, WriteOffReason } from '../types';
+import { inventoryService } from '../services/inventoryService';
+import { restockService } from '../services/restockService';
+import { writeOffService } from '../services/writeOffService';
+import { useActivityStore } from './activityStore';
+import { useAuthStore } from './authStore';
+import { generateSKU, resolveUniqueSKU } from '../features/inventory/AddProductModal';
+
+interface InventoryState {
+  products: PhoneModel[]; // Retail products (Server excludes repair_part from the beginning)
+  parts: PhoneModel[];    // Repair parts (Server sends only repair_part from the beginning)
+  isLoading: boolean;
+  isLoadingParts: boolean;
+  error: string | null;
+  searchQuery: string;
+  // Actions
+  fetchProducts: () => Promise<void>;
+  fetchParts: () => Promise<void>;
+  fetchAll: () => Promise<void>;
+  setSearchQuery: (query: string) => void;
+  updateStock: (id: string, newStock: number) => Promise<void>;
+  restockProduct: (id: string, quantityToAdd: number, opts?: { supplier?: string; note?: string; cost?: number }) => Promise<void>;
+  writeOffStock: (id: string, quantity: number, reason: WriteOffReason, note?: string) => Promise<void>;
+  adjustStockBy: (id: string, delta: number) => void;  // live adjustment (no async, no server call)
+  addProduct: (product: Omit<PhoneModel, 'id'>) => Promise<void>;
+  addProductsBulk: (products: Omit<PhoneModel, 'id'>[]) => Promise<void>;
+  updateProduct: (id: string, updates: Partial<Omit<PhoneModel, 'id'>>) => Promise<void>;
+  deleteProduct: (id: string) => Promise<void>;
+  // Derived
+  getFilteredProducts: (excludeCategory?: string) => PhoneModel[];
+}
+
+export const useInventoryStore = create<InventoryState>((set, get) => ({
+  products: [],
+  parts: [],
+  isLoading: false,
+  isLoadingParts: false,
+  error: null,
+  searchQuery: '',
+
+  // Server-side retail fetch: Firestore query excludes repair parts from the beginning
+  fetchProducts: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const rawProducts = await inventoryService.getRetailProducts();
+      const products = rawProducts.filter(p => p.category !== 'repair_part' && !p.sku?.toUpperCase().startsWith('PRT-'));
+      set({ products, isLoading: false });
+    } catch (err) {
+      console.error('Failed to load retail inventory from server:', err);
+      set({ error: 'Failed to load retail inventory', isLoading: false });
+    }
+  },
+
+  // Server-side parts fetch: Firestore query asks only for repair parts from the beginning
+  fetchParts: async () => {
+    set({ isLoadingParts: true, error: null });
+    try {
+      const parts = await inventoryService.getRepairParts();
+      set({ parts, isLoadingParts: false });
+    } catch (err) {
+      console.error('Failed to load repair parts from server:', err);
+      set({ error: 'Failed to load repair parts', isLoadingParts: false });
+    }
+  },
+
+  fetchAll: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const all = await inventoryService.getAll();
+      const retail = all.filter(p => p.category !== 'repair_part' && !p.sku?.toUpperCase().startsWith('PRT-'));
+      const parts = all.filter(p => p.category === 'repair_part' || p.sku?.toUpperCase().startsWith('PRT-'));
+      set({ products: retail, parts, isLoading: false });
+    } catch (err) {
+      set({ error: 'Failed to load full inventory', isLoading: false });
+    }
+  },
+
+  setSearchQuery: (searchQuery) => set({ searchQuery }),
+
+  updateStock: async (id, newStock) => {
+    try {
+      const existing = get().products.find(p => p.id === id) || get().parts.find(p => p.id === id);
+      const updated = await inventoryService.updateStock(id, newStock);
+      set(state => ({
+        products: state.products.map(p => p.id === id ? updated : p),
+        parts: state.parts.map(p => p.id === id ? updated : p),
+      }));
+
+      const user = useAuthStore.getState().user;
+      const userName = user ? user.name : 'System';
+      const delta = newStock - (existing?.stock || 0);
+      const sign = delta > 0 ? '+' : '';
+      useActivityStore.getState().logActivity(
+        'inventory',
+        `${sign}${delta} units stock updated by ${userName}`,
+        id,
+        user?.id
+      );
+    } catch (err) {
+      set({ error: 'Failed to update stock' });
+    }
+  },
+
+  restockProduct: async (id, quantityToAdd, opts = {}) => {
+    try {
+      const existing = get().products.find(p => p.id === id) || get().parts.find(p => p.id === id);
+      if (!existing) return;
+      const stockBefore = existing.stock;
+      const stockAfter = stockBefore + quantityToAdd;
+      const updated = await inventoryService.updateStock(id, stockAfter);
+      set(state => ({
+        products: state.products.map(p => p.id === id ? updated : p),
+        parts: state.parts.map(p => p.id === id ? updated : p),
+      }));
+      const user = useAuthStore.getState().user;
+      // Persist the structured restock log
+      await restockService.log({
+        productId: id,
+        productName: existing.name,
+        productSku: existing.sku,
+        quantityAdded: quantityToAdd,
+        stockBefore,
+        stockAfter,
+        supplier: opts.supplier,
+        note: opts.note,
+        cost: opts.cost,
+        performedById: user?.id,
+        performedByName: user?.name,
+      });
+      useActivityStore.getState().logActivity(
+        'inventory',
+        `Restocked ${existing.name}: +${quantityToAdd} units (${stockBefore} → ${stockAfter})`,
+        { entityId: id, entityType: existing.category === 'repair_part' ? 'part' : 'product', severity: 'success', userName: user?.name, userId: user?.id }
+      );
+    } catch (err) {
+      set({ error: 'Failed to restock product' });
+    }
+  },
+
+  writeOffStock: async (id, quantity, reason, note) => {
+    try {
+      const existing = get().products.find(p => p.id === id) || get().parts.find(p => p.id === id);
+      if (!existing) return;
+      const stockBefore = existing.stock;
+      const stockAfter = Math.max(0, stockBefore - quantity);
+      const actualWrittenOff = stockBefore - stockAfter; // can't write off more than stock
+      if (actualWrittenOff <= 0) return;
+      const updated = await inventoryService.updateStock(id, stockAfter);
+      set(state => ({
+        products: state.products.map(p => p.id === id ? updated : p),
+        parts: state.parts.map(p => p.id === id ? updated : p),
+      }));
+      const user = useAuthStore.getState().user;
+      await writeOffService.log({
+        productId: id,
+        productName: existing.name,
+        productSku: existing.sku,
+        quantityWrittenOff: actualWrittenOff,
+        stockBefore,
+        stockAfter,
+        reason,
+        note,
+        performedById: user?.id,
+        performedByName: user?.name,
+      });
+      const reasonLabel = reason.charAt(0).toUpperCase() + reason.slice(1);
+      useActivityStore.getState().logActivity(
+        'inventory',
+        `Write-off: -${actualWrittenOff} units of ${existing.name} [${reasonLabel}] (${stockBefore} → ${stockAfter})`,
+        { entityId: id, entityType: existing.category === 'repair_part' ? 'part' : 'product', severity: 'danger', detail: note || undefined, userName: user?.name, userId: user?.id }
+      );
+    } catch (err) {
+      set({ error: 'Failed to write off stock' });
+    }
+  },
+
+  // Stock adjustment: updates local state instantly AND persists to Firebase.
+  adjustStockBy: (id, delta) => {
+    // 1. Optimistic local update for instant UI feedback
+    set(state => ({
+      products: state.products.map(p => {
+        if (p.id !== id) return p;
+        const newStock = Math.max(0, p.stock + delta);
+        const stockStatus =
+          newStock === 0 ? 'out_of_stock' :
+          newStock <= p.lowStockThreshold ? 'low_stock' : 'in_stock';
+        return { ...p, stock: newStock, stockStatus };
+      }),
+      parts: state.parts.map(p => {
+        if (p.id !== id) return p;
+        const newStock = Math.max(0, p.stock + delta);
+        const stockStatus =
+          newStock === 0 ? 'out_of_stock' :
+          newStock <= p.lowStockThreshold ? 'low_stock' : 'in_stock';
+        return { ...p, stock: newStock, stockStatus };
+      }),
+    }));
+
+    // 2. Persist to Firebase so stock survives reload
+    inventoryService.adjustStockAsync(id, delta)
+      .then(updated => {
+        // Reconcile local state with the authoritative DB value
+        set(state => ({
+          products: state.products.map(p => p.id === id ? updated : p),
+          parts: state.parts.map(p => p.id === id ? updated : p),
+        }));
+      })
+      .catch(err => console.error(`Failed to persist stock adjustment for ${id}:`, err));
+  },
+
+  addProduct: async (product) => {
+    try {
+      // Safety net: resolve SKU against all existing products before persisting
+      const systemSkus = new Set(get().products.map(p => (p.sku || '').toUpperCase().trim()));
+      // Also include repair parts to prevent any cross-collection collisions
+      get().parts.forEach(p => systemSkus.add((p.sku || '').toUpperCase().trim()));
+      const rawSku = (product.sku || '').trim() || generateSKU(product.name, product.model, product.storage || '', product.color || '');
+      const safeSku = resolveUniqueSKU(rawSku, systemSkus);
+      const safeProduct = { ...product, sku: safeSku };
+
+      const newProduct = await inventoryService.addProduct(safeProduct);
+      if (newProduct.category === 'repair_part' || newProduct.sku?.toUpperCase().startsWith('PRT-')) {
+        set(state => ({ parts: [...state.parts, newProduct] }));
+      } else {
+        set(state => ({ products: [...state.products, newProduct] }));
+      }
+      
+      const user = useAuthStore.getState().user;
+      useActivityStore.getState().logActivity(
+        'inventory',
+        `Product created: ${product.name} ${product.model}`,
+        { entityId: newProduct.id, entityType: newProduct.category === 'repair_part' ? 'part' : 'product', severity: 'success', userName: user?.name, userId: user?.id }
+      );
+    } catch (err) {
+      set({ error: 'Failed to add product' });
+    }
+  },
+
+  addProductsBulk: async (products) => {
+    try {
+      // Safety net: resolve every product's SKU against existing store + prior items in this batch
+      const systemSkus = new Set(get().products.map(p => (p.sku || '').toUpperCase().trim()));
+      get().parts.forEach(p => systemSkus.add((p.sku || '').toUpperCase().trim()));
+      const safeProducts = products.map(product => {
+        const rawSku = (product.sku || '').trim() || generateSKU(product.name, product.model, product.storage || '', product.color || '');
+        const safeSku = resolveUniqueSKU(rawSku, systemSkus); // mutates systemSkus so next product sees this one
+        return { ...product, sku: safeSku };
+      });
+
+      const newProducts = await inventoryService.addProductsBulk(safeProducts);
+      const newParts = newProducts.filter(p => p.category === 'repair_part' || p.sku?.toUpperCase().startsWith('PRT-'));
+      const newRetail = newProducts.filter(p => p.category !== 'repair_part' && !p.sku?.toUpperCase().startsWith('PRT-'));
+      set(state => ({
+        products: [...state.products, ...newRetail],
+        parts: [...state.parts, ...newParts],
+      }));
+      
+      const user = useAuthStore.getState().user;
+      useActivityStore.getState().logActivity(
+        'inventory',
+        `Bulk import: Added ${products.length} products`,
+        'bulk-import',
+        user?.id
+      );
+    } catch (err) {
+      set({ error: 'Failed to bulk import products' });
+      throw err;
+    }
+  },
+
+  updateProduct: async (id, updates) => {
+    try {
+      const updated = await inventoryService.updateProduct(id, updates);
+      set(state => ({
+        products: state.products
+          .map(p => p.id === id ? updated : p)
+          .filter(p => p.category !== 'repair_part' && !p.sku?.toUpperCase().startsWith('PRT-')),
+        parts: state.parts
+          .map(p => p.id === id ? updated : p)
+          .filter(p => p.category === 'repair_part' || p.sku?.toUpperCase().startsWith('PRT-')),
+      }));
+
+      const user = useAuthStore.getState().user;
+      useActivityStore.getState().logActivity(
+        'inventory',
+        `Product updated by ${user ? user.name : 'System'}`,
+        id,
+        user?.id
+      );
+    } catch {
+      set({ error: 'Failed to update product' });
+    }
+  },
+
+  deleteProduct: async (id) => {
+    try {
+      const existing = get().products.find(p => p.id === id) || get().parts.find(p => p.id === id);
+      await inventoryService.deleteProduct(id);
+      set(state => ({
+        products: state.products.filter(p => p.id !== id),
+        parts: state.parts.filter(p => p.id !== id),
+      }));
+      const user = useAuthStore.getState().user;
+      useActivityStore.getState().logActivity(
+        'inventory',
+        `Product deleted: ${existing?.name || id}`,
+        { entityId: id, entityType: existing?.category === 'repair_part' ? 'part' : 'product', severity: 'danger', userName: user?.name, userId: user?.id }
+      );
+    } catch {
+      set({ error: 'Failed to delete product' });
+    }
+  },
+
+  getFilteredProducts: (excludeCategory?: string) => {
+    const { products, searchQuery } = get();
+    
+    let filtered = products.filter(p => p.category !== 'repair_part' && !p.sku?.toUpperCase().startsWith('PRT-'));
+    if (excludeCategory) {
+      filtered = filtered.filter(p => p.category !== excludeCategory);
+    }
+    
+    if (!searchQuery.trim()) return filtered;
+    
+    const words = searchQuery.toLowerCase().trim().split(/\s+/);
+    return filtered.filter(p => {
+      const full = [p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier].filter(Boolean).join(' ').toLowerCase();
+      return words.every(word => full.includes(word));
+    });
+  },
+}));

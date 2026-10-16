@@ -1,0 +1,53 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-family: var(--font-label);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-sm-weight);
+  line-height: var(--text-label-sm-line);
+  letter-spacing: var(--text-label-sm-spacing);
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.success {
+  background: var(--color-success-bg, #d1fae5);
+  color: var(--color-success-text, #065f46);
+}
+
+.warning {
+  background: var(--color-warning-bg, #fef3c7);
+  color: var(--color-warning-text, #92400e);
+}
+
+.danger {
+  background: var(--color-danger-bg, #fee2e2);
+  color: var(--color-danger-text, #991b1b);
+}
+
+.info {
+  background: var(--color-secondary-container, #dbeafe);
+  color: var(--color-on-secondary-fixed, #1e40af);
+}
+
+.neutral {
+  background: var(--color-surface-container-high, #f1f5f9);
+  color: var(--color-on-surface-variant, #475569);
+}
+
+/* Status Glow & Pulse Effects */
+.glowReady {
+  animation: statusGlowEmerald 2.5s infinite;
+  font-weight: 700;
+}
+
+.glowProgress {
+  animation: statusGlowBlue 2.5s infinite;
+  font-weight: 700;
+}
+
+.glowPending {
+  animation: statusPulseAmber 2.5s infinite;
+}

@@ -1,0 +1,119 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal {
+  background: var(--color-surface);
+  border-radius: var(--radius-xl);
+  width: min(480px, 100%);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  animation: pop 0.2s ease;
+}
+
+@keyframes pop {
+  from { transform: scale(0.94); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--color-outline-variant);
+  gap: 12px;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-on-surface);
+  margin: 0;
+}
+
+.subtitle {
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+  margin: 2px 0 0;
+}
+
+.closeBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-on-surface-variant);
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  transition: background 0.2s;
+}
+.closeBtn:hover { background: var(--color-surface-container); }
+
+.stockInfo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 24px;
+  background: var(--color-surface-container-lowest);
+  border-bottom: 1px solid var(--color-outline-variant);
+}
+
+.stockLabel {
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+}
+
+.stockValue {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px 16px;
+}
+
+.formRow {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 24px 16px;
+  padding: 10px 14px;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: #dc2626;
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--color-outline-variant);
+  background: var(--color-surface-container-lowest);
+}

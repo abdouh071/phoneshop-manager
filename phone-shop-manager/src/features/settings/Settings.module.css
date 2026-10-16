@@ -1,0 +1,432 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  font-family: var(--font-headline);
+  font-size: var(--text-headline-lg-size);
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-6);
+  max-width: 800px;
+}
+
+.sectionTitle {
+  font-family: var(--font-headline);
+  font-size: var(--text-headline-sm-size);
+  font-weight: 600;
+  color: var(--color-on-surface);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-surface-container-low);
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.toggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) 0;
+}
+
+.toggleLabel {
+  font-size: var(--text-label-md-size);
+  font-weight: 500;
+  color: var(--color-on-surface);
+}
+
+.toggleDesc {
+  font-size: var(--text-body-sm-size);
+  color: var(--color-on-surface-variant);
+  margin-top: 2px;
+}
+
+/* Custom Switch Toggle */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: var(--color-surface-container-high);
+  transition: .4s;
+  border-radius: 24px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .2s;
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+  background-color: var(--color-primary);
+}
+
+input:checked + .slider:before {
+  transform: translateX(20px);
+}
+
+/* Tabs */
+.tabsContainer {
+  display: flex;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--color-surface-container-high);
+  margin-bottom: var(--space-2);
+}
+
+.tabBtn {
+  background: none;
+  border: none;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-body-md-size);
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  font-weight: 500;
+  transition: all var(--transition-base);
+}
+
+.tabBtn:hover {
+  color: var(--color-on-surface);
+  background: var(--color-surface-container-low);
+}
+
+.tabBtnActive {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+/* Users Tab */
+.cardHeaderWithExport {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-surface-container-low);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.th {
+  padding: var(--space-3) var(--space-5);
+  text-align: left;
+  font-size: var(--text-label-sm-size);
+  color: var(--color-on-surface-variant);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--color-surface-container-low);
+}
+
+.tr {
+  border-bottom: 1px solid var(--color-surface-container-low);
+}
+
+.tr:last-child { border-bottom: none; }
+
+.td {
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--text-body-sm-size);
+  color: var(--color-on-surface);
+}
+
+.userCell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.userAvatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: var(--text-label-sm-size);
+}
+
+.userName {
+  font-weight: 500;
+  color: var(--color-on-surface);
+}
+
+.userEmail {
+  font-size: var(--text-label-sm-size);
+  color: var(--color-on-surface-variant);
+}
+
+.roleBadge {
+  padding: 4px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.roleAdmin {
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+}
+
+.roleCashier {
+  background: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+}
+
+/* Receipt Tab */
+.receiptLayout {
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  gap: var(--space-5);
+  align-items: flex-start;
+}
+
+@media (max-width: 1024px) {
+  .receiptLayout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.receiptForm {
+  display: flex;
+  flex-direction: column;
+}
+
+.logoUploadSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.logoUploadLabel {
+  font-size: var(--text-label-md-size);
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+.logoDropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-4);
+  border: 2px dashed var(--color-outline-variant);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-container-lowest);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.logoDropzone:hover, .logoDropzoneActive {
+  border-color: var(--color-primary);
+  background: var(--color-surface-container-low);
+}
+
+.logoDropzoneIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--space-1);
+}
+
+.logoDropzoneTitle {
+  font-size: var(--text-body-sm-size);
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+.logoDropzoneSub {
+  font-size: var(--text-label-xs-size);
+  color: var(--color-on-surface-variant);
+}
+
+.logoActiveCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-container-lowest);
+}
+
+.logoActiveLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.logoActiveThumbnailBox {
+  width: 72px;
+  height: 52px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.logoActiveThumbnail {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.logoActiveInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.logoActiveTitle {
+  font-size: var(--text-body-sm-size);
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+.logoActiveSubtitle {
+  font-size: var(--text-label-xs-size);
+  color: var(--color-on-surface-variant);
+}
+
+.logoActiveActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.previewLogoImgContainer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+
+.previewLogoImg {
+  max-width: 180px;
+  max-height: 70px;
+  object-fit: contain;
+}
+
+.buttonRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.saveBtn {
+  align-self: flex-start;
+}
+
+.testPrintBtn {
+  align-self: flex-start;
+}
+
+.receiptPreviewPanel {
+  position: sticky;
+  top: var(--space-5);
+}
+
+.receiptPreview {
+  background: #fdfdfd;
+  color: #111;
+  padding: var(--space-6);
+  font-family: monospace;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  box-shadow: inset 0 0 10px rgba(0,0,0,0.05);
+}
+
+.previewLogo {
+  font-size: 24px;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: var(--space-2);
+}
+
+.previewHeader {
+  text-align: center;
+  white-space: pre-wrap;
+  margin-bottom: var(--space-2);
+}
+
+.previewDivider {
+  border-top: 1px dashed #ccc;
+  margin: var(--space-2) 0;
+}
+
+.previewItem {
+  display: flex;
+  justify-content: space-between;
+}
+
+.previewTotal {
+  display: flex;
+  justify-content: space-between;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.previewFooter {
+  text-align: center;
+  white-space: pre-wrap;
+  color: #555;
+  margin-top: var(--space-4);
+}

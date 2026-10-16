@@ -1,0 +1,432 @@
+/* B2B Parts POS & Commercial Account Styles */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Account Info Card */
+.accountCard {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.accountCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.accountTitleGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.shopIconBadge {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #3b82f6;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.25);
+}
+
+.shopInfo {
+  display: flex;
+  flex-direction: column;
+}
+
+.shopName {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.ownerName {
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.balancePill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.balanceLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.balanceValue {
+  font-size: 16px;
+  font-weight: 800;
+  color: #dc2626;
+}
+
+.balanceValueZero {
+  font-size: 15px;
+  font-weight: 700;
+  color: #16a34a;
+}
+
+.creditLimitRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #475569;
+  padding-top: 6px;
+  border-top: 1px dashed #cbd5e1;
+}
+
+/* 3 Settlement Choice Tabs */
+.settlementModes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  background: #f1f5f9;
+  padding: 5px;
+  border-radius: 10px;
+}
+
+.settlementBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 6px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.settlementBtn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.settlementBtnActive {
+  background: #ffffff;
+  color: #1e293b;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+}
+
+.settlementBtnActiveGreen {
+  background: #ecfdf5;
+  color: #065f46;
+  border-color: #a7f3d0;
+  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.1);
+}
+
+.settlementBtnActiveBlue {
+  background: #eff6ff;
+  color: #1e40af;
+  border-color: #bfdbfe;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.1);
+}
+
+.settlementBtnActiveAmber {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fde68a;
+  box-shadow: 0 2px 4px rgba(217, 119, 6, 0.1);
+}
+
+/* Payment Method Row */
+.methodGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.methodBtn {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.methodBtn:hover {
+  background: #f1f5f9;
+}
+
+.methodBtnActive {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+/* Quick Pay Chips */
+.quickChips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.chip {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.chip:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+/* Balance Impact Calculation Box */
+.impactBox {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.impactRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #475569;
+}
+
+.impactRowTotal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 8px;
+  border-top: 1px solid #cbd5e1;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.limitWarning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: 8px;
+  color: #be123c;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* B2B Commercial Invoice Styles */
+.invoiceContainer {
+  background: #ffffff;
+  color: #0f172a;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-family: inherit;
+}
+
+.invoiceHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 2px solid #0f172a;
+  padding-bottom: 12px;
+}
+
+.invoiceLogoGroup h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.5px;
+}
+
+.invoiceSub {
+  font-size: 12px;
+  color: #64748b;
+  margin: 2px 0 0 0;
+}
+
+.invoiceMetaCol {
+  text-align: right;
+}
+
+.invoiceBadge {
+  display: inline-block;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.invoiceNum {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e293b;
+  margin-top: 4px;
+}
+
+.invoiceDate {
+  font-size: 12px;
+  color: #64748b;
+}
+
+/* Client Details in Invoice */
+.invoiceParties {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  background: #f8fafc;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.partyLabel {
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748b;
+  font-size: 10.5px;
+  letter-spacing: 0.5px;
+  margin-bottom: 3px;
+}
+
+.partyName {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.partyDetail {
+  color: #475569;
+}
+
+/* Invoice Table */
+.invoiceTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.invoiceTable th {
+  text-align: left;
+  background: #f1f5f9;
+  padding: 8px 10px;
+  font-weight: 700;
+  color: #334155;
+  border-bottom: 1px solid #cbd5e1;
+}
+
+.invoiceTable th:last-child {
+  text-align: right;
+}
+
+.invoiceTable td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #1e293b;
+}
+
+.invoiceTable td:last-child {
+  text-align: right;
+  font-weight: 600;
+}
+
+/* Invoice Summary Footer */
+.invoiceSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 240px;
+  margin-left: auto;
+  font-size: 12.5px;
+  border-top: 1px dashed #cbd5e1;
+  padding-top: 10px;
+}
+
+.summaryLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #475569;
+}
+
+.summaryTotalLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+  border-top: 1px solid #0f172a;
+  padding-top: 4px;
+  margin-top: 2px;
+}
+
+.summaryPaidLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #16a34a;
+  font-weight: 700;
+}
+
+.summaryChargedLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #dc2626;
+  font-weight: 700;
+}
+
+.invoiceTerms {
+  border-top: 1px solid #f1f5f9;
+  padding-top: 10px;
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+}

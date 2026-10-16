@@ -1,0 +1,237 @@
+/* Lock Code & Pattern Visualizer Widget */
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Mode Switcher Tabs */
+.typeTabs {
+  display: flex;
+  background: var(--color-surface-container-low, #f1f5f9);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.typeTab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-on-surface-variant, #64748b);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.typeTab:hover:not(.typeTabActive) {
+  color: var(--color-on-surface, #0f172a);
+}
+
+.typeTabActive {
+  background: var(--color-surface-container-lowest, #ffffff);
+  color: var(--color-primary, #4f46e5);
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+/* ============================================================
+   3x3 Android Pattern Lock Grid
+   ============================================================ */
+.patternContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 14px;
+  padding: 16px 12px;
+  position: relative;
+  user-select: none;
+}
+
+.patternSvg {
+  width: 210px;
+  height: 210px;
+  touch-action: none;
+}
+
+.patternDotCircle {
+  cursor: pointer;
+  transition: r 0.18s ease, fill 0.18s ease;
+}
+
+.patternDotActive {
+  fill: #4f46e5;
+  filter: drop-shadow(0 0 6px rgba(79, 70, 229, 0.5));
+}
+
+.patternLine {
+  stroke: #4f46e5;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 4px rgba(79, 70, 229, 0.35));
+}
+
+.patternOrderBadge {
+  font-family: system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  fill: #ffffff;
+  pointer-events: none;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.patternFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 240px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.patternSequenceText {
+  font-family: monospace;
+  font-weight: 700;
+  color: var(--color-primary, #4f46e5);
+  background: rgba(79, 70, 229, 0.08);
+  padding: 3px 8px;
+  border-radius: 6px;
+  letter-spacing: 1px;
+}
+
+.clearPatternBtn {
+  background: none;
+  border: none;
+  color: var(--color-on-surface-variant, #64748b);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.clearPatternBtn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+}
+
+/* ============================================================
+   PIN / Password Widget
+   ============================================================ */
+.pinContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.pinDisplay {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pinDigitBox {
+  width: 38px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--color-surface-container-low, #f1f5f9);
+  border: 1.5px solid var(--color-outline-variant, #cbd5e1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: monospace;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--color-on-surface, #0f172a);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.pinDigitBoxFilled {
+  border-color: var(--color-primary, #4f46e5);
+  background: rgba(79, 70, 229, 0.04);
+  color: var(--color-primary, #4f46e5);
+}
+
+.pinActionsRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pinActionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  background: var(--color-surface-container-lowest, #ffffff);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-on-surface-variant, #64748b);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pinActionBtn:hover {
+  background: var(--color-surface-container-low, #f1f5f9);
+  color: var(--color-on-surface, #0f172a);
+}
+
+.pinInputWrapper {
+  width: 100%;
+  max-width: 240px;
+}
+
+/* Readonly Detail Card in Ticket Detail Panel */
+.detailLockCard {
+  background: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detailLockHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-on-surface, #0f172a);
+}
+
+.detailLockBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(79, 70, 229, 0.1);
+  color: var(--color-primary, #4f46e5);
+}

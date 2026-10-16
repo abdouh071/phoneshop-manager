@@ -1,0 +1,80 @@
+.skeletonContainer {
+  padding: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-container-low, #f1f5f9) 0%,
+    var(--color-surface-container, #e2e8f0) 50%,
+    var(--color-surface-container-low, #f1f5f9) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.titleBox {
+  width: 220px;
+  height: 32px;
+}
+
+.buttonBox {
+  width: 140px;
+  height: 38px;
+  border-radius: 8px;
+}
+
+.filterRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.searchBar {
+  flex: 1;
+  max-width: 380px;
+  height: 40px;
+  border-radius: 10px;
+}
+
+.filterPill {
+  width: 90px;
+  height: 36px;
+  border-radius: 20px;
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.card {
+  height: 160px;
+  border-radius: 12px;
+}

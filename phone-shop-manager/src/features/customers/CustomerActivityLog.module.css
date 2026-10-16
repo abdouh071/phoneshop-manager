@@ -1,0 +1,228 @@
+/* ============================================================
+   CUSTOMER ACTIVITY & AUDIT LOG STYLES
+   ============================================================ */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Add Note Form ────────────────────────────────────────── */
+.addNoteBox {
+  background: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
+}
+
+.addNoteHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.addNoteTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-on-surface, #0f172a);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.noteTextarea {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--color-outline-variant, #cbd5e1);
+  font-size: 12.5px;
+  color: var(--color-on-surface, #1e293b);
+  resize: vertical;
+  background: var(--color-surface-container-low, #f8fafc);
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.noteTextarea:focus {
+  outline: none;
+  border-color: var(--color-primary, #0050cb);
+  background: #ffffff;
+}
+
+.noteSubmitRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.authorHint {
+  font-size: 11px;
+  color: var(--color-on-surface-variant, #64748b);
+}
+
+.submitNoteBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 11.5px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.submitNoteBtn:hover:not(:disabled) {
+  background: #1e293b;
+}
+
+.submitNoteBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Filter Pills ─────────────────────────────────────────── */
+.filterRow {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.filterBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  background: var(--color-surface-container-lowest, #ffffff);
+  color: var(--color-on-surface-variant, #64748b);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filterBtn:hover {
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.filterBtnActive {
+  background: #0f172a !important;
+  border-color: #0f172a !important;
+  color: #ffffff !important;
+}
+
+/* ── Audit Logs List ──────────────────────────────────────── */
+.logsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.logCard {
+  background: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.logCard:hover {
+  border-color: #94a3b8;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.logHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.logTitleWrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--color-on-surface, #0f172a);
+}
+
+.iconBadge {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.iconDebt { background: #fee2e2; color: #dc2626; }
+.iconPayment { background: #dcfce7; color: #16a34a; }
+.iconRepair { background: #fef3c7; color: #d97706; }
+.iconSale { background: #dbeafe; color: #2563eb; }
+.iconProfile { background: #f3e8ff; color: #9333ea; }
+.iconNote { background: #f1f5f9; color: #475569; }
+
+.logTime {
+  font-size: 10.5px;
+  color: var(--color-on-surface-variant, #94a3b8);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.logDesc {
+  font-size: 12px;
+  color: #334155;
+  line-height: 1.45;
+  margin: 0;
+  background: var(--color-surface-container-low, #f8fafc);
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.03);
+}
+
+.logFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--color-on-surface-variant, #64748b);
+  padding-top: 4px;
+}
+
+.actorTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: #1e293b;
+  background: #f1f5f9;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+.emptyLogs {
+  padding: 30px 16px;
+  text-align: center;
+  color: var(--color-on-surface-variant, #94a3b8);
+  font-size: 12.5px;
+  background: var(--color-surface-container-low, #f8fafc);
+  border-radius: 12px;
+  border: 1px dashed var(--color-outline-variant, #e2e8f0);
+}

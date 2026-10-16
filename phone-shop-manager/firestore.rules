@@ -1,0 +1,171 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helper Functions ────────────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Reads the caller's profile from Firestore to check their role
+    function callerProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && callerProfile().role == 'admin';
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        callerProfile().isSuperAdmin == true || 
+        request.auth.token.email == 'admin@example.com' // Replace with your initial owner email if needed
+      );
+    }
+
+    function isWorker() {
+      return isSignedIn() && (callerProfile().role == 'sales_agent' || callerProfile().role == 'repair_agent');
+    }
+
+    // ─── Inventory ───────────────────────────────────────────────────────────
+    // All signed-in users can read & write (Admin Unlock modal handles frontend guard)
+    match /inventory/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // ─── Transactions ────────────────────────────────────────────────────────
+    // All signed-in users can create/read. Nobody can ever delete a transaction.
+    match /transactions/{docId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn(); // refunds & edits (status/settlement updates)
+      allow delete: if false;        // permanently prohibited
+    }
+
+    // ─── Repairs ─────────────────────────────────────────────────────────────
+    // Signed-in users can read/write all repairs.
+    // Unauthenticated users can READ individual tickets (public tracking portal).
+    // PIN verification and field stripping is enforced in the application layer.
+    match /repairs/{docId} {
+      allow read:  if true;
+      allow write: if isSignedIn();
+    }
+
+    // ─── Counters (for sequential numbers like TKT-XXXX) ──────────────────────
+    match /counters/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // ─── Customers ───────────────────────────────────────────────────────────
+    match /customers/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // ─── Customer Debts & Credit Tabs ────────────────────────────────────────
+    match /customer_debts/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // ─── Customer Activity Logs ──────────────────────────────────────────────
+    // Immutable audit trail for customer ledger & events
+    match /customer_activity_logs/{docId} {
+      allow read:          if isSignedIn();
+      allow create:        if isSignedIn();
+      allow update, delete: if false; // permanently prohibited
+    }
+
+    // ─── Activity Logs ───────────────────────────────────────────────────────
+    // Immutable audit trail — anyone can create, nobody can ever edit or delete
+    match /activityLogs/{docId} {
+      allow read:          if isSignedIn();
+      allow create:        if isSignedIn();
+      allow update, delete: if false; // permanently prohibited
+    }
+
+    // ─── Purchasing & Suppliers ──────────────────────────────────────────────
+    match /suppliers/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /purchaseOrders/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // ─── Restock & Write-Off Logs ────────────────────────────────────────────
+    match /restockLogs/{docId} {
+      allow read:          if isSignedIn();
+      allow create:        if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    match /writeOffLogs/{docId} {
+      allow read:          if isSignedIn();
+      allow create:        if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    // ─── User Profiles ───────────────────────────────────────────────────────
+    // Workers can only read. Only admins/superadmins can write.
+    // Strict rules prevent privilege escalation:
+    //   - Nobody can grant isSuperAdmin via the API (only existing super admins can)
+    //   - Regular admins cannot promote anyone to admin role
+    match /users/{userId} {
+      // Anyone signed-in can read staff profiles (needed for listings)
+      allow read: if isSignedIn();
+
+      // Allow the super admin email to bootstrap their own profile on first login
+      allow create: if isSignedIn() 
+        && request.auth.uid == userId
+        && (request.auth.token.email == 'admin@example.com' || isAdmin());
+
+      // Workers cannot write to user profiles at all
+      allow write: if !isWorker() && (
+
+        // Super Admins can do anything to user profiles
+        isSuperAdmin()
+
+        ||
+
+        // Regular Admins can create/edit, but with strict guards:
+        (isAdmin() && (
+          // 1. They cannot grant isSuperAdmin to anyone
+          !('isSuperAdmin' in request.resource.data && request.resource.data.isSuperAdmin == true)
+          &&
+          // 2. They cannot promote anyone to admin role
+          !('role' in request.resource.data && request.resource.data.role == 'admin')
+          &&
+          // 3. They cannot touch existing Super Admin profiles
+          !(resource != null && resource.data.isSuperAdmin == true)
+        ))
+      );
+    }
+
+    // ─── Active & Suspended Carts ────────────────────────────────────────────
+    // Signed-in users can read/write their own active & suspended carts
+    match /carts/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /suspended_carts/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /parts_suspended_carts/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // ─── Settings ────────────────────────────────────────────────────────────
+    // Anyone can READ settings (needed for tracking page store name + IP Lock);
+    // Only Admins/SuperAdmins can WRITE settings (changing IP config etc.)
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin() || isSuperAdmin();
+    }
+
+    // ─── Deny Everything Else ────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

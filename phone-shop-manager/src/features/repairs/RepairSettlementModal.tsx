@@ -1,0 +1,793 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  CheckCircle2,
+  AlertTriangle,
+  Phone,
+  DollarSign,
+  Calendar,
+  FileText,
+  CreditCard,
+  Banknote,
+  Smartphone,
+  User,
+  ArrowRight,
+  ShieldCheck,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
+import type { RepairTicket, RepairStatusHistoryEntry, PaymentMethod } from '../../types';
+import { Modal } from '../../components/ui/Modal';
+import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
+import { useToast } from '../../components/ui/Toast';
+import { formatCurrency } from '../../utils/formatCurrency';
+import { useRepairStore } from '../../store/repairStore';
+import { useCustomerStore } from '../../store/customerStore';
+import { useAuthStore } from '../../store/authStore';
+import { activityLogService } from '../../services/activityLogService';
+import { customerLogService } from '../../services/customerLogService';
+import styles from './RepairSettlementModal.module.css';
+
+interface RepairSettlementModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  ticket: RepairTicket | null;
+  onSettled: (updatedTicket: RepairTicket) => void;
+}
+
+export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
+  isOpen,
+  onClose,
+  ticket,
+  onSettled,
+}) => {
+  const toast = useToast();
+  const { updateTicket } = useRepairStore();
+  const { customers, findOrCreateCustomer, addDebt, updateCustomer, updateDebtAmount } = useCustomerStore();
+  const actor = useAuthStore(state => state.user);
+
+  // Form State
+  const [finalPrice, setFinalPrice] = useState<number>(0);
+  const [isEditingPrice, setIsEditingPrice] = useState<boolean>(false);
+  const [amountPaidNow, setAmountPaidNow] = useState<string>('');
+  const [customerPhone, setCustomerPhone] = useState<string>('');
+  const [isEditingPhone, setIsEditingPhone] = useState<boolean>(false);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
+  const [dueDate, setDueDate] = useState<string>('');
+  const [settlementNotes, setSettlementNotes] = useState<string>('');
+  const [showExtra, setShowExtra] = useState<boolean>(false);
+  const [phoneError, setPhoneError] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Initialize or reset form whenever ticket changes or modal opens
+  useEffect(() => {
+    if (ticket && isOpen) {
+      const price = ticket.actualCost ?? ticket.estimatedCost ?? 0;
+      const deposit = ticket.depositAmount || 0;
+      const remainingDue = Math.max(0, price - deposit);
+
+      setFinalPrice(price);
+      setIsEditingPrice(false);
+      setAmountPaidNow(remainingDue.toString());
+      setCustomerPhone(ticket.customerPhone || '');
+      setIsEditingPhone(!ticket.customerPhone);
+      setPaymentMethod('cash');
+      setDueDate('');
+      setSettlementNotes('');
+      setShowExtra(false);
+      setPhoneError('');
+      setIsSubmitting(false);
+    }
+  }, [ticket, isOpen]);
+
+  // Proactively find existing customer account by phone or ID
+  const matchingCustomer = useMemo(() => {
+    const cleanPhone = customerPhone.replace(/\D/g, '');
+    if (cleanPhone.length >= 8) {
+      const found = customers.find(c => {
+        const cDigits = (c.phone || '').replace(/\D/g, '');
+        return (
+          cDigits &&
+          (cDigits === cleanPhone ||
+            cDigits.endsWith(cleanPhone) ||
+            cleanPhone.endsWith(cDigits))
+        );
+      });
+      if (found) return found;
+    }
+    if (ticket?.customerId) {
+      return customers.find(c => c.id === ticket.customerId) || null;
+    }
+    return null;
+  }, [customerPhone, ticket?.customerId, customers]);
+
+  if (!ticket) return null;
+
+  // Derived financial calculations
+  const depositAlreadyPaid = ticket.depositAmount || 0;
+  const balanceDueBeforeHandover = Math.max(0, finalPrice - depositAlreadyPaid);
+  const paidNowNum = isNaN(Number(amountPaidNow)) ? 0 : Math.max(0, Number(amountPaidNow));
+  const totalPaid = depositAlreadyPaid + paidNowNum;
+  const remainingDebt = Math.max(0, finalPrice - totalPaid);
+
+  const isFullyPaid = remainingDebt <= 0 && finalPrice > 0;
+  const isZeroPrice = finalPrice === 0;
+  const isDebt = remainingDebt > 0;
+
+  // Validation conditions
+  const hasPhone = Boolean(customerPhone.trim());
+  const isPhoneRequired = isDebt && !hasPhone;
+
+  const handleQuickAmount = (amount: number) => {
+    setAmountPaidNow(Math.max(0, amount).toString());
+    setPhoneError('');
+  };
+
+  const handlePhoneChange = (val: string) => {
+    setCustomerPhone(val);
+    if (val.trim()) {
+      setPhoneError('');
+    }
+  };
+
+  const handleSubmit = async (e?: React.FormEvent, overrides?: { paidNow?: number; method?: PaymentMethod }) => {
+    if (e) e.preventDefault();
+
+    // 1. Validate price
+    if (finalPrice < 0 || isNaN(finalPrice)) {
+      toast.error('Invalid Price', 'Repair price cannot be negative.');
+      return;
+    }
+
+    // Use overrides if provided (e.g. from quick-cash button)
+    const effectivePaidNow = overrides?.paidNow !== undefined ? overrides.paidNow : paidNowNum;
+    const effectiveMethod = overrides?.method || paymentMethod;
+    const effectiveTotalPaid = depositAlreadyPaid + effectivePaidNow;
+    const effectiveRemainingDebt = Math.max(0, finalPrice - effectiveTotalPaid);
+    const effectiveIsFullyPaid = effectiveRemainingDebt <= 0 && finalPrice > 0;
+    const effectiveIsDebt = effectiveRemainingDebt > 0;
+
+    // 2. Validate phone number when there is debt
+    if (effectiveIsDebt) {
+      const trimmedPhone = customerPhone.trim();
+      if (!trimmedPhone) {
+        setPhoneError('Client phone number is required to record the debt on their account.');
+        setIsEditingPhone(true);
+        toast.error('Phone Number Required', 'A phone number is required to register the client debt tab.');
+        return;
+      }
+
+      const digitsOnly = trimmedPhone.replace(/\D/g, '');
+      if (digitsOnly.length < 8) {
+        setPhoneError('Please enter a valid phone number (at least 8 digits).');
+        setIsEditingPhone(true);
+        toast.error('Invalid Phone', 'Please enter a valid phone number with at least 8 digits.');
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const trimmedPhone = customerPhone.trim();
+      let customerId = ticket.customerId;
+      let matchedCustomer = matchingCustomer;
+
+      // 3. Resolve or create customer account
+      if (!matchedCustomer && trimmedPhone) {
+        try {
+          matchedCustomer = await findOrCreateCustomer({
+            name: ticket.customerName.trim() || 'Client',
+            phone: trimmedPhone,
+            accountType: 'retail',
+          });
+        } catch (custErr) {
+          console.warn('Customer find/create fallback:', custErr);
+        }
+      }
+
+      if (matchedCustomer?.id) {
+        customerId = matchedCustomer.id;
+        // Keep phone up-to-date on existing customer profile if it was missing or updated
+        if (trimmedPhone && (!matchedCustomer.phone || matchedCustomer.phone !== trimmedPhone)) {
+          updateCustomer(matchedCustomer.id, { phone: trimmedPhone }).catch(console.error);
+        }
+      }
+
+      // 4. Create or update debt record if there is an unpaid balance
+      let createdDebtId: string | undefined = ticket.debtEntryId;
+      if (effectiveIsDebt && (matchedCustomer || customerId)) {
+        if (ticket.debtEntryId) {
+          try {
+            await updateDebtAmount(
+              ticket.debtEntryId,
+              finalPrice,
+              `Repair #${ticket.ticketNumber} re-settled: total adjusted to ${formatCurrency(finalPrice)}`
+            );
+          } catch (debtErr) {
+            console.error('Failed to update existing debt entry:', debtErr);
+          }
+        } else {
+          const targetCustId = matchedCustomer?.id || customerId!;
+          const custName = matchedCustomer?.name || ticket.customerName || 'Client';
+          const custPhone = trimmedPhone || matchedCustomer?.phone || ticket.customerPhone || '';
+
+          const initialPayments = [];
+          if (depositAlreadyPaid > 0) {
+            initialPayments.push({
+              id: `pay_dep_${Date.now()}`,
+              date: ticket.createdAt || new Date().toISOString(),
+              amount: depositAlreadyPaid,
+              method: 'cash' as PaymentMethod,
+              note: `Deposit paid at intake for Repair #${ticket.ticketNumber}`,
+              receivedByName: actor?.name || 'Staff',
+            });
+          }
+          if (effectivePaidNow > 0) {
+            initialPayments.push({
+              id: `pay_handover_${Date.now()}`,
+              date: new Date().toISOString(),
+              amount: effectivePaidNow,
+              method: effectiveMethod,
+              note: `Payment at handover for Repair #${ticket.ticketNumber}`,
+              receivedByName: actor?.name || 'Staff',
+            });
+          }
+
+          const debtPayload = {
+            customerId: targetCustId,
+            customerName: custName,
+            customerPhone: custPhone,
+            productOrService: `Repair #${ticket.ticketNumber} - ${ticket.deviceBrand} ${ticket.deviceModel}`,
+            totalAmount: finalPrice,
+            amountPaid: effectiveTotalPaid,
+            date: new Date().toISOString(),
+            dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
+            type: 'repair' as const,
+            notes: settlementNotes.trim()
+              ? settlementNotes.trim()
+              : `Repair #${ticket.ticketNumber} handed over with ${formatCurrency(effectiveRemainingDebt)} remaining debt.`,
+            payments: initialPayments,
+          };
+
+          const newDebt = await addDebt(debtPayload);
+          createdDebtId = newDebt.id;
+        }
+      }
+
+      // 5. Append status history entry
+      const historyEntry: RepairStatusHistoryEntry = {
+        status: 'completed',
+        changedById: actor?.id ?? 'unknown',
+        changedByName: actor?.name ?? 'Staff',
+        at: new Date().toISOString(),
+      };
+      const updatedHistory = [...(ticket.statusHistory || []), historyEntry];
+
+      // 6. Update Repair Ticket in Firestore & Store
+      const paymentStatus: RepairTicket['paymentStatus'] =
+        effectiveIsFullyPaid || isZeroPrice ? 'paid' : effectiveTotalPaid > 0 ? 'partial' : 'debt';
+
+      const updates: Partial<RepairTicket> = {
+        status: 'completed',
+        actualCost: finalPrice,
+        paidAmount: effectiveTotalPaid,
+        handoverAmountPaid: effectivePaidNow,
+        paymentStatus,
+        completedAt: new Date().toISOString(),
+        debtEntryId: createdDebtId,
+        customerPhone: trimmedPhone || ticket.customerPhone,
+        customerId,
+        settlementNotes: settlementNotes.trim() || undefined,
+        statusHistory: updatedHistory,
+      };
+
+      await updateTicket(ticket.id, updates);
+
+      // 7. Activity Logs
+      const debtDesc = effectiveIsDebt
+        ? ` Paid: ${formatCurrency(effectivePaidNow)}. Debt recorded: ${formatCurrency(effectiveRemainingDebt)}.`
+        : ` Paid in full: ${formatCurrency(effectiveTotalPaid)}.`;
+
+      activityLogService.log(
+        'repairs',
+        `Repair #${ticket.ticketNumber} marked as taken/claimed`,
+        {
+          detail: `Device: ${ticket.deviceBrand} ${ticket.deviceModel}.${debtDesc}`,
+          entityId: ticket.id,
+          userName: actor?.name,
+          userId: actor?.id,
+        }
+      ).catch(console.error);
+
+      if (matchedCustomer) {
+        customerLogService.log({
+          customerId: matchedCustomer.id,
+          customerName: matchedCustomer.name,
+          actionType: effectiveIsDebt ? 'debt_added' : 'repair_updated',
+          actionTitle: `Repair #${ticket.ticketNumber} Claimed & Settled`,
+          actionDescription: `Repair #${ticket.ticketNumber} (${ticket.deviceBrand} ${ticket.deviceModel}) claimed.${debtDesc}`,
+          actorId: actor?.id,
+          actorName: actor?.name || 'Staff',
+          actorRole: actor?.role,
+          metadata: { ticketId: ticket.id, totalAmount: finalPrice, paidNow: effectivePaidNow, debt: effectiveRemainingDebt },
+        }).catch(console.error);
+      }
+
+      // Problem 11 fix: Update customer statistics (totalPurchases, totalSpent, lastVisitDate)
+      const isAlreadyCompleted = ticket.status === 'completed';
+      const targetCustomer = matchedCustomer || (customerId ? customers.find(c => c.id === customerId) : null);
+      if (targetCustomer) {
+        const purchaseInc = isAlreadyCompleted ? 0 : 1;
+        const spentDelta = isAlreadyCompleted
+          ? Math.max(0, finalPrice - (ticket.actualCost || 0))
+          : finalPrice;
+        updateCustomer(targetCustomer.id, {
+          totalPurchases: (targetCustomer.totalPurchases || 0) + purchaseInc,
+          totalSpent: Math.max(0, (targetCustomer.totalSpent || 0) + spentDelta),
+          lastVisitDate: new Date().toISOString(),
+        }).catch(console.error);
+      }
+
+      // 8. Success Feedback
+      if (effectiveIsFullyPaid || isZeroPrice) {
+        toast.success(
+          'Phone Handed Over & Fully Paid! 🟢',
+          `Ticket #${ticket.ticketNumber} marked as completed and fully paid (${formatCurrency(effectiveTotalPaid)}).`
+        );
+      } else {
+        toast.success(
+          'Phone Handed Over & Debt Recorded! 📋',
+          `Debt of ${formatCurrency(effectiveRemainingDebt)} recorded on ${ticket.customerName}'s account (${trimmedPhone}).`
+        );
+      }
+
+      const mergedTicket: RepairTicket = {
+        ...ticket,
+        ...updates,
+      };
+
+      onSettled(mergedTicket);
+      onClose();
+    } catch (err: any) {
+      console.error('Failed to settle repair ticket:', err);
+      toast.error('Settlement Failed', err?.message || 'Could not complete repair settlement.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Phone Handover & Settlement"
+      subtitle={`Ticket #${ticket.ticketNumber} · ${ticket.deviceBrand} ${ticket.deviceModel}`}
+      size="md"
+    >
+      <form onSubmit={(e) => handleSubmit(e)} className={styles.modalBody}>
+        {ticket.status === 'completed' && ticket.paymentStatus && (
+          <div style={{
+            background: '#eff6ff',
+            border: '1px solid #bfdbfe',
+            borderRadius: '8px',
+            padding: '10px 14px',
+            fontSize: '12.5px',
+            color: '#1d4ed8',
+            marginBottom: '6px',
+            lineHeight: 1.4,
+          }}>
+            ℹ️ <strong>Previously Settled:</strong> This ticket was completed ({ticket.paymentStatus.toUpperCase()})
+            {ticket.completedAt ? ` on ${new Date(ticket.completedAt).toLocaleDateString()}` : ''}. Re-submitting will update the settlement records.
+          </div>
+        )}
+
+        {/* Quick Fully-Paid Cash Button */}
+        {balanceDueBeforeHandover > 0 && (
+          <button
+            type="button"
+            onClick={() => handleSubmit(undefined, { paidNow: balanceDueBeforeHandover, method: 'cash' })}
+            disabled={isSubmitting}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              width: '100%',
+              padding: '14px 20px',
+              background: 'linear-gradient(135deg, #059669, #10b981)',
+              border: 'none',
+              borderRadius: '12px',
+              color: '#fff',
+              fontSize: '15px',
+              fontWeight: 700,
+              cursor: isSubmitting ? 'not-allowed' : 'pointer',
+              opacity: isSubmitting ? 0.7 : 1,
+              boxShadow: '0 4px 14px rgba(5, 150, 105, 0.35)',
+              transition: 'all 0.2s ease',
+              marginBottom: '8px',
+              letterSpacing: '0.2px',
+            }}
+            title="One-tap: Mark as fully paid in cash and hand over the phone"
+          >
+            <CheckCircle2 size={20} />
+            Fully Paid — Cash ({formatCurrency(balanceDueBeforeHandover)})
+          </button>
+        )}
+        {balanceDueBeforeHandover <= 0 && finalPrice > 0 && (
+          <button
+            type="button"
+            onClick={() => handleSubmit(undefined, { paidNow: 0, method: 'cash' })}
+            disabled={isSubmitting}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              width: '100%',
+              padding: '14px 20px',
+              background: 'linear-gradient(135deg, #059669, #10b981)',
+              border: 'none',
+              borderRadius: '12px',
+              color: '#fff',
+              fontSize: '15px',
+              fontWeight: 700,
+              cursor: isSubmitting ? 'not-allowed' : 'pointer',
+              opacity: isSubmitting ? 0.7 : 1,
+              boxShadow: '0 4px 14px rgba(5, 150, 105, 0.35)',
+              transition: 'all 0.2s ease',
+              marginBottom: '8px',
+              letterSpacing: '0.2px',
+            }}
+            title="Deposit already covers full price — confirm handover"
+          >
+            <CheckCircle2 size={20} />
+            ✅ Already Paid in Full — Confirm Handover
+          </button>
+        )}
+        <div style={{ textAlign: 'center', fontSize: '11px', color: 'var(--color-on-surface-variant)', margin: '-2px 0 10px', fontWeight: 500 }}>
+          or customize payment below ↓
+        </div>
+        {/* Top Summary Card */}
+        <div className={styles.summaryCard}>
+          <div className={styles.summaryHeader}>
+            <div className={styles.deviceTitle}>
+              <Smartphone size={17} style={{ color: 'var(--color-primary)' }} />
+              <span>{ticket.deviceBrand} {ticket.deviceModel}</span>
+            </div>
+            <span className={styles.ticketBadge}>{ticket.ticketNumber}</span>
+          </div>
+
+          <div className={styles.summaryDetails}>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Client</span>
+              <span className={styles.detailValue} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <User size={13} style={{ opacity: 0.7 }} />
+                {ticket.customerName || 'Walk-in Client'}
+              </span>
+            </div>
+            <div className={styles.detailItem}>
+              <span className={styles.detailLabel}>Issue</span>
+              <span className={styles.detailValue} title={ticket.issueDescription}>
+                {ticket.issueDescription || 'Repair'}
+              </span>
+            </div>
+            {ticket.assignedTechnician && (
+              <div className={styles.detailItem}>
+                <span className={styles.detailLabel}>Technician</span>
+                <span className={styles.detailValue}>{ticket.assignedTechnician}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Pricing Cards Grid */}
+        <div className={styles.priceGrid}>
+          <div className={styles.priceCard}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className={styles.priceCardLabel}>
+                <DollarSign size={13} /> Total Repair Price
+              </span>
+              <button
+                type="button"
+                className={styles.editPriceBtn}
+                onClick={() => setIsEditingPrice(!isEditingPrice)}
+              >
+                {isEditingPrice ? 'Done' : 'Adjust'}
+              </button>
+            </div>
+            {isEditingPrice ? (
+              <input
+                type="number"
+                min={0}
+                className={styles.priceInputInline}
+                value={finalPrice}
+                onChange={(e) => {
+                  const val = Math.max(0, Number(e.target.value) || 0);
+                  setFinalPrice(val);
+                }}
+                autoFocus
+              />
+            ) : (
+              <span className={styles.priceCardValue}>
+                {formatCurrency(finalPrice)}
+              </span>
+            )}
+          </div>
+
+          <div className={[styles.priceCard, depositAlreadyPaid > 0 && styles.priceCardDeposit].filter(Boolean).join(' ')}>
+            <span className={styles.priceCardLabel}>
+              <ShieldCheck size={13} /> Deposit Already Paid
+            </span>
+            <span className={styles.priceCardValue}>
+              {depositAlreadyPaid > 0 ? formatCurrency(depositAlreadyPaid) : '0 DA'}
+            </span>
+          </div>
+
+          <div className={[styles.priceCard, styles.priceCardDue].join(' ')}>
+            <span className={styles.priceCardLabel}>
+              <ArrowRight size={13} /> Balance Due Today
+            </span>
+            <span className={styles.priceCardValue}>
+              {formatCurrency(balanceDueBeforeHandover)}
+            </span>
+          </div>
+        </div>
+
+        {/* Payment Input Section */}
+        <div className={styles.inputSection}>
+          <div className={styles.sectionHeading}>
+            <span>Amount Paid Now by Client</span>
+            <span style={{ fontSize: '11px', color: 'var(--color-on-surface-variant)' }}>
+              In Algerian Dinar (DA)
+            </span>
+          </div>
+
+          <Input
+            type="number"
+            min={0}
+            max={finalPrice}
+            step="any"
+            value={amountPaidNow}
+            onChange={(e) => {
+              setAmountPaidNow(e.target.value);
+              setPhoneError('');
+            }}
+            placeholder="0"
+            leftIcon={<Banknote size={18} style={{ color: 'var(--color-primary)' }} />}
+            autoFocus
+          />
+
+          {/* Quick Pre-fill Chips */}
+          <div className={styles.chipRow}>
+            <button
+              type="button"
+              className={[styles.quickChip, paidNowNum === balanceDueBeforeHandover && styles.quickChipActive].filter(Boolean).join(' ')}
+              onClick={() => handleQuickAmount(balanceDueBeforeHandover)}
+            >
+              Full Payment ({formatCurrency(balanceDueBeforeHandover)})
+            </button>
+            <button
+              type="button"
+              className={[styles.quickChip, paidNowNum === 0 && styles.quickChipActive].filter(Boolean).join(' ')}
+              onClick={() => handleQuickAmount(0)}
+            >
+              0 DA (All to Debt)
+            </button>
+            {balanceDueBeforeHandover >= 400 && (
+              <button
+                type="button"
+                className={[styles.quickChip, paidNowNum === Math.round(balanceDueBeforeHandover / 2) && styles.quickChipActive].filter(Boolean).join(' ')}
+                onClick={() => handleQuickAmount(Math.round(balanceDueBeforeHandover / 2))}
+              >
+                50% ({formatCurrency(Math.round(balanceDueBeforeHandover / 2))})
+              </button>
+            )}
+          </div>
+
+          {/* Payment Method Selector (when amount > 0) */}
+          {paidNowNum > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-on-surface-variant)' }}>
+                Payment Method:
+              </span>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  type="button"
+                  className={[styles.quickChip, paymentMethod === 'cash' && styles.quickChipActive].filter(Boolean).join(' ')}
+                  onClick={() => setPaymentMethod('cash')}
+                >
+                  <Banknote size={12} /> Cash
+                </button>
+                <button
+                  type="button"
+                  className={[styles.quickChip, paymentMethod === 'card' && styles.quickChipActive].filter(Boolean).join(' ')}
+                  onClick={() => setPaymentMethod('card')}
+                >
+                  <CreditCard size={12} /> Card / TPE
+                </button>
+                <button
+                  type="button"
+                  className={[styles.quickChip, paymentMethod === 'transfer' && styles.quickChipActive].filter(Boolean).join(' ')}
+                  onClick={() => setPaymentMethod('transfer')}
+                >
+                  Transfer
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Dynamic Status Banner */}
+        {isFullyPaid || isZeroPrice ? (
+          <div className={[styles.statusBanner, styles.statusBannerPaid].join(' ')}>
+            <CheckCircle2 size={20} className={styles.bannerIcon} />
+            <div>
+              <div className={styles.bannerTitle}>
+                🟢 Fully Paid ({formatCurrency(totalPaid)})
+              </div>
+              <div className={styles.bannerDesc}>
+                Total price is settled in full. Device will be marked as claimed with zero debt.
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className={[styles.statusBanner, styles.statusBannerDebt].join(' ')}>
+            <AlertTriangle size={20} className={styles.bannerIcon} />
+            <div>
+              <div className={styles.bannerTitle}>
+                ⚠️ Unpaid Balance: {formatCurrency(remainingDebt)} (Credit / Debt)
+              </div>
+              <div className={styles.bannerDesc}>
+                Paid: {formatCurrency(totalPaid)} ({formatCurrency(depositAlreadyPaid)} deposit + {formatCurrency(paidNowNum)} now).
+                The remaining {formatCurrency(remainingDebt)} will be added to the customer debt record.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Customer Phone & Debt Record Section */}
+        <div className={[styles.phoneCard, isPhoneRequired ? styles.phoneCardRequired : styles.phoneCardValid].join(' ')}>
+          <div className={styles.phoneHeader}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Phone size={14} style={{ color: isPhoneRequired ? '#dc2626' : 'var(--color-primary)' }} />
+              <span>Client Phone Number</span>
+              {isDebt && (
+                <span className={hasPhone ? styles.phoneBadgeOk : styles.phoneBadgeReq}>
+                  {hasPhone ? 'Account Linked' : 'Required for Debt'}
+                </span>
+              )}
+            </div>
+
+            {ticket.customerPhone && !isEditingPhone && (
+              <button
+                type="button"
+                className={styles.editPhoneLink}
+                onClick={() => setIsEditingPhone(true)}
+              >
+                Change Phone
+              </button>
+            )}
+          </div>
+
+          {/* Show phone input if missing, if required, or if editing */}
+          {(!ticket.customerPhone || isEditingPhone || isPhoneRequired) ? (
+            <div>
+              <Input
+                type="tel"
+                value={customerPhone}
+                onChange={(e) => handlePhoneChange(e.target.value)}
+                placeholder="e.g. 0555 12 34 56 or 0661..."
+                error={phoneError}
+                leftIcon={<Phone size={14} />}
+                required={isDebt}
+              />
+              {matchingCustomer && (
+                <div className={styles.matchedAccountInfo}>
+                  <User size={12} />
+                  <span>Existing Account: <strong>{matchingCustomer.name}</strong></span>
+                  {matchingCustomer.totalDebt ? (
+                    <span className={styles.matchedDebtBadge}>
+                      Current Debt: {formatCurrency(matchingCustomer.totalDebt)}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '10.5px', color: '#15803d', fontWeight: 600, marginLeft: 'auto' }}>
+                      Clean Ledger (0 DA)
+                    </span>
+                  )}
+                </div>
+              )}
+              {isDebt && !hasPhone && (
+                <p className={styles.phoneWarningText} style={{ marginTop: '4px' }}>
+                  * The client's phone number is required to automatically link and register this debt of <strong>{formatCurrency(remainingDebt)}</strong> to their credit account.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '13px', fontWeight: 600 }}>
+                <span style={{ color: 'var(--color-on-surface)' }}>{customerPhone}</span>
+                <span style={{ fontSize: '11px', color: '#15803d', fontWeight: 700 }}>
+                  ✓ Auto-record debt to this client account
+                </span>
+              </div>
+              {matchingCustomer && (
+                <div className={styles.matchedAccountInfo} style={{ marginTop: '6px' }}>
+                  <User size={12} />
+                  <span>Account: <strong>{matchingCustomer.name}</strong></span>
+                  {matchingCustomer.totalDebt ? (
+                    <span className={styles.matchedDebtBadge}>
+                      Current Balance: {formatCurrency(matchingCustomer.totalDebt)}
+                    </span>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Collapsible Due Date & Settlement Note */}
+        <div>
+          <button
+            type="button"
+            className={styles.extraDetailsToggle}
+            onClick={() => setShowExtra(!showExtra)}
+          >
+            {showExtra ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            <span>{showExtra ? 'Hide optional note & due date' : 'Add optional debt due date or notes'}</span>
+          </button>
+
+          {showExtra && (
+            <div className={styles.collapsibleSection}>
+              {isDebt && (
+                <Input
+                  type="date"
+                  label="Debt Due Date (Optional)"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  leftIcon={<Calendar size={14} />}
+                />
+              )}
+              <Input
+                label="Handover / Payment Remark (Optional)"
+                value={settlementNotes}
+                onChange={(e) => setSettlementNotes(e.target.value)}
+                placeholder="e.g. Screen replaced, customer promised to pay rest on Friday"
+                leftIcon={<FileText size={14} />}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Modal Actions Footer */}
+        <div className={styles.modalFooter}>
+          <div className={styles.footerLeft}>
+            <span>Status after confirmation: <strong>Taken (Claimed)</strong></span>
+          </div>
+
+          <div className={styles.footerActions}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={onClose}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+
+            <Button
+              type="submit"
+              variant={isDebt ? 'primary' : 'success'}
+              isLoading={isSubmitting}
+              leftIcon={isDebt ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}
+            >
+              {isFullyPaid || isZeroPrice
+                ? 'Confirm Handover & Full Settlement'
+                : `Confirm Handover & Record Debt (${formatCurrency(remainingDebt)})`}
+            </Button>
+          </div>
+        </div>
+      </form>
+    </Modal>
+  );
+};

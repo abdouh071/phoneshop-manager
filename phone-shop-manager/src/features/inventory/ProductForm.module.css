@@ -1,0 +1,496 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.skuInput input {
+  font-family: monospace;
+  font-size: 13px;
+  background: var(--color-surface-container-low) !important;
+  color: var(--color-on-surface-variant);
+}
+
+.marginPreview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-container-low);
+  border-radius: var(--radius);
+  font-size: var(--text-body-sm-size);
+  color: var(--color-on-surface-variant);
+}
+
+.positive { color: var(--color-success-text); font-size: var(--text-body-md-size); }
+.negative { color: var(--color-danger-text); font-size: var(--text-body-md-size); }
+.warning { color: #ca8a04; font-size: var(--text-body-md-size); }
+
+.marginItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-label-sm-size);
+}
+
+.marginDivider {
+  width: 1px;
+  height: 32px;
+  background: var(--color-outline-variant);
+}
+
+/* Divider for form sections */
+.divider {
+  height: 1px;
+  background: var(--color-outline-variant);
+  margin: var(--space-2) 0;
+}
+
+.sectionLabel {
+  font-size: var(--text-label-sm-size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-on-surface-variant);
+}
+
+/* Edit panel danger zone */
+.dangerZone {
+  margin-top: var(--space-6);
+  padding: var(--space-4);
+  border: 1px solid var(--color-danger-bg);
+  border-radius: var(--radius-lg);
+  background: var(--color-danger-bg);
+}
+
+.dangerTitle {
+  font-size: var(--text-label-md-size);
+  font-weight: 600;
+  color: var(--color-danger-text);
+  margin-bottom: var(--space-2);
+}
+
+.dangerDesc {
+  font-size: var(--text-body-sm-size);
+  color: var(--color-on-surface-variant);
+  margin-bottom: var(--space-3);
+}
+
+/* ── Multi-Model Mode Toggle ── */
+.modeToggle {
+  display: flex;
+  gap: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--color-outline-variant);
+  width: fit-content;
+}
+
+.modeOption {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-label-md-size);
+  font-weight: 500;
+  color: var(--color-on-surface-variant);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-base);
+  white-space: nowrap;
+}
+
+.modeOption:not(:last-child) {
+  border-right: 1px solid var(--color-outline-variant);
+}
+
+.modeOption:hover {
+  background: var(--color-surface-container-low);
+}
+
+.modeOptionActive {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.modeOptionActive:hover {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+/* ── Variant Cards ── */
+.variantsContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.variantCard {
+  position: relative;
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  background: var(--color-surface-container-lowest);
+  transition: border-color var(--transition-base), box-shadow var(--transition-base);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.variantCard:hover {
+  border-color: var(--color-primary-fixed-dim);
+}
+
+.variantCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.variantLabelGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.cardSkuBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+  background: var(--color-surface-container-low);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--color-outline-variant);
+}
+
+.variantCardActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.variantCloneBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-outline-variant);
+  background: var(--color-surface-container-lowest);
+  color: var(--color-primary);
+  font-size: var(--text-label-sm-size);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.variantCloneBtn:hover {
+  background: rgba(0, 102, 255, 0.08);
+  border-color: var(--color-primary);
+}
+
+.variantLabel {
+  font-size: var(--text-label-md-size);
+  font-weight: 600;
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.variantNumber {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.variantRemoveBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  border: none;
+  background: transparent;
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.variantRemoveBtn:hover {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+
+.variantRemoveBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.variantRemoveBtn:disabled:hover {
+  background: transparent;
+  color: var(--color-on-surface-variant);
+}
+
+/* ── Add Variant Button ── */
+.addVariantBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 2px dashed var(--color-outline-variant);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-primary);
+  font-size: var(--text-label-md-size);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.addVariantBtn:hover {
+  border-color: var(--color-primary);
+  background: var(--color-surface-container-low);
+}
+
+/* ── Summary Bar ── */
+.summaryBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--color-primary-fixed);
+  color: var(--color-on-primary-fixed);
+  font-size: var(--text-body-sm-size);
+  font-weight: 500;
+}
+
+.summaryItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.summaryValue {
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+/* ── Variant Errors ── */
+.variantErrors {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+  font-size: var(--text-label-sm-size);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* ── Quick Sync Bar (Multi-Model) ── */
+.syncBar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-container);
+  border: 1px solid var(--color-outline-variant);
+}
+
+.syncBarHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.syncBarIcon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.syncBarTitle {
+  font-size: var(--text-label-md-size);
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+.syncBarDesc {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+  opacity: 0.85;
+}
+
+.syncOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.syncCheckboxLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-outline-variant);
+  cursor: pointer;
+  font-size: var(--text-label-sm-size);
+  font-weight: 500;
+  color: var(--color-on-surface);
+  user-select: none;
+  transition: all var(--transition-base);
+}
+
+.syncCheckboxLabel:hover {
+  border-color: var(--color-primary);
+  background: var(--color-surface-container-low);
+}
+
+.syncCheckboxLabelActive {
+  background: rgba(0, 102, 255, 0.08);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.syncCheckboxInput {
+  accent-color: var(--color-primary);
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+}
+
+.syncCheckboxText {
+  white-space: nowrap;
+}
+
+/* ── Badges inside Variant Card ── */
+.syncedBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: rgba(0, 102, 255, 0.1);
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: var(--space-2);
+  vertical-align: middle;
+}
+
+.primaryBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: rgba(0, 102, 255, 0.12);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  margin-left: var(--space-2);
+}
+
+/* ── Add & New Button Accent ── */
+.addNewBtn {
+  background: rgba(0, 102, 255, 0.08) !important;
+  color: var(--color-primary) !important;
+  border: 1px solid rgba(0, 102, 255, 0.3) !important;
+  font-weight: 600;
+}
+
+.addNewBtn:hover:not(:disabled) {
+  background: rgba(0, 102, 255, 0.16) !important;
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 2px 8px rgba(0, 102, 255, 0.15);
+}
+
+/* ── Preserved Defaults Banner (Add & New Flow) ── */
+.preservedBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: rgba(0, 102, 255, 0.08);
+  border: 1px solid rgba(0, 102, 255, 0.22);
+  color: var(--color-on-surface);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-body-sm-size);
+}
+
+.preservedInfo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.preservedIcon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.preservedTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-surface);
+  color: var(--color-on-surface);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  border: 1px solid var(--color-outline-variant);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.clearPreservedBtn {
+  background: transparent;
+  border: none;
+  color: var(--color-primary);
+  font-size: var(--text-label-sm-size);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-base);
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+.clearPreservedBtn:hover {
+  color: var(--color-danger);
+}
+
+

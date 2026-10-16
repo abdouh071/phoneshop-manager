@@ -1,0 +1,404 @@
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Header summary card */
+.summaryCard {
+  background: var(--color-surface-container-low, #f8fafc);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.summaryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ticketBadge {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--color-surface-container, #e2e8f0);
+  color: var(--color-on-surface, #0f172a);
+}
+
+.deviceTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-on-surface, #0f172a);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.summaryDetails {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-on-surface-variant, #64748b);
+  border-top: 1px dashed var(--color-outline-variant, #e2e8f0);
+  padding-top: 8px;
+}
+
+.detailItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detailLabel {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--color-on-surface-variant, #94a3b8);
+  font-weight: 600;
+}
+
+.detailValue {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-on-surface, #1e293b);
+}
+
+/* Pricing Grid */
+.priceGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 600px) {
+  .priceGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.priceCard {
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.priceCardLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-on-surface-variant, #64748b);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.priceCardValue {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--color-on-surface, #0f172a);
+}
+
+.priceCardDeposit {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.priceCardDeposit .priceCardValue {
+  color: #15803d;
+}
+
+.priceCardDue {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.priceCardDue .priceCardValue {
+  color: #1d4ed8;
+}
+
+/* Payment Inputs Section */
+.inputSection {
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sectionHeading {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--color-on-surface, #1e293b);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: -4px;
+}
+
+.quickChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid var(--color-outline-variant, #cbd5e1);
+  background: var(--color-surface, #ffffff);
+  color: var(--color-on-surface, #334155);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.quickChip:hover {
+  border-color: var(--color-primary, #4f46e5);
+  background: #f5f3ff;
+  color: var(--color-primary, #4f46e5);
+}
+
+.quickChipActive {
+  background: var(--color-primary, #4f46e5) !important;
+  color: #ffffff !important;
+  border-color: var(--color-primary, #4f46e5) !important;
+}
+
+/* Status Banner */
+.statusBanner {
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  transition: all 0.2s ease;
+}
+
+.statusBannerPaid {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #14532d;
+}
+
+.statusBannerPaid .bannerIcon {
+  color: #16a34a;
+}
+
+.statusBannerDebt {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #78350f;
+}
+
+.statusBannerDebt .bannerIcon {
+  color: #d97706;
+}
+
+.bannerTitle {
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.bannerDesc {
+  opacity: 0.9;
+}
+
+/* Phone Number Section */
+.phoneCard {
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.phoneCardValid {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.phoneCardRequired {
+  background: #fef2f2;
+  border: 1.5px solid #f87171;
+}
+
+.phoneHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.phoneBadgeOk {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #15803d;
+  background: #dcfce7;
+  padding: 2px 8px;
+  border-radius: 5px;
+}
+
+.phoneBadgeReq {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #b91c1c;
+  background: #fee2e2;
+  padding: 2px 8px;
+  border-radius: 5px;
+}
+
+.phoneWarningText {
+  font-size: 11.5px;
+  color: #991b1b;
+  line-height: 1.4;
+}
+
+.editPhoneLink {
+  background: none;
+  border: none;
+  color: var(--color-primary, #4f46e5);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+/* Extra options (due date, notes) */
+.extraDetailsToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--color-on-surface-variant, #64748b);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.extraDetailsToggle:hover {
+  color: var(--color-on-surface, #1e293b);
+}
+
+.collapsibleSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+/* Footer layout */
+.modalFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 12px;
+}
+
+.footerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-on-surface-variant, #64748b);
+}
+
+.footerActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Price inline editing */
+.editPriceBtn {
+  background: none;
+  border: none;
+  color: var(--color-primary, #4f46e5);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.editPriceBtn:hover {
+  opacity: 0.8;
+}
+
+.priceInputInline {
+  width: 100%;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1.5px solid var(--color-primary, #4f46e5);
+  outline: none;
+  background: var(--color-surface, #ffffff);
+  color: var(--color-on-surface, #0f172a);
+}
+
+/* Matched Customer Account indicator */
+.matchedAccountInfo {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11.5px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: #166534;
+  margin-top: 4px;
+}
+
+.matchedDebtBadge {
+  font-size: 10.5px;
+  font-weight: 700;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
+.existingDebtNote {
+  font-size: 11px;
+  color: #b45309;
+  font-weight: 600;
+}
+

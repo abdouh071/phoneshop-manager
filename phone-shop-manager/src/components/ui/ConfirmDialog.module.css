@@ -1,0 +1,34 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+}
+
+.iconWrap {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.danger {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+
+.warning {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+.message {
+  font-size: var(--text-body-md-size);
+  color: var(--color-on-surface-variant);
+  line-height: 1.5;
+  max-width: 300px;
+}

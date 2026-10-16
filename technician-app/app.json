@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Auto-Manager",
+    "slug": "abdouh71",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#4338ca"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.phoneshop.technicianapp",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundColor": "#4338ca"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f7f4d1c2-b95d-40c1-a983-a63e235cb403"
+      }
+    },
+    "plugins": [
+      "expo-localization"
+    ]
+  }
+}

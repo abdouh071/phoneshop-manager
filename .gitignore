@@ -1,0 +1,17 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Agents / AI workspace
+.agents/
+
+# Environment files (never commit secrets)
+.env
+.env.local
+.env*.local

@@ -1,0 +1,203 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.title {
+  font-family: var(--font-headline);
+  font-size: var(--text-headline-lg-size);
+  font-weight: var(--text-headline-lg-weight);
+  line-height: var(--text-headline-lg-line);
+}
+
+.subtitle {
+  font-size: var(--text-body-sm-size);
+  color: var(--color-on-surface-variant);
+  margin-top: 2px;
+}
+
+/* Overview cards */
+.overviewGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+}
+
+@media (max-width: 900px) {
+  .overviewGrid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.overviewCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.overviewIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--space-2);
+}
+
+.icon-warning { background: var(--color-warning-bg); color: var(--color-warning-text); }
+.icon-info { background: var(--color-secondary-container); color: var(--color-on-secondary-fixed); }
+.icon-success { background: var(--color-success-bg); color: var(--color-success-text); }
+.icon-neutral { background: var(--color-surface-container); color: var(--color-on-surface-variant); }
+
+.overviewValue {
+  font-family: var(--font-headline);
+  font-size: var(--text-headline-lg-size);
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+.overviewLabel {
+  font-size: var(--text-label-sm-size);
+  color: var(--color-on-surface-variant);
+  font-weight: 500;
+}
+
+/* Table Controls */
+.tableControls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--color-surface-container-low);
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.statusFilters {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.filterBtn {
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-outline-variant);
+  background: var(--color-surface-container-lowest);
+  border-radius: var(--radius-full);
+  font-size: var(--text-label-sm-size);
+  font-weight: 500;
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.filterBtn:hover { border-color: var(--color-primary-container); color: var(--color-primary); }
+
+.filterActive {
+  background: var(--color-primary-fixed);
+  border-color: var(--color-primary-container);
+  color: var(--color-on-primary-fixed-variant);
+  font-weight: 600;
+}
+
+.search { min-width: 240px; }
+
+.loading, .empty {
+  padding: var(--space-10);
+  text-align: center;
+  color: var(--color-on-surface-variant);
+}
+
+/* Table */
+.tableWrapper { overflow-x: auto; }
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.th {
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  font-size: var(--text-label-sm-size);
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--color-surface-container-low);
+  white-space: nowrap;
+}
+
+.tr {
+  border-bottom: 1px solid var(--color-surface-container-low);
+  transition: background var(--transition-base);
+}
+
+.tr:last-child { border-bottom: none; }
+.tr:hover { background: var(--color-surface-container-low); }
+
+.td {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-body-sm-size);
+  color: var(--color-on-surface);
+  height: 56px;
+  vertical-align: middle;
+}
+
+.ticketNumber {
+  font-size: 11px;
+  background: var(--color-surface-container-low);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--color-on-surface-variant);
+  font-family: monospace;
+}
+
+.customerName { font-weight: 600; }
+.customerPhone { font-size: var(--text-label-sm-size); color: var(--color-on-surface-variant); }
+
+.deviceName { font-weight: 500; }
+
+.issue {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-on-surface-variant);
+}
+
+.techCell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-body-sm-size);
+}
+
+.techAvatar {
+  width: 28px;
+  height: 28px;
+  background: var(--color-secondary-container);
+  color: var(--color-on-secondary-fixed);
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.unassigned { color: var(--color-on-surface-variant); font-style: italic; }
+
+.actualCost { font-weight: 600; color: var(--color-on-surface); }
+.estCost { color: var(--color-on-surface-variant); }
+
+.actions { display: flex; align-items: center; gap: var(--space-2); }

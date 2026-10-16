@@ -1,0 +1,280 @@
+/* Restock Assistant Modal & Reorder Hub Styles */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Header Summary Bar */
+.kpiStrip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.kpiCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  padding: 12px 14px;
+  border-radius: 10px;
+}
+
+.kpiLabel {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.kpiValue {
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0;
+}
+
+.kpiValueRed {
+  color: #dc2626;
+}
+
+.kpiValueAmber {
+  color: #d97706;
+}
+
+.kpiValueBlue {
+  color: #2563eb;
+}
+
+/* Controls Toolbar */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 12px 16px;
+  border-radius: 12px;
+}
+
+.filtersGroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.filterPill {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filterPill:hover {
+  border-color: #94a3b8;
+  color: #1e293b;
+}
+
+.filterPillActive {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.supplierSelectGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.selectInput {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: #ffffff;
+  color: #1e293b;
+}
+
+/* Table Area */
+.tableContainer {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.table th {
+  background: #f1f5f9;
+  color: #475569;
+  font-weight: 700;
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 2px solid #cbd5e1;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  color: #1e293b;
+  vertical-align: middle;
+}
+
+.table tr:hover {
+  background: #f8fafc;
+}
+
+.trSelected {
+  background: #eff6ff !important;
+}
+
+.stockBadgeOut {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #dc2626;
+  background: #fee2e2;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.stockBadgeLow {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #d97706;
+  background: #fef3c7;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.numInput {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+  background: #ffffff;
+  width: 70px;
+  text-align: center;
+}
+
+.numInput:focus {
+  border-color: #2563eb;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+/* Footer Actions Bar */
+.footerBar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.selectionSummary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.summaryTotalVal {
+  color: #2563eb;
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.actionButtonsGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Printable Purchase Order / Requisition View */
+.printablePO {
+  display: none;
+}
+
+@media print {
+  body {
+    background: #ffffff !important;
+    padding: 0 !important;
+  }
+
+  .kpiStrip,
+  .toolbar,
+  .footerBar,
+  .tableContainer,
+  .noPrint {
+    display: none !important;
+  }
+
+  .printablePO {
+    display: block !important;
+    padding: 16px;
+    font-family: Arial, sans-serif;
+    color: #000;
+  }
+
+  .poHeader {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 2px solid #000;
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+  }
+
+  .poTable {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 12px;
+  }
+
+  .poTable th, .poTable td {
+    border: 1px solid #000;
+    padding: 6px 8px;
+    text-align: left;
+  }
+
+  .poTable th {
+    background: #eee !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+}

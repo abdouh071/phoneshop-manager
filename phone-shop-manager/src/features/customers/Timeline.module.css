@@ -1,0 +1,413 @@
+/* ============================================================
+   CUSTOMER 360° TIMELINE STYLES
+   ============================================================ */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── Filter Pills ─────────────────────────────────────────── */
+.filterRow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: 20px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  background: var(--color-surface-container-lowest, #ffffff);
+  color: var(--color-on-surface-variant, #64748b);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.pill:hover {
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.pillActive {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #ffffff;
+}
+
+.pillActive .pillCount {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.pillCount {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.07);
+  min-width: 16px;
+  text-align: center;
+}
+
+/* ── Timeline container ───────────────────────────────────── */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Month group & separator ──────────────────────────────── */
+.monthGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.monthLabel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0 8px 0;
+}
+
+.monthLabel span {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--color-on-surface-variant, #94a3b8);
+  white-space: nowrap;
+  padding: 3px 8px;
+  background: var(--color-surface-container-low, #f1f5f9);
+  border-radius: 6px;
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+}
+
+/* ── Single timeline row ──────────────────────────────────── */
+.timelineRow {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 12px;
+  align-items: flex-start;
+  padding-bottom: 12px;
+}
+
+/* ── Spine: line + node ───────────────────────────────────── */
+.spine {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding-top: 18px; /* aligns node with card title */
+}
+
+.node {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  z-index: 1;
+}
+
+/* Node colours per event type */
+.nodeSale {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+
+.nodeRepair {
+  background: linear-gradient(135deg, #d97706, #b45309);
+}
+
+.nodeDebt {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+}
+
+.nodePayment {
+  background: linear-gradient(135deg, #16a34a, #15803d);
+}
+
+.line {
+  flex: 1;
+  width: 2px;
+  background: var(--color-outline-variant, #e2e8f0);
+  min-height: 16px;
+  margin-top: 4px;
+}
+
+/* ── Event content area ───────────────────────────────────── */
+.eventContent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.eventTime {
+  font-size: 10.5px;
+  color: var(--color-on-surface-variant, #94a3b8);
+  font-weight: 500;
+  padding-bottom: 2px;
+}
+
+/* ── Event card ───────────────────────────────────────────── */
+.card {
+  background: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card:hover {
+  border-color: #94a3b8;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cardTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-on-surface, #0f172a);
+}
+
+.cardMeta {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--color-on-surface-variant, #64748b);
+  background: var(--color-surface-container-low, #f1f5f9);
+  padding: 1px 7px;
+  border-radius: 6px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.amount {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--color-on-surface, #0f172a);
+}
+
+.amountDebt {
+  color: #dc2626;
+}
+
+.amountPaid {
+  color: #16a34a;
+}
+
+.expandBtn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.expandBtn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.cardSubtitle {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-on-surface-variant, #475569);
+  margin: 0;
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-surface-container-low, #f1f5f9);
+  animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* ── Item list inside sale card ───────────────────────────── */
+.itemList {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: var(--color-surface-container-low, #f8fafc);
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.itemRow {
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ── Debt detail rows ─────────────────────────────────────── */
+.debtRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #475569;
+}
+
+/* ── Card footer ──────────────────────────────────────────── */
+.cardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.methodTag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--color-surface-container-low, #f1f5f9);
+  color: var(--color-on-surface-variant, #475569);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+}
+
+.linkBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-primary, #2563eb);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: none;
+}
+
+.linkBtn:hover {
+  text-decoration: underline;
+}
+
+/* ── Note / issue text ────────────────────────────────────── */
+.noteText,
+.issueText {
+  font-size: 12px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.45;
+  background: #f8fafc;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-style: italic;
+}
+
+/* ── Status badges inside cards ───────────────────────────── */
+.badgePaid {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+
+.badgePartial {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #fefce8;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.badgeOverdue {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  color: #b91c1c;
+  border: 1px solid #f87171;
+}
+
+.badgeUnpaid {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+/* ── Empty state ──────────────────────────────────────────── */
+.emptyTimeline {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--color-on-surface-variant, #94a3b8);
+  background: var(--color-surface-container-low, #f8fafc);
+  border-radius: 14px;
+  border: 1px dashed var(--color-outline-variant, #e2e8f0);
+}
+
+.emptyTimeline p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.emptyTimeline span {
+  font-size: 12px;
+  color: #94a3b8;
+}

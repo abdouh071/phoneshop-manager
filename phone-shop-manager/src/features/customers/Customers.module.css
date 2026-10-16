@@ -1,0 +1,601 @@
+/* ============================================================
+   MODERN PREMIUM CUSTOMERS DIRECTORY & CRM STYLES
+   ============================================================ */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 40px;
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: #ffffff;
+  padding: 20px 24px;
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.titleGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0;
+  letter-spacing: -0.4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.titleBadge {
+  font-size: 11px;
+  font-weight: 700;
+  background: #eff6ff;
+  color: #2563eb;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid #bfdbfe;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+  font-weight: 500;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* 6-Card Interactive KPI Summary Grid */
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.summaryCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  user-select: none;
+}
+
+.summaryCard:hover {
+  border-color: #cbd5e1;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.05);
+}
+
+.summaryCardActive {
+  border-color: #2563eb !important;
+  background: #f8faff !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18), 0 6px 16px rgba(37, 99, 235, 0.08) !important;
+}
+
+.summaryCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.summaryIconWrap {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.iconTotal { background: #eff6ff; color: #2563eb; }
+.iconB2B { background: #f0fdf4; color: #16a34a; }
+.iconOverdue { background: #fee2e2; color: #dc2626; }
+.iconDebt { background: #fef3c7; color: #d97706; }
+.iconRepeat { background: #faf5ff; color: #9333ea; }
+.iconLtv { background: #ecfeff; color: #0891b2; }
+
+.summaryLabel {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #64748b;
+}
+
+.summaryValue {
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.15;
+  margin: 0;
+  letter-spacing: -0.3px;
+}
+
+.summarySub {
+  font-size: 11.5px;
+  color: #64748b;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Fast Filter Pills Toolbar */
+.filterPills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px;
+  scrollbar-width: thin;
+}
+
+.filterPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 20px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  transition: all 0.16s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.filterPill:hover:not(.filterPillActive) {
+  background: #f8fafc;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+
+.filterPillActive {
+  background: #0f172a !important;
+  color: #ffffff !important;
+  border-color: #0f172a !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.2);
+}
+
+.pillCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.filterPillActive .pillCount {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.filterPillOverdue {
+  border-color: #fca5a5 !important;
+  color: #dc2626 !important;
+}
+
+/* Main Catalog Table Card */
+.catalogCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02), 0 8px 24px rgba(0, 0, 0, 0.03);
+}
+
+.tableHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tableTitle {
+  font-size: 16px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0;
+  letter-spacing: -0.2px;
+}
+
+.itemCountBadge {
+  font-size: 11.5px;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 2px 9px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.search {
+  width: 280px;
+}
+
+.tableWrapper {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.th {
+  padding: 12px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 2px solid #e2e8f0;
+  background: #f8fafc;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.th:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.sortNeutral {
+  display: inline-flex;
+  flex-direction: column;
+  color: #94a3b8;
+  opacity: 0.4;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+.tr {
+  border-bottom: 1px solid #f1f5f9;
+  transition: background-color 0.15s ease;
+}
+
+.tr:hover {
+  background-color: #f8fafc;
+}
+
+.td {
+  padding: 13px 16px;
+  font-size: 13px;
+  color: #1e293b;
+  vertical-align: middle;
+}
+
+/* Customer Cell Styling */
+.customerCell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 220px;
+}
+
+.customerAvatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 15px;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.customerAvatarB2B {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%) !important;
+  color: #059669 !important;
+  border-color: #a7f3d0 !important;
+}
+
+.customerAvatarOverdue {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%) !important;
+  color: #dc2626 !important;
+  border-color: #fecaca !important;
+}
+
+.customerInfoGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.customerNameRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.customerName {
+  font-weight: 700;
+  color: #0f172a;
+  font-size: 13.5px;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.customerB2BTag {
+  font-size: 10px;
+  font-weight: 800;
+  background: #dbeafe;
+  color: #1e40af;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #bfdbfe;
+  text-transform: uppercase;
+}
+
+.customerContactSub {
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.customerJoinDate {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* Badges for Overdue / Active Debt */
+.overdueBadgeTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #fee2e2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  margin-top: 3px;
+  white-space: nowrap;
+}
+
+.debtBadgeTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #fef3c7;
+  color: #d97706;
+  border: 1px solid #fde68a;
+  margin-top: 3px;
+  white-space: nowrap;
+}
+
+/* Contact Cell */
+.contactInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 140px;
+}
+
+.contactPhone {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: #1e293b;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.contactPhone:hover {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.contactEmail {
+  font-size: 11.5px;
+  color: #64748b;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+  white-space: nowrap;
+}
+
+.contactEmail:hover {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+/* Loyalty & Type Badges */
+.loyaltyBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.loyaltyB2B {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.loyaltyRepeat {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.loyaltyNew {
+  background: #f8fafc;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+.loyaltyVIP {
+  background: #faf5ff;
+  color: #9333ea;
+  border: 1px solid #e9d5ff;
+}
+
+/* Spent & Debt Cells */
+.ordersCount {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.spentValue {
+  font-weight: 800;
+  font-size: 13.5px;
+  color: #0f172a;
+}
+
+.settledBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #16a34a;
+  background: #dcfce7;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.lastVisitText {
+  font-size: 12px;
+  color: #475569;
+  white-space: nowrap;
+}
+
+/* Action Buttons Cluster */
+.actionButtons {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  justify-content: flex-end;
+  min-width: 240px;
+}
+
+.quickActionBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+}
+
+.quickActionBtn:hover {
+  border-color: #cbd5e1;
+  color: #0f172a;
+  background: #f8fafc;
+  transform: translateY(-1px);
+}
+
+.reminderBtn {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.reminderBtn:hover {
+  background: #25D366 !important;
+  color: #ffffff !important;
+  border-color: #25D366 !important;
+}
+
+.whatsappBtn:hover {
+  border-color: #25D366;
+  color: #25D366;
+  background: #f0fdf4;
+}
+
+.phoneBtn:hover {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.repairBtn:hover {
+  border-color: #ea580c;
+  color: #ea580c;
+  background: #fff7ed;
+}
+
+.posBtn:hover {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.statementBtn:hover {
+  border-color: #7c3aed;
+  color: #7c3aed;
+  background: #f5f3ff;
+}

@@ -1,0 +1,39 @@
+.page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80vh;
+  padding: var(--space-6);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 400px;
+}
+
+.errorCode {
+  font-family: var(--font-headline);
+  font-size: 120px;
+  font-weight: 800;
+  color: var(--color-primary-container);
+  line-height: 1;
+  margin-bottom: var(--space-4);
+  text-shadow: 0 4px 20px rgba(0,0,0,0.05);
+}
+
+.title {
+  font-family: var(--font-headline);
+  font-size: var(--text-headline-lg-size);
+  font-weight: 700;
+  color: var(--color-on-surface);
+  margin-bottom: var(--space-2);
+}
+
+.message {
+  font-size: var(--text-body-md-size);
+  color: var(--color-on-surface-variant);
+  margin-bottom: var(--space-6);
+}

@@ -1,0 +1,445 @@
+/* ===================================================
+   Stock Audit Page — Full screen overlay mode
+   =================================================== */
+
+/* ─── Page Layout ────────────────────────────────── */
+.auditPage {
+  min-height: 100vh;
+  background: var(--color-background);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-6);
+}
+
+.reportPage {
+  padding-bottom: var(--space-10);
+}
+
+/* ─── Header ─────────────────────────────────────── */
+.auditHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-surface-container-high);
+}
+
+.auditHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.auditHeaderActions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.auditTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-headline);
+  font-size: var(--text-headline-md-size, 1.5rem);
+  font-weight: 700;
+  color: var(--color-on-surface);
+  margin: 0;
+}
+
+.auditSubtitle {
+  font-size: var(--text-body-sm-size);
+  color: var(--color-on-surface-variant);
+  margin-top: 2px;
+}
+
+/* ─── Scanning Body ──────────────────────────────── */
+.auditBody {
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  gap: var(--space-6);
+  flex: 1;
+}
+
+/* ─── Scan Panel ─────────────────────────────────── */
+.scanPanel {
+  display: flex;
+  flex-direction: column;
+}
+
+.scanCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-6) !important;
+  text-align: center;
+}
+
+.scanIconWrapper {
+  width: 80px;
+  height: 80px;
+  background: var(--color-primary-container);
+  border-radius: var(--radius-xl, 20px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.8; }
+}
+
+.scanIcon {
+  color: var(--color-primary);
+}
+
+.scanPrompt {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-on-surface);
+  margin: 0;
+}
+
+.scanHint {
+  font-size: var(--text-body-sm-size);
+  color: var(--color-on-surface-variant);
+  margin: 0;
+}
+
+.scanForm {
+  display: flex;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.scanInput {
+  flex: 1;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-container-low);
+  border: 2px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--text-body-md-size, 1rem);
+  color: var(--color-on-surface);
+  outline: none;
+  font-family: var(--font-mono, monospace);
+  letter-spacing: 0.05em;
+}
+
+.scanInput:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-container);
+}
+
+.scanBtn {
+  flex-shrink: 0;
+}
+
+/* ─── Feedback ───────────────────────────────────── */
+.feedback {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-body-sm-size);
+  width: 100%;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.feedbackOk {
+  background: var(--color-success-bg, #dcfce7);
+  color: var(--color-success-text, #166534);
+  border: 1px solid #86efac;
+}
+
+.feedbackErr {
+  background: var(--color-error-bg, #fee2e2);
+  color: var(--color-error, #dc2626);
+  border: 1px solid #fca5a5;
+}
+
+/* ─── Stats ──────────────────────────────────────── */
+.scanStats {
+  display: flex;
+  gap: var(--space-6);
+  justify-content: center;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-surface-container-high);
+  width: 100%;
+}
+
+.statItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.statValue {
+  font-family: var(--font-headline);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.statLabel {
+  font-size: var(--text-label-sm-size);
+  color: var(--color-on-surface-variant);
+  white-space: nowrap;
+}
+
+/* ─── Scan Log ───────────────────────────────────── */
+.scanLog {
+  background: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-surface-container-high);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.scanLogHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-surface-container-high);
+  font-weight: 600;
+}
+
+.scanLogCount {
+  font-size: var(--text-label-sm-size);
+  color: var(--color-on-surface-variant);
+  background: var(--color-surface-container);
+  padding: 2px 8px;
+  border-radius: 100px;
+}
+
+.scanLogList {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 500px;
+}
+
+.scanLogEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-10);
+  color: var(--color-on-surface-variant);
+  gap: var(--space-3);
+}
+
+.scanLogEntry {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--color-surface-container-low);
+  transition: background 0.15s;
+}
+
+.scanLogEntry:hover {
+  background: var(--color-surface-container-low);
+}
+
+.scanLogEntryUnknown {
+  background: var(--color-error-bg, #fee2e2);
+}
+
+.scanLogEntryLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scanLogSku {
+  font-size: 12px;
+  background: var(--color-surface-container);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+  color: var(--color-on-surface);
+}
+
+.scanLogName {
+  font-size: var(--text-label-sm-size);
+  color: var(--color-on-surface-variant);
+}
+
+.scanLogEntryRight {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.scanLogCount2 {
+  font-weight: 700;
+  color: var(--color-primary);
+  font-size: 1rem;
+}
+
+.scanLogTime {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+/* ─── Report Summary ─────────────────────────────── */
+.reportSummary {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-4);
+}
+
+.summaryCard {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5) !important;
+}
+
+.summaryNum {
+  font-family: var(--font-headline);
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.summaryLabel {
+  font-size: var(--text-label-sm-size);
+  color: var(--color-on-surface-variant);
+  margin: 0;
+}
+
+.summaryDanger { border-left: 4px solid var(--color-error, #dc2626); }
+.summaryDanger svg { color: var(--color-error, #dc2626); }
+
+.summaryWarning { border-left: 4px solid #ca8a04; }
+.summaryWarning svg { color: #ca8a04; }
+
+.summarySuccess { border-left: 4px solid var(--color-success-text, #166534); }
+.summarySuccess svg { color: var(--color-success-text, #166534); }
+
+.summaryNeutral { border-left: 4px solid var(--color-on-surface-variant); }
+.summaryNeutral svg { color: var(--color-on-surface-variant); }
+
+.summaryShrinkage { border-left: 4px solid var(--color-error, #dc2626); }
+.summaryShrinkage svg { color: var(--color-error, #dc2626); }
+.summaryShrinkage .summaryNum { color: var(--color-error, #dc2626); }
+
+/* ─── Report Table ───────────────────────────────── */
+.reportTableHeader {
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-surface-container-high);
+}
+
+.reportTableHeader h3 {
+  font-weight: 600;
+  font-size: var(--text-body-md-size);
+  margin: 0;
+}
+
+.reportTableSubtitle {
+  font-size: var(--text-body-sm-size);
+  color: var(--color-on-surface-variant);
+  margin: 2px 0 0;
+}
+
+.reportTableWrapper {
+  overflow-x: auto;
+}
+
+.reportTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-body-sm-size);
+}
+
+.reportTable th {
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-surface-variant);
+  border-bottom: 1px solid var(--color-surface-container-low);
+}
+
+.reportTable td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-surface-container-low);
+  vertical-align: middle;
+}
+
+.reportTable code {
+  font-size: 11px;
+  background: var(--color-surface-container-low);
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+/* Section rows */
+.sectionRow td {
+  background: var(--color-surface-container);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-surface-variant);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+}
+
+/* Row types */
+.rowMissing { background: #fff7f7; }
+.rowMissing:hover { background: #fee2e2; }
+
+.rowExtra { background: #fffbf0; }
+.rowExtra:hover { background: #fef3c7; }
+
+.rowMatched { }
+.rowMatched:hover { background: var(--color-surface-container-lowest); }
+
+.rowUnscanned { opacity: 0.6; }
+
+/* Delta cells */
+.deltaMissing { color: var(--color-error, #dc2626); font-weight: 700; }
+.deltaExtra { color: #ca8a04; font-weight: 700; }
+.deltaOk { color: var(--color-success-text, #166534); font-weight: 700; }
+
+.shrinkageVal { color: var(--color-error, #dc2626); font-weight: 600; }
+
+/* Badges */
+.badgeMissing, .badgeExtra, .badgeOk, .badgeUnscanned {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.badgeMissing { background: #fee2e2; color: #dc2626; }
+.badgeExtra { background: #fef3c7; color: #ca8a04; }
+.badgeOk { background: #dcfce7; color: #166534; }
+.badgeUnscanned { background: var(--color-surface-container); color: var(--color-on-surface-variant); }
+
+/* ─── Print Styles ───────────────────────────────── */
+@media print {
+  .auditHeader { display: none; }
+  .reportSummary { grid-template-columns: repeat(5, 1fr); }
+  .auditPage { padding: 0; gap: 16px; }
+  .reportTable th, .reportTable td { padding: 6px 8px; }
+}

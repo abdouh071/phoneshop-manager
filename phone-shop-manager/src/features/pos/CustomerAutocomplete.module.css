@@ -1,0 +1,349 @@
+.container {
+  position: relative;
+  width: 100%;
+}
+
+.label {
+  display: block;
+  font-size: var(--text-label-sm-size, 12px);
+  font-weight: 600;
+  color: var(--color-on-surface, #0f172a);
+  margin-bottom: 6px;
+}
+
+.inputWrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.inputIcon {
+  position: absolute;
+  left: 10px;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.input {
+  width: 100%;
+  height: 38px;
+  padding: 0 32px 0 34px;
+  border: 1px solid var(--color-outline-variant, #cbd5e1);
+  border-radius: var(--radius, 8px);
+  background: var(--color-surface-container-lowest, #ffffff);
+  color: var(--color-on-surface, #0f172a);
+  font-size: 13px;
+  transition: all 0.15s ease;
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--color-primary, #0050cb);
+  box-shadow: 0 0 0 3px rgba(0, 80, 203, 0.12);
+}
+
+.clearBtn {
+  position: absolute;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: #e2e8f0;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.clearBtn:hover {
+  background: #cbd5e1;
+  color: #0f172a;
+}
+
+/* Floating Dropdown below input */
+.dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-outline-variant, #cbd5e1);
+  border-radius: 12px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  z-index: 100;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: dropdownSlide 0.15s ease-out;
+}
+
+@keyframes dropdownSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dropdownHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+  border-bottom: 1px solid #f1f5f9;
+  margin-bottom: 4px;
+}
+
+.keyboardHint {
+  font-size: 10px;
+  text-transform: none;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  border: 1px solid transparent;
+  text-align: left;
+  background: transparent;
+  width: 100%;
+}
+
+.item:hover,
+.itemActive {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.itemLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #e0e7ff;
+  color: #4338ca;
+  font-size: 11.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.nameCol {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.customerName {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-on-surface, #0f172a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+}
+
+.customerPhone {
+  font-size: 11px;
+  color: #64748b;
+  margin: 0;
+}
+
+.itemRight {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.ordersCount {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.debtBadge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+/* Custom Add Option */
+.customOption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  color: #0050cb;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: all 0.1s ease;
+  margin-top: 4px;
+}
+
+.customOption:hover,
+.customOptionActive {
+  background: #eff6ff;
+  border-color: #0050cb;
+}
+
+.emptyState {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #64748b;
+}
+
+/* ── Name-Only Option (Top of dropdown when search query exists) ── */
+.nameOnlyOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: all 0.12s ease;
+  margin-bottom: 4px;
+}
+
+.nameOnlyOption:hover,
+.nameOnlyOptionActive {
+  background: #dcfce7;
+  border-color: #16a34a;
+  box-shadow: 0 1px 4px rgba(22, 163, 74, 0.15);
+}
+
+.nameOnlyLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.nameOnlyIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #bbf7d0;
+  color: #15803d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.nameOnlyTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: #166534;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nameOnlySubtext {
+  font-size: 11px;
+  color: #15803d;
+  margin: 0;
+}
+
+.nameOnlyBadge {
+  font-size: 10px;
+  font-weight: 700;
+  background: #dcfce7;
+  color: #166534;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #86efac;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Section divider inside dropdown */
+.sectionDivider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #64748b;
+  border-top: 1px solid #f1f5f9;
+  border-bottom: 1px solid #f1f5f9;
+  background: #f8fafc;
+  margin: 4px -6px;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+/* Indicator shown below input when a name is typed without customer attached */
+.nameOnlyIndicator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 5px;
+  padding: 4px 10px;
+  background: #f0fdf4;
+  border: 1px solid #dcfce7;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #166534;
+  animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+

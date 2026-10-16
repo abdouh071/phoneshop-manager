@@ -1,0 +1,490 @@
+import { create } from 'zustand';
+import { 
+  signInWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged,
+  createUserWithEmailAndPassword,
+  getAuth,
+  sendPasswordResetEmail
+} from 'firebase/auth';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { auth, app } from '../lib/firebase';
+import { userService } from '../services/userService';
+import { settingsService } from '../services/settingsService';
+import { activityLogService } from '../services/activityLogService';
+import type { Permissions } from '../types/permissions';
+import { FULL_PERMISSIONS, SALES_AGENT_PERMISSIONS, REPAIR_AGENT_PERMISSIONS } from '../types/permissions';
+
+// Helper to fetch current public IP address with multiple fallbacks
+export const fetchPublicIP = async (): Promise<string | null> => {
+  const providers = [
+    'https://api.ipify.org?format=json',
+    'https://icanhazip.com',
+    'https://checkip.amazonaws.com'
+  ];
+  for (const provider of providers) {
+    try {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(provider, { signal: controller.signal });
+      clearTimeout(id);
+      
+      if (provider.includes('json')) {
+        const data = await res.json();
+        if (data.ip) return data.ip.trim();
+      } else {
+        const text = await res.text();
+        if (text.trim()) return text.trim();
+      }
+    } catch {
+      // try next provider
+    }
+  }
+  return null;
+};
+
+// We no longer hardcode a single SUPER_ADMIN_EMAIL to enforce dynamic DB checks,
+// but we allow configuring an initial super admin email via environment variable.
+const LEGACY_OWNER_EMAIL = import.meta.env.VITE_SUPER_ADMIN_EMAIL || '';
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'sales_agent' | 'repair_agent';
+  status?: 'active' | 'revoked';
+  avatar?: string;
+  lastActive?: any;
+  createdAt?: any;
+  permissions?: Permissions;
+  isSuperAdmin?: boolean;
+}
+
+interface AuthState {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  isInitializing: boolean;
+  isSuperAdmin: boolean;
+  isHistoryUnlocked: boolean;
+  error: string | null;
+  staff: User[];
+  login: (email: string, pass: string) => Promise<void>;
+  logout: () => Promise<void>;
+  clearError: () => void;
+  fetchStaff: () => Promise<void>;
+  createStaffMember: (name: string, email: string, pass: string, role: 'admin' | 'sales_agent' | 'repair_agent', permissions?: Permissions) => Promise<void>;
+  updateStaffMember: (uid: string, data: Partial<Pick<User, 'name' | 'role' | 'status' | 'permissions' | 'isSuperAdmin'>>) => Promise<void>;
+  sendPasswordReset: (email: string) => Promise<void>;
+  quickRoleLogin: (role: 'sales_agent' | 'repair_agent', adminPass: string) => Promise<void>;
+  unlockHistory: (adminEmail: string, adminPass: string) => Promise<void>;
+  lockHistory: () => void;
+}
+
+export const useAuthStore = create<AuthState>((set, get) => {
+  // Listen to Auth State globally
+  onAuthStateChanged(auth, async (firebaseUser) => {
+    if (firebaseUser) {
+      try {
+        const profile = await userService.getUserById(firebaseUser.uid);
+        if (profile) {
+          // Block revoked users even if their Firebase Auth token is valid
+          if (profile.status === 'revoked') {
+            await signOut(auth);
+            set({ 
+              user: null, 
+              isAuthenticated: false, 
+              isInitializing: false,
+            });
+            return;
+          }
+
+          // Enforce IP Lock for Workers (Sales/Repair) on auth initialization
+          if (profile.role === 'sales_agent' || profile.role === 'repair_agent') {
+            const settings = await settingsService.getSettings();
+            if (settings && settings.allowedIp && settings.allowedIp.trim() !== '') {
+              const allowedList = settings.allowedIp
+                .split(/[\s,]+/)
+                .map(ip => ip.trim())
+                .filter(Boolean);
+              if (allowedList.length > 0) {
+                let userIP = await fetchPublicIP();
+                if (!userIP) {
+                  // Retry once after 1s before disconnecting
+                  await new Promise(r => setTimeout(r, 1000));
+                  userIP = await fetchPublicIP();
+                }
+                if (!userIP || !allowedList.includes(userIP)) {
+                  await signOut(auth);
+                  set({ 
+                    user: null, 
+                    isAuthenticated: false, 
+                    isInitializing: false,
+                    error: userIP 
+                      ? `Session ended: Your IP (${userIP}) is not authorized. Store Wi-Fi required.`
+                      : 'Session ended: Could not verify store Wi-Fi connection.'
+                  });
+                  return;
+                }
+              }
+            }
+          }
+
+          // Check super admin status with fallback to legacy owner email
+          const isSuper = profile.isSuperAdmin === true || profile.email === LEGACY_OWNER_EMAIL;
+
+          // One-time migration: attempt to set isSuperAdmin in DB asynchronously
+          if (profile.email === LEGACY_OWNER_EMAIL && profile.isSuperAdmin !== true) {
+            profile.isSuperAdmin = true;
+            userService.updateUserProfile(firebaseUser.uid, { isSuperAdmin: true }).catch(console.error);
+          }
+
+          // Apply Role Override (Quick Login)
+          const override = localStorage.getItem('role_override');
+          if (override && isSuper) {
+            profile.role = override as 'sales_agent' | 'repair_agent';
+            profile.name = override === 'sales_agent' ? 'Sales Agent' : 'Repair Technician';
+            profile.permissions = override === 'sales_agent'
+              ? { ...SALES_AGENT_PERMISSIONS }
+              : { ...REPAIR_AGENT_PERMISSIONS };
+          }
+
+          set({ 
+            user: profile, 
+            isAuthenticated: true, 
+            isInitializing: false,
+            isSuperAdmin: isSuper && !override,
+            isHistoryUnlocked: profile.role === 'admin' // Admins always have unlocked history
+          });
+          userService.updateLastActive(firebaseUser.uid).catch(console.error);
+        } else {
+          await signOut(auth);
+          set({ user: null, isAuthenticated: false, isInitializing: false });
+        }
+      } catch (err) {
+        console.error("Auth state validation error:", err);
+        set({ isInitializing: false });
+      }
+    } else {
+      set({ user: null, isAuthenticated: false, isInitializing: false });
+    }
+  });
+
+  return {
+    user: null,
+    isAuthenticated: false,
+    isLoading: false,
+    isInitializing: true,
+    error: null,
+    staff: [],
+    isSuperAdmin: false,
+    isHistoryUnlocked: false,
+
+    login: async (email, pass) => {
+      set({ isLoading: true, error: null });
+      try {
+        const cred = await signInWithEmailAndPassword(auth, email, pass);
+        let profile = await userService.getUserById(cred.user.uid);
+        
+        // Auto-bootstrap: if the super admin email signs in for the first time,
+        // create their Firestore profile automatically
+        if (!profile && cred.user.email === LEGACY_OWNER_EMAIL) {
+          await userService.createUserProfile(cred.user.uid, {
+            name: 'Admin',
+            email: cred.user.email,
+            role: 'admin',
+            status: 'active',
+            isSuperAdmin: true,
+            permissions: FULL_PERMISSIONS,
+            avatar: 'AD',
+          } as any);
+          profile = await userService.getUserById(cred.user.uid);
+        }
+        
+        if (!profile) {
+          await signOut(auth);
+          throw new Error('Access Denied. Your account does not have permission.');
+        }
+
+        // Block revoked users on login attempt
+        if (profile.status === 'revoked') {
+          await signOut(auth);
+          throw new Error('Your account has been revoked. Please contact your administrator.');
+        }
+
+        // Enforce IP Lock for Workers on login
+        if (profile.role === 'sales_agent' || profile.role === 'repair_agent') {
+          const settings = await settingsService.getSettings();
+          if (settings && settings.allowedIp && settings.allowedIp.trim() !== '') {
+            const allowedList = settings.allowedIp
+              .split(/[\s,]+/)
+              .map(ip => ip.trim())
+              .filter(Boolean);
+            if (allowedList.length > 0) {
+              let userIP = await fetchPublicIP();
+              if (!userIP) {
+                await new Promise(r => setTimeout(r, 1000));
+                userIP = await fetchPublicIP();
+              }
+              if (!userIP) {
+                await signOut(auth);
+                throw new Error('Access Denied. Could not verify your location (IP lookup timed out).');
+              }
+              if (!allowedList.includes(userIP)) {
+                await signOut(auth);
+                throw new Error(`Access Denied. Your IP (${userIP}) is not authorized. You must connect to the store Wi-Fi.`);
+              }
+            }
+          }
+        }
+
+        // Apply Role Override on login (if any)
+        const override = localStorage.getItem('role_override');
+        if (override && profile.isSuperAdmin) {
+          profile.role = override as 'sales_agent' | 'repair_agent';
+          profile.name = override === 'sales_agent' ? 'Sales Agent' : 'Repair Technician';
+          profile.permissions = override === 'sales_agent'
+            ? { ...SALES_AGENT_PERMISSIONS }
+            : { ...REPAIR_AGENT_PERMISSIONS };
+        }
+
+        set({
+          user: profile,
+          isAuthenticated: true,
+          isLoading: false,
+          isSuperAdmin: (profile.isSuperAdmin === true) && !override,
+          isHistoryUnlocked: profile.role === 'admin'
+        });
+        // Log the login event
+        activityLogService.log('system', `${profile.name} logged in`, { userName: profile.name, userId: profile.id }).catch(console.error);
+      } catch (err: any) {
+        // Simplify Firebase error messages
+        let message = err.message || 'Failed to login';
+        if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+          message = 'Invalid email or password.';
+        }
+        set({ error: message, isLoading: false });
+      }
+    },
+
+    logout: async () => {
+      const currentUser = get().user;
+      if (currentUser) {
+        activityLogService.log('system', `${currentUser.name} logged out`, { userName: currentUser.name, userId: currentUser.id }).catch(console.error);
+      }
+      localStorage.removeItem('role_override');
+      await signOut(auth);
+      set({ user: null, isAuthenticated: false, isSuperAdmin: false, isHistoryUnlocked: false });
+    },
+
+    clearError: () => set({ error: null }),
+
+    fetchStaff: async () => {
+      try {
+        const staff = await userService.getAllUsers();
+        set({ staff });
+      } catch (err) {
+        console.error("Failed to fetch staff:", err);
+      }
+    },
+
+    createStaffMember: async (name, email, pass, role, permissions) => {
+      const currentUser = get().user;
+      if (!currentUser || currentUser.role !== 'admin') {
+        throw new Error('Only administrators can create staff members.');
+      }
+
+      // Regular admins cannot create other admins or super admins
+      if (!currentUser.isSuperAdmin && role === 'admin') {
+        throw new Error('Only the super admin can create other administrators.');
+      }
+
+      set({ isLoading: true, error: null });
+      const secondaryAppName = `Secondary_${Date.now()}`;
+      let secondaryApp: any = null;
+      try {
+        secondaryApp = initializeApp(app.options, secondaryAppName);
+        const secondaryAuth = getAuth(secondaryApp);
+        
+        let cred: any = null;
+        try {
+          cred = await createUserWithEmailAndPassword(secondaryAuth, email, pass);
+        } catch (authErr: any) {
+          throw authErr;
+        }
+
+        try {
+          await userService.createUserProfile(cred.user.uid, {
+            name,
+            email,
+            role,
+            status: 'active',
+            permissions: role === 'admin' ? FULL_PERMISSIONS : (permissions ?? undefined),
+            avatar: name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
+          });
+        } catch (profileErr: any) {
+          // Rollback newly created Firebase Auth user so we don't leave an orphaned account
+          if (cred?.user) {
+            try {
+              await cred.user.delete();
+            } catch (deleteErr) {
+              console.error('Failed to rollback orphaned auth user:', deleteErr);
+            }
+          }
+          throw profileErr;
+        }
+
+        await signOut(secondaryAuth);
+
+        await get().fetchStaff();
+        const actor = get().user;
+        activityLogService.log('system', `New staff member "${name}" added as ${role}`, { userName: actor?.name, userId: actor?.id }).catch(console.error);
+        set({ isLoading: false });
+      } catch (err: any) {
+        set({ error: err.message || 'Failed to create staff member', isLoading: false });
+        throw err;
+      } finally {
+        if (secondaryApp) {
+          try {
+            await deleteApp(secondaryApp);
+          } catch (delAppErr) {
+            console.error('Failed to delete secondary app:', delAppErr);
+          }
+        }
+      }
+    },
+
+    updateStaffMember: async (uid, data) => {
+      const currentUser = get().user;
+      if (!currentUser) throw new Error('Not authenticated.');
+
+      const targetMember = get().staff.find(s => s.id === uid);
+      if (!targetMember) throw new Error('Staff member not found.');
+
+      const isSuper = currentUser.isSuperAdmin === true;
+
+      if (!isSuper) {
+        if (currentUser.role !== 'admin') {
+          throw new Error('Only administrators can manage users.');
+        }
+        // Cannot manage themselves
+        if (currentUser.id === uid) {
+          throw new Error('You cannot edit your own permissions or role.');
+        }
+        // Cannot manage other admins
+        if (targetMember.role === 'admin') {
+          throw new Error('You do not have permission to manage other administrators.');
+        }
+        // Cannot promote to admin
+        if (data.role === 'admin' || data.isSuperAdmin) {
+          throw new Error('Only the super admin can grant administrator privileges.');
+        }
+      }
+
+      // Nobody can revoke or demote a super admin except themselves
+      if (targetMember.isSuperAdmin && currentUser.id !== targetMember.id) {
+        if (data.status === 'revoked' || data.role !== 'admin' || data.isSuperAdmin === false) {
+           throw new Error('You cannot demote or revoke a Super Admin.');
+        }
+      }
+
+      set({ isLoading: true, error: null });
+      try {
+        await userService.updateUserProfile(uid, data);
+        // Update avatar if name is changing
+        if (data.name) {
+          const avatar = data.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+          await userService.updateUserProfile(uid, { avatar });
+        }
+        await get().fetchStaff();
+        const actor = get().user;
+        const actionDesc = data.status === 'revoked'
+          ? `Access revoked for "${targetMember.name}"`
+          : data.status === 'active'
+          ? `Account reactivated for "${targetMember.name}"`
+          : `Staff member "${data.name || targetMember.name}" profile updated`;
+        activityLogService.log('system', actionDesc, { userName: actor?.name, userId: actor?.id }).catch(console.error);
+        set({ isLoading: false });
+      } catch (err: any) {
+        set({ error: err.message || 'Failed to update member.', isLoading: false });
+        throw err;
+      }
+    },
+
+    quickRoleLogin: async (role, adminPass) => {
+      // Find a super admin to login as
+      const superAdmins = get().staff.filter(s => s.isSuperAdmin);
+      const superAdminEmail = superAdmins.length > 0 ? superAdmins[0].email : LEGACY_OWNER_EMAIL;
+      
+      set({ isLoading: true, error: null });
+      try {
+        localStorage.setItem('role_override', role);
+        await get().login(superAdminEmail, adminPass);
+      } catch (err: any) {
+        localStorage.removeItem('role_override');
+        set({ error: err.message || 'Failed to authenticate Admin.', isLoading: false });
+      }
+    },
+
+    unlockHistory: async (adminEmail, adminPass) => {
+      set({ isLoading: true, error: null });
+      const secondaryAppName = `VerifyAdminApp_${Date.now()}`;
+      let secondaryApp: any = null;
+      try {
+        // Authenticate the provided admin credentials using a secondary app
+        secondaryApp = initializeApp(app.options, secondaryAppName);
+        const secondaryAuth = getAuth(secondaryApp);
+        
+        const cred = await signInWithEmailAndPassword(secondaryAuth, adminEmail, adminPass);
+        
+        // Verify the authenticated user is actually an admin
+        const profile = await userService.getUserById(cred.user.uid);
+        await signOut(secondaryAuth); // immediately sign out of secondary
+        
+        if (!profile || (profile.role !== 'admin' && profile.isSuperAdmin !== true)) {
+           throw new Error('This account does not have administrator privileges.');
+        }
+        
+        set({ isHistoryUnlocked: true, isLoading: false });
+        
+        // Refresh stores so they fetch full data
+        const { useCartStore } = await import('./cartStore');
+        const { useActivityStore } = await import('./activityStore');
+        useCartStore.getState().fetchTransactions();
+        useActivityStore.getState().fetchActivities();
+
+      } catch (err: any) {
+        set({ error: err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential' 
+          ? 'Incorrect Admin Password' : (err.message || 'Failed to unlock.'), isLoading: false });
+        throw err;
+      } finally {
+        if (secondaryApp) {
+          try {
+            await deleteApp(secondaryApp);
+          } catch (delErr) {
+            console.error('Failed to cleanup secondary verification app:', delErr);
+          }
+        }
+      }
+    },
+
+    lockHistory: () => {
+      // Admins always have unlocked history, so only lock if it's a worker
+      const user = get().user;
+      if (user && user.role !== 'admin') {
+        set({ isHistoryUnlocked: false });
+      }
+    },
+
+    sendPasswordReset: async (email: string) => {
+      set({ isLoading: true, error: null });
+      try {
+        await sendPasswordResetEmail(auth, email);
+        set({ isLoading: false });
+      } catch (err: any) {
+        set({ error: err.message || 'Failed to send password reset email.', isLoading: false });
+        throw err;
+      }
+    }
+  };
+});

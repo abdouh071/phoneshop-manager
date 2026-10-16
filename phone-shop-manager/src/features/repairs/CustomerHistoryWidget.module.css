@@ -1,0 +1,612 @@
+/* Customer Repair History & Existing Account Loyalty Widget */
+.historyCard {
+  background: var(--color-surface-container-lowest, #ffffff);
+  border: 1.5px solid #c7d2fe;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.06);
+  transition: all 0.2s ease;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.historyCardDebt {
+  border-color: #fca5a5;
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.08);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.historyHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #f5f7ff;
+  border-bottom: 1px solid #e0e7ff;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease;
+  gap: 10px;
+}
+
+.historyHeader:hover {
+  background: #eef2ff;
+}
+
+.historyCardDebt .historyHeader {
+  background: #fff5f5;
+  border-bottom-color: #fee2e2;
+}
+
+.historyCardDebt .historyHeader:hover {
+  background: #fef2f2;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.historyBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #4f46e5;
+  color: #ffffff;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.historyBadgeDebt {
+  background: #dc2626;
+  animation: pulseBadge 2s infinite ease-in-out;
+}
+
+@keyframes pulseBadge {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.headerTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1e1b4b;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.customerNameTitle {
+  color: #1e1b4b;
+  font-weight: 800;
+}
+
+.ticketsCountBadge {
+  color: #6366f1;
+  font-weight: 600;
+}
+
+.headerSpentStat {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+.headerDebtStat {
+  font-size: 11px;
+  font-weight: 700;
+  color: #b91c1c;
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+.toggleIcon {
+  color: #6366f1;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.historyCardDebt .toggleIcon {
+  color: #dc2626;
+}
+
+.toggleIconRotated {
+  transform: rotate(180deg);
+}
+
+.historyBody {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+/* Detected Account Profile Banner */
+.accountBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.accountLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.accountAvatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #e0e7ff;
+  color: #4338ca;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.accountDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.accountNameRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.accountName {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.accountTypeBadge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.accountPhone {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.accountRight {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.accountPillSuccess {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+  font-size: 11px;
+}
+
+.accountPillSuccess strong {
+  font-weight: 700;
+}
+
+.accountPillDebt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #fee2e2;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.accountPillGoodStanding {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.accountPillCredit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Active Debts Container */
+.activeDebtsSection {
+  background: #fff5f5;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.debtsSectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #991b1b;
+}
+
+.debtsTotalDue {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #dc2626;
+}
+
+.debtsList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.debtItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  background: #ffffff;
+  border: 1px solid #fee2e2;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.debtItemLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.debtService {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.debtDate {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.debtItemRight {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.debtDueLabel {
+  color: #64748b;
+  font-size: 10.5px;
+}
+
+.debtDueValue {
+  font-weight: 800;
+  color: #dc2626;
+}
+
+/* Repairs Section */
+.repairsSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sectionHeaderLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-top: 2px;
+}
+
+.ticketItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--color-surface-container-low, #f8fafc);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+
+.ticketItem:hover {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+}
+
+.ticketItemDebt {
+  border-color: #fca5a5;
+  background: #fffbfa;
+}
+
+.ticketItemDebt:hover {
+  border-color: #f87171;
+  background: #fff5f5;
+}
+
+.itemTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.itemDevice {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--color-on-surface, #0f172a);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ticketNumberText {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.itemStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+}
+
+/* Exact Status Styles */
+.statusDept {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  font-weight: 800;
+}
+
+.statusTaken {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  font-weight: 700;
+}
+
+.statusCompleted {
+  background: rgba(2, 132, 199, 0.12);
+  color: #0369a1;
+  border: 1px solid rgba(2, 132, 199, 0.3);
+  font-weight: 700;
+}
+
+.statusInProgress {
+  background: rgba(99, 102, 241, 0.12);
+  color: #4338ca;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+.statusPending {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.statusCancelled {
+  background: rgba(100, 116, 139, 0.12);
+  color: #475569;
+  border: 1px solid rgba(100, 116, 139, 0.25);
+}
+
+.statusReturned {
+  background: rgba(234, 88, 12, 0.12);
+  color: #c2410c;
+  border: 1px solid rgba(234, 88, 12, 0.25);
+}
+
+.itemMiddle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-on-surface-variant, #64748b);
+}
+
+.itemIssue {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+  font-weight: 500;
+}
+
+.itemFinancials {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.itemCost {
+  font-weight: 700;
+  color: var(--color-on-surface, #0f172a);
+}
+
+.itemCostPaid {
+  font-weight: 700;
+  color: #047857;
+}
+
+.depositNote {
+  font-size: 10px;
+  color: #6366f1;
+  font-weight: 500;
+}
+
+.debtCostBreakdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+}
+
+.costTotalText {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.costPaidText {
+  color: #047857;
+  font-weight: 600;
+}
+
+.costDebtText {
+  color: #b91c1c;
+  font-weight: 800;
+  background: #fee2e2;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.itemBottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+  gap: 8px;
+}
+
+.itemDate {
+  font-size: 10.5px;
+  color: #94a3b8;
+}
+
+.completedDateNote {
+  color: #059669;
+  font-weight: 500;
+}
+
+.itemActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.repeatBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #4338ca;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.repeatBtn:hover {
+  background: #4f46e5;
+  color: #ffffff;
+  border-color: #4f46e5;
+}
+
+.viewTicketBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.viewTicketBtn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+.noRepairsNotice {
+  padding: 8px 10px;
+  font-size: 11.5px;
+  color: #64748b;
+  text-align: center;
+  background: #f8fafc;
+  border-radius: 6px;
+  border: 1px dashed #cbd5e1;
+}

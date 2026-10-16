@@ -1,0 +1,447 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding-bottom: var(--space-8);
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 50vh;
+  font-size: var(--text-body-lg-size);
+  color: var(--color-on-surface-variant);
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.title {
+  font-family: var(--font-headline);
+  font-size: var(--text-headline-lg-size);
+  font-weight: var(--text-headline-lg-weight);
+  line-height: var(--text-headline-lg-line);
+  letter-spacing: var(--text-headline-lg-spacing);
+  color: var(--color-on-surface);
+}
+
+.subtitle {
+  font-size: var(--text-body-sm-size);
+  color: var(--color-on-surface-variant);
+  margin-top: 2px;
+}
+
+/* Quick Action Shortcuts */
+.quickActionsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+}
+
+@media (max-width: 900px) {
+  .quickActionsGrid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.quickActionCard {
+  background: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  transition: all var(--transition-base);
+  text-decoration: none;
+  color: var(--color-on-surface);
+}
+
+.quickActionCard:hover {
+  border-color: var(--color-primary);
+  background: var(--color-surface-container-low);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+
+.quickActionIcon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.actionSale { background: #dbeafe; color: #1d4ed8; }
+.actionRepair { background: #ede9fe; color: #6d28d9; }
+.actionInventory { background: #dcfce7; color: #15803d; }
+.actionParts { background: #fef3c7; color: #b45309; }
+
+.quickActionText {
+  display: flex;
+  flex-direction: column;
+}
+
+.quickActionTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+.quickActionDesc {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+/* Stat Cards Grid */
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+}
+
+@media (max-width: 1100px) {
+  .statsGrid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.statCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.statCardClickable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+}
+
+.accentCard {
+  background: var(--color-primary-container) !important;
+}
+
+.statTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.statIcon {
+  width: 40px;
+  height: 40px;
+  background: var(--color-surface-container-low);
+  color: var(--color-primary-container);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.accentIcon {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.statValue {
+  font-family: var(--font-headline);
+  font-size: var(--text-headline-lg-size);
+  font-weight: 700;
+  color: var(--color-on-surface);
+  line-height: 1.1;
+}
+
+.accentCard .statValue,
+.accentCard .statLabel {
+  color: #ffffff;
+}
+
+.statLabel {
+  font-size: var(--text-label-sm-size);
+  font-weight: 500;
+  color: var(--color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.change {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-label-sm-size);
+  font-weight: 600;
+}
+
+.changeUp {
+  background: rgba(22, 101, 52, 0.12);
+  color: var(--color-success-text);
+}
+
+.changeDown {
+  background: rgba(186, 26, 26, 0.12);
+  color: var(--color-danger-text);
+}
+
+/* Cash Drawer Quick Bar */
+.cashDrawerWidget {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-5);
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.drawerWidgetTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-on-surface);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.drawerItemsRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.drawerWidgetItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.drawerItemValue {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+/* Content grid */
+.contentGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+}
+
+@media (max-width: 900px) {
+  .contentGrid { grid-template-columns: 1fr; }
+}
+
+/* Bar Chart */
+.barChart {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  height: 160px;
+}
+
+.barGroup {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  height: 100%;
+}
+
+.barWrapper {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.bar {
+  width: 100%;
+  background: var(--color-primary-container);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  min-height: 4px;
+  transition: opacity var(--transition-base);
+  opacity: 0.85;
+}
+
+.bar:hover {
+  opacity: 1;
+}
+
+.barLabel {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+/* Transactions */
+.txHeader {
+  padding: var(--space-4) var(--space-5) 0;
+}
+
+.txList {
+  display: flex;
+  flex-direction: column;
+}
+
+.txRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-surface-container-low);
+  transition: background var(--transition-base);
+}
+
+.txRow:hover {
+  background: var(--color-surface-container-low);
+}
+
+.txIcon {
+  width: 32px;
+  height: 32px;
+  background: var(--color-surface-container);
+  color: var(--color-on-surface-variant);
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.txInfo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.txCustomer {
+  font-size: var(--text-body-sm-size);
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+.txTime {
+  font-size: var(--text-label-sm-size);
+  color: var(--color-on-surface-variant);
+}
+
+.txAmount {
+  font-family: var(--font-headline);
+  font-size: var(--text-body-md-size);
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+/* Monthly Summary */
+.monthlySummary {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+}
+
+.summaryItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-4);
+  min-width: 120px;
+}
+
+.summaryLabel {
+  font-size: var(--text-label-sm-size);
+  color: var(--color-on-surface-variant);
+}
+
+.summaryValue {
+  font-family: var(--font-headline);
+  font-size: var(--text-headline-sm-size);
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+.summaryDivider {
+  width: 1px;
+  height: 36px;
+  background: var(--color-surface-container-low);
+}
+
+/* Overdue Debt Alert Banner */
+.overdueAlertBanner {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.06);
+}
+
+.overdueAlertLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.overdueAlertIcon {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #dc2626;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(220, 38, 38, 0.3);
+}
+
+.overdueAlertTitle {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #991b1b;
+  margin: 0;
+}
+
+.overdueAlertSubtitle {
+  font-size: 12px;
+  color: #b91c1c;
+  margin: 2px 0 0;
+}
+
+.overdueAlertBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: #dc2626;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.overdueAlertBtn:hover {
+  background: #b91c1c;
+}

@@ -1,0 +1,179 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.productHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.productName {
+  font-family: var(--font-headline);
+  font-size: var(--text-headline-sm-size);
+  font-weight: 700;
+  color: var(--color-on-surface);
+  margin-bottom: var(--space-2);
+}
+
+.badgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Price grid */
+.priceGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.priceCard {
+  background: var(--color-surface-container-low);
+  border: 1px solid var(--color-surface-container-high);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.priceLabel {
+  font-size: var(--text-label-sm-size);
+  color: var(--color-on-surface-variant);
+  margin-bottom: var(--space-1);
+}
+
+.priceValue {
+  font-size: var(--text-headline-sm-size);
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+.sellPrice { color: var(--color-primary); }
+.profitGood { color: var(--color-success-text); }
+.profitOk { color: #ca8a04; }
+.profitBad { color: var(--color-error); }
+
+/* Sections */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-label-lg-size);
+  font-weight: 600;
+  color: var(--color-on-surface);
+  border-bottom: 1px solid var(--color-surface-container-low);
+  padding-bottom: var(--space-2);
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.detailItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detailLabel {
+  font-size: var(--text-label-sm-size);
+  color: var(--color-on-surface-variant);
+}
+
+.detailValue {
+  font-size: var(--text-body-sm-size);
+  color: var(--color-on-surface);
+  font-weight: 500;
+}
+
+.skuCode {
+  font-size: 12px;
+  background: var(--color-surface-container);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--color-on-surface-variant);
+  font-family: monospace;
+  display: inline-block;
+}
+
+.supplierName {
+  font-size: var(--text-body-sm-size);
+  font-weight: 600;
+  color: var(--color-on-surface);
+}
+
+/* Stock warning */
+.stockWarning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  border-radius: var(--radius-md);
+  font-size: var(--text-body-sm-size);
+  border: 1px solid #fde68a;
+}
+
+/* Notes */
+.notes {
+  font-size: var(--text-body-sm-size);
+  color: var(--color-on-surface-variant);
+  background: var(--color-surface-container-low);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  line-height: 1.6;
+}
+
+/* Condition / Category badges */
+.conditionBadge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.conditionNew { background: #dcfce7; color: #166534; }
+.conditionRefurb { background: #dbeafe; color: #1e40af; }
+.conditionUsed { background: #fef9c3; color: #854d0e; }
+
+[data-theme="dark"] .conditionNew { background: #14532d; color: #86efac; }
+[data-theme="dark"] .conditionRefurb { background: #1e3a8a; color: #93c5fd; }
+[data-theme="dark"] .conditionUsed { background: #713f12; color: #fde68a; }
+
+.categoryBadge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-on-surface-variant);
+  background: var(--color-surface-container);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
