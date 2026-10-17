@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card, CardHeader } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { Edit2, UserX, UserPlus, RefreshCw, ShieldOff } from 'lucide-react';
+import { Edit2, UserX, UserPlus, RefreshCw, ShieldOff, Smartphone } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import type { User } from '../../store/authStore';
 import { NewUserModal } from './NewUserModal';
@@ -76,15 +76,31 @@ export const UsersTab = () => {
             title="Staff & Users"
             subtitle={`${staff.filter(s => s.status !== 'revoked').length} active member${staff.filter(s => s.status !== 'revoked').length !== 1 ? 's' : ''}`}
           />
-          {isUserAdmin && (
-            <Button
-              leftIcon={<UserPlus size={16} />}
-              size="sm"
-              onClick={() => setIsNewUserModalOpen(true)}
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <a
+              href="/downloads/Auto-Manager.apk"
+              download="Auto-Manager.apk"
+              style={{ textDecoration: 'none' }}
+              title="Download Android APK for technicians"
             >
-              Add User
-            </Button>
-          )}
+              <Button
+                variant="secondary"
+                size="sm"
+                leftIcon={<Smartphone size={16} />}
+              >
+                Download Technician App (.APK)
+              </Button>
+            </a>
+            {isUserAdmin && (
+              <Button
+                leftIcon={<UserPlus size={16} />}
+                size="sm"
+                onClick={() => setIsNewUserModalOpen(true)}
+              >
+                Add User
+              </Button>
+            )}
+          </div>
         </div>
 
         <table className={styles.table}>

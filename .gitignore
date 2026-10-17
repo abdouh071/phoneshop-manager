@@ -15,3 +15,8 @@ Thumbs.db
 .env
 .env.local
 .env*.local
+
+# Large application binaries (distribute via GitHub Releases)
+*.apk
+downloads/*.apk
+public/downloads/*.apk
