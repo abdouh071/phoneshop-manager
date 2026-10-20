@@ -1,0 +1,180 @@
+import {
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  addDoc,
+  updateDoc,
+  query,
+  where,
+  limit
+} from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import type { Customer, CustomerDebtEntry } from '../types';
+
+export const customerService = {
+  /**
+   * Look up a customer by phone number (exact or digit suffix match)
+   */
+  findByPhone: async (phone: string): Promise<Customer | null> => {
+    if (!phone) return null;
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.length < 8) return null;
+
+    try {
+      // 1. Exact match query
+      const q = query(
+        collection(db, 'customers'),
+        where('phone', '==', phone.trim()),
+        limit(1)
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const d = snap.docs[0];
+        return { id: d.id, ...d.data() } as Customer;
+      }
+
+      // 2. Scan fallback for non-standard formatted phone numbers
+      const allSnap = await getDocs(query(collection(db, 'customers'), limit(100)));
+      for (const d of allSnap.docs) {
+        const data = d.data() as Customer;
+        const cDigits = (data.phone || '').replace(/\D/g, '');
+        if (
+          cDigits &&
+          (cDigits === cleanPhone ||
+            cDigits.endsWith(cleanPhone) ||
+            cleanPhone.endsWith(cDigits))
+        ) {
+          return { ...data, id: d.id };
+        }
+      }
+      return null;
+    } catch (e) {
+      console.warn('[CustomerService] findByPhone error:', e);
+      return null;
+    }
+  },
+
+  /**
+   * Find existing customer or create a new profile
+   */
+  findOrCreate: async (name: string, phone: string): Promise<Customer> => {
+    const trimmedName = name.trim() || 'Client';
+    const trimmedPhone = phone.trim();
+
+    if (trimmedPhone) {
+      const existing = await customerService.findByPhone(trimmedPhone);
+      if (existing) return existing;
+    }
+
+    const now = new Date().toISOString();
+    const newCustomerData: Omit<Customer, 'id'> = {
+      name: trimmedName,
+      phone: trimmedPhone,
+      accountType: 'retail',
+      totalPurchases: 0,
+      totalSpent: 0,
+      totalDebt: 0,
+      lastVisitDate: now,
+      joinDate: now,
+    };
+
+    const docRef = await addDoc(collection(db, 'customers'), newCustomerData);
+    return { id: docRef.id, ...newCustomerData };
+  },
+
+  /**
+   * Register a customer debt entry in customer_debts collection
+   */
+  createDebtRecord: async (params: {
+    customerId: string;
+    customerName: string;
+    customerPhone: string;
+    ticketNumber: string;
+    deviceDescription: string;
+    totalAmount: number;
+    amountPaid: number;
+    paymentMethod?: string;
+    actorName?: string;
+    notes?: string;
+  }): Promise<string> => {
+    const now = new Date().toISOString();
+    const remainingBalance = Math.max(0, params.totalAmount - params.amountPaid);
+    const status =
+      remainingBalance <= 0
+        ? 'paid'
+        : params.amountPaid > 0
+        ? 'partially_paid'
+        : 'unpaid';
+
+    const payments = [];
+    if (params.amountPaid > 0) {
+      payments.push({
+        id: `pay_${Date.now()}`,
+        date: now,
+        amount: params.amountPaid,
+        method: params.paymentMethod || 'cash',
+        note: `Handover payment for Repair #${params.ticketNumber}`,
+        receivedByName: params.actorName || 'Staff',
+      });
+    }
+
+    const debtData = {
+      customerId: params.customerId,
+      customerName: params.customerName,
+      customerPhone: params.customerPhone,
+      productOrService: `Repair #${params.ticketNumber} - ${params.deviceDescription}`,
+      totalAmount: params.totalAmount,
+      amountPaid: params.amountPaid,
+      remainingBalance,
+      status,
+      date: now,
+      type: 'repair',
+      notes: params.notes || `Repair #${params.ticketNumber} handed over with ${remainingBalance} DA remaining debt.`,
+      payments,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const debtRef = await addDoc(collection(db, 'customer_debts'), debtData);
+
+    // Update customer debt total
+    try {
+      const custDocRef = doc(db, 'customers', params.customerId);
+      const custSnap = await getDoc(custDocRef);
+      if (custSnap.exists()) {
+        const custData = custSnap.data() as Customer;
+        const currentDebt = custData.totalDebt || 0;
+        await updateDoc(custDocRef, {
+          totalDebt: currentDebt + remainingBalance,
+          lastVisitDate: now,
+        });
+      }
+    } catch (err) {
+      console.warn('[CustomerService] Failed to update customer debt total:', err);
+    }
+
+    return debtRef.id;
+  },
+
+  /**
+   * Update customer spending totals upon ticket completion
+   */
+  recordCustomerSpending: async (customerId: string, amount: number) => {
+    if (!customerId || amount <= 0) return;
+    try {
+      const custDocRef = doc(db, 'customers', customerId);
+      const custSnap = await getDoc(custDocRef);
+      if (custSnap.exists()) {
+        const custData = custSnap.data() as Customer;
+        await updateDoc(custDocRef, {
+          totalSpent: (custData.totalSpent || 0) + amount,
+          totalPurchases: (custData.totalPurchases || 0) + 1,
+          lastVisitDate: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      console.warn('[CustomerService] Failed to record customer spending:', e);
+    }
+  }
+};

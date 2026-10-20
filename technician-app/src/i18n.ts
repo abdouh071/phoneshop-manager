@@ -4,10 +4,12 @@ import * as Localization from 'expo-localization';
 
 import enTranslations from './locales/en/translation.json';
 import frTranslations from './locales/fr/translation.json';
+import arTranslations from './locales/ar/translation.json';
 
 const resources = {
   en: { translation: enTranslations },
-  fr: { translation: frTranslations }
+  fr: { translation: frTranslations },
+  ar: { translation: arTranslations }
 };
 
 i18n

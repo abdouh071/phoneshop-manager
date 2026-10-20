@@ -15,6 +15,8 @@ export const SettingsScreen = () => {
   
   const [localPercentage, setLocalPercentage] = useState(profitPercentage);
 
+  const [currentLang, setCurrentLang] = useState(i18next.language || 'en');
+
   const handleSave = () => {
     const parsed = parseFloat(localPercentage);
     if (isNaN(parsed) || parsed < 0 || parsed > 100) {
@@ -27,6 +29,7 @@ export const SettingsScreen = () => {
 
   const changeLanguage = (lang: string) => {
     i18next.changeLanguage(lang);
+    setCurrentLang(lang);
   };
 
   return (
@@ -64,14 +67,14 @@ export const SettingsScreen = () => {
               <Text style={styles.prefLabel}>{t('settings.language', 'Language')}</Text>
             </View>
             <View style={styles.langRow}>
-              <TouchableOpacity style={[styles.langBtn, i18next.language === 'en' && styles.langBtnActive]} onPress={() => changeLanguage('en')}>
-                <Text style={[styles.langText, i18next.language === 'en' && styles.langTextActive]}>🇺🇸 EN</Text>
+              <TouchableOpacity style={[styles.langBtn, currentLang.startsWith('en') && styles.langBtnActive]} onPress={() => changeLanguage('en')}>
+                <Text style={[styles.langText, currentLang.startsWith('en') && styles.langTextActive]}>🇺🇸 EN</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.langBtn, i18next.language === 'fr' && styles.langBtnActive]} onPress={() => changeLanguage('fr')}>
-                <Text style={[styles.langText, i18next.language === 'fr' && styles.langTextActive]}>🇫🇷 FR</Text>
+              <TouchableOpacity style={[styles.langBtn, currentLang.startsWith('fr') && styles.langBtnActive]} onPress={() => changeLanguage('fr')}>
+                <Text style={[styles.langText, currentLang.startsWith('fr') && styles.langTextActive]}>🇫🇷 FR</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.langBtn, i18next.language === 'ar' && styles.langBtnActive]} onPress={() => changeLanguage('ar')}>
-                <Text style={[styles.langText, i18next.language === 'ar' && styles.langTextActive]}>🇩🇿 AR</Text>
+              <TouchableOpacity style={[styles.langBtn, currentLang.startsWith('ar') && styles.langBtnActive]} onPress={() => changeLanguage('ar')}>
+                <Text style={[styles.langText, currentLang.startsWith('ar') && styles.langTextActive]}>🇩🇿 AR</Text>
               </TouchableOpacity>
             </View>
             

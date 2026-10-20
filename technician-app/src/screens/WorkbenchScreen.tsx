@@ -102,11 +102,16 @@ export const WorkbenchScreen = ({ navigation }: any) => {
   const openScanner = () => {
     navigation.navigate('Scanner', {
       onScan: (data: string) => {
-        const found = tickets.find(t => t.ticketNumber === data);
+        const clean = data.trim();
+        const found = tickets.find(t => 
+          t.ticketNumber?.toLowerCase() === clean.toLowerCase() ||
+          t.trackingPin?.toLowerCase() === clean.toLowerCase() ||
+          (clean.length >= 8 && t.customerPhone && t.customerPhone.replace(/\D/g, '') === clean.replace(/\D/g, ''))
+        );
         if (found) {
           navigation.navigate('TicketDetail', { ticket: found });
         } else {
-          Alert.alert(t('error.notFound', 'Not Found'), t('error.noTicketMatch', 'No assigned ticket matches this barcode.'));
+          Alert.alert(t('error.notFound', 'Not Found'), t('error.noTicketMatch', 'No ticket matches this barcode or PIN.'));
         }
       }
     });

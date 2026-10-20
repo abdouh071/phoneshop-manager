@@ -1,20 +1,26 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
-import { TextInput, Button, Title, Text, useTheme } from 'react-native-paper';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, ScrollView, Alert, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
+import { TextInput, Button, Title, Text, useTheme, Menu, Chip } from 'react-native-paper';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRepairStore } from '../store/repairStore';
 import { useAuthStore } from '../store/authStore';
+import { customerService } from '../services/customerService';
 import { useTranslation } from 'react-i18next';
-import { Menu } from 'react-native-paper';
+import type { Customer } from '../types';
 
 export const NewTicketScreen = ({ navigation }: any) => {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [matchedCustomer, setMatchedCustomer] = useState<Customer | null>(null);
   const [deviceBrand, setDeviceBrand] = useState('');
   const [deviceModel, setDeviceModel] = useState('');
   const [issueDescription, setIssueDescription] = useState('');
-  const [lockType, setLockType] = useState('none');
+  const [remark, setRemark] = useState('');
+  const [lockType, setLockType] = useState<'none' | 'pin' | 'pattern'>('none');
   const [lockValue, setLockValue] = useState('');
+  const [patternDots, setPatternDots] = useState<number[]>([]);
   const [estimatedCost, setEstimatedCost] = useState('');
+  const [depositAmount, setDepositAmount] = useState('');
   const [assignedTechnician, setAssignedTechnician] = useState<string | null>(null);
   const [techMenuVisible, setTechMenuVisible] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -24,9 +30,43 @@ export const NewTicketScreen = ({ navigation }: any) => {
   const theme = useTheme();
   const { t } = useTranslation();
 
-  React.useEffect(() => {
+  useEffect(() => {
     fetchStaff();
   }, []);
+
+  // Look up customer when phone number reaches 8+ digits
+  useEffect(() => {
+    const cleanPhone = customerPhone.replace(/\D/g, '');
+    if (cleanPhone.length >= 8) {
+      const timer = setTimeout(async () => {
+        const found = await customerService.findByPhone(customerPhone);
+        if (found) {
+          setMatchedCustomer(found);
+          if (!customerName) {
+            setCustomerName(found.name);
+          }
+        } else {
+          setMatchedCustomer(null);
+        }
+      }, 350);
+      return () => clearTimeout(timer);
+    } else {
+      setMatchedCustomer(null);
+    }
+  }, [customerPhone]);
+
+  // Handle tapping a pattern dot in 3x3 grid
+  const handleDotPress = (dotNum: number) => {
+    if (patternDots.includes(dotNum)) return; // No repeats in pattern
+    const nextDots = [...patternDots, dotNum];
+    setPatternDots(nextDots);
+    setLockValue(nextDots.join('-'));
+  };
+
+  const handleClearPattern = () => {
+    setPatternDots([]);
+    setLockValue('');
+  };
 
   const handleSubmit = async () => {
     if (!customerName || !deviceBrand || !deviceModel || !issueDescription) {
@@ -37,15 +77,18 @@ export const NewTicketScreen = ({ navigation }: any) => {
     setLoading(true);
     try {
       await createTicket({
+        customerId: matchedCustomer?.id,
         customerName,
         customerPhone,
         deviceBrand,
         deviceModel,
         issueDescription,
-        lockType: lockType as any,
-        lockValue,
+        remark: remark.trim() || undefined,
+        lockType,
+        lockValue: lockType === 'none' ? undefined : lockValue,
         assignedTechnician: assignedTechnician || undefined,
         estimatedCost: estimatedCost ? parseFloat(estimatedCost) : 0,
+        depositAmount: depositAmount ? parseFloat(depositAmount) : 0,
         createdById: user?.id,
         createdByName: user?.name,
       });
@@ -68,17 +111,9 @@ export const NewTicketScreen = ({ navigation }: any) => {
           <Text style={styles.subtitle}>{t('newTicket.subtitle', 'Enter device and customer details below.')}</Text>
         </View>
 
+        {/* Customer Info Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('newTicket.customerInfo', 'Customer Info')}</Text>
-          <TextInput
-            label={t('newTicket.customerName', 'Customer Name *')}
-            value={customerName}
-            onChangeText={setCustomerName}
-            mode="outlined"
-            style={styles.input}
-            outlineStyle={styles.inputOutline}
-            left={<TextInput.Icon icon="account" />}
-          />
           <TextInput
             label={t('newTicket.phoneNumber', 'Phone Number')}
             value={customerPhone}
@@ -89,8 +124,26 @@ export const NewTicketScreen = ({ navigation }: any) => {
             outlineStyle={styles.inputOutline}
             left={<TextInput.Icon icon="phone" />}
           />
+          {matchedCustomer && (
+            <View style={styles.matchedCustomerBanner}>
+              <MaterialCommunityIcons name="account-check" size={18} color="#10b981" />
+              <Text style={styles.matchedCustomerText}>
+                Known client: {matchedCustomer.name} {matchedCustomer.totalDebt ? `(Debt: ${matchedCustomer.totalDebt} DA)` : ''}
+              </Text>
+            </View>
+          )}
+          <TextInput
+            label={t('newTicket.customerName', 'Customer Name *')}
+            value={customerName}
+            onChangeText={setCustomerName}
+            mode="outlined"
+            style={styles.input}
+            outlineStyle={styles.inputOutline}
+            left={<TextInput.Icon icon="account" />}
+          />
         </View>
 
+        {/* Device Details Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('newTicket.deviceDetails', 'Device Details')}</Text>
           <View style={styles.row}>
@@ -117,18 +170,57 @@ export const NewTicketScreen = ({ navigation }: any) => {
             onChangeText={setIssueDescription}
             mode="outlined"
             multiline
-            numberOfLines={3}
+            numberOfLines={2}
+            style={styles.input}
+            outlineStyle={styles.inputOutline}
+          />
+          <TextInput
+            label={t('newTicket.remarks', 'Condition / Findings (Optional)')}
+            value={remark}
+            onChangeText={setRemark}
+            placeholder="e.g. Scratched back, missing SIM tray, water indicator pink"
+            mode="outlined"
+            multiline
+            numberOfLines={2}
             style={styles.input}
             outlineStyle={styles.inputOutline}
           />
         </View>
 
+        {/* Cost & Deposit Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t('newTicket.security', 'Security (Optional)')}</Text>
+          <Text style={styles.sectionTitle}>{t('newTicket.financials', 'Pricing & Deposit')}</Text>
+          <View style={styles.row}>
+            <TextInput
+              label={t('newTicket.estimatedCost', 'Estimated Cost')}
+              value={estimatedCost}
+              onChangeText={setEstimatedCost}
+              mode="outlined"
+              keyboardType="numeric"
+              style={[styles.input, { flex: 1, marginRight: 12 }]}
+              outlineStyle={styles.inputOutline}
+              right={<TextInput.Affix text="DA" />}
+            />
+            <TextInput
+              label={t('ticket.deposit', 'Deposit Amount')}
+              value={depositAmount}
+              onChangeText={setDepositAmount}
+              mode="outlined"
+              keyboardType="numeric"
+              style={[styles.input, { flex: 1 }]}
+              outlineStyle={styles.inputOutline}
+              right={<TextInput.Affix text="DA" />}
+            />
+          </View>
+        </View>
+
+        {/* Security & Lock Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{t('newTicket.security', 'Security / Passcode')}</Text>
           <View style={styles.row}>
             <Button 
               mode={lockType === 'none' ? 'contained' : 'outlined'}
-              onPress={() => setLockType('none')}
+              onPress={() => { setLockType('none'); setLockValue(''); setPatternDots([]); }}
               style={[styles.chipButton, { marginRight: 8 }]}
               compact
             >
@@ -136,7 +228,7 @@ export const NewTicketScreen = ({ navigation }: any) => {
             </Button>
             <Button 
               mode={lockType === 'pin' ? 'contained' : 'outlined'}
-              onPress={() => setLockType('pin')}
+              onPress={() => { setLockType('pin'); setLockValue(''); setPatternDots([]); }}
               style={[styles.chipButton, { marginRight: 8 }]}
               compact
             >
@@ -144,7 +236,7 @@ export const NewTicketScreen = ({ navigation }: any) => {
             </Button>
             <Button 
               mode={lockType === 'pattern' ? 'contained' : 'outlined'}
-              onPress={() => setLockType('pattern')}
+              onPress={() => { setLockType('pattern'); setLockValue(''); setPatternDots([]); }}
               style={styles.chipButton}
               compact
             >
@@ -152,7 +244,7 @@ export const NewTicketScreen = ({ navigation }: any) => {
             </Button>
           </View>
           
-          {lockType !== 'none' && lockType !== 'pattern' && (
+          {lockType === 'pin' && (
             <TextInput
               label="Enter PIN / Password"
               value={lockValue}
@@ -163,8 +255,43 @@ export const NewTicketScreen = ({ navigation }: any) => {
               left={<TextInput.Icon icon="lock" />}
             />
           )}
+
+          {lockType === 'pattern' && (
+            <View style={styles.patternBox}>
+              <View style={styles.patternHeaderRow}>
+                <Text style={styles.patternSequence}>
+                  {patternDots.length > 0 ? patternDots.join(' ➔ ') : 'Tap dots to draw pattern'}
+                </Text>
+                {patternDots.length > 0 && (
+                  <Button mode="text" compact textColor="#ef4444" onPress={handleClearPattern}>
+                    Clear
+                  </Button>
+                )}
+              </View>
+
+              {/* 3x3 Dot Grid */}
+              <View style={styles.patternGrid}>
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((dot) => {
+                  const isSelected = patternDots.includes(dot);
+                  const order = patternDots.indexOf(dot) + 1;
+                  return (
+                    <TouchableOpacity
+                      key={dot}
+                      style={[styles.patternDotBtn, isSelected && styles.patternDotSelected]}
+                      onPress={() => handleDotPress(dot)}
+                    >
+                      <Text style={[styles.patternDotText, isSelected && styles.patternDotTextSelected]}>
+                        {isSelected ? order : dot}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
         </View>
 
+        {/* Technician Assignment */}
         {(user?.role === 'admin' || user?.permissions?.repair_assign) && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t('newTicket.assignment', 'Technician Assignment (Optional)')}</Text>
@@ -229,26 +356,26 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   header: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   title: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '800',
     color: '#0f172a',
   },
   subtitle: {
-    fontSize: 15,
+    fontSize: 14,
     color: '#64748b',
     marginTop: 4,
   },
   section: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: '#94a3b8',
-    marginBottom: 12,
+    marginBottom: 10,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -256,7 +383,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   input: {
-    marginBottom: 16,
+    marginBottom: 12,
     backgroundColor: '#ffffff',
   },
   inputOutline: {
@@ -267,15 +394,84 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 8,
   },
+  matchedCustomerBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+    gap: 8,
+  },
+  matchedCustomerText: {
+    color: '#065f46',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  patternBox: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    alignItems: 'center',
+  },
+  patternHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: 12,
+  },
+  patternSequence: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#4f46e5',
+  },
+  patternGrid: {
+    width: 220,
+    height: 220,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignContent: 'space-between',
+  },
+  patternDotBtn: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#f1f5f9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  patternDotSelected: {
+    backgroundColor: '#4f46e5',
+    borderColor: '#3730a3',
+  },
+  patternDotText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#64748b',
+  },
+  patternDotTextSelected: {
+    color: '#ffffff',
+  },
   footer: {
     padding: 16,
-    paddingBottom: 32, // Safe area for iOS
+    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
     backgroundColor: '#ffffff',
     borderTopWidth: 1,
     borderTopColor: '#f1f5f9',
   },
   submitButton: {
     borderRadius: 12,
+    backgroundColor: '#4f46e5',
   },
   submitButtonContent: {
     paddingVertical: 10,

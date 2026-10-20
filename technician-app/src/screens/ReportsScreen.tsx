@@ -79,10 +79,15 @@ export const ReportsScreen = () => {
     }
 
     return tickets.filter(t => {
-      if (!t.completedAt) return false;
-      const tDate = new Date(t.completedAt);
+      const dateToCheck = t.repairedAt || t.completedAt;
+      if (!dateToCheck) return false;
+      const tDate = new Date(dateToCheck);
       return tDate >= start && tDate <= end;
-    }).sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+    }).sort((a, b) => {
+      const timeB = new Date(b.repairedAt || b.completedAt || 0).getTime();
+      const timeA = new Date(a.repairedAt || a.completedAt || 0).getTime();
+      return timeB - timeA;
+    });
   }, [tickets, viewMode, currentDate, currentWeekStart]);
 
   const navPrev = () => {
@@ -158,13 +163,21 @@ export const ReportsScreen = () => {
       item.partsUsed.forEach((p: any) => { partsCost += (parseFloat(p.cost) || 0); });
     }
     const net = rev - partsCost;
+    const isReadyOnly = item.status === 'ready';
     
     return (
       <Card style={styles.ticketCard}>
-        <View style={styles.ticketStrip} />
+        <View style={[styles.ticketStrip, { backgroundColor: isReadyOnly ? '#10b981' : '#8b5cf6' }]} />
         <Card.Content style={styles.ticketRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.ticketNum}>{item.ticketNumber}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={styles.ticketNum}>{item.ticketNumber}</Text>
+              <View style={[styles.statusMiniBadge, { backgroundColor: isReadyOnly ? '#ecfdf5' : '#f5f3ff' }]}>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: isReadyOnly ? '#059669' : '#7c3aed' }}>
+                  {isReadyOnly ? 'READY' : 'CLAIMED'}
+                </Text>
+              </View>
+            </View>
             <Text style={styles.deviceText}>{item.deviceBrand} {item.deviceModel}</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
@@ -418,6 +431,12 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     fontWeight: '700',
     letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  statusMiniBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
     marginBottom: 2,
   },
   deviceText: {
