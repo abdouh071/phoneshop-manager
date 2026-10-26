@@ -167,6 +167,16 @@ export interface SaleTransaction {
   customerName?: string;
   customerPhone?: string;
   customerId?: string;
+  saleType?: 'retail' | 'parts_b2b';
+  invoiceNumber?: string;
+  accountSettlement?: {
+    type: 'paid_full' | 'charged_to_account' | 'partial_payment';
+    paidAmount: number;
+    chargedAmount: number;
+    debtEntryId?: string;
+    dueDate?: string;
+    notes?: string;
+  };
   processedById?: string;
   processedByName?: string;
   status?: 'completed' | 'refunded';

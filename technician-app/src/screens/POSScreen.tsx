@@ -64,9 +64,13 @@ export const POSScreen = ({ navigation }: any) => {
   const [isSavingCustomer, setIsSavingCustomer] = useState(false);
 
   useEffect(() => {
+    if (user?.role === 'repair_agent') {
+      navigation.replace('Workbench');
+      return;
+    }
     fetchProducts();
     fetchCustomers();
-  }, []);
+  }, [user?.role]);
 
   const { subtotal, totalItems } = getCartTotal();
 
@@ -200,10 +204,49 @@ export const POSScreen = ({ navigation }: any) => {
     { id: 'repair_part', label: 'Parts', icon: 'cog' },
   ];
 
+  // Guard: Repair agents cannot access POS
+  if (user?.role === 'repair_agent') {
+    return (
+      <View style={styles.restrictedContainer}>
+        <MaterialCommunityIcons name="shield-lock-outline" size={64} color="#ef4444" />
+        <Text style={styles.restrictedTitle}>Access Restricted</Text>
+        <Text style={styles.restrictedSub}>
+          Point of Sale is only accessible to Sales Agents and Administrators. Repair agents do not have access to sales and POS features.
+        </Text>
+        <Button
+          mode="contained"
+          buttonColor="#4f46e5"
+          style={{ marginTop: 24, borderRadius: 10 }}
+          onPress={() => navigation.navigate('Workbench')}
+        >
+          Return to Workbench
+        </Button>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Appbar.Header style={styles.header}>
         <Appbar.Content title="Quick POS Sale" subtitle={`Agent: ${user?.name || 'Staff'}`} titleStyle={styles.headerTitle} subtitleStyle={styles.headerSub} />
+        {/* Cart Quick Access in Header */}
+        <TouchableOpacity
+          style={styles.headerCartBtn}
+          onPress={() => {
+            if (cart.length > 0) {
+              setIsCheckoutOpen(true);
+            } else {
+              Alert.alert('Cart is Empty', 'Select products below to add them to your cart.');
+            }
+          }}
+        >
+          <MaterialCommunityIcons name="cart" size={24} color="#ffffff" />
+          {totalItems > 0 && (
+            <View style={styles.headerCartBadge}>
+              <Text style={styles.headerCartBadgeText}>{totalItems}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
         <Appbar.Action icon="barcode-scan" color="#ffffff" onPress={handleOpenScanner} />
         <Appbar.Action icon="refresh" color="#ffffff" onPress={() => { fetchProducts(); fetchCustomers(); }} />
       </Appbar.Header>
@@ -295,12 +338,12 @@ export const POSScreen = ({ navigation }: any) => {
             const inCart = cart.find(c => c.product.id === item.id);
             const isOutOfStock = item.stock <= 0;
             return (
-              <TouchableOpacity
-                activeOpacity={0.7}
-                style={[styles.productCard, isOutOfStock && styles.productCardDisabled]}
-                onPress={() => handleProductPress(item)}
-              >
-                <View style={styles.productInfo}>
+              <View style={[styles.productCard, isOutOfStock && styles.productCardDisabled]}>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  style={styles.productInfo}
+                  onPress={() => handleProductPress(item)}
+                >
                   <Text style={styles.productName}>{item.name}</Text>
                   <Text style={styles.productModel}>{item.model} · SKU: {item.sku}</Text>
                   <View style={styles.productMetaRow}>
@@ -311,17 +354,42 @@ export const POSScreen = ({ navigation }: any) => {
                       </Text>
                     </View>
                   </View>
-                </View>
+                </TouchableOpacity>
                 <View style={styles.productAction}>
                   {inCart ? (
-                    <View style={styles.cartQtyBadge}>
-                      <Text style={styles.cartQtyText}>x{inCart.quantity}</Text>
+                    <View style={styles.stepperContainer}>
+                      <TouchableOpacity
+                        style={styles.stepperBtn}
+                        onPress={() => updateQuantity(item.id, inCart.quantity - 1)}
+                      >
+                        <MaterialCommunityIcons name="minus" size={15} color="#ffffff" />
+                      </TouchableOpacity>
+                      <Text style={styles.stepperQtyText}>{inCart.quantity}</Text>
+                      <TouchableOpacity
+                        style={styles.stepperBtn}
+                        onPress={() => {
+                          if (inCart.quantity >= item.stock) {
+                            Alert.alert('Max Stock', `Only ${item.stock} unit(s) available.`);
+                            return;
+                          }
+                          updateQuantity(item.id, inCart.quantity + 1);
+                        }}
+                      >
+                        <MaterialCommunityIcons name="plus" size={15} color="#ffffff" />
+                      </TouchableOpacity>
                     </View>
                   ) : (
-                    <MaterialCommunityIcons name="plus-circle" size={28} color={isOutOfStock ? '#cbd5e1' : '#4f46e5'} />
+                    <TouchableOpacity
+                      disabled={isOutOfStock}
+                      style={[styles.addBtn, isOutOfStock && styles.addBtnDisabled]}
+                      onPress={() => handleProductPress(item)}
+                    >
+                      <MaterialCommunityIcons name="plus" size={18} color={isOutOfStock ? '#cbd5e1' : '#4f46e5'} />
+                      <Text style={[styles.addBtnText, isOutOfStock && { color: '#cbd5e1' }]}>Add</Text>
+                    </TouchableOpacity>
                   )}
                 </View>
-              </TouchableOpacity>
+              </View>
             );
           }}
           ListEmptyComponent={
@@ -333,23 +401,27 @@ export const POSScreen = ({ navigation }: any) => {
         />
       )}
 
-      {/* Bottom Cart Bar */}
+      {/* Prominent Checkout Floating / Pinned Action Bar */}
       {cart.length > 0 && (
         <View style={styles.bottomBar}>
-          <View>
-            <Text style={styles.bottomBarItems}>{totalItems} item{totalItems > 1 ? 's' : ''}</Text>
-            <Text style={styles.bottomBarTotal}>{subtotal} DA</Text>
+          <View style={styles.bottomBarLeft}>
+            <View style={styles.cartIconBadge}>
+              <MaterialCommunityIcons name="cart" size={18} color="#ffffff" />
+              <Text style={styles.cartIconBadgeText}>{totalItems}</Text>
+            </View>
+            <View>
+              <Text style={styles.bottomBarItems}>{totalItems} item{totalItems > 1 ? 's' : ''} in cart</Text>
+              <Text style={styles.bottomBarTotal}>{subtotal.toLocaleString()} DA</Text>
+            </View>
           </View>
-          <Button
-            mode="contained"
-            buttonColor="#16a34a"
-            textColor="#ffffff"
-            icon="cart-check"
-            onPress={() => setIsCheckoutOpen(true)}
+          <TouchableOpacity
             style={styles.checkoutBtn}
+            activeOpacity={0.85}
+            onPress={() => setIsCheckoutOpen(true)}
           >
-            Review & Pay
-          </Button>
+            <Text style={styles.checkoutBtnText}>Checkout</Text>
+            <MaterialCommunityIcons name="arrow-right-circle" size={20} color="#ffffff" />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -776,44 +848,146 @@ const styles = StyleSheet.create({
   productAction: {
     marginLeft: 8,
   },
-  cartQtyBadge: {
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#4f46e5',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 8,
+    overflow: 'hidden',
   },
-  cartQtyText: {
+  stepperBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperQtyText: {
     color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
+    minWidth: 20,
+    textAlign: 'center',
+  },
+  addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#eef2ff',
+    borderWidth: 1,
+    borderColor: '#c7d2fe',
+  },
+  addBtnDisabled: {
+    backgroundColor: '#f1f5f9',
+    borderColor: '#e2e8f0',
+  },
+  addBtnText: {
+    color: '#4f46e5',
     fontSize: 12,
     fontWeight: '700',
   },
-  bottomBar: {
+  headerCartBtn: {
+    position: 'relative',
+    padding: 8,
+    marginRight: 4,
+  },
+  headerCartBadge: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#ffffff',
+    top: 2,
+    right: 2,
+    backgroundColor: '#ef4444',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  headerCartBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  bottomBar: {
+    backgroundColor: '#0f172a',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
     elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: -3 },
+  },
+  bottomBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  cartIconBadge: {
+    backgroundColor: '#4f46e5',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  cartIconBadgeText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
   },
   bottomBarItems: {
-    fontSize: 12,
-    color: '#64748b',
+    fontSize: 11,
+    color: '#94a3b8',
     fontWeight: '600',
   },
   bottomBarTotal: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#0f172a',
+    color: '#22c55e',
   },
   checkoutBtn: {
+    backgroundColor: '#16a34a',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
     borderRadius: 10,
+    elevation: 3,
+  },
+  checkoutBtnText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  restrictedContainer: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  restrictedTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginTop: 16,
+  },
+  restrictedSub: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
   },
   center: {
     flex: 1,

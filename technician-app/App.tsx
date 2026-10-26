@@ -105,19 +105,23 @@ export default function App() {
               />
             ) : (
               <>
-                {/* Admin Mobile Dashboard */}
-                <Stack.Screen 
-                  name="AdminDashboard" 
-                  component={AdminDashboardScreen} 
-                  options={{ headerShown: false }}
-                />
+                {/* Admin Mobile Dashboard - only mounted for admin */}
+                {user?.role === 'admin' && (
+                  <Stack.Screen 
+                    name="AdminDashboard" 
+                    component={AdminDashboardScreen} 
+                    options={{ headerShown: false }}
+                  />
+                )}
 
-                {/* Sales POS Screen */}
-                <Stack.Screen 
-                  name="POS" 
-                  component={POSScreen} 
-                  options={{ headerShown: false }}
-                />
+                {/* Sales POS Screen - strictly excluded for repair_agent */}
+                {user?.role !== 'repair_agent' && (
+                  <Stack.Screen 
+                    name="POS" 
+                    component={POSScreen} 
+                    options={{ headerShown: false }}
+                  />
+                )}
 
                 {/* Repair Workbench Screen */}
                 <Stack.Screen 

@@ -3,6 +3,7 @@ import {
   collection,
   query,
   getDocs,
+  getDoc,
   addDoc,
   doc,
   updateDoc,
@@ -12,7 +13,7 @@ import { useAuthStore } from './authStore';
 import { activityLogService } from '../services/activityLogService';
 import { offlineSyncService } from '../services/offlineSyncService';
 import { customerService } from '../services/customerService';
-import type { PhoneModel, CartItem, SaleTransaction, Customer, PaymentMethod, CustomerDebtEntry } from '../types';
+import type { PhoneModel, CartItem, SaleTransaction, Customer, PaymentMethod, CustomerDebtEntry, StockStatus } from '../types';
 
 interface CheckoutParams {
   paymentMethod: PaymentMethod;
@@ -160,18 +161,40 @@ export const usePosStore = create<PosState>((set, get) => ({
     const currentUser = useAuthStore.getState().user;
     const now = new Date().toISOString();
     const cust = params.customer || selectedCustomer;
+    const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
+
+    // Calculate debt if payment method is 'debt' or partial payment
+    const debtAmount = params.paymentMethod === 'debt' 
+      ? total 
+      : Math.max(0, total - (params.amountPaid || total));
+
+    const settlement: SaleTransaction['accountSettlement'] = debtAmount > 0 ? {
+      type: debtAmount === total ? 'charged_to_account' : 'partial_payment',
+      paidAmount: params.paymentMethod === 'debt' ? 0 : (params.amountPaid || 0),
+      chargedAmount: debtAmount,
+      notes: `POS Mobile Sale #${invoiceNumber}`,
+    } : undefined;
+
+    // Standard items with unitPrice for desktop history compatibility
+    const formattedItems: CartItem[] = cart.map(item => ({
+      ...item,
+      unitPrice: item.product.price,
+    }));
 
     const newTx: SaleTransaction = {
       id: '',
       date: now,
-      items: cart,
+      items: formattedItems,
       subtotal,
       discount: params.discountValue ? { type: params.discountType || 'flat', value: params.discountValue } : undefined,
       total,
-      payments: [{ method: params.paymentMethod, amount: params.amountPaid || total }],
+      payments: [{ method: params.paymentMethod, amount: params.paymentMethod === 'debt' ? 0 : (params.amountPaid || total) }],
       customerName: cust?.name || 'Walk-in Customer',
       customerPhone: cust?.phone || undefined,
       customerId: cust?.id || undefined,
+      saleType: 'retail', // Crucial: Enables desktop app POS history and analytics to find and display this transaction
+      invoiceNumber,
+      accountSettlement: settlement,
       processedById: currentUser?.id || 'technician-app',
       processedByName: currentUser?.name || 'Sales Agent',
       status: 'completed',
@@ -203,11 +226,36 @@ export const usePosStore = create<PosState>((set, get) => ({
       await offlineSyncService.saveOfflineSale(realTx);
     }
 
-    // If debt payment or partial payment, record customer debt entry
-    const debtAmount = params.paymentMethod === 'debt' 
-      ? total 
-      : Math.max(0, total - (params.amountPaid || total));
+    // Deduct stock in Firestore collection 'inventory' (with fallback to 'products')
+    for (const item of cart) {
+      try {
+        const invRef = doc(db, 'inventory', item.product.id);
+        const invSnap = await getDoc(invRef);
+        if (invSnap.exists()) {
+          const curData = invSnap.data();
+          const currentStock = curData.stock ?? item.product.stock;
+          const newStock = Math.max(0, currentStock - item.quantity);
+          const threshold = curData.lowStockThreshold ?? item.product.lowStockThreshold ?? 1;
+          const stockStatus = newStock === 0 ? 'out_of_stock' : newStock <= threshold ? 'low_stock' : 'in_stock';
+          await updateDoc(invRef, { stock: newStock, stockStatus });
+        } else {
+          const prodRef = doc(db, 'products', item.product.id);
+          const prodSnap = await getDoc(prodRef);
+          if (prodSnap.exists()) {
+            const curData = prodSnap.data();
+            const currentStock = curData.stock ?? item.product.stock;
+            const newStock = Math.max(0, currentStock - item.quantity);
+            const threshold = curData.lowStockThreshold ?? item.product.lowStockThreshold ?? 1;
+            const stockStatus = newStock === 0 ? 'out_of_stock' : newStock <= threshold ? 'low_stock' : 'in_stock';
+            await updateDoc(prodRef, { stock: newStock, stockStatus });
+          }
+        }
+      } catch (sErr) {
+        console.warn(`[PosStore] Failed to update Firestore stock for ${item.product.name}:`, sErr);
+      }
+    }
 
+    // If debt payment or partial payment, record customer debt entry
     if (debtAmount > 0 && cust) {
       const debtEntry: CustomerDebtEntry = {
         id: '',
@@ -221,13 +269,17 @@ export const usePosStore = create<PosState>((set, get) => ({
         date: now,
         status: debtAmount === total ? 'unpaid' : 'partially_paid',
         type: 'sale',
+        notes: `Receipt #${invoiceNumber}`,
         createdAt: now,
         updatedAt: now,
       };
 
       try {
         const { id: _, ...debtToSave } = debtEntry;
-        await addDoc(collection(db, 'customer_debts'), debtToSave);
+        const debtDocRef = await addDoc(collection(db, 'customer_debts'), debtToSave);
+        if (realTx.accountSettlement) {
+          realTx.accountSettlement.debtEntryId = debtDocRef.id;
+        }
       } catch (dErr) {
         console.warn('[PosStore] Offline customer debt queueing:', dErr);
         const offlineDebtId = `offline_debt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -235,23 +287,49 @@ export const usePosStore = create<PosState>((set, get) => ({
       }
     }
 
-    // Deduct stock locally
-    set(state => ({
-      products: state.products.map(p => {
+    // Customer Activity Log
+    if (cust) {
+      try {
+        await addDoc(collection(db, 'customer_activity_logs'), {
+          customerId: cust.id,
+          customerName: cust.name,
+          actionType: 'sale_completed',
+          actionTitle: `POS Sale Completed (${cart.length} items)`,
+          actionDescription: `POS Sale of ${total} DA by ${currentUser?.name || 'Staff'}. Invoice: #${invoiceNumber}. Items: ${cart.map(i => `${i.quantity}x ${i.product.name}`).join(', ')}`,
+          actorId: currentUser?.id,
+          actorName: currentUser?.name || 'Staff',
+          actorRole: currentUser?.role || 'sales_agent',
+          metadata: { transactionId: realTx.id, invoiceNumber, total, itemsCount: cart.length },
+          timestamp: now,
+        });
+      } catch (logErr) {
+        console.warn('[PosStore] Failed to write customer activity log:', logErr);
+      }
+    }
+
+    // Deduct stock locally in Zustand store
+    set(state => {
+      const updatedProducts = state.products.map(p => {
         const cartMatch = cart.find(c => c.product.id === p.id);
         if (cartMatch) {
           const newStock = Math.max(0, p.stock - cartMatch.quantity);
+          const stockStatus: StockStatus = newStock <= 0 ? 'out_of_stock' : newStock <= p.lowStockThreshold ? 'low_stock' : 'in_stock';
           return {
             ...p,
             stock: newStock,
-            stockStatus: newStock <= 0 ? 'out_of_stock' : newStock <= p.lowStockThreshold ? 'low_stock' : 'in_stock',
+            stockStatus,
           };
         }
         return p;
-      }),
-      cart: [],
-      selectedCustomer: null,
-    }));
+      });
+      // Update cached products as well
+      offlineSyncService.setCachedProducts(updatedProducts).catch(() => {});
+      return {
+        products: updatedProducts,
+        cart: [],
+        selectedCustomer: null,
+      };
+    });
 
     return realTx;
   },

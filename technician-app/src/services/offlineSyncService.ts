@@ -3,6 +3,7 @@ import {
   collection,
   addDoc,
   doc,
+  getDoc,
   updateDoc,
   getDocs,
   query,
@@ -247,9 +248,41 @@ export const offlineSyncService = {
             const { id: _, ...saleData } = sale;
             await addDoc(collection(db, 'transactions'), {
               ...saleData,
+              saleType: saleData.saleType || 'retail',
               syncedAt: new Date().toISOString(),
             });
             syncedCount++;
+
+            // Deduct stock in Firestore collection 'inventory' (or 'products' fallback)
+            if (sale.items && Array.isArray(sale.items)) {
+              for (const item of sale.items) {
+                try {
+                  const invRef = doc(db, 'inventory', item.product.id);
+                  const invSnap = await getDoc(invRef);
+                  if (invSnap.exists()) {
+                    const cur = invSnap.data();
+                    const currentStock = cur.stock ?? item.product.stock;
+                    const newStock = Math.max(0, currentStock - item.quantity);
+                    const threshold = cur.lowStockThreshold ?? item.product.lowStockThreshold ?? 1;
+                    const stockStatus = newStock === 0 ? 'out_of_stock' : newStock <= threshold ? 'low_stock' : 'in_stock';
+                    await updateDoc(invRef, { stock: newStock, stockStatus });
+                  } else {
+                    const prodRef = doc(db, 'products', item.product.id);
+                    const prodSnap = await getDoc(prodRef);
+                    if (prodSnap.exists()) {
+                      const cur = prodSnap.data();
+                      const currentStock = cur.stock ?? item.product.stock;
+                      const newStock = Math.max(0, currentStock - item.quantity);
+                      const threshold = cur.lowStockThreshold ?? item.product.lowStockThreshold ?? 1;
+                      const stockStatus = newStock === 0 ? 'out_of_stock' : newStock <= threshold ? 'low_stock' : 'in_stock';
+                      await updateDoc(prodRef, { stock: newStock, stockStatus });
+                    }
+                  }
+                } catch (stockErr) {
+                  console.warn('[OfflineSync] Failed to deduct stock for synced item:', stockErr);
+                }
+              }
+            }
           } catch (sErr) {
             console.error('[OfflineSync] Failed to upload sale transaction:', sErr);
             remainingSales.push(sale);
