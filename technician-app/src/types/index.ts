@@ -138,6 +138,7 @@ export interface PhoneModel {
   id: string;
   name: string;
   model: string;
+  brand?: string;
   storage?: string;
   color?: string;
   price: number;
@@ -154,6 +155,7 @@ export interface PhoneModel {
 export interface CartItem {
   product: PhoneModel;
   quantity: number;
+  unitPrice?: number;
 }
 
 export interface SaleTransaction {
@@ -179,6 +181,35 @@ export interface SaleTransaction {
   };
   processedById?: string;
   processedByName?: string;
-  status?: 'completed' | 'refunded';
+  status?: 'completed' | 'refunded' | 'voided' | 'pending_approval';
+  approvalRequestId?: string;
+  notes?: string;
 }
+
+export interface ApprovalRequest {
+  id: string;
+  actionType: string;
+  actionLabel: string;
+  actionData?: Record<string, any>;
+  targetId?: string;
+  requestedBy: {
+    uid: string;
+    name: string;
+    email?: string;
+    role?: string;
+    avatar?: string;
+  };
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  requestedAt: string;
+  reason?: string;
+  resolvedAt?: string;
+  resolvedBy?: {
+    uid: string;
+    name: string;
+  };
+  rejectionReason?: string;
+  approvalMethod?: 'pin' | 'remote' | 'password';
+  createdAt?: any;
+}
+
 

@@ -23,12 +23,14 @@ import {
   TextInput,
 } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePosStore } from '../store/posStore';
 import { useAuthStore } from '../store/authStore';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import type { PhoneModel, PaymentMethod, SaleTransaction, Customer } from '../types';
 
 export const POSScreen = ({ navigation }: any) => {
+  const insets = useSafeAreaInsets();
   const {
     products,
     cart,
@@ -63,6 +65,12 @@ export const POSScreen = ({ navigation }: any) => {
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
   const [isSavingCustomer, setIsSavingCustomer] = useState(false);
 
+  // Discount System State for Sales Agent
+  const [discountType, setDiscountType] = useState<'percent' | 'flat'>('percent');
+  const [discountValue, setDiscountValue] = useState<string>('');
+  const [discountReason, setDiscountReason] = useState<string>('');
+  const [showDiscountSection, setShowDiscountSection] = useState(false);
+
   useEffect(() => {
     if (user?.role === 'repair_agent') {
       navigation.replace('Workbench');
@@ -73,6 +81,18 @@ export const POSScreen = ({ navigation }: any) => {
   }, [user?.role]);
 
   const { subtotal, totalItems } = getCartTotal();
+
+  // Calculated discount values
+  const parsedDiscount = parseFloat(discountValue) || 0;
+  const calculatedDiscount = useMemo(() => {
+    if (parsedDiscount <= 0) return 0;
+    if (discountType === 'percent') {
+      return Math.min(subtotal, Math.round((subtotal * parsedDiscount) / 100));
+    }
+    return Math.min(subtotal, Math.round(parsedDiscount));
+  }, [subtotal, parsedDiscount, discountType]);
+
+  const finalTotalDue = Math.max(0, subtotal - calculatedDiscount);
 
   const filteredProducts = useMemo(() => {
     return products.filter(p => {
@@ -153,11 +173,18 @@ export const POSScreen = ({ navigation }: any) => {
     try {
       const tx = await checkout({
         paymentMethod,
-        amountPaid: subtotal,
+        amountPaid: finalTotalDue,
+        discountValue: calculatedDiscount > 0 ? parsedDiscount : undefined,
+        discountType: calculatedDiscount > 0 ? discountType : undefined,
         customer: selectedCustomer,
+        notes: discountReason.trim() ? `Discount Note: ${discountReason.trim()}` : undefined,
       });
       setIsCheckoutOpen(false);
       setCompletedTx(tx);
+      // Reset discount inputs
+      setDiscountValue('');
+      setDiscountReason('');
+      setShowDiscountSection(false);
       Vibration.vibrate([0, 50, 50, 100]);
     } catch (err: any) {
       Alert.alert('Checkout Failed', err.message || 'Could not complete sale.');
@@ -167,16 +194,20 @@ export const POSScreen = ({ navigation }: any) => {
   };
 
   const buildReceiptText = (tx: SaleTransaction): string => {
+    const discountAmount = tx.subtotal && tx.total ? Math.max(0, tx.subtotal - tx.total) : 0;
     const lines = [
       `🧾 *PhoneShop Pro - Sales Receipt*`,
-      `Invoice: #${tx.id.slice(-6)}`,
+      `Invoice: #${tx.invoiceNumber || tx.id.slice(-6)}`,
       `Date: ${new Date(tx.date).toLocaleString()}`,
       `Customer: ${tx.customerName || 'Walk-in'}`,
       `─────────────────────────`,
-      ...tx.items.map(i => `• ${i.product.name} x${i.quantity} — ${i.product.price * i.quantity} DA`),
+      ...tx.items.map(i => `• ${i.product.name} ${i.product.model || ''} x${i.quantity} — ${(i.unitPrice || i.product.price) * i.quantity} DA`),
       `─────────────────────────`,
-      `Total: *${tx.total} DA*`,
+      `Subtotal: ${tx.subtotal} DA`,
+      ...(discountAmount > 0 ? [`Discount (${tx.discount?.type === 'percent' ? `${tx.discount.value}%` : `${tx.discount?.value} DA`}): -${discountAmount} DA`] : []),
+      `*TOTAL: ${tx.total} DA*`,
       `Payment: ${tx.payments?.[0]?.method.toUpperCase() || 'CASH'}`,
+      `Served By: ${user?.name || 'Sales Staff'}`,
       `\nThank you for choosing us!`,
     ];
     return lines.join('\n');
@@ -431,7 +462,7 @@ export const POSScreen = ({ navigation }: any) => {
       {/* Checkout Modal */}
       <Modal visible={isCheckoutOpen} animationType="slide" transparent>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Checkout Sale</Text>
               <TouchableOpacity onPress={() => setIsCheckoutOpen(false)}>
@@ -439,7 +470,7 @@ export const POSScreen = ({ navigation }: any) => {
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ maxHeight: 220 }}>
+            <ScrollView style={{ maxHeight: 200 }}>
               {cart.map(item => (
                 <View key={item.product.id} style={styles.cartRow}>
                   <View style={{ flex: 1 }}>
@@ -467,6 +498,107 @@ export const POSScreen = ({ navigation }: any) => {
 
             <View style={styles.divider} />
 
+            {/* Discount / Coupon Section for Sales Agent */}
+            <TouchableOpacity
+              style={styles.discountHeaderBtn}
+              activeOpacity={0.8}
+              onPress={() => setShowDiscountSection(!showDiscountSection)}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                <MaterialCommunityIcons name="tag-outline" size={18} color="#4f46e5" />
+                <Text style={styles.discountHeaderLabel}>Apply Discount</Text>
+                {calculatedDiscount > 0 && (
+                  <View style={styles.appliedDiscountBadge}>
+                    <Text style={styles.appliedDiscountBadgeText}>
+                      -{calculatedDiscount.toLocaleString()} DA ({discountType === 'percent' ? `${parsedDiscount}%` : 'Flat'})
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <MaterialCommunityIcons
+                name={showDiscountSection ? 'chevron-up' : 'chevron-down'}
+                size={22}
+                color="#64748b"
+              />
+            </TouchableOpacity>
+
+            {showDiscountSection && (
+              <View style={styles.discountBox}>
+                {/* Discount Mode Toggle: Percent (%) vs Flat (DA) */}
+                <View style={styles.discountTypeRow}>
+                  <TouchableOpacity
+                    style={[styles.discountTypeBtn, discountType === 'percent' && styles.discountTypeBtnActive]}
+                    onPress={() => setDiscountType('percent')}
+                  >
+                    <Text style={[styles.discountTypeBtnText, discountType === 'percent' && styles.discountTypeBtnTextActive]}>
+                      Percentage (%)
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.discountTypeBtn, discountType === 'flat' && styles.discountTypeBtnActive]}
+                    onPress={() => setDiscountType('flat')}
+                  >
+                    <Text style={[styles.discountTypeBtnText, discountType === 'flat' && styles.discountTypeBtnTextActive]}>
+                      Flat (DA)
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Preset Discount Chips */}
+                <View style={styles.presetChipsRow}>
+                  {(discountType === 'percent' ? [0, 5, 10, 15, 20] : [0, 200, 500, 1000, 2000]).map(val => {
+                    const isSelected = parsedDiscount === val;
+                    return (
+                      <TouchableOpacity
+                        key={val}
+                        style={[styles.presetChip, isSelected && styles.presetChipActive]}
+                        onPress={() => setDiscountValue(val === 0 ? '' : val.toString())}
+                      >
+                        <Text style={[styles.presetChipText, isSelected && styles.presetChipTextActive]}>
+                          {val === 0 ? 'None' : discountType === 'percent' ? `${val}%` : `${val} DA`}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Custom Discount Input */}
+                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                  <TextInput
+                    label={discountType === 'percent' ? 'Discount %' : 'Discount DA'}
+                    value={discountValue}
+                    onChangeText={setDiscountValue}
+                    keyboardType="numeric"
+                    mode="outlined"
+                    dense
+                    style={{ flex: 1, backgroundColor: '#ffffff' }}
+                  />
+                  {calculatedDiscount > 0 && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setDiscountValue('');
+                        setDiscountReason('');
+                      }}
+                      style={styles.clearDiscountBtn}
+                    >
+                      <Text style={styles.clearDiscountBtnText}>Reset</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Optional Discount Note */}
+                <TextInput
+                  label="Discount Reason / Promo Note (Optional)"
+                  placeholder="e.g. Loyalty perk, bundle deal..."
+                  value={discountReason}
+                  onChangeText={setDiscountReason}
+                  mode="outlined"
+                  dense
+                  style={{ backgroundColor: '#ffffff' }}
+                />
+              </View>
+            )}
+
             {/* Payment Method Selector */}
             <Text style={styles.sectionHeading}>Payment Method</Text>
             <View style={styles.paymentMethodsRow}>
@@ -483,9 +615,26 @@ export const POSScreen = ({ navigation }: any) => {
               ))}
             </View>
 
-            <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Total Due:</Text>
-              <Text style={styles.totalAmount}>{subtotal} DA</Text>
+            {/* Live Pricing Summary Rows */}
+            <View style={styles.summaryContainer}>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Subtotal:</Text>
+                <Text style={styles.summaryValue}>{subtotal.toLocaleString()} DA</Text>
+              </View>
+              {calculatedDiscount > 0 && (
+                <View style={styles.summaryRow}>
+                  <Text style={[styles.summaryLabel, { color: '#16a34a', fontWeight: '700' }]}>
+                    Discount ({discountType === 'percent' ? `${parsedDiscount}%` : 'Flat'}):
+                  </Text>
+                  <Text style={[styles.summaryValue, { color: '#16a34a', fontWeight: '800' }]}>
+                    -{calculatedDiscount.toLocaleString()} DA
+                  </Text>
+                </View>
+              )}
+              <View style={[styles.summaryRow, styles.totalSummaryRow]}>
+                <Text style={styles.totalLabel}>Total Due:</Text>
+                <Text style={styles.totalAmount}>{finalTotalDue.toLocaleString()} DA</Text>
+              </View>
             </View>
 
             <Button
@@ -494,9 +643,9 @@ export const POSScreen = ({ navigation }: any) => {
               loading={isSubmitting}
               disabled={isSubmitting}
               onPress={handleConfirmCheckout}
-              style={{ marginTop: 12, paddingVertical: 4 }}
+              style={{ marginTop: 8, paddingVertical: 4 }}
             >
-              Complete Sale ({subtotal} DA)
+              Complete Sale ({finalTotalDue.toLocaleString()} DA)
             </Button>
           </View>
         </View>
@@ -505,7 +654,7 @@ export const POSScreen = ({ navigation }: any) => {
       {/* Receipt & Share Modal */}
       <Modal visible={Boolean(completedTx)} animationType="fade" transparent>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalSheet, { alignItems: 'center' }]}>
+          <View style={[styles.modalSheet, { alignItems: 'center', paddingBottom: Math.max(insets.bottom, 20) }]}>
             <MaterialCommunityIcons name="check-circle" size={56} color="#16a34a" />
             <Text style={styles.successTitle}>Sale Successful!</Text>
             <Text style={styles.successSub}>Invoice #{completedTx?.id.slice(-6)} · {completedTx?.total} DA</Text>
@@ -536,7 +685,7 @@ export const POSScreen = ({ navigation }: any) => {
       {/* Customer Picker Modal */}
       <Modal visible={isCustomerPickerOpen} animationType="slide" transparent>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
+          <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, 20) }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
                 {isAddingNewCustomer ? 'New Customer' : 'Select Customer'}
@@ -1202,5 +1351,135 @@ const styles = StyleSheet.create({
     color: '#dc2626',
     fontSize: 11,
     fontWeight: '700',
+  },
+  discountHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+  discountHeaderLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1e293b',
+  },
+  appliedDiscountBadge: {
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 6,
+  },
+  appliedDiscountBadgeText: {
+    color: '#16a34a',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  discountBox: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  discountTypeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  discountTypeBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 6,
+    backgroundColor: '#e2e8f0',
+  },
+  discountTypeBtnActive: {
+    backgroundColor: '#4f46e5',
+  },
+  discountTypeBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  discountTypeBtnTextActive: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  presetChipsRow: {
+    flexDirection: 'row',
+    gap: 6,
+    flexWrap: 'wrap',
+    marginBottom: 10,
+  },
+  presetChip: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    backgroundColor: '#ffffff',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  presetChipActive: {
+    backgroundColor: '#4f46e5',
+    borderColor: '#4f46e5',
+  },
+  presetChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  presetChipTextActive: {
+    color: '#ffffff',
+  },
+  clearDiscountBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    backgroundColor: '#fee2e2',
+    borderRadius: 6,
+  },
+  clearDiscountBtnText: {
+    color: '#dc2626',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  summaryContainer: {
+    backgroundColor: '#f8fafc',
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 8,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 3,
+  },
+  summaryLabel: {
+    fontSize: 13,
+    color: '#64748b',
+    fontWeight: '600',
+  },
+  summaryValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  totalSummaryRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+    paddingTop: 8,
+    marginTop: 4,
   },
 });

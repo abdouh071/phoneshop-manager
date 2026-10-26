@@ -4,6 +4,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Provider as PaperProvider, DefaultTheme } from 'react-native-paper';
 import { ActivityIndicator, View, StyleSheet } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useAuthStore } from './src/store/authStore';
 import { useSettingsStore } from './src/store/settingsStore';
@@ -19,6 +20,8 @@ import { ReportsScreen } from './src/screens/ReportsScreen';
 import { ScannerScreen } from './src/screens/ScannerScreen';
 import { POSScreen } from './src/screens/POSScreen';
 import { AdminDashboardScreen } from './src/screens/AdminDashboardScreen';
+import { SalesHistoryScreen } from './src/screens/SalesHistoryScreen';
+import { InventoryScreen } from './src/screens/InventoryScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -83,85 +86,105 @@ export default function App() {
   };
 
   return (
-    <PaperProvider theme={theme}>
-      <View style={styles.appContainer}>
-        {/* Universal Offline / Syncing Banner */}
-        <OfflineBanner />
+    <SafeAreaProvider>
+      <PaperProvider theme={theme}>
+        <View style={styles.appContainer}>
+          {/* Universal Offline / Syncing Banner */}
+          <OfflineBanner />
 
-        <NavigationContainer>
-          <Stack.Navigator
-            initialRouteName={!isAuthenticated ? 'Login' : getInitialRouteName()}
-            screenOptions={{
-              headerStyle: { backgroundColor: '#4f46e5' },
-              headerTintColor: '#fff',
-              headerTitleStyle: { fontWeight: 'bold' },
-            }}
-          >
-            {!isAuthenticated ? (
-              <Stack.Screen 
-                name="Login" 
-                component={LoginScreen} 
-                options={{ headerShown: false }}
-              />
-            ) : (
-              <>
-                {/* Admin Mobile Dashboard - only mounted for admin */}
-                {user?.role === 'admin' && (
-                  <Stack.Screen 
-                    name="AdminDashboard" 
-                    component={AdminDashboardScreen} 
-                    options={{ headerShown: false }}
-                  />
-                )}
-
-                {/* Sales POS Screen - strictly excluded for repair_agent */}
-                {user?.role !== 'repair_agent' && (
-                  <Stack.Screen 
-                    name="POS" 
-                    component={POSScreen} 
-                    options={{ headerShown: false }}
-                  />
-                )}
-
-                {/* Repair Workbench Screen */}
+          <NavigationContainer>
+            <Stack.Navigator
+              initialRouteName={!isAuthenticated ? 'Login' : getInitialRouteName()}
+              screenOptions={{
+                headerStyle: { backgroundColor: '#4f46e5' },
+                headerTintColor: '#fff',
+                headerTitleStyle: { fontWeight: 'bold' },
+              }}
+            >
+              {!isAuthenticated ? (
                 <Stack.Screen 
-                  name="Workbench" 
-                  component={WorkbenchScreen} 
+                  name="Login" 
+                  component={LoginScreen} 
                   options={{ headerShown: false }}
                 />
+              ) : (
+                <>
+                  {/* Admin Mobile Dashboard - only mounted for admin */}
+                  {user?.role === 'admin' && (
+                    <Stack.Screen 
+                      name="AdminDashboard" 
+                      component={AdminDashboardScreen} 
+                      options={{ headerShown: false }}
+                    />
+                  )}
 
-                {/* Ticket Management Screens */}
-                <Stack.Screen 
-                  name="NewTicket" 
-                  component={NewTicketScreen} 
-                  options={{ title: 'Add Phone' }}
-                />
-                <Stack.Screen 
-                  name="TicketDetail" 
-                  component={TicketDetailScreen} 
-                  options={{ title: 'Ticket Details' }}
-                />
-                <Stack.Screen 
-                  name="Settings" 
-                  component={SettingsScreen} 
-                  options={{ title: 'Settings' }}
-                />
-                <Stack.Screen 
-                  name="Reports" 
-                  component={ReportsScreen} 
-                  options={{ title: 'Daily Report' }}
-                />
-                <Stack.Screen 
-                  name="Scanner" 
-                  component={ScannerScreen} 
-                  options={{ headerShown: false, presentation: 'modal' }}
-                />
-              </>
-            )}
-          </Stack.Navigator>
-        </NavigationContainer>
-      </View>
-    </PaperProvider>
+                  {/* Sales POS Screen - strictly excluded for repair_agent */}
+                  {user?.role !== 'repair_agent' && (
+                    <Stack.Screen 
+                      name="POS" 
+                      component={POSScreen} 
+                      options={{ headerShown: false }}
+                    />
+                  )}
+
+                  {/* Sales History Screen - strictly excluded for repair_agent */}
+                  {user?.role !== 'repair_agent' && (
+                    <Stack.Screen 
+                      name="SalesHistory" 
+                      component={SalesHistoryScreen} 
+                      options={{ headerShown: false }}
+                    />
+                  )}
+
+                  {/* Inventory & Stock Screen - strictly excluded for repair_agent */}
+                  {user?.role !== 'repair_agent' && (
+                    <Stack.Screen 
+                      name="Inventory" 
+                      component={InventoryScreen} 
+                      options={{ headerShown: false }}
+                    />
+                  )}
+
+                  {/* Repair Workbench Screen */}
+                  <Stack.Screen 
+                    name="Workbench" 
+                    component={WorkbenchScreen} 
+                    options={{ headerShown: false }}
+                  />
+
+                  {/* Ticket Management Screens */}
+                  <Stack.Screen 
+                    name="NewTicket" 
+                    component={NewTicketScreen} 
+                    options={{ title: 'Add Phone' }}
+                  />
+                  <Stack.Screen 
+                    name="TicketDetail" 
+                    component={TicketDetailScreen} 
+                    options={{ title: 'Ticket Details' }}
+                  />
+                  <Stack.Screen 
+                    name="Settings" 
+                    component={SettingsScreen} 
+                    options={{ title: 'Settings' }}
+                  />
+                  <Stack.Screen 
+                    name="Reports" 
+                    component={ReportsScreen} 
+                    options={{ title: 'Daily Report' }}
+                  />
+                  <Stack.Screen 
+                    name="Scanner" 
+                    component={ScannerScreen} 
+                    options={{ headerShown: false, presentation: 'modal' }}
+                  />
+                </>
+              )}
+            </Stack.Navigator>
+          </NavigationContainer>
+        </View>
+      </PaperProvider>
+    </SafeAreaProvider>
   );
 }
 

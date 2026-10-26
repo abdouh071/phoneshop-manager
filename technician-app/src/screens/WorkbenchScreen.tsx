@@ -5,6 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRepairStore } from '../store/repairStore';
 import { useAuthStore } from '../store/authStore';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 
 const getTimeAgo = (dateStr: string): string => {
@@ -25,6 +26,7 @@ const getTimeAgo = (dateStr: string): string => {
 };
 
 export const WorkbenchScreen = ({ navigation }: any) => {
+  const insets = useSafeAreaInsets();
   const { tickets, isLoading, error, subscribeToTickets, updateTicketStatus } = useRepairStore();
   const { user, logout } = useAuthStore();
   const theme = useTheme();
@@ -394,7 +396,7 @@ export const WorkbenchScreen = ({ navigation }: any) => {
 
       {(user?.role === 'admin' || user?.permissions?.repair_add) && (
         <FAB
-          style={styles.fab}
+          style={[styles.fab, { bottom: 68 + Math.max(insets.bottom, 0) }]}
           icon="plus"
           color="#fff"
           onPress={() => navigation.navigate('NewTicket')}
