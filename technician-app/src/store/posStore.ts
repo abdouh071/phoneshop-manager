@@ -107,15 +107,16 @@ export const usePosStore = create<PosState>((set, get) => ({
   },
 
   addToCart: (product: PhoneModel, quantity: number = 1) => {
+    const safeQty = Math.max(1, Math.floor(quantity || 1));
     const { cart } = get();
     const existingIndex = cart.findIndex(item => item.product.id === product.id);
 
     if (existingIndex >= 0) {
       const updated = [...cart];
-      updated[existingIndex].quantity += quantity;
+      updated[existingIndex].quantity += safeQty;
       set({ cart: updated });
     } else {
-      set({ cart: [...cart, { product, quantity }] });
+      set({ cart: [...cart, { product, quantity: safeQty }] });
     }
   },
 
@@ -124,13 +125,14 @@ export const usePosStore = create<PosState>((set, get) => ({
   },
 
   updateQuantity: (productId: string, quantity: number) => {
-    if (quantity <= 0) {
+    const safeQty = Math.floor(quantity || 0);
+    if (safeQty <= 0) {
       get().removeFromCart(productId);
       return;
     }
     set({
       cart: get().cart.map(item =>
-        item.product.id === productId ? { ...item, quantity } : item
+        item.product.id === productId ? { ...item, quantity: safeQty } : item
       ),
     });
   },
@@ -154,8 +156,8 @@ export const usePosStore = create<PosState>((set, get) => ({
     let discountAmount = 0;
     if (params.discountValue && params.discountValue > 0) {
       discountAmount = params.discountType === 'percent'
-        ? (subtotal * params.discountValue) / 100
-        : params.discountValue;
+        ? (subtotal * Math.min(100, Math.max(0, params.discountValue))) / 100
+        : Math.min(subtotal, Math.max(0, params.discountValue));
     }
     const total = Math.max(0, subtotal - discountAmount);
 

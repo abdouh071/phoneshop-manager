@@ -422,8 +422,34 @@ function createWindow() {
     if (url.startsWith('http://localhost') || url.startsWith('file://') || url.startsWith(DEPLOYED_URL)) {
       return { action: 'allow' };
     }
-    shell.openExternal(url);
+    // Security: Only open safe http/https/mailto protocols via OS shell
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'mailto:') {
+        shell.openExternal(url);
+      }
+    } catch (_) {}
     return { action: 'deny' };
+  });
+
+  // Security: Prevent malicious in-window redirects away from trusted origins
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    try {
+      const parsed = new URL(navigationUrl);
+      const isAllowed =
+        navigationUrl.startsWith('data:text/html') ||
+        navigationUrl.startsWith(DEPLOYED_URL) ||
+        parsed.origin === 'http://localhost:5173' ||
+        parsed.origin === 'http://127.0.0.1:5173';
+      if (!isAllowed) {
+        event.preventDefault();
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+          shell.openExternal(navigationUrl);
+        }
+      }
+    } catch (_) {
+      event.preventDefault();
+    }
   });
 
   // Handle window close — minimize to tray on Windows, quit on Mac

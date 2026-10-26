@@ -227,6 +227,26 @@ export const ApprovalsScreen = ({ navigation }: any) => {
     );
   };
 
+  if (user?.role !== 'admin') {
+    return (
+      <View style={styles.restrictedContainer}>
+        <MaterialCommunityIcons name="shield-lock-outline" size={64} color="#ef4444" />
+        <Text style={styles.restrictedTitle}>{t('common.accessRestricted', 'Access Restricted')}</Text>
+        <Text style={styles.restrictedSub}>
+          {t('approvals.adminOnlyNotice', 'Staff Approvals are strictly reserved for Administrators.')}
+        </Text>
+        <Button
+          mode="contained"
+          buttonColor="#4f46e5"
+          style={{ marginTop: 20, borderRadius: 10 }}
+          onPress={() => navigation.navigate(user?.role === 'sales_agent' ? 'POS' : 'Workbench')}
+        >
+          {t('common.back', 'Go Back')}
+        </Button>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Appbar.Header style={styles.appbar}>
@@ -634,5 +654,25 @@ const styles = StyleSheet.create({
   modalBtnRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  restrictedContainer: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  restrictedTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginTop: 16,
+  },
+  restrictedSub: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
   },
 });

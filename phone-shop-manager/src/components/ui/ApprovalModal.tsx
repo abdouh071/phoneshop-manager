@@ -43,6 +43,18 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
   const [noPinConfigured, setNoPinConfigured] = useState(false);
   const pinInputRef = useRef<HTMLInputElement>(null);
 
+  // Security: Brute-force lockout state
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockoutRemaining, setLockoutRemaining] = useState(0);
+
+  useEffect(() => {
+    if (lockoutRemaining <= 0) return;
+    const timer = setInterval(() => {
+      setLockoutRemaining((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lockoutRemaining]);
+
   // Remote state
   const [remoteReason, setRemoteReason] = useState('');
   const [isSubmittingRemote, setIsSubmittingRemote] = useState(false);
@@ -100,7 +112,7 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
   // Handle PIN verification
   const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pin) return;
+    if (!pin || lockoutRemaining > 0) return;
     setPinLoading(true);
     setPinError('');
     setNoPinConfigured(false);
@@ -108,6 +120,7 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
     try {
       const result = await verifyPin(pin);
       if (result.success) {
+        setFailedAttempts(0);
         logActivity('system', `Admin approved action via PIN: "${actionName}"`, {
           adminName: result.adminName,
           adminId: result.adminId,
@@ -122,8 +135,21 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
       } else {
         if (result.noPinConfigured) {
           setNoPinConfigured(true);
+          setPinError(result.error || 'No administrator has configured an approval PIN yet.');
+        } else {
+          const nextAttempts = failedAttempts + 1;
+          setFailedAttempts(nextAttempts);
+          if (nextAttempts >= 5) {
+            setLockoutRemaining(60);
+            logActivity('system', `⚠️ Security Alert: 5 consecutive failed Admin PIN attempts for "${actionName}" by ${user?.name || 'Staff'}`);
+            setPinError('Too many failed attempts. PIN verification is locked for 60 seconds.');
+          } else if (nextAttempts >= 3) {
+            setLockoutRemaining(30);
+            setPinError('3 failed attempts. Please wait 30 seconds or use Remote Request.');
+          } else {
+            setPinError(result.error || `Invalid approval PIN (${3 - nextAttempts} attempt${3 - nextAttempts > 1 ? 's' : ''} remaining).`);
+          }
         }
-        setPinError(result.error || 'Invalid approval PIN.');
       }
     } catch (err: any) {
       setPinError(err.message || 'Failed to verify PIN.');
@@ -314,6 +340,26 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
               </div>
             )}
 
+            {lockoutRemaining > 0 && (
+              <div style={{
+                padding: '10px 12px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '8px',
+                fontSize: '12px',
+                color: '#dc2626',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontWeight: 600
+              }}>
+                <Lock size={16} style={{ flexShrink: 0 }} />
+                <span>
+                  Too many incorrect attempts. PIN entry locked for <strong>{lockoutRemaining}s</strong>. Use Remote Request if urgent.
+                </span>
+              </div>
+            )}
+
             <div>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--color-on-surface-variant, #64748b)', marginBottom: '6px' }}>
                 Admin 4-8 Digit PIN
@@ -324,6 +370,7 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
                 inputMode="numeric"
                 pattern="[0-9]*"
                 maxLength={8}
+                disabled={lockoutRemaining > 0}
                 value={pin}
                 onChange={(e) => {
                   const val = e.target.value.replace(/\D/g, '');
@@ -339,10 +386,11 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
                   textAlign: 'center',
                   borderRadius: '10px',
                   border: pinError ? '2px solid #ef4444' : '1px solid var(--color-outline, #cbd5e1)',
-                  background: 'var(--color-surface, #ffffff)',
+                  background: lockoutRemaining > 0 ? '#f1f5f9' : 'var(--color-surface, #ffffff)',
                   color: 'var(--color-on-surface, #0f172a)',
                   outline: 'none',
                   boxSizing: 'border-box',
+                  opacity: lockoutRemaining > 0 ? 0.6 : 1,
                 }}
                 autoFocus
               />
@@ -357,7 +405,7 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
               <Button type="button" variant="ghost" onClick={onClose} disabled={pinLoading}>
                 Cancel
               </Button>
-              <Button type="submit" isLoading={pinLoading} disabled={pin.length < 4}>
+              <Button type="submit" isLoading={pinLoading} disabled={pin.length < 4 || lockoutRemaining > 0}>
                 Approve via PIN
               </Button>
             </div>

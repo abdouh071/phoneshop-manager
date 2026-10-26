@@ -50,10 +50,11 @@ service cloud.firestore {
 
     // ─── Repairs ─────────────────────────────────────────────────────────────
     // Signed-in users can read/write all repairs.
-    // Unauthenticated users can READ individual tickets (public tracking portal).
-    // PIN verification and field stripping is enforced in the application layer.
+    // Unauthenticated users can read for public tracking, but write is strictly prohibited.
     match /repairs/{docId} {
-      allow read, write: if true;
+      allow read:           if true;
+      allow create, update: if isSignedIn();
+      allow delete:         if isAdmin() || isSuperAdmin();
     }
 
     // ─── Counters (for sequential numbers like TKT-XXXX) ──────────────────────
@@ -62,13 +63,17 @@ service cloud.firestore {
     }
 
     // ─── Customers ───────────────────────────────────────────────────────────
+    // Strictly authenticated staff access only
     match /customers/{docId} {
-      allow read, write: if true;
+      allow read, create, update: if isSignedIn();
+      allow delete:               if isAdmin() || isSuperAdmin();
     }
 
     // ─── Customer Debts & Credit Tabs ────────────────────────────────────────
+    // Strictly authenticated staff access only
     match /customer_debts/{docId} {
-      allow read, write: if true;
+      allow read, create, update: if isSignedIn();
+      allow delete:               if isAdmin() || isSuperAdmin();
     }
 
     // ─── Customer Activity Logs ──────────────────────────────────────────────
@@ -118,33 +123,33 @@ service cloud.firestore {
       // Anyone signed-in can read staff profiles (needed for listings)
       allow read: if isSignedIn();
 
-      // Allow first-time authenticated users to create their own user profile document on first login/bootstrap, or admins
-      // This is separate from update/delete so the first-ever user isn't blocked by callerProfile()
+      // Prevent privilege escalation on creation:
+      // Non-admins can only create non-admin profiles for their own UID
       allow create: if isSignedIn() && (
-        request.auth.uid == userId ||
+        isSuperAdmin() ||
         isAdmin() ||
-        isSuperAdmin()
+        (request.auth.uid == userId &&
+          (!('role' in request.resource.data) || request.resource.data.role != 'admin') &&
+          (!('isSuperAdmin' in request.resource.data) || request.resource.data.isSuperAdmin == false))
       );
 
-      // Only admins/superadmins can update or delete user profiles
-      // Workers cannot update/delete user profiles at all
-      allow update: if isSignedIn() && !isWorker() && (
-
-        // Super Admins can do anything to user profiles
-        isSuperAdmin()
-
-        ||
-
-        // Regular Admins can edit, but with strict guards:
+      // Updates:
+      // 1. Super Admins can do anything
+      // 2. Admins can edit with strict guards (cannot grant superadmin or promote to admin)
+      // 3. Workers can self-update personal fields (pushToken, preferredLanguage, avatar)
+      //    WITHOUT being able to alter role, permissions, isSuperAdmin, or approvalPin
+      allow update: if isSignedIn() && (
+        isSuperAdmin() ||
         (isAdmin() && (
-          // 1. They cannot grant isSuperAdmin to anyone
-          !('isSuperAdmin' in request.resource.data && request.resource.data.isSuperAdmin == true)
-          &&
-          // 2. They cannot promote anyone to admin role
-          !('role' in request.resource.data && request.resource.data.role == 'admin')
-          &&
-          // 3. They cannot touch existing Super Admin profiles
+          !('isSuperAdmin' in request.resource.data && request.resource.data.isSuperAdmin == true) &&
+          !('role' in request.resource.data && request.resource.data.role == 'admin') &&
           !(resource != null && resource.data.isSuperAdmin == true)
+        )) ||
+        (request.auth.uid == userId && (
+          (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) &&
+          (!('isSuperAdmin' in request.resource.data) || request.resource.data.isSuperAdmin == false) &&
+          (!('permissions' in request.resource.data) || request.resource.data.permissions == resource.data.permissions) &&
+          (!('approvalPin' in request.resource.data) || request.resource.data.approvalPin == resource.data.approvalPin)
         ))
       );
 
@@ -175,9 +180,19 @@ service cloud.firestore {
     }
 
     // ─── Approval Requests ────────────────────────────────────────────────────
-    // Signed-in staff can create/read approval requests and admins can resolve them
+    // Signed-in staff can create pending requests; only admins can resolve/approve/reject them
     match /approvalRequests/{docId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      // Workers can only create pending requests for their own account
+      allow create: if isSignedIn() &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.requestedBy.uid == request.auth.uid;
+      // Only admins or superadmins can approve/reject. Requesters can only cancel their own pending request.
+      allow update: if isSignedIn() && (
+        isAdmin() || isSuperAdmin() ||
+        (request.resource.data.status == 'cancelled' && resource.data.requestedBy.uid == request.auth.uid)
+      );
+      allow delete: if isAdmin() || isSuperAdmin();
     }
 
     // ─── Deny Everything Else ────────────────────────────────────────────────
