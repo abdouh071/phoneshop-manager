@@ -6,6 +6,7 @@ import {
   where,
   orderBy,
   limit,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { CustomerActivityLog } from '../types';
@@ -115,5 +116,53 @@ export const customerLogService = {
     saveLocalLogs([created, ...local]);
 
     return created;
+  },
+
+  /**
+   * Reassign logs from one customer ID to another (e.g. after offline customer sync or profile merge)
+   */
+  reassignLogsForCustomer: async (
+    primaryId: string,
+    secondaryId: string,
+    customerName?: string
+  ): Promise<number> => {
+    // 1. Update local cache
+    const local = getLocalLogs();
+    saveLocalLogs(
+      local.map(l =>
+        l.customerId === secondaryId
+          ? { ...l, customerId: primaryId, ...(customerName ? { customerName } : {}) }
+          : l
+      )
+    );
+
+    // 2. Update Firestore if online
+    try {
+      const q = query(
+        collection(db, COLLECTION),
+        where('customerId', '==', secondaryId)
+      );
+      const snap = await getDocs(q);
+      if (snap.empty) return 0;
+
+      const docs = snap.docs;
+      let count = 0;
+      for (let i = 0; i < docs.length; i += 450) {
+        const batch = writeBatch(db);
+        const chunk = docs.slice(i, i + 450);
+        for (const logDoc of chunk) {
+          batch.update(logDoc.ref, {
+            customerId: primaryId,
+            ...(customerName ? { customerName } : {}),
+          });
+          count++;
+        }
+        await batch.commit();
+      }
+      return count;
+    } catch (err) {
+      console.warn('Failed to reassign customer logs in Firestore:', err);
+      return 0;
+    }
   },
 };

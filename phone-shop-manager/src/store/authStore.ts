@@ -47,6 +47,8 @@ export const fetchPublicIP = async (): Promise<string | null> => {
 // but we allow configuring an initial super admin email via environment variable.
 const LEGACY_OWNER_EMAIL = import.meta.env.VITE_SUPER_ADMIN_EMAIL || '';
 
+import { hashApprovalPin } from '../utils/security';
+
 export interface User {
   id: string;
   name: string;
@@ -58,6 +60,7 @@ export interface User {
   createdAt?: any;
   permissions?: Permissions;
   isSuperAdmin?: boolean;
+  approvalPin?: string;
 }
 
 interface AuthState {
@@ -74,18 +77,26 @@ interface AuthState {
   clearError: () => void;
   fetchStaff: () => Promise<void>;
   createStaffMember: (name: string, email: string, pass: string, role: 'admin' | 'sales_agent' | 'repair_agent', permissions?: Permissions) => Promise<void>;
-  updateStaffMember: (uid: string, data: Partial<Pick<User, 'name' | 'role' | 'status' | 'permissions' | 'isSuperAdmin'>>) => Promise<void>;
+  updateStaffMember: (uid: string, data: Partial<Pick<User, 'name' | 'role' | 'status' | 'permissions' | 'isSuperAdmin' | 'approvalPin'>>) => Promise<void>;
+  setApprovalPin: (pin: string, targetUid?: string) => Promise<void>;
+  removeApprovalPin: (targetUid?: string) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   quickRoleLogin: (role: 'sales_agent' | 'repair_agent', adminPass: string) => Promise<void>;
   unlockHistory: (adminEmail: string, adminPass: string) => Promise<void>;
   lockHistory: () => void;
 }
 
+// Guard flag to prevent onAuthStateChanged from interfering during login/bootstrap
+let _isLoginInProgress = false;
+
 export const useAuthStore = create<AuthState>((set, get) => {
   // Listen to Auth State globally
   onAuthStateChanged(auth, async (firebaseUser) => {
     if (firebaseUser) {
       try {
+        // Skip validation if login() is currently running (it handles its own bootstrap)
+        if (_isLoginInProgress) return;
+
         const profile = await userService.getUserById(firebaseUser.uid);
         if (profile) {
           // Block revoked users even if their Firebase Auth token is valid
@@ -158,8 +169,57 @@ export const useAuthStore = create<AuthState>((set, get) => {
           });
           userService.updateLastActive(firebaseUser.uid).catch(console.error);
         } else {
-          await signOut(auth);
-          set({ user: null, isAuthenticated: false, isInitializing: false });
+          // No Firestore profile yet — try auto-bootstrap (first user becomes Super Admin)
+          let bootstrapped = false;
+          try {
+            let shouldBootstrap = false;
+            if (LEGACY_OWNER_EMAIL && firebaseUser.email === LEGACY_OWNER_EMAIL) {
+              shouldBootstrap = true;
+            } else {
+              try {
+                const allUsers = await userService.getAllUsers();
+                if (!allUsers || allUsers.length === 0) {
+                  shouldBootstrap = true;
+                }
+              } catch {
+                // If query fails (e.g. brand new collection), allow initial user to bootstrap
+                shouldBootstrap = true;
+              }
+            }
+
+            if (shouldBootstrap) {
+              const rawName = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Owner');
+              const cleanName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+              await userService.createUserProfile(firebaseUser.uid, {
+                name: cleanName,
+                email: firebaseUser.email || '',
+                role: 'admin',
+                status: 'active',
+                isSuperAdmin: true,
+                permissions: FULL_PERMISSIONS,
+                avatar: rawName.slice(0, 2).toUpperCase(),
+              } as any);
+              const newProfile = await userService.getUserById(firebaseUser.uid);
+              if (newProfile) {
+                bootstrapped = true;
+                set({
+                  user: newProfile,
+                  isAuthenticated: true,
+                  isInitializing: false,
+                  isSuperAdmin: true,
+                  isHistoryUnlocked: true
+                });
+                userService.updateLastActive(firebaseUser.uid).catch(console.error);
+              }
+            }
+          } catch (bootstrapErr) {
+            console.error("Auto-bootstrap failed:", bootstrapErr);
+          }
+
+          if (!bootstrapped) {
+            await signOut(auth);
+            set({ user: null, isAuthenticated: false, isInitializing: false });
+          }
         }
       } catch (err) {
         console.error("Auth state validation error:", err);
@@ -182,23 +242,45 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
     login: async (email, pass) => {
       set({ isLoading: true, error: null });
+      _isLoginInProgress = true;
       try {
         const cred = await signInWithEmailAndPassword(auth, email, pass);
         let profile = await userService.getUserById(cred.user.uid);
         
-        // Auto-bootstrap: if the super admin email signs in for the first time,
-        // create their Firestore profile automatically
-        if (!profile && cred.user.email === LEGACY_OWNER_EMAIL) {
-          await userService.createUserProfile(cred.user.uid, {
-            name: 'Admin',
-            email: cred.user.email,
-            role: 'admin',
-            status: 'active',
-            isSuperAdmin: true,
-            permissions: FULL_PERMISSIONS,
-            avatar: 'AD',
-          } as any);
-          profile = await userService.getUserById(cred.user.uid);
+        // Auto-bootstrap: If the user has no Firestore profile yet,
+        // automatically make them Super Admin if:
+        // 1. Matches LEGACY_OWNER_EMAIL, OR
+        // 2. The database has no users yet (first account to ever sign in becomes Super Admin)
+        if (!profile) {
+          let shouldBootstrap = false;
+          if (LEGACY_OWNER_EMAIL && cred.user.email === LEGACY_OWNER_EMAIL) {
+            shouldBootstrap = true;
+          } else {
+            try {
+              const allUsers = await userService.getAllUsers();
+              if (!allUsers || allUsers.length === 0) {
+                shouldBootstrap = true;
+              }
+            } catch {
+              // If query fails (e.g. brand new collection), allow initial user to bootstrap
+              shouldBootstrap = true;
+            }
+          }
+
+          if (shouldBootstrap) {
+            const rawName = cred.user.displayName || (cred.user.email ? cred.user.email.split('@')[0] : 'Owner');
+            const cleanName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+            await userService.createUserProfile(cred.user.uid, {
+              name: cleanName,
+              email: cred.user.email || '',
+              role: 'admin',
+              status: 'active',
+              isSuperAdmin: true,
+              permissions: FULL_PERMISSIONS,
+              avatar: rawName.slice(0, 2).toUpperCase(),
+            } as any);
+            profile = await userService.getUserById(cred.user.uid);
+          }
         }
         
         if (!profile) {
@@ -264,6 +346,8 @@ export const useAuthStore = create<AuthState>((set, get) => {
           message = 'Invalid email or password.';
         }
         set({ error: message, isLoading: false });
+      } finally {
+        _isLoginInProgress = false;
       }
     },
 
@@ -273,8 +357,13 @@ export const useAuthStore = create<AuthState>((set, get) => {
         activityLogService.log('system', `${currentUser.name} logged out`, { userName: currentUser.name, userId: currentUser.id }).catch(console.error);
       }
       localStorage.removeItem('role_override');
-      await signOut(auth);
-      set({ user: null, isAuthenticated: false, isSuperAdmin: false, isHistoryUnlocked: false });
+      try {
+        await signOut(auth);
+      } catch (err) {
+        console.warn('SignOut network/auth warning:', err);
+      } finally {
+        set({ user: null, isAuthenticated: false, isSuperAdmin: false, isHistoryUnlocked: false });
+      }
     },
 
     clearError: () => set({ error: null }),
@@ -483,6 +572,77 @@ export const useAuthStore = create<AuthState>((set, get) => {
         set({ isLoading: false });
       } catch (err: any) {
         set({ error: err.message || 'Failed to send password reset email.', isLoading: false });
+        throw err;
+      }
+    },
+
+    setApprovalPin: async (pin: string, targetUid?: string) => {
+      const currentUser = get().user;
+      if (!currentUser) throw new Error('Not authenticated.');
+      
+      const targetId = targetUid || currentUser.id;
+      const targetMember = get().staff.find(s => s.id === targetId) || (currentUser.id === targetId ? currentUser : null);
+      if (!targetMember) throw new Error('Target user not found.');
+
+      // Check permissions: only admin or super admin can set approval PINs
+      if (currentUser.role !== 'admin' && !currentUser.isSuperAdmin) {
+        throw new Error('Only administrators can configure approval PINs.');
+      }
+
+      // If setting someone else's PIN, caller must be superAdmin or admin managing non-superAdmin
+      if (targetId !== currentUser.id && targetMember.isSuperAdmin && !currentUser.isSuperAdmin) {
+        throw new Error('Only Super Admin can change another Super Admin\'s approval PIN.');
+      }
+
+      const cleanPin = pin.trim();
+      if (!cleanPin || cleanPin.length < 4 || cleanPin.length > 8 || !/^\d+$/.test(cleanPin)) {
+        throw new Error('Approval PIN must be between 4 and 8 digits (numeric only).');
+      }
+
+      set({ isLoading: true, error: null });
+      try {
+        const hashedPin = await hashApprovalPin(cleanPin);
+        await userService.updateUserProfile(targetId, { approvalPin: hashedPin });
+        
+        // Update local user if editing self
+        if (currentUser.id === targetId) {
+          set({ user: { ...currentUser, approvalPin: hashedPin } });
+        }
+        await get().fetchStaff();
+
+        activityLogService.log('system', `Approval PIN updated for "${targetMember.name}"`, {
+          userName: currentUser.name,
+          userId: currentUser.id,
+        }).catch(console.error);
+
+        set({ isLoading: false });
+      } catch (err: any) {
+        set({ error: err.message || 'Failed to update approval PIN.', isLoading: false });
+        throw err;
+      }
+    },
+
+    removeApprovalPin: async (targetUid?: string) => {
+      const currentUser = get().user;
+      if (!currentUser) throw new Error('Not authenticated.');
+      const targetId = targetUid || currentUser.id;
+      const targetMember = get().staff.find(s => s.id === targetId) || (currentUser.id === targetId ? currentUser : null);
+      if (!targetMember) throw new Error('Target user not found.');
+
+      if (currentUser.role !== 'admin' && !currentUser.isSuperAdmin) {
+        throw new Error('Only administrators can remove approval PINs.');
+      }
+
+      set({ isLoading: true, error: null });
+      try {
+        await userService.updateUserProfile(targetId, { approvalPin: '' });
+        if (currentUser.id === targetId) {
+          set({ user: { ...currentUser, approvalPin: undefined } });
+        }
+        await get().fetchStaff();
+        set({ isLoading: false });
+      } catch (err: any) {
+        set({ error: err.message || 'Failed to remove approval PIN.', isLoading: false });
         throw err;
       }
     }

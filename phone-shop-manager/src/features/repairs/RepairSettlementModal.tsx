@@ -21,6 +21,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useToast } from '../../components/ui/Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { formatStandardPhone, isPhoneMatch } from '../../utils/phoneUtils';
 import { useRepairStore } from '../../store/repairStore';
 import { useCustomerStore } from '../../store/customerStore';
 import { useAuthStore } from '../../store/authStore';
@@ -43,7 +44,7 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
 }) => {
   const toast = useToast();
   const { updateTicket } = useRepairStore();
-  const { customers, findOrCreateCustomer, addDebt, updateCustomer, updateDebtAmount } = useCustomerStore();
+  const { customers, findOrCreateCustomer, addDebt, updateCustomer, updateDebtAmount, recalculateCustomer } = useCustomerStore();
   const actor = useAuthStore(state => state.user);
 
   // Form State
@@ -169,17 +170,24 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
     setIsSubmitting(true);
 
     try {
-      const trimmedPhone = customerPhone.trim();
+      const trimmedPhone = formatStandardPhone(customerPhone.trim()) || customerPhone.trim();
       let customerId = ticket.customerId;
       let matchedCustomer = matchingCustomer;
 
       // 3. Resolve or create customer account
+      const devicePayload = ticket.deviceBrand && ticket.deviceModel ? {
+        brand: ticket.deviceBrand.trim(),
+        model: ticket.deviceModel.trim(),
+        notes: ticket.issueDescription?.trim() || undefined,
+      } : undefined;
+
       if (!matchedCustomer && trimmedPhone) {
         try {
           matchedCustomer = await findOrCreateCustomer({
             name: ticket.customerName.trim() || 'Client',
             phone: trimmedPhone,
             accountType: 'retail',
+            device: devicePayload,
           });
         } catch (custErr) {
           console.warn('Customer find/create fallback:', custErr);
@@ -188,8 +196,13 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
 
       if (matchedCustomer?.id) {
         customerId = matchedCustomer.id;
-        // Keep phone up-to-date on existing customer profile if it was missing or updated
-        if (trimmedPhone && (!matchedCustomer.phone || matchedCustomer.phone !== trimmedPhone)) {
+        // Keep phone up-to-date and enrich device vault non-destructively
+        if (devicePayload) {
+          useCustomerStore.getState().enrichCustomer(matchedCustomer.id, {
+            phone: trimmedPhone || undefined,
+            device: devicePayload,
+          }).catch(console.warn);
+        } else if (trimmedPhone && (!matchedCustomer.phone || !isPhoneMatch(matchedCustomer.phone, trimmedPhone))) {
           updateCustomer(matchedCustomer.id, { phone: trimmedPhone }).catch(console.error);
         }
       }
@@ -284,14 +297,52 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
 
       await updateTicket(ticket.id, updates);
 
+      // 6b. Synchronize Parent Ticket if this is a Return Child Ticket
+      const storeTickets = useRepairStore.getState().tickets;
+      if (ticket.parentTicketId) {
+        const parent = storeTickets.find(t => t.id === ticket.parentTicketId);
+        if (parent) {
+          const parentHistoryEntry: RepairStatusHistoryEntry = {
+            status: 'completed',
+            changedById: actor?.id ?? 'unknown',
+            changedByName: actor?.name ?? 'Staff',
+            at: new Date().toISOString(),
+          };
+          const updatedReturnRecords = (parent.returnRecords || []).map(r =>
+            r.returnTicketId === ticket.id || r.returnTicketNumber === ticket.ticketNumber
+              ? { ...r, status: 'completed' as const, resolvedAt: new Date().toISOString(), actualCost: finalPrice }
+              : r
+          );
+          await updateTicket(parent.id, {
+            status: 'completed',
+            completedAt: new Date().toISOString(),
+            activeReturnTicketId: undefined,
+            returnRecords: updatedReturnRecords,
+            statusHistory: [...(parent.statusHistory || []), parentHistoryEntry],
+          });
+        }
+      } else if (ticket.activeReturnTicketId) {
+        const child = storeTickets.find(t => t.id === ticket.activeReturnTicketId);
+        if (child && child.status !== 'completed') {
+          await updateTicket(child.id, {
+            status: 'completed',
+            completedAt: new Date().toISOString(),
+          });
+        }
+      }
+
       // 7. Activity Logs
       const debtDesc = effectiveIsDebt
         ? ` Paid: ${formatCurrency(effectivePaidNow)}. Debt recorded: ${formatCurrency(effectiveRemainingDebt)}.`
         : ` Paid in full: ${formatCurrency(effectiveTotalPaid)}.`;
 
+      const isReturnTicket = Boolean(ticket.isReturn || ticket.parentTicketId);
+
       activityLogService.log(
         'repairs',
-        `Repair #${ticket.ticketNumber} marked as taken/claimed`,
+        isReturnTicket
+          ? `Return repair #${ticket.ticketNumber} (for #${ticket.parentTicketNumber || 'main'}) completed & handed over`
+          : `Repair #${ticket.ticketNumber} marked as taken/claimed`,
         {
           detail: `Device: ${ticket.deviceBrand} ${ticket.deviceModel}.${debtDesc}`,
           entityId: ticket.id,
@@ -300,33 +351,37 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
         }
       ).catch(console.error);
 
-      if (matchedCustomer) {
+      // Customer audit log (for registered and walk-in customers)
+      const auditCustomerId = matchedCustomer?.id || ticket.customerId || (trimmedPhone ? `walkin_${trimmedPhone.replace(/\D/g, '')}` : undefined);
+      if (auditCustomerId) {
         customerLogService.log({
-          customerId: matchedCustomer.id,
-          customerName: matchedCustomer.name,
+          customerId: auditCustomerId,
+          customerName: matchedCustomer?.name || ticket.customerName || 'Client',
           actionType: effectiveIsDebt ? 'debt_added' : 'repair_updated',
-          actionTitle: `Repair #${ticket.ticketNumber} Claimed & Settled`,
-          actionDescription: `Repair #${ticket.ticketNumber} (${ticket.deviceBrand} ${ticket.deviceModel}) claimed.${debtDesc}`,
+          actionTitle: isReturnTicket
+            ? `Return Re-repair #${ticket.ticketNumber} Completed & Handed Over`
+            : `Repair #${ticket.ticketNumber} Claimed & Settled`,
+          actionDescription: isReturnTicket
+            ? `Return re-repair #${ticket.ticketNumber} for device (${ticket.deviceBrand} ${ticket.deviceModel}) completed and returned to customer.${debtDesc}`
+            : `Repair #${ticket.ticketNumber} (${ticket.deviceBrand} ${ticket.deviceModel}) claimed.${debtDesc}`,
           actorId: actor?.id,
           actorName: actor?.name || 'Staff',
           actorRole: actor?.role,
-          metadata: { ticketId: ticket.id, totalAmount: finalPrice, paidNow: effectivePaidNow, debt: effectiveRemainingDebt },
+          metadata: {
+            ticketId: ticket.id,
+            parentTicketId: ticket.parentTicketId,
+            isReturn: ticket.isReturn,
+            totalAmount: finalPrice,
+            paidNow: effectivePaidNow,
+            debt: effectiveRemainingDebt
+          },
         }).catch(console.error);
       }
 
-      // Problem 11 fix: Update customer statistics (totalPurchases, totalSpent, lastVisitDate)
-      const isAlreadyCompleted = ticket.status === 'completed';
+      // Authoritative recalculation of customer statistics (totalPurchases, totalSpent, lastVisitDate)
       const targetCustomer = matchedCustomer || (customerId ? customers.find(c => c.id === customerId) : null);
       if (targetCustomer) {
-        const purchaseInc = isAlreadyCompleted ? 0 : 1;
-        const spentDelta = isAlreadyCompleted
-          ? Math.max(0, finalPrice - (ticket.actualCost || 0))
-          : finalPrice;
-        updateCustomer(targetCustomer.id, {
-          totalPurchases: (targetCustomer.totalPurchases || 0) + purchaseInc,
-          totalSpent: Math.max(0, (targetCustomer.totalSpent || 0) + spentDelta),
-          lastVisitDate: new Date().toISOString(),
-        }).catch(console.error);
+        recalculateCustomer(targetCustomer.id).catch(console.error);
       }
 
       // 8. Success Feedback

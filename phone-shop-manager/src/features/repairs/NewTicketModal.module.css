@@ -181,3 +181,74 @@
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
+
+/* Returning Customer Device Vault Chips */
+.vaultSection {
+  background: #f8faff;
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.vaultHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.vaultTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1e1b4b;
+}
+
+.vaultHint {
+  font-size: 11px;
+  color: #6366f1;
+  font-weight: 500;
+  margin-left: auto;
+}
+
+.vaultChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vaultChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid #c7d2fe;
+  background: #ffffff;
+  color: #312e81;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.vaultChip:hover {
+  background: #eef2ff;
+  border-color: #818cf8;
+  transform: translateY(-1px);
+}
+
+.vaultChipActive {
+  background: #4f46e5;
+  color: #ffffff;
+  border-color: #4f46e5;
+}
+
+.vaultImeiChip {
+  font-size: 10.5px;
+  opacity: 0.85;
+}
+

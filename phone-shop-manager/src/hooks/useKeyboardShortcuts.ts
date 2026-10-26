@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { usePrivacyStore } from '../store/privacyStore';
+import { usePosDensityStore } from '../store/posDensityStore';
 
 export function useKeyboardShortcuts() {
   const navigate = useNavigate();
@@ -11,6 +13,30 @@ export function useKeyboardShortcuts() {
         target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable;
+
+      // Alt + P (or Option + P on Mac) to toggle Privacy Curtain Mode instantly
+      if (e.altKey && (e.key.toLowerCase() === 'p' || e.code === 'KeyP')) {
+        e.preventDefault();
+        usePrivacyStore.getState().togglePrivacy();
+        return;
+      }
+
+      // Alt + D (or Option + D on Mac) to cycle POS Layout Density (Compact / Standard / Touch)
+      if (e.altKey && (e.key.toLowerCase() === 'd' || e.code === 'KeyD')) {
+        e.preventDefault();
+        usePosDensityStore.getState().cycleDensity();
+        return;
+      }
+
+      // Alt + L (or Option + L on Mac) to trigger Quick Logout / Lock
+      if (e.altKey && (e.key.toLowerCase() === 'l' || e.code === 'KeyL')) {
+        e.preventDefault();
+        const logoutBtn = document.querySelector<HTMLElement>('[data-logout-trigger]');
+        if (logoutBtn) {
+          logoutBtn.click();
+        }
+        return;
+      }
 
       // Ctrl / Cmd + K or "/" to focus primary search input on current page
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {

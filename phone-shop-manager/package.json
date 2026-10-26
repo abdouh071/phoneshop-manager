@@ -1,7 +1,9 @@
 {
   "name": "phone-shop-manager",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "PhoneShop Manager Pro — Complete phone repair shop POS, inventory, repairs, and thermal printing management system",
+  "author": "PhoneShop Manager Team",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -11,34 +13,88 @@
     "preview": "vite preview",
     "print-server": "cd print-server && node server.js",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
-    "electron:build:mac": "vite build && electron-builder --mac",
-    "electron:build:win": "vite build && electron-builder --win"
+    "electron:build:mac": "electron-builder --mac",
+    "electron:build:mac:arm64": "electron-builder --mac --arm64 -c.mac.artifactName=\"PhoneShop Manager Pro-1.0.0-arm64.dmg\"",
+    "electron:build:mac:intel": "electron-builder --mac --x64 -c.mac.artifactName=\"PhoneShop Manager Pro-1.0.0-intel-x64.dmg\"",
+    "electron:build:win": "electron-builder --win --x64",
+    "electron:build:win7": "electron-builder --win --ia32 -c.electronVersion=22.3.27 -c.win.artifactName=\"PhoneShop-Manager-Pro-Setup-1.0.0-win7-32bit.exe\""
   },
   "build": {
     "appId": "com.automanager.phoneshop",
-    "productName": "Auto-Manager",
+    "productName": "PhoneShop Manager Pro",
     "directories": {
-      "output": "release"
+      "output": "../releases"
     },
     "mac": {
-      "category": "public.app-category.business"
+      "category": "public.app-category.business",
+      "target": [
+        "dmg"
+      ]
     },
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
     },
     "files": [
-      "dist/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "print-server/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "print-server/server.js",
+        "to": "print-server/server.js"
+      },
+      {
+        "from": "print-server/print-raw.ps1",
+        "to": "print-server/print-raw.ps1"
+      },
+      {
+        "from": "print-server/package.json",
+        "to": "print-server/package.json"
+      },
+      {
+        "from": "print-server/.env",
+        "to": "print-server/.env"
+      },
+      {
+        "from": "print-server/node_modules",
+        "to": "print-server/node_modules",
+        "filter": [
+          "**/*",
+          "!.cache/**",
+          "!.bin/**"
+        ]
+      },
+      {
+        "from": "electron/print-raw.ps1",
+        "to": "scripts/print-raw.ps1"
+      }
+    ],
+    "asarUnpack": [
+      "print-server/**/*",
+      "electron/print-raw.ps1"
     ]
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.8",
+    "express": "^5.3.0",
     "firebase": "^12.16.0",
     "html2canvas": "^1.4.1",
     "i18next": "^26.4.2",
     "i18next-browser-languagedetector": "^8.2.1",
     "lucide-react": "^1.23.0",
+    "node-thermal-printer": "^4.6.1",
     "papaparse": "^5.5.4",
+    "pngjs": "^7.0.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.7",
     "react-barcode": "^1.6.1",
@@ -63,3 +119,4 @@
     "wait-on": "^9.5.1"
   }
 }
+

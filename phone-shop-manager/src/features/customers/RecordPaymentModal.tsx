@@ -3,9 +3,10 @@ import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useCustomerStore } from '../../store/customerStore';
+import { usePrivacyStore } from '../../store/privacyStore';
 import { useToast } from '../../components/ui/Toast';
 import type { CustomerDebtEntry, PaymentMethod } from '../../types';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { DollarSign, CheckCircle2, AlertCircle } from 'lucide-react';
 import styles from '../inventory/ProductForm.module.css';
 
@@ -16,6 +17,7 @@ interface RecordPaymentModalProps {
 }
 
 export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, onClose, debt }) => {
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -123,7 +125,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
           <div>
             <span style={{ color: '#64748b', fontSize: '11.5px', textTransform: 'uppercase', fontWeight: 700 }}>Current Balance Owed</span>
             <p style={{ margin: '2px 0 0', fontWeight: 800, fontSize: '18px', color: '#dc2626' }}>
-              {formatCurrency(debt.remainingBalance)}
+              {formatPrivateCurrency(debt.remainingBalance)}
             </p>
           </div>
           <button
@@ -151,6 +153,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
           max={debt.remainingBalance}
           value={amount}
           onChange={e => { setAmount(e.target.value); setError(null); }}
+          className="privacy-cost-input"
         />
 
         {/* New remaining balance preview */}
@@ -166,7 +169,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
           color: isFullPayment ? '#15803d' : '#854d0e',
         }}>
           <span>Remaining after this payment:</span>
-          <span>{isFullPayment ? '✅ 0 DA (Fully Paid)' : formatCurrency(newRemaining)}</span>
+          <span>{isFullPayment ? '✅ 0 DA (Fully Paid)' : formatPrivateCurrency(newRemaining)}</span>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>

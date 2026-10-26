@@ -17,11 +17,13 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { useCartStore } from '../../store/cartStore';
 import { useRepairStore } from '../../store/repairStore';
 import { useCustomerStore } from '../../store/customerStore';
+import { usePrivacyStore } from '../../store/privacyStore';
 import { usePermissions } from '../../hooks/usePermissions';
 import { EndOfDayButton } from '../endofday/EndOfDayButton';
+import { AdminMobileDashboard } from './AdminMobileDashboard';
 import type { RevenueDataPoint, SaleTransaction } from '../../types';
 import styles from './Dashboard.module.css';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { getOverdueDebts } from '../../utils/debtAlerts';
 import {
   isClaimedAndPaidRepair,
@@ -82,9 +84,9 @@ const MiniBarChart: React.FC<{ data: RevenueDataPoint[] }> = ({ data }) => {
         <div key={i} className={styles.barGroup}>
           <div className={styles.barWrapper}>
             <div
-              className={styles.bar}
+              className={[styles.bar, 'privacy-blur'].join(' ')}
               style={{ height: `${max > 0 ? Math.max(4, (d.revenue / max) * 100) : 0}%` }}
-              title={`${d.label}: ${formatCurrency(d.revenue)}`}
+              title={`${d.label}: ${formatPrivateCurrency(d.revenue)}`}
             />
           </div>
           <span className={styles.barLabel}>{d.label}</span>
@@ -105,11 +107,12 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const DashboardPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const isPrivacyActive = usePrivacyStore((s) => s.isPrivacyActive);
   const { products, fetchProducts } = useInventoryStore();
   const { transactions, fetchTransactions } = useCartStore();
   const { debts, customers, fetchCustomers } = useCustomerStore();
   const { tickets, fetchTickets } = useRepairStore();
-  const { user, isHistoryUnlocked } = useAuthStore();
+  const { isAuthenticated, user, isHistoryUnlocked } = useAuthStore();
   const settings = useSettingsStore();
   const permissions = usePermissions();
   
@@ -284,6 +287,12 @@ export const DashboardPage = () => {
   const recentTransactions: SaleTransaction[] = useMemo(() => activeTx.slice(0, 8), [activeTx]);
   const isAnalyticsLocked = user?.role !== 'admin' && !isHistoryUnlocked;
 
+  // Show mobile admin dashboard on small screens
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+  if (isMobile && user?.role === 'admin') {
+    return <AdminMobileDashboard />;
+  }
+
   return (
     <div className={styles.page}>
       <AdminUnlockModal
@@ -394,7 +403,7 @@ export const DashboardPage = () => {
             </div>
             <div>
               <p className={styles.overdueAlertTitle}>
-                🚨 {overdueCustomerCount} Customer{overdueCustomerCount !== 1 ? 's' : ''} with Overdue Debts ({formatCurrency(overdueTotalAmount)} Total Past Due)
+                🚨 {overdueCustomerCount} Customer{overdueCustomerCount !== 1 ? 's' : ''} with Overdue Debts ({formatPrivateCurrency(overdueTotalAmount)} Total Past Due)
               </p>
               <p className={styles.overdueAlertSubtitle}>
                 {overdueDebtsList.length} credit record{overdueDebtsList.length !== 1 ? 's' : ''} have exceeded their scheduled repayment due date.
@@ -417,9 +426,9 @@ export const DashboardPage = () => {
         <StatCard
           accent
           label={permissions.pos ? "Today's Total Revenue" : "Today's Repair Revenue"}
-          value={formatCurrency(permissions.pos ? (permissions.repairs ? dailyRevenue : todaySalesRev) : todayRepRev)}
+          value={formatPrivateCurrency(permissions.pos ? (permissions.repairs ? dailyRevenue : todaySalesRev) : todayRepRev)}
           change={revenueChange}
-          subtext={permissions.pos && permissions.repairs ? `Sales: ${formatCurrency(todaySalesRev)} • Repairs: ${formatCurrency(todayRepRev)}` : permissions.repairs ? `${todayRepairs.length} repairs finished today` : `${todayTx.length} completed sales`}
+          subtext={permissions.pos && permissions.repairs ? `Sales: ${formatPrivateCurrency(todaySalesRev)} • Repairs: ${formatPrivateCurrency(todayRepRev)}` : permissions.repairs ? `${todayRepairs.length} repairs finished today` : `${todayTx.length} completed sales`}
           icon={<DollarSign size={20} />}
           onClick={permissions.pos ? () => navigate('/pos') : () => navigate('/repairs')}
           linkLabel={permissions.pos ? 'Open POS' : 'Open Repairs'}
@@ -427,7 +436,7 @@ export const DashboardPage = () => {
         {(!isAnalyticsLocked || user?.role === 'admin') ? (
           <StatCard
             label={t('dashboard.netProfit', "Today's Net Profit")}
-            value={formatCurrency(todayNetProfit)}
+            value={formatPrivateCurrency(todayNetProfit)}
             change={revenueChange}
             subtext="Gross Revenue minus COGS"
             icon={<TrendingUp size={20} />}
@@ -497,15 +506,15 @@ export const DashboardPage = () => {
           <div className={styles.drawerItemsRow}>
             <div className={styles.drawerWidgetItem}>
               <span>💵 Cash:</span>
-              <span className={styles.drawerItemValue}>{formatCurrency(todayCash)}</span>
+              <span className={styles.drawerItemValue}>{formatPrivateCurrency(todayCash)}</span>
             </div>
             <div className={styles.drawerWidgetItem}>
               <span>💳 Card:</span>
-              <span className={styles.drawerItemValue}>{formatCurrency(todayCard)}</span>
+              <span className={styles.drawerItemValue}>{formatPrivateCurrency(todayCard)}</span>
             </div>
             <div className={styles.drawerWidgetItem}>
               <span>📱 Mobile:</span>
-              <span className={styles.drawerItemValue}>{formatCurrency(todayMobile)}</span>
+              <span className={styles.drawerItemValue}>{formatPrivateCurrency(todayMobile)}</span>
             </div>
           </div>
         </div>
@@ -534,7 +543,7 @@ export const DashboardPage = () => {
             <Card>
               <CardHeader
                 title={permissions.repairs ? "Weekly Revenue (Sales + Repairs)" : "Weekly Revenue (Sales)"}
-                subtitle={`Total: ${formatCurrency(permissions.repairs ? weeklyRevenue : activeTx.filter(t => new Date(t.date) >= startOfWeek).reduce((s, t) => s + t.total, 0))}`}
+                subtitle={`Total: ${formatPrivateCurrency(permissions.repairs ? weeklyRevenue : activeTx.filter(t => new Date(t.date) >= startOfWeek).reduce((s, t) => s + t.total, 0))}`}
               />
               <MiniBarChart data={chartData} />
             </Card>
@@ -602,7 +611,7 @@ export const DashboardPage = () => {
                       </span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span className={styles.txAmount}>{formatCurrency(tx.total)}</span>
+                      <span className={styles.txAmount}>{formatPrivateCurrency(tx.total)}</span>
                       <Eye size={14} style={{ color: 'var(--color-on-surface-variant)' }} />
                     </div>
                   </div>
@@ -698,7 +707,7 @@ export const DashboardPage = () => {
             <div className={styles.monthlySummary}>
               <div className={styles.summaryItem}>
                 <span className={styles.summaryLabel}>Monthly Revenue</span>
-                <span className={styles.summaryValue}>{formatCurrency(monthlyRevenue)}</span>
+                <span className={styles.summaryValue}>{formatPrivateCurrency(monthlyRevenue)}</span>
               </div>
               <div className={styles.summaryDivider} />
               <div className={styles.summaryItem}>
@@ -710,7 +719,7 @@ export const DashboardPage = () => {
               <div className={styles.summaryDivider} />
               <div className={styles.summaryItem}>
                 <span className={styles.summaryLabel}>Weekly Revenue</span>
-                <span className={styles.summaryValue}>{formatCurrency(weeklyRevenue)}</span>
+                <span className={styles.summaryValue}>{formatPrivateCurrency(weeklyRevenue)}</span>
               </div>
             </div>
           </Card>

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { endOfDayService, type EndOfDayRecord } from '../services/endOfDayService';
 import { useCartStore } from './cartStore';
+import { usePartsCartStore } from './partsCartStore';
 import { useRepairStore } from './repairStore';
 import { useCustomerStore } from './customerStore';
 import { useAuthStore } from './authStore';
@@ -86,8 +87,14 @@ export const useEndOfDayStore = create<EndOfDayState>((set, get) => ({
     const targetDateObj = targetDate ? (typeof targetDate === 'string' ? new Date(targetDate) : targetDate) : new Date();
     const targetDateStr = toDateStr(targetDateObj);
 
-    // ---- 1. Sales (POS) ----
-    const allTx = useCartStore.getState().transactions || [];
+    // ---- 1. Sales (POS & Parts B2B) ----
+    const posTx = useCartStore.getState().transactions || [];
+    const partsInvoices = usePartsCartStore.getState().invoices || [];
+    const txMap = new Map<string, typeof posTx[0]>();
+    posTx.forEach(t => txMap.set(t.id, t));
+    partsInvoices.forEach(t => txMap.set(t.id, t));
+    const allTx = Array.from(txMap.values());
+
     const todayTx = allTx.filter(t => t.status !== 'refunded' && t.saleType !== 'parts_b2b' && isSameLocalDate(t.date, targetDateStr));
     const refundedTx = allTx.filter(t => t.status === 'refunded' && isSameLocalDate(t.date, targetDateStr));
     const partsTx = allTx.filter(t => t.status !== 'refunded' && t.saleType === 'parts_b2b' && isSameLocalDate(t.date, targetDateStr));
@@ -161,13 +168,16 @@ export const useEndOfDayStore = create<EndOfDayState>((set, get) => ({
 
     // ---- 4. Parts B2B ----
     const partsSalesRevenue = partsTx.reduce((s, t) => s + t.total, 0);
+    const partsSalesCash    = sumPayment(partsTx, 'cash');
+    const partsSalesCard    = sumPayment(partsTx, 'card');
+    const partsSalesMobile  = sumPayment(partsTx, 'mobile');
 
     // ---- 5. Grand Totals (including debt recovered today) ----
     const totalRevenue = salesTotalRevenue + repairsTotalRevenue + partsSalesRevenue + debtCollectedCash;
-    // Exact physical cash in drawer: POS cash + Repair handover + Repair deposit + Debt payments - Cash refunds
-    const totalCash    = Math.max(0, (salesCash + repairsCash + debtCollectedCash) - refundsCash);
-    const totalCard    = salesCard;
-    const totalMobile  = salesMobile;
+    // Exact physical cash in drawer: POS cash + Parts B2B cash + Repair handover + Repair deposit + Debt payments - Cash refunds
+    const totalCash    = Math.max(0, (salesCash + partsSalesCash + repairsCash + debtCollectedCash) - refundsCash);
+    const totalCard    = salesCard + partsSalesCard;
+    const totalMobile  = salesMobile + partsSalesMobile;
     const totalNetProfit = (salesTotalRevenue - salesCogs) + (repairsTotalRevenue - repairsPartsCost) + debtCollectedCash;
 
     const { user } = useAuthStore.getState();

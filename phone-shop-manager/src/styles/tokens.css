@@ -202,3 +202,324 @@
   --shadow-high: 0px 20px 40px rgba(0, 0, 0, 0.5);
   --shadow-card: 0px 1px 3px rgba(0, 0, 0, 0.5), 0px 4px 12px rgba(0, 0, 0, 0.3);
 }
+
+/* ============================================================
+   PALETTE COMBINATION 2: TITANIUM & CYBER CYAN
+   ============================================================ */
+[data-color-theme="cyan"] {
+  --color-surface: #f4f8fb;
+  --color-surface-dim: #cbe0ea;
+  --color-surface-bright: #f4f8fb;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #e9f4f8;
+  --color-surface-container: #dceef4;
+  --color-surface-container-high: #d0e7ef;
+  --color-surface-container-highest: #c4dfe9;
+  --color-on-surface: #0a1b24;
+  --color-on-surface-variant: #344c59;
+  --color-outline: #5c7b8c;
+  --color-outline-variant: #b6d2df;
+  --color-surface-tint: #0891b2;
+
+  --color-primary: #0891b2;
+  --color-primary-container: #06b6d4;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #ecfeff;
+  --color-inverse-primary: #a5f3fc;
+  --color-primary-fixed: #cffafe;
+  --color-primary-fixed-dim: #a5f3fc;
+  --color-on-primary-fixed: #164e63;
+  --color-on-primary-fixed-variant: #0e7490;
+
+  --color-secondary: #475569;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #cbe3ee;
+  --color-on-secondary-container: #1e293b;
+  --color-secondary-fixed: #e2e8f0;
+  --color-secondary-fixed-dim: #cbd5e1;
+  --color-on-secondary-fixed: #0f172a;
+  --color-on-secondary-fixed-variant: #334155;
+
+  --color-background: #f4f8fb;
+  --color-on-background: #0a1b24;
+  --color-surface-variant: #c4dfe9;
+}
+
+[data-theme="dark"][data-color-theme="cyan"],
+[data-theme="dark"] [data-color-theme="cyan"] {
+  --color-surface: #0a111a;
+  --color-surface-dim: #050a10;
+  --color-surface-bright: #121e2c;
+  --color-surface-container-lowest: #04080e;
+  --color-surface-container-low: #0e1825;
+  --color-surface-container: #142233;
+  --color-surface-container-high: #1a2d44;
+  --color-surface-container-highest: #223955;
+  --color-on-surface: #e0f2fe;
+  --color-on-surface-variant: #94a3b8;
+  --color-inverse-surface: #f0f9ff;
+  --color-inverse-on-surface: #082f49;
+  --color-outline: #0284c7;
+  --color-outline-variant: #1e293b;
+  --color-surface-tint: #22d3ee;
+
+  --color-primary: #06b6d4;
+  --color-primary-container: #0891b2;
+  --color-on-primary: #042f2e;
+  --color-on-primary-container: #ecfeff;
+  --color-inverse-primary: #155e75;
+  --color-primary-fixed: #164e63;
+  --color-primary-fixed-dim: #155e75;
+  --color-on-primary-fixed: #cffafe;
+  --color-on-primary-fixed-variant: #a5f3fc;
+
+  --color-secondary: #64748b;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #1e293b;
+  --color-on-secondary-container: #cbd5e1;
+
+  --color-background: #070d14;
+  --color-on-background: #f0f9ff;
+  --color-surface-variant: #142233;
+}
+
+/* ============================================================
+   PALETTE COMBINATION 3: EMERALD MINT & FINTECH
+   ============================================================ */
+[data-color-theme="emerald"] {
+  --color-surface: #f4faf6;
+  --color-surface-dim: #cae5d5;
+  --color-surface-bright: #f4faf6;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #e9f6ef;
+  --color-surface-container: #dbeee3;
+  --color-surface-container-high: #cde6d7;
+  --color-surface-container-highest: #bfdfcb;
+  --color-on-surface: #092015;
+  --color-on-surface-variant: #315040;
+  --color-outline: #557964;
+  --color-outline-variant: #b0d4bf;
+  --color-surface-tint: #059669;
+
+  --color-primary: #059669;
+  --color-primary-container: #10b981;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #ecfdf5;
+  --color-inverse-primary: #a7f3d0;
+  --color-primary-fixed: #d1fae5;
+  --color-primary-fixed-dim: #a7f3d0;
+  --color-on-primary-fixed: #064e3b;
+  --color-on-primary-fixed-variant: #047857;
+
+  --color-secondary: #3f6250;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #c4ecd5;
+  --color-on-secondary-container: #264233;
+  --color-secondary-fixed: #dcfce7;
+  --color-secondary-fixed-dim: #bbf7d0;
+  --color-on-secondary-fixed: #14532d;
+  --color-on-secondary-fixed-variant: #166534;
+
+  --color-background: #f4faf6;
+  --color-on-background: #092015;
+  --color-surface-variant: #bfdfcb;
+}
+
+[data-theme="dark"][data-color-theme="emerald"],
+[data-theme="dark"] [data-color-theme="emerald"] {
+  --color-surface: #061810;
+  --color-surface-dim: #030e09;
+  --color-surface-bright: #0c261a;
+  --color-surface-container-lowest: #020906;
+  --color-surface-container-low: #092016;
+  --color-surface-container: #0f2a1d;
+  --color-surface-container-high: #153526;
+  --color-surface-container-highest: #1c4230;
+  --color-on-surface: #ecfdf5;
+  --color-on-surface-variant: #a7f3d0;
+  --color-inverse-surface: #f0fdf4;
+  --color-inverse-on-surface: #064e3b;
+  --color-outline: #059669;
+  --color-outline-variant: #14532d;
+  --color-surface-tint: #10b981;
+
+  --color-primary: #10b981;
+  --color-primary-container: #059669;
+  --color-on-primary: #022c1b;
+  --color-on-primary-container: #ecfdf5;
+  --color-inverse-primary: #064e3b;
+  --color-primary-fixed: #064e3b;
+  --color-primary-fixed-dim: #047857;
+  --color-on-primary-fixed: #d1fae5;
+  --color-on-primary-fixed-variant: #a7f3d0;
+
+  --color-secondary: #4ade80;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #164e31;
+  --color-on-secondary-container: #bbf7d0;
+
+  --color-background: #04120c;
+  --color-on-background: #ecfdf5;
+  --color-surface-variant: #0f2a1d;
+}
+
+/* ============================================================
+   PALETTE COMBINATION 4: ROYAL VELVET & NEBULA
+   ============================================================ */
+[data-color-theme="purple"] {
+  --color-surface: #f9f6fc;
+  --color-surface-dim: #dbceed;
+  --color-surface-bright: #f9f6fc;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f3ecfa;
+  --color-surface-container: #ece0f7;
+  --color-surface-container-high: #e2d2f2;
+  --color-surface-container-highest: #d7c4ed;
+  --color-on-surface: #1b0f2e;
+  --color-on-surface-variant: #4a3a62;
+  --color-outline: #725e8d;
+  --color-outline-variant: #cbb9e2;
+  --color-surface-tint: #7c3aed;
+
+  --color-primary: #7c3aed;
+  --color-primary-container: #8b5cf6;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #f5f3ff;
+  --color-inverse-primary: #ddd6fe;
+  --color-primary-fixed: #ede9fe;
+  --color-primary-fixed-dim: #ddd6fe;
+  --color-on-primary-fixed: #4c1d95;
+  --color-on-primary-fixed-variant: #6d28d9;
+
+  --color-secondary: #624b7a;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #e6d3fa;
+  --color-on-secondary-container: #3d2954;
+  --color-secondary-fixed: #f3e8ff;
+  --color-secondary-fixed-dim: #e9d5ff;
+  --color-on-secondary-fixed: #3b0764;
+  --color-on-secondary-fixed-variant: #581c87;
+
+  --color-background: #f9f6fc;
+  --color-on-background: #1b0f2e;
+  --color-surface-variant: #d7c4ed;
+}
+
+[data-theme="dark"][data-color-theme="purple"],
+[data-theme="dark"] [data-color-theme="purple"] {
+  --color-surface: #120922;
+  --color-surface-dim: #0a0414;
+  --color-surface-bright: #1c0f33;
+  --color-surface-container-lowest: #06020c;
+  --color-surface-container-low: #170c2a;
+  --color-surface-container: #1e1037;
+  --color-surface-container-high: #271646;
+  --color-surface-container-highest: #321c58;
+  --color-on-surface: #f5f3ff;
+  --color-on-surface-variant: #c4b5fd;
+  --color-inverse-surface: #faf5ff;
+  --color-inverse-on-surface: #3b0764;
+  --color-outline: #7c3aed;
+  --color-outline-variant: #4c1d95;
+  --color-surface-tint: #8b5cf6;
+
+  --color-primary: #8b5cf6;
+  --color-primary-container: #7c3aed;
+  --color-on-primary: #1e093d;
+  --color-on-primary-container: #f5f3ff;
+  --color-inverse-primary: #4c1d95;
+  --color-primary-fixed: #4c1d95;
+  --color-primary-fixed-dim: #6d28d9;
+  --color-on-primary-fixed: #ede9fe;
+  --color-on-primary-fixed-variant: #ddd6fe;
+
+  --color-secondary: #c084fc;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #3b1764;
+  --color-on-secondary-container: #e9d5ff;
+
+  --color-background: #0c0517;
+  --color-on-background: #f5f3ff;
+  --color-surface-variant: #1e1037;
+}
+
+/* ============================================================
+   PALETTE COMBINATION 5: WARM AMBER & CRIMSON GOLD
+   ============================================================ */
+[data-color-theme="amber"] {
+  --color-surface: #fffaf4;
+  --color-surface-dim: #e9dac4;
+  --color-surface-bright: #fffaf4;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #fdf3e5;
+  --color-surface-container: #faebd9;
+  --color-surface-container-high: #f5e1cb;
+  --color-surface-container-highest: #efd6bc;
+  --color-on-surface: #271705;
+  --color-on-surface-variant: #5f4a33;
+  --color-outline: #896d4e;
+  --color-outline-variant: #dcc5ab;
+  --color-surface-tint: #d97706;
+
+  --color-primary: #d97706;
+  --color-primary-container: #f59e0b;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #fffbeb;
+  --color-inverse-primary: #fde68a;
+  --color-primary-fixed: #fef3c7;
+  --color-primary-fixed-dim: #fde68a;
+  --color-on-primary-fixed: #78350f;
+  --color-on-primary-fixed-variant: #b45309;
+
+  --color-secondary: #745432;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #fae2c4;
+  --color-on-secondary-container: #472f16;
+  --color-secondary-fixed: #ffedd5;
+  --color-secondary-fixed-dim: #fed7aa;
+  --color-on-secondary-fixed: #7c2d12;
+  --color-on-secondary-fixed-variant: #9a3412;
+
+  --color-background: #fffaf4;
+  --color-on-background: #271705;
+  --color-surface-variant: #efd6bc;
+}
+
+[data-theme="dark"][data-color-theme="amber"],
+[data-theme="dark"] [data-color-theme="amber"] {
+  --color-surface: #181108;
+  --color-surface-dim: #0e0904;
+  --color-surface-bright: #241a0d;
+  --color-surface-container-lowest: #080502;
+  --color-surface-container-low: #1d140a;
+  --color-surface-container: #261b0d;
+  --color-surface-container-high: #312311;
+  --color-surface-container-highest: #3e2d16;
+  --color-on-surface: #fef3c7;
+  --color-on-surface-variant: #fde68a;
+  --color-inverse-surface: #fffbeb;
+  --color-inverse-on-surface: #78350f;
+  --color-outline: #d97706;
+  --color-outline-variant: #78350f;
+  --color-surface-tint: #f59e0b;
+
+  --color-primary: #f59e0b;
+  --color-primary-container: #d97706;
+  --color-on-primary: #291400;
+  --color-on-primary-container: #fffbeb;
+  --color-inverse-primary: #78350f;
+  --color-primary-fixed: #78350f;
+  --color-primary-fixed-dim: #b45309;
+  --color-on-primary-fixed: #fef3c7;
+  --color-on-primary-fixed-variant: #fde68a;
+
+  --color-secondary: #fbbf24;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #452a0a;
+  --color-on-secondary-container: #fed7aa;
+
+  --color-background: #110b05;
+  --color-on-background: #fef3c7;
+  --color-surface-variant: #261b0d;
+}
+

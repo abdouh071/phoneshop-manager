@@ -158,3 +158,130 @@ input:focus, select:focus, textarea:focus {
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
+
+/* ─── Privacy Curtain Mode (Instant Zero-Latency Blind Mode) ─── */
+[data-privacy="active"] .privacy-blur {
+  filter: blur(8px) !important;
+  user-select: none !important;
+  pointer-events: none !important;
+  opacity: 0.55 !important;
+  transition: filter 0.1s ease-in-out, opacity 0.1s ease-in-out !important;
+}
+
+[data-privacy="active"] .privacy-masked {
+  filter: blur(6px) !important;
+  user-select: none !important;
+  pointer-events: none !important;
+  display: inline-block;
+  opacity: 0.6 !important;
+  letter-spacing: 2px;
+  font-family: monospace;
+  transition: filter 0.1s ease-in-out, opacity 0.1s ease-in-out !important;
+}
+
+/* Instantly blur and shield all financial KPI values, stat cards, hero summaries, cost prices, customer debt, payments, and spent totals */
+[data-privacy="active"] [data-privacy-sensitive],
+[data-privacy="active"] [data-privacy-cost],
+[data-privacy="active"] [data-privacy-client-financial],
+[data-privacy="active"] .privacy-cost,
+[data-privacy="active"] [class*="statValue"],
+[data-privacy="active"] [class*="kpiValue"],
+[data-privacy="active"] [class*="heroValue"],
+[data-privacy="active"] [class*="drawerItemValue"],
+[data-privacy="active"] [class*="summaryValue"],
+[data-privacy="active"] [class*="txAmount"],
+[data-privacy="active"] [class*="dayCardValue"],
+[data-privacy="active"] [class*="debtSummaryValue"],
+[data-privacy="active"] [class*="amountDebt"],
+[data-privacy="active"] [class*="amountPaid"],
+[data-privacy="active"] [class*="paymentHistoryRow"],
+[data-privacy="active"] [class*="paymentHistoryList"],
+[data-privacy="active"] [class*="debtBadgePartial"],
+[data-privacy="active"] [class*="debtBadgeTag"],
+[data-privacy="active"] [class*="overdueBadgeTag"],
+[data-privacy="active"] [class*="spentValue"],
+[data-privacy="active"] [class*="totalSpent"],
+[data-privacy="active"] [class*="headerSpentStat"],
+[data-privacy="active"] [class*="headerDebtStat"],
+[data-privacy="active"] [class*="accountPillSuccess"],
+[data-privacy="active"] [class*="accountPillDebt"],
+[data-privacy="active"] [class*="debtsTotalDue"],
+[data-privacy="active"] [class*="debtDueValue"],
+[data-privacy="active"] [class*="costDebtText"],
+[data-privacy="active"] [class*="attachedDebtBadge"],
+[data-privacy="active"] [class*="creditMetricsRow"],
+[data-privacy="active"] [class*="creditMetricValue"],
+[data-privacy="active"] [class*="creditMetricTotal"],
+[data-privacy="active"] [class*="optionDebt"],
+[data-privacy="active"] [class*="optionSpent"],
+[data-privacy="active"] [class*="costSub"],
+[data-privacy="active"] [class*="costPrice"],
+[data-privacy="active"] [class*="shrinkageVal"],
+[data-privacy="active"] td[data-col="cost"],
+[data-privacy="active"] td[data-col="margin"],
+[data-privacy="active"] td[data-col="debt"],
+[data-privacy="active"] td[data-col="spent"],
+[data-privacy="active"] td[data-col="credit"],
+[data-privacy="active"] td[data-col="debit"],
+[data-privacy="active"] td[data-col="balance"],
+[data-privacy="active"] input[data-privacy-cost],
+[data-privacy="active"] .privacy-cost-input input {
+  filter: blur(8px) !important;
+  user-select: none !important;
+  opacity: 0.55 !important;
+  transition: filter 0.1s ease-in-out, opacity 0.1s ease-in-out !important;
+}
+
+[data-privacy="inactive"] [data-privacy-sensitive],
+[data-privacy="inactive"] [data-privacy-cost],
+[data-privacy="inactive"] [data-privacy-client-financial],
+[data-privacy="inactive"] .privacy-cost,
+[data-privacy="inactive"] [class*="statValue"],
+[data-privacy="inactive"] [class*="kpiValue"],
+[data-privacy="inactive"] [class*="heroValue"],
+[data-privacy="inactive"] [class*="drawerItemValue"],
+[data-privacy="inactive"] [class*="summaryValue"],
+[data-privacy="inactive"] [class*="txAmount"],
+[data-privacy="inactive"] [class*="dayCardValue"],
+[data-privacy="inactive"] [class*="debtSummaryValue"],
+[data-privacy="inactive"] [class*="amountDebt"],
+[data-privacy="inactive"] [class*="amountPaid"],
+[data-privacy="inactive"] [class*="paymentHistoryRow"],
+[data-privacy="inactive"] [class*="paymentHistoryList"],
+[data-privacy="inactive"] [class*="debtBadgePartial"],
+[data-privacy="inactive"] [class*="debtBadgeTag"],
+[data-privacy="inactive"] [class*="overdueBadgeTag"],
+[data-privacy="inactive"] [class*="spentValue"],
+[data-privacy="inactive"] [class*="totalSpent"],
+[data-privacy="inactive"] [class*="headerSpentStat"],
+[data-privacy="inactive"] [class*="headerDebtStat"],
+[data-privacy="inactive"] [class*="accountPillSuccess"],
+[data-privacy="inactive"] [class*="accountPillDebt"],
+[data-privacy="inactive"] [class*="debtsTotalDue"],
+[data-privacy="inactive"] [class*="debtDueValue"],
+[data-privacy="inactive"] [class*="costDebtText"],
+[data-privacy="inactive"] [class*="attachedDebtBadge"],
+[data-privacy="inactive"] [class*="creditMetricsRow"],
+[data-privacy="inactive"] [class*="creditMetricValue"],
+[data-privacy="inactive"] [class*="creditMetricTotal"],
+[data-privacy="inactive"] [class*="optionDebt"],
+[data-privacy="inactive"] [class*="optionSpent"],
+[data-privacy="inactive"] [class*="costSub"],
+[data-privacy="inactive"] [class*="costPrice"],
+[data-privacy="inactive"] [class*="shrinkageVal"],
+[data-privacy="inactive"] td[data-col="cost"],
+[data-privacy="inactive"] td[data-col="margin"],
+[data-privacy="inactive"] td[data-col="debt"],
+[data-privacy="inactive"] td[data-col="spent"],
+[data-privacy="inactive"] td[data-col="credit"],
+[data-privacy="inactive"] td[data-col="debit"],
+[data-privacy="inactive"] td[data-col="balance"],
+[data-privacy="inactive"] input[data-privacy-cost],
+[data-privacy="inactive"] .privacy-cost-input input {
+  filter: none !important;
+  user-select: auto !important;
+  pointer-events: auto !important;
+  opacity: 1 !important;
+  transition: filter 0.1s ease-in-out, opacity 0.1s ease-in-out !important;
+}
+

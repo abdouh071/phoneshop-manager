@@ -1,12 +1,15 @@
 .container {
   padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
+/* Header & Controls */
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
   gap: 16px;
   flex-wrap: wrap;
 }
@@ -17,113 +20,409 @@
   gap: 12px;
 }
 
-.headerTitle {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--color-on-surface, #0f172a);
-  margin: 0;
+.headerIconCircle {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
 }
 
-.dateFilter {
+.headerTitle {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--color-on-surface, #0f172a);
+  margin: 0;
+  letter-spacing: -0.3px;
+}
+
+.headerSubtitle {
+  font-size: 13px;
+  color: var(--color-on-surface-variant, #64748b);
+  margin: 2px 0 0 0;
+}
+
+/* Mode Tabs */
+.modeTabs {
+  display: flex;
+  background: var(--color-surface-hover, #f1f5f9);
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  gap: 4px;
+}
+
+.modeBtn {
+  padding: 7px 16px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--color-on-surface-variant, #64748b);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.modeBtn:hover {
+  color: var(--color-on-surface, #0f172a);
+}
+
+.modeBtnActive {
+  background: #ffffff;
+  color: #4f46e5;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* Date Navigator Row */
+.navigatorRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 12px;
+  padding: 10px 16px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.navControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.navArrowBtn {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  background: var(--color-surface, #fff);
+  color: var(--color-on-surface, #0f172a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.navArrowBtn:hover {
+  background: var(--color-surface-hover, #f1f5f9);
+  border-color: #cbd5e1;
+}
+
+.periodHeading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-on-surface, #0f172a);
+}
+
+.periodBadge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #4f46e5;
+  font-weight: 700;
+}
+
+.todayQuickBtn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #4f46e5;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.todayQuickBtn:hover {
+  background: #e0e7ff;
+}
+
+.customDateInputs {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 .dateInput {
-  padding: 6px 12px;
+  padding: 6px 10px;
   border-radius: 8px;
   border: 1px solid var(--color-border, #e2e8f0);
   background: var(--color-surface, #fff);
-  font-size: 14px;
+  font-size: 13px;
   color: var(--color-on-surface, #0f172a);
 }
 
-.datePresets {
+/* Technician Filter Bar */
+.techFilterBar {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 
-.presetBtn {
-  padding: 6px 12px;
-  border-radius: 6px;
+.filterLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-on-surface-variant, #64748b);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.techFilterChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 20px;
   border: 1px solid var(--color-border, #e2e8f0);
   background: var(--color-surface, #fff);
-  color: var(--color-on-surface-variant, #64748b);
+  color: var(--color-on-surface-variant, #475569);
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s;
+  white-space: nowrap;
+  transition: all 0.15s ease;
 }
 
-.presetBtn:hover {
-  background: var(--color-surface-hover, #f1f5f9);
+.techFilterChip:hover {
+  background: var(--color-surface-hover, #f8fafc);
+  border-color: #cbd5e1;
 }
 
-.presetBtnActive {
+.techFilterChipActive {
   background: #4f46e5;
+  color: #ffffff;
+  border-color: #4f46e5;
+  box-shadow: 0 2px 10px rgba(79, 70, 229, 0.3);
+}
+
+.chipAvatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.techFilterChipActive .chipAvatar {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.chipCountBadge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.06);
+  font-weight: 700;
+}
+
+.techFilterChipActive .chipCountBadge {
+  background: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+/* 7-Day Day-by-Day Strip (Weekly Mode) */
+.weekDaysStrip {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+}
+
+.dayCard {
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 10px;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+}
+
+.dayCard:hover {
+  border-color: #6366f1;
+  background: #faf5ff;
+}
+
+.dayCardToday {
+  border: 2px solid #6366f1;
+  background: #f5f3ff;
+}
+
+.dayCardActive {
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
   color: #fff;
   border-color: #4f46e5;
 }
 
-.presetBtnActive:hover {
-  background: #4338ca;
+.dayCardName {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #64748b;
 }
 
-/* Summary cards grid */
+.dayCardActive .dayCardName {
+  color: #e0e7ff;
+}
+
+.dayCardNum {
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 2px 0 4px;
+}
+
+.dayCardActive .dayCardNum {
+  color: #ffffff;
+}
+
+.dayCardRepairsBadge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #475569;
+  margin-bottom: 4px;
+}
+
+.dayCardActive .dayCardRepairsBadge {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.dayCardProfit {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #10b981;
+}
+
+.dayCardActive .dayCardProfit {
+  color: #a7f3d0;
+}
+
+/* Global Summary Hero Grid */
 .summaryGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 28px;
+  grid-template-columns: 1.5fr repeat(4, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 1200px) {
+  .summaryGrid {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
 }
 
 .summaryCard {
-  padding: 20px;
-  border-radius: 12px;
+  padding: 18px 20px;
+  border-radius: 14px;
   background: var(--color-surface, #fff);
   border: 1px solid var(--color-border, #e2e8f0);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  justify-content: space-between;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+
+/* Hero Technician Profit Card */
+.heroTechCard {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  border: none;
+  color: #fff;
+  box-shadow: 0 8px 25px rgba(79, 70, 229, 0.35);
+}
+
+.heroTechCard .summaryLabel {
+  color: #e0e7ff;
+  font-weight: 700;
+}
+
+.heroTechCard .summaryValue {
+  color: #ffffff;
+  font-size: 28px;
+  font-weight: 900;
+}
+
+.heroSubtitle {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 500;
 }
 
 .summaryLabel {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--color-on-surface-variant, #64748b);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .summaryValue {
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 800;
   color: var(--color-on-surface, #0f172a);
 }
 
+.summarySub {
+  font-size: 11px;
+  color: var(--color-on-surface-variant, #94a3b8);
+}
+
 .summaryValueGross {
-  composes: summaryValue;
-  color: #3b82f6;
+  color: #2563eb;
 }
 
 .summaryValueParts {
-  composes: summaryValue;
   color: #ef4444;
 }
 
 .summaryValueNet {
-  composes: summaryValue;
-  color: #10b981;
+  color: #059669;
 }
 
-.summaryValueProfit {
-  composes: summaryValue;
-  color: #8b5cf6;
+.summaryValueShop {
+  color: #0284c7;
 }
 
-/* Technician cards */
+/* Technician Cards Grid (All Techs View) */
 .techGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
 }
 
 .techCard {
@@ -131,38 +430,44 @@
   border: 1px solid var(--color-border, #e2e8f0);
   border-radius: 14px;
   overflow: hidden;
-  transition: box-shadow 0.2s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+  transition: transform 0.15s, box-shadow 0.15s;
 }
 
 .techCard:hover {
-  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.08);
 }
 
 .techCardHeader {
-  padding: 16px 20px;
+  padding: 14px 18px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+  justify-content: space-between;
+  background: #f8fafc;
   border-bottom: 1px solid var(--color-border, #e2e8f0);
 }
 
+.techCardHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .techAvatar {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
-  background: #4f46e5;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
-  font-size: 16px;
-  flex-shrink: 0;
+  font-weight: 800;
+  font-size: 15px;
 }
 
 .techName {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--color-on-surface, #0f172a);
 }
@@ -170,10 +475,13 @@
 .techTicketCount {
   font-size: 12px;
   color: var(--color-on-surface-variant, #64748b);
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .techStats {
-  padding: 16px 20px;
+  padding: 14px 18px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -183,127 +491,413 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .techStatLabel {
   color: var(--color-on-surface-variant, #64748b);
+  font-weight: 500;
 }
 
 .techStatValue {
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-on-surface, #0f172a);
 }
 
-.techProfitRow {
-  composes: techStatRow;
-  padding-top: 10px;
-  margin-top: 4px;
-  border-top: 1px solid var(--color-border, #e2e8f0);
-}
-
-.techProfitLabel {
-  font-weight: 700;
-  color: #8b5cf6;
-  font-size: 15px;
-}
-
-.techProfitValue {
-  font-weight: 800;
-  color: #8b5cf6;
-  font-size: 18px;
-}
-
-/* Ticket list inside tech card */
-.techTicketList {
-  max-height: 200px;
-  overflow-y: auto;
-  border-top: 1px solid var(--color-border, #e2e8f0);
-}
-
-.techTicketItem {
+.techProfitHighlight {
+  background: #f5f3ff;
+  border-radius: 8px;
+  padding: 8px 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 20px;
+  margin-top: 4px;
+}
+
+.techProfitHighlightLabel {
   font-size: 13px;
-  border-bottom: 1px solid rgba(0,0,0,0.04);
-}
-
-.techTicketItem:last-child {
-  border-bottom: none;
-}
-
-.ticketInfo {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ticketInfoNum {
-  font-weight: 600;
-  color: var(--color-on-surface, #0f172a);
-}
-
-.ticketInfoDevice {
-  color: var(--color-on-surface-variant, #64748b);
-  font-size: 12px;
-}
-
-.ticketAmounts {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
-}
-
-.ticketGross {
-  color: var(--color-on-surface-variant, #64748b);
-  font-size: 12px;
-}
-
-.ticketParts {
-  color: #ef4444;
-  font-size: 12px;
-}
-
-.ticketNet {
   font-weight: 700;
-  color: #10b981;
+  color: #6d28d9;
 }
 
-.toggleBtn {
+.techProfitHighlightValue {
+  font-size: 16px;
+  font-weight: 900;
+  color: #6d28d9;
+}
+
+.techCardAction {
+  padding: 10px 18px;
+  background: #f8fafc;
+  border-top: 1px solid var(--color-border, #e2e8f0);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.viewTechBtn {
+  background: transparent;
+  border: 1px solid #c7d2fe;
+  color: #4f46e5;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s;
+}
+
+.viewTechBtn:hover {
+  background: #eef2ff;
+}
+
+/* Ledger & Tickets Table */
+.ticketsSection {
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.sectionHeader {
+  padding: 16px 20px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  padding: 8px;
-  background: none;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--color-border, #e2e8f0);
+  flex-wrap: wrap;
+}
+
+.sectionTitle {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--color-on-surface, #0f172a);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f8fafc;
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 8px;
+  padding: 6px 12px;
+  width: 260px;
+}
+
+.searchInput {
   border: none;
-  border-top: 1px solid var(--color-border, #e2e8f0);
-  color: var(--color-on-surface-variant, #64748b);
+  background: transparent;
+  outline: none;
   font-size: 13px;
-  cursor: pointer;
+  width: 100%;
+  color: #0f172a;
+}
+
+.ticketList {
+  display: flex;
+  flex-direction: column;
+}
+
+.ticketRow {
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--color-border, #e2e8f0);
   transition: background 0.15s;
 }
 
-.toggleBtn:hover {
-  background: var(--color-surface-hover, #f8fafc);
+.ticketRow:last-child {
+  border-bottom: none;
 }
 
-.empty {
+.ticketRow:hover {
+  background: #f8fafc;
+}
+
+.ticketLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.statusPillReady {
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+  letter-spacing: 0.4px;
+}
+
+.statusPillClaimed {
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #f5f3ff;
+  color: #7c3aed;
+  border: 1px solid #ddd6fe;
+  letter-spacing: 0.4px;
+}
+
+.ticketNumber {
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.ticketDevice {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.ticketCustomer {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.ticketMiddle {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  flex: 1.2;
+}
+
+.partsPillList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.partTag {
+  font-size: 11px;
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.ticketRight {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 140px;
+}
+
+.ticketGrossText {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.ticketNetText {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #059669;
+}
+
+.ticketCutBadge {
+  font-size: 12px;
+  font-weight: 800;
+  color: #6d28d9;
+  background: #f5f3ff;
+  padding: 2px 8px;
+  border-radius: 6px;
+  margin-top: 2px;
+}
+
+/* Empty State */
+.emptyState {
   text-align: center;
-  padding: 64px 24px;
-  color: var(--color-on-surface-variant, #94a3b8);
+  padding: 50px 20px;
+  color: #94a3b8;
 }
 
 .emptyIcon {
-  font-size: 48px;
-  margin-bottom: 16px;
+  font-size: 40px;
+  margin-bottom: 12px;
 }
 
-.emptyText {
+.emptyTitle {
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 4px;
 }
+
+.emptySubtitle {
+  font-size: 13px;
+  color: #64748b;
+}
+
+/* Dual Profit Mode Toggle */
+.dualProfitWrapper {
+  display: flex;
+  background: var(--color-surface-hover, #f1f5f9);
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  gap: 4px;
+}
+
+.dualProfitBtn {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--color-on-surface-variant, #64748b);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.dualProfitBtn:hover {
+  color: var(--color-on-surface, #0f172a);
+}
+
+.dualProfitBtnActiveTaken {
+  background: #059669;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.3);
+}
+
+.dualProfitBtnActiveAll {
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+
+/* Commission Management Bar */
+.commissionBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 12px;
+  padding: 10px 16px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.commissionBarLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.commissionBarLabel {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-on-surface, #1e293b);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rateInputWrapper {
+  display: inline-flex;
+  align-items: center;
+  background: var(--color-surface-hover, #f8fafc);
+  border: 1.5px solid var(--color-border, #cbd5e1);
+  border-radius: 8px;
+  padding: 2px 8px;
+  transition: border-color 0.15s ease;
+}
+
+.rateInputWrapper:focus-within {
+  border-color: #4f46e5;
+  background: #ffffff;
+}
+
+.rateInputField {
+  width: 48px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 800;
+  color: #1e293b;
+  text-align: right;
+  padding: 4px 2px;
+  outline: none;
+}
+
+.ratePercentSymbol {
+  font-size: 13px;
+  font-weight: 800;
+  color: #6366f1;
+  margin-left: 2px;
+}
+
+.quickRatePill {
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid var(--color-border, #e2e8f0);
+  background: var(--color-surface, #ffffff);
+  color: var(--color-on-surface-variant, #64748b);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.quickRatePill:hover {
+  border-color: #6366f1;
+  color: #6366f1;
+}
+
+.quickRatePillActive {
+  background: #6366f1;
+  color: #ffffff;
+  border-color: #6366f1;
+}
+
+.saveHintBadge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #059669;
+  background: #ecfdf5;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+/* Card Commission Row */
+.techCommissionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  margin-top: 4px;
+}
+
+.techCommissionLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+

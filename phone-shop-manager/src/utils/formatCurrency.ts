@@ -1,4 +1,5 @@
 import { useSettingsStore } from '../store/settingsStore';
+import { usePrivacyStore } from '../store/privacyStore';
 import { useCallback } from 'react';
 
 /**
@@ -69,14 +70,52 @@ export const formatCurrency = (amount: number, noFractions = false): string => {
 };
 
 /**
- * React hook that subscribes to the active currency and returns a reactive formatter function.
+ * Formats a monetary amount, masking it to ••••• DA if Privacy Curtain Mode is active.
+ */
+export const formatPrivateCurrency = (amount: number, noFractions = false): string => {
+  if (usePrivacyStore.getState().isPrivacyActive) {
+    const { currency } = useSettingsStore.getState();
+    const curr = (currency || 'USD').toUpperCase();
+    if (curr === 'DZD') return '••••• DA';
+    if (curr === 'EUR') return '••••• €';
+    if (curr === 'GBP') return '£•••••';
+    return '$•••••';
+  }
+  return formatCurrency(amount, noFractions);
+};
+
+/**
+ * React hook that subscribes to the active currency and privacy mode,
+ * returning a reactive formatter function with .private(amount) support.
  */
 export const useFormatCurrency = () => {
   const currency = useSettingsStore((s) => s.currency);
-  return useCallback(
+  const isPrivacyActive = usePrivacyStore((s) => s.isPrivacyActive);
+
+  const format = useCallback(
     (amount: number, noFractions = false) => {
       return formatCurrencyWith(amount, currency, noFractions);
     },
     [currency]
   );
+
+  const privateFormat = useCallback(
+    (amount: number, noFractions = false) => {
+      if (isPrivacyActive) {
+        const curr = (currency || 'USD').toUpperCase();
+        if (curr === 'DZD') return '••••• DA';
+        if (curr === 'EUR') return '••••• €';
+        if (curr === 'GBP') return '£•••••';
+        return '$•••••';
+      }
+      return formatCurrencyWith(amount, currency, noFractions);
+    },
+    [currency, isPrivacyActive]
+  );
+
+  return Object.assign(format, {
+    private: privateFormat,
+    isPrivacyActive,
+  });
 };
+

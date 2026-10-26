@@ -20,7 +20,8 @@ service cloud.firestore {
     function isSuperAdmin() {
       return isSignedIn() && (
         callerProfile().isSuperAdmin == true || 
-        request.auth.token.email == 'admin@example.com' // Replace with your initial owner email if needed
+        callerProfile().role == 'admin' ||
+        request.auth.token.email == 'admin@example.com'
       );
     }
 
@@ -28,9 +29,13 @@ service cloud.firestore {
       return isSignedIn() && (callerProfile().role == 'sales_agent' || callerProfile().role == 'repair_agent');
     }
 
-    // ─── Inventory ───────────────────────────────────────────────────────────
+    // ─── Inventory & Products ──────────────────────────────────────────────────
     // All signed-in users can read & write (Admin Unlock modal handles frontend guard)
     match /inventory/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /products/{docId} {
       allow read, write: if isSignedIn();
     }
 
@@ -48,8 +53,7 @@ service cloud.firestore {
     // Unauthenticated users can READ individual tickets (public tracking portal).
     // PIN verification and field stripping is enforced in the application layer.
     match /repairs/{docId} {
-      allow read:  if true;
-      allow write: if isSignedIn();
+      allow read, write: if true;
     }
 
     // ─── Counters (for sequential numbers like TKT-XXXX) ──────────────────────
@@ -59,12 +63,12 @@ service cloud.firestore {
 
     // ─── Customers ───────────────────────────────────────────────────────────
     match /customers/{docId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
 
     // ─── Customer Debts & Credit Tabs ────────────────────────────────────────
     match /customer_debts/{docId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if true;
     }
 
     // ─── Customer Activity Logs ──────────────────────────────────────────────
@@ -114,20 +118,24 @@ service cloud.firestore {
       // Anyone signed-in can read staff profiles (needed for listings)
       allow read: if isSignedIn();
 
-      // Allow the super admin email to bootstrap their own profile on first login
-      allow create: if isSignedIn() 
-        && request.auth.uid == userId
-        && (request.auth.token.email == 'admin@example.com' || isAdmin());
+      // Allow first-time authenticated users to create their own user profile document on first login/bootstrap, or admins
+      // This is separate from update/delete so the first-ever user isn't blocked by callerProfile()
+      allow create: if isSignedIn() && (
+        request.auth.uid == userId ||
+        isAdmin() ||
+        isSuperAdmin()
+      );
 
-      // Workers cannot write to user profiles at all
-      allow write: if !isWorker() && (
+      // Only admins/superadmins can update or delete user profiles
+      // Workers cannot update/delete user profiles at all
+      allow update: if isSignedIn() && !isWorker() && (
 
         // Super Admins can do anything to user profiles
         isSuperAdmin()
 
         ||
 
-        // Regular Admins can create/edit, but with strict guards:
+        // Regular Admins can edit, but with strict guards:
         (isAdmin() && (
           // 1. They cannot grant isSuperAdmin to anyone
           !('isSuperAdmin' in request.resource.data && request.resource.data.isSuperAdmin == true)
@@ -139,6 +147,9 @@ service cloud.firestore {
           !(resource != null && resource.data.isSuperAdmin == true)
         ))
       );
+
+      // Only Super Admins can delete user profiles
+      allow delete: if isSignedIn() && isSuperAdmin();
     }
 
     // ─── Active & Suspended Carts ────────────────────────────────────────────
@@ -161,6 +172,12 @@ service cloud.firestore {
     match /settings/{docId} {
       allow read: if true;
       allow write: if isAdmin() || isSuperAdmin();
+    }
+
+    // ─── Approval Requests ────────────────────────────────────────────────────
+    // Signed-in staff can create/read approval requests and admins can resolve them
+    match /approvalRequests/{docId} {
+      allow read, write: if isSignedIn();
     }
 
     // ─── Deny Everything Else ────────────────────────────────────────────────

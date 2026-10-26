@@ -187,11 +187,14 @@ export const repairService = {
     const local = getLocalRepairs();
     const existingLocal = local.find(t => t.id === id);
     
+    const repairedAt = (status === 'ready' && !existingLocal?.repairedAt) ? updatedAt : existingLocal?.repairedAt;
+    
     const updatedLocal: RepairTicket = {
       ...(existingLocal || ({} as RepairTicket)),
       id,
       status,
       updatedAt,
+      ...(repairedAt ? { repairedAt } : {}),
       ...(statusHistory ? { statusHistory } : {}),
     };
 
@@ -203,6 +206,7 @@ export const repairService = {
       const snap = await getDoc(ref);
       if (snap.exists()) {
         const updatePayload: Record<string, unknown> = { status, updatedAt };
+        if (repairedAt && !snap.data()?.repairedAt) updatePayload.repairedAt = repairedAt;
         if (statusHistory) updatePayload.statusHistory = statusHistory;
         await updateDoc(ref, updatePayload);
         // Merge: keep local ticket data as base, only apply status-related fields
@@ -211,6 +215,7 @@ export const repairService = {
           id,
           status,
           updatedAt,
+          ...(repairedAt ? { repairedAt } : {}),
           ...(statusHistory ? { statusHistory } : {}),
         };
         saveLocalRepairs(local.map(t => t.id === id ? serverTicket : t));
@@ -293,7 +298,12 @@ export const repairService = {
       const ref = doc(db, COLLECTION, id);
       const snap = await getDoc(ref);
       if (snap.exists()) {
-        const payload = { ...updates, updatedAt: merged.updatedAt };
+        const payload: Record<string, any> = { updatedAt: merged.updatedAt };
+        for (const [key, val] of Object.entries(updates)) {
+          if (val !== undefined) {
+            payload[key] = val;
+          }
+        }
         await updateDoc(ref, payload);
         saveLocalRepairs(local.map(t => t.id === id ? merged : t));
         return merged;
@@ -531,6 +541,23 @@ export const repairService = {
     } catch (err) {
       console.warn('Failed to batch reassign customer tickets on Firestore:', err);
     }
+  },
+
+  mergeTickets: async (
+    primaryTicketId: string,
+    secondaryTicketId: string,
+    consolidatedUpdates: Partial<RepairTicket>
+  ): Promise<RepairTicket> => {
+    // 1. Update primary ticket with consolidated data
+    const updatedPrimary = await repairService.updateTicket(primaryTicketId, consolidatedUpdates);
+
+    // 2. Archive secondary ticket with merged metadata (NEVER delete from DB)
+    await repairService.updateTicket(secondaryTicketId, {
+      mergedIntoTicketId: primaryTicketId,
+      mergedAt: new Date().toISOString(),
+    });
+
+    return updatedPrimary;
   },
 };
 

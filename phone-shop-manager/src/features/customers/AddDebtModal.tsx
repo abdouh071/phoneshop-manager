@@ -4,10 +4,11 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Textarea } from '../../components/ui/Textarea';
 import { useCustomerStore } from '../../store/customerStore';
+import { usePrivacyStore } from '../../store/privacyStore';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
 import type { Customer } from '../../types';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { BookOpen, AlertCircle, ShieldAlert } from 'lucide-react';
 import styles from '../inventory/ProductForm.module.css';
 
@@ -18,6 +19,7 @@ interface AddDebtModalProps {
 }
 
 export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, customer }) => {
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
   const [productOrService, setProductOrService] = useState('');
   const [totalAmount, setTotalAmount] = useState('');
   const [amountPaid, setAmountPaid] = useState('');
@@ -144,6 +146,7 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
             placeholder="e.g. 24000"
             value={totalAmount}
             onChange={e => { setTotalAmount(e.target.value); setError(null); }}
+            className="privacy-cost-input"
           />
           <Input
             label="Amount Paid Upfront"
@@ -152,6 +155,7 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
             placeholder="0 if nothing"
             value={amountPaid}
             onChange={e => setAmountPaid(e.target.value)}
+            className="privacy-cost-input"
           />
         </div>
 
@@ -169,7 +173,7 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
         }}>
           <span style={{ color: '#78350f' }}>Remaining Balance Owed:</span>
           <span style={{ fontSize: '15px', fontWeight: 800, color: '#dc2626' }}>
-            {formatCurrency(remainingNum)}
+            {formatPrivateCurrency(remainingNum)}
           </span>
         </div>
 
@@ -187,10 +191,10 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ color: isLimitExceeded ? '#991b1b' : '#166534', fontWeight: 700 }}>
-                Credit Limit: {formatCurrency(customer.creditLimit)}
+                Credit Limit: {formatPrivateCurrency(customer.creditLimit)}
               </span>
               <span style={{ color: isLimitExceeded ? '#dc2626' : '#15803d', fontWeight: 600 }}>
-                Projected: {formatCurrency(projectedBalance)}
+                Projected: {formatPrivateCurrency(projectedBalance)}
               </span>
             </div>
 
@@ -198,7 +202,7 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
               <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', color: '#991b1b', marginTop: '2px' }}>
                 <ShieldAlert size={16} style={{ flexShrink: 0, marginTop: '2px', color: '#dc2626' }} />
                 <div style={{ flex: 1, fontSize: '12px', lineHeight: 1.4 }}>
-                  This item will cause {customer.name} to exceed their authorized limit by {formatCurrency(projectedBalance - customer.creditLimit)}.
+                  This item will cause {customer.name} to exceed their authorized limit by {formatPrivateCurrency(projectedBalance - customer.creditLimit)}.
                   {user?.role === 'admin' ? (
                     <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', cursor: 'pointer', fontWeight: 700, color: '#b91c1c' }}>
                       <input

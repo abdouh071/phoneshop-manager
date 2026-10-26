@@ -2,11 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Card, CardHeader } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { Edit2, UserX, UserPlus, RefreshCw, ShieldOff, Smartphone } from 'lucide-react';
+import { Edit2, UserX, UserPlus, RefreshCw, ShieldOff, Smartphone, KeyRound } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import type { User } from '../../store/authStore';
 import { NewUserModal } from './NewUserModal';
 import { EditUserModal } from './EditUserModal';
+import { SetPinModal } from './SetPinModal';
 import { useToast } from '../../components/ui/Toast';
 import styles from './Settings.module.css';
 
@@ -15,12 +16,14 @@ export const UsersTab = () => {
   const toast = useToast();
   const [isNewUserModalOpen, setIsNewUserModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<User | null>(null);
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [selectedPinUser, setSelectedPinUser] = useState<User | null>(null);
 
   useEffect(() => {
     fetchStaff();
   }, [fetchStaff]);
 
-  const isUserAdmin = user?.role === 'admin';
+  const isUserAdmin = user?.role === 'admin' || user?.isSuperAdmin === true;
 
   const canManageTarget = (target: User) => {
     if (!user) return false;
@@ -70,6 +73,63 @@ export const UsersTab = () => {
 
   return (
     <>
+      {/* Admin Approval PIN Quick Setup Card */}
+      {isUserAdmin && (
+        <div style={{
+          marginBottom: '16px',
+          padding: '16px 20px',
+          background: 'var(--color-surface, #ffffff)',
+          border: '1px solid var(--color-outline, #e2e8f0)',
+          borderRadius: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div style={{
+              width: '42px',
+              height: '42px',
+              borderRadius: '10px',
+              background: 'rgba(99, 102, 241, 0.1)',
+              color: 'var(--color-primary, #6366f1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <KeyRound size={22} />
+            </div>
+            <div>
+              <div style={{ fontSize: '15px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>Admin Quick Approval PIN</span>
+                {user?.approvalPin ? (
+                  <Badge variant="success">PIN Active</Badge>
+                ) : (
+                  <Badge variant="warning">Not Configured</Badge>
+                )}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--color-on-surface-variant, #64748b)', marginTop: '2px' }}>
+                {user?.approvalPin
+                  ? 'Your approval PIN is active. Use it on any staff terminal to instantly authorize price changes, discounts, and returns in-person without entering your login password.'
+                  : 'Configure a 4-8 digit numeric PIN so you can authorize staff actions on their screens without typing your full password in front of others.'}
+              </div>
+            </div>
+          </div>
+
+          <Button
+            variant={user?.approvalPin ? 'secondary' : 'primary'}
+            size="sm"
+            leftIcon={<KeyRound size={15} />}
+            onClick={() => { setSelectedPinUser(user); setIsPinModalOpen(true); }}
+          >
+            {user?.approvalPin ? 'Change My PIN' : 'Set Approval PIN'}
+          </Button>
+        </div>
+      )}
+
       <Card padding="none">
         <div className={styles.cardHeaderWithExport}>
           <CardHeader
@@ -78,8 +138,10 @@ export const UsersTab = () => {
           />
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <a
-              href="/downloads/Auto-Manager.apk"
+              href={import.meta.env.VITE_APK_DOWNLOAD_URL || '/downloads/Auto-Manager.apk'}
               download="Auto-Manager.apk"
+              target={import.meta.env.VITE_APK_DOWNLOAD_URL ? '_blank' : '_self'}
+              rel="noopener noreferrer"
               style={{ textDecoration: 'none' }}
               title="Download Android APK for technicians"
             >
@@ -108,6 +170,7 @@ export const UsersTab = () => {
             <tr>
               <th className={styles.th}>Member</th>
               <th className={styles.th}>Role</th>
+              <th className={styles.th}>Approval PIN</th>
               <th className={styles.th}>Status</th>
               <th className={styles.th}>Last Active</th>
               <th className={styles.th}>Actions</th>
@@ -117,6 +180,9 @@ export const UsersTab = () => {
             {staff.map((u) => {
               const isRevoked = u.status === 'revoked';
               const isSelf = u.id === user?.id;
+              const isAdminMember = u.role === 'admin' || u.isSuperAdmin;
+              const canEditPin = isUserAdmin && (isSelf || isSuperAdmin);
+
               return (
                 <tr key={u.id} className={styles.tr} style={{ opacity: isRevoked ? 0.6 : 1 }}>
                   <td className={styles.td}>
@@ -154,6 +220,40 @@ export const UsersTab = () => {
                        u.role === 'repair_agent' ? '🔧 Repair Agent' :
                        String(u.role).replace('_', ' ').toUpperCase()}
                     </span>
+                  </td>
+                  <td className={styles.td}>
+                    {isAdminMember ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {u.approvalPin ? (
+                          <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 600 }}>
+                            ● Configured
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 500 }}>
+                            ○ Not Set
+                          </span>
+                        )}
+                        {canEditPin && (
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedPinUser(u); setIsPinModalOpen(true); }}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--color-primary, #6366f1)',
+                              fontSize: '11px',
+                              cursor: 'pointer',
+                              padding: '2px 4px',
+                              textDecoration: 'underline',
+                            }}
+                          >
+                            {u.approvalPin ? 'Edit' : 'Set'}
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: '12px', color: '#aaa' }}>—</span>
+                    )}
                   </td>
                   <td className={styles.td}>
                     {isRevoked ? (
@@ -211,7 +311,7 @@ export const UsersTab = () => {
             })}
             {staff.length === 0 && (
               <tr>
-                <td colSpan={5} style={{ padding: '32px', textAlign: 'center', color: '#666' }}>
+                <td colSpan={6} style={{ padding: '32px', textAlign: 'center', color: '#666' }}>
                   No staff members yet. Click "Add User" to get started.
                 </td>
               </tr>
@@ -229,6 +329,12 @@ export const UsersTab = () => {
         isOpen={!!editingMember}
         onClose={() => setEditingMember(null)}
         member={editingMember}
+      />
+
+      <SetPinModal
+        isOpen={isPinModalOpen}
+        onClose={() => { setIsPinModalOpen(false); setSelectedPinUser(null); }}
+        targetUser={selectedPinUser}
       />
     </>
   );

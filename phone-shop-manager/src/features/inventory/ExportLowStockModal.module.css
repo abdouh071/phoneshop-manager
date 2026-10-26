@@ -1,0 +1,318 @@
+/* ============================================================
+   EXPORT LOW STOCK MODAL STYLES
+   ============================================================ */
+
+.modalContent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* --- Filter Configuration Card --- */
+.filterCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--color-surface-container-low, #f8fafc);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.filterRow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filterHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.filterLabel {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-surface-variant, #64748b);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pillGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.categoryPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--color-outline-variant, #cbd5e1);
+  background: var(--color-surface-container-lowest, #ffffff);
+  color: var(--color-on-surface, #334155);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.categoryPill:hover:not(.categoryPillActive) {
+  background: var(--color-surface-container-high, #f1f5f9);
+  color: var(--color-on-surface, #0f172a);
+}
+
+.categoryPillActive {
+  background: #d97706 !important;
+  color: #ffffff !important;
+  border-color: #d97706 !important;
+  box-shadow: 0 2px 6px rgba(217, 119, 6, 0.25);
+}
+
+.pillBadge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.categoryPillActive .pillBadge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.subCategoryRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 10px;
+  border-left: 2px solid #2563eb;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.subCategoryPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border: 1px solid var(--color-outline-variant, #cbd5e1);
+  background: var(--color-surface-container-lowest, #ffffff);
+  color: var(--color-on-surface-variant, #475569);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.subCategoryPill:hover:not(.subCategoryPillActive) {
+  background: var(--color-surface-container-high, #f1f5f9);
+  color: var(--color-on-surface, #0f172a);
+}
+
+.subCategoryPillActive {
+  background: #2563eb !important;
+  color: #ffffff !important;
+  border-color: #2563eb !important;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+
+.subCategoryPillActive .pillBadge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.optionsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px dashed var(--color-outline-variant, #e2e8f0);
+}
+
+.selectWrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.selectInput {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--color-outline-variant, #cbd5e1);
+  background: var(--color-surface-container-lowest, #ffffff);
+  font-size: 12px;
+  color: var(--color-on-surface, #0f172a);
+  outline: none;
+}
+
+/* --- Metric Stats Bar --- */
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.statCard {
+  background: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.statLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-on-surface-variant, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.statValue {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--color-on-surface, #0f172a);
+}
+
+/* --- Preview Table --- */
+.previewSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.previewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.previewTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-on-surface, #0f172a);
+}
+
+.tableWrapper {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 10px;
+  background: var(--color-surface-container-lowest, #ffffff);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  background: var(--color-surface-container-low, #f8fafc);
+  color: var(--color-on-surface-variant, #64748b);
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-outline-variant, #e2e8f0);
+  z-index: 1;
+}
+
+.table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-outline-variant, #f1f5f9);
+  color: var(--color-on-surface, #1e293b);
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.productCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.productName {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.productSku {
+  font-family: monospace;
+  font-size: 10.5px;
+  color: #64748b;
+}
+
+.catBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.stockBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+  color: #d97706;
+}
+
+.deficitBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.emptyBox {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--color-on-surface-variant, #64748b);
+  font-size: 13px;
+}
+
+/* --- Modal Footer --- */
+.footerActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  width: 100%;
+}

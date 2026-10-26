@@ -6,6 +6,7 @@ export type StockStatus = 'in_stock' | 'low_stock' | 'out_of_stock';
 export type RepairStatus = 'pending' | 'in_progress' | 'ready' | 'completed' | 'cancelled' | 'returned';
 export type PaymentMethod = 'cash' | 'card' | 'mobile' | 'transfer' | 'debt' | 'store_credit';
 export type ProductCategory = 'smartphone' | 'tablet' | 'accessory' | 'wearable' | 'repair_part';
+export type AccessorySubCategory = 'case' | 'glass' | 'cable' | 'charger' | 'earphone' | 'powerbank' | 'holder' | 'other';
 export type ProductCondition = 'new' | 'refurbished' | 'used';
 
 // --- Inventory ---
@@ -21,6 +22,7 @@ export interface PhoneModel {
   stockStatus: StockStatus;
   sku: string;
   category: ProductCategory;
+  accessorySubCategory?: AccessorySubCategory; // only set when category === 'accessory'
   supplier?: string;
   location?: string;
 
@@ -158,13 +160,45 @@ export interface RepairTicket {
   estimatedCompletionDate?: string;
   returnReason?: string;
   returnDate?: string;
+  repairedAt?: string; // Timestamp when marked ready (production credit)
   // Handover / Settlement tracking
   paymentStatus?: 'paid' | 'partial' | 'debt';
   paidAmount?: number;
   handoverAmountPaid?: number;
   completedAt?: string;
   debtEntryId?: string;
-  settlementNotes?: string;
+  /** Structured return history records on this ticket */
+  returnRecords?: {
+    id: string;
+    returnDate: string;
+    reason: string;
+    returnTicketId?: string;
+    returnTicketNumber?: string;
+    isWarranty?: boolean;
+    estimatedCost?: number;
+    actualCost?: number;
+    resolvedAt?: string;
+    resolutionNotes?: string;
+    status: 'pending' | 'in_progress' | 'ready' | 'completed';
+  }[];
+  /** If set, this ticket was merged into another ticket and is archived (never deleted from DB) */
+  mergedIntoTicketId?: string;
+  /** ISO timestamp of when this ticket was merged */
+  mergedAt?: string;
+}
+
+export interface RepairReturnRecord {
+  id: string;
+  returnDate: string;
+  reason: string;
+  returnTicketId?: string;
+  returnTicketNumber?: string;
+  isWarranty?: boolean;
+  estimatedCost?: number;
+  actualCost?: number;
+  resolvedAt?: string;
+  resolutionNotes?: string;
+  status: 'pending' | 'in_progress' | 'ready' | 'completed';
 }
 
 export interface CustomerRegisteredDevice {
@@ -180,12 +214,19 @@ export interface Customer {
   id: string;
   name: string;
   phone: string;
+  normalizedPhone?: string; // Canonical clean digits (e.g. 0550123456) for reliable search & indexing
   email?: string;
   accountType?: 'retail' | 'shop_repairer' | 'b2b';
   shopName?: string; // e.g. "AP Phone"
   creditLimit?: number; // Maximum allowed credit balance in DZD
   storeCredit?: number; // Active Store Credit / Avoir balance in DZD
   taxId?: string;
+  address?: string; // Physical address / Wilaya
+  rc?: string; // Registre de Commerce (e.g. 16/00-1234567B19)
+  nif?: string; // Numéro d'Identification Fiscale
+  nis?: string; // Numéro d'Identification Statistique
+  art?: string; // Article d'Imposition (AI)
+  wholesaleDiscountPercent?: number; // Custom wholesale discount percentage (e.g. 5, 10, 15)
   notes?: string;
   registeredDevices?: CustomerRegisteredDevice[];
   totalPurchases: number;
@@ -193,6 +234,10 @@ export interface Customer {
   totalDebt?: number;
   lastVisitDate: string;
   joinDate: string;
+  /** If set, this customer was merged into another account and should be hidden from active lists */
+  mergedIntoId?: string;
+  /** ISO timestamp of when this customer was merged/archived */
+  mergedAt?: string;
 }
 
 export const isShopCustomer = (c: Customer): boolean => {

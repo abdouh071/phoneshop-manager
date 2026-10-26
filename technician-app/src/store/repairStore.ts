@@ -14,6 +14,7 @@ import { db } from '../lib/firebase';
 import { useAuthStore } from './authStore';
 import { activityLogService } from '../services/activityLogService';
 import { customerService } from '../services/customerService';
+import { offlineSyncService } from '../services/offlineSyncService';
 import type { RepairTicket, RepairStatus, RepairStatusHistoryEntry } from '../types';
 
 interface SettleClaimParams {
@@ -45,7 +46,14 @@ export const useRepairStore = create<RepairState>((set, get) => ({
   error: null,
 
   subscribeToTickets: () => {
-    set({ isLoading: true });
+    // Immediately display cached tickets while fetching remote changes
+    offlineSyncService.getCachedTickets().then((cached) => {
+      if (cached && cached.length > 0 && get().tickets.length === 0) {
+        set({ tickets: cached, isLoading: false });
+      }
+    });
+
+    set({ isLoading: get().tickets.length === 0 });
     const q = query(collection(db, 'repairs'));
 
     const unsubscribe = onSnapshot(
@@ -60,11 +68,21 @@ export const useRepairStore = create<RepairState>((set, get) => ({
           const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
           return timeB - timeA;
         });
-        set({ tickets, isLoading: false, error: null });
+
+        // Merge any pending offline tickets that are not yet on the server
+        offlineSyncService.getCachedTickets().then((cached) => {
+          const offlineOnes = (cached || []).filter(t => t.id && t.id.startsWith('offline_'));
+          const serverIds = new Set(tickets.map(t => t.id));
+          const merged = [...offlineOnes.filter(t => !serverIds.has(t.id)), ...tickets];
+          set({ tickets: merged, isLoading: false, error: null });
+          offlineSyncService.setCachedTickets(merged);
+        });
       },
       (error) => {
-        console.error('Error fetching tickets:', error);
-        set({ error: error.message, isLoading: false });
+        console.warn('[RepairStore] Snapshot listener failed (offline), loading cache:', error);
+        offlineSyncService.getCachedTickets().then((cached) => {
+          set({ tickets: cached || [], error: null, isLoading: false });
+        });
       }
     );
 
@@ -145,8 +163,8 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         }
       );
     } catch (error) {
-      console.error('Failed to update ticket status:', error);
-      throw error;
+      console.warn('Failed to update ticket status on Firestore (offline), queuing for auto-sync:', error);
+      await offlineSyncService.saveOfflineStatusUpdate(id, status, changerName, additionalUpdates);
     }
   },
 
@@ -375,23 +393,33 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         statusHistory: [initialHistory]
       };
 
-      const createdDoc = await addDoc(collection(db, 'repairs'), newTicket);
+      try {
+        const createdDoc = await addDoc(collection(db, 'repairs'), newTicket);
 
-      // Log activity
-      await activityLogService.log(
-        'repairs',
-        `New Repair Ticket created: #${ticketNumber}`,
-        {
-          entityId: createdDoc.id,
-          entityType: 'repair',
-          detail: `Device: ${ticket.deviceBrand} ${ticket.deviceModel} for ${ticket.customerName}`,
-          userName: creatorName,
-          userId: creatorId,
-        }
-      );
-    } catch (error) {
-      console.error('Failed to create ticket:', error);
-      throw error;
+        // Log activity
+        await activityLogService.log(
+          'repairs',
+          `New Repair Ticket created: #${ticketNumber}`,
+          {
+            entityId: createdDoc.id,
+            entityType: 'repair',
+            detail: `Device: ${ticket.deviceBrand} ${ticket.deviceModel} for ${ticket.customerName}`,
+            userName: creatorName,
+            userId: creatorId,
+          }
+        );
+      } catch (error) {
+        console.warn('Failed to create ticket on Firestore (offline), storing locally for auto-sync:', error);
+        const offlineId = `offline_tkt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const offlineTicket: RepairTicket = {
+          ...newTicket,
+          id: offlineId,
+        } as RepairTicket;
+        await offlineSyncService.saveOfflineTicket(offlineTicket);
+        set(state => ({ tickets: [offlineTicket, ...state.tickets] }));
+      }
+    } catch (outerErr) {
+      console.warn('Unexpected error in createTicket flow:', outerErr);
     }
   },
 

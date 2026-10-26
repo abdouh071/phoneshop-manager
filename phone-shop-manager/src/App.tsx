@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
@@ -6,24 +6,77 @@ import { ErrorBoundary } from './components/layout/ErrorBoundary';
 import { ToastProvider } from './components/ui/Toast';
 import { PageSkeleton } from './components/ui/PageSkeleton';
 import { useAuthStore } from './store/authStore';
+import { offlineCustomerSyncService } from './services/offlineCustomerSyncService';
+import { offlineQueue } from './services/offlineQueue';
+import { registerOfflineHandlers } from './services/offlineHandlers';
+import { unifiedOfflineSyncService } from './services/unifiedOfflineSyncService';
 
-// Lazy-loaded routes for instant initial application startup
-const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })));
-const InventoryPage = lazy(() => import('./features/inventory/InventoryPage').then(m => ({ default: m.InventoryPage })));
-const PurchasingPage = lazy(() => import('./features/purchasing/PurchasingPage').then(m => ({ default: m.PurchasingPage })));
-const POSPage = lazy(() => import('./features/pos/POSPage').then(m => ({ default: m.POSPage })));
-const PartsPage = lazy(() => import('./features/parts/PartsPage').then(m => ({ default: m.PartsPage })));
-const RepairsPage = lazy(() => import('./features/repairs/RepairsPage').then(m => ({ default: m.RepairsPage })));
-const CustomersPage = lazy(() => import('./features/customers/CustomersPage').then(m => ({ default: m.CustomersPage })));
-const ReportsPage = lazy(() => import('./features/reports/ReportsPage').then(m => ({ default: m.ReportsPage })));
-const SettingsPage = lazy(() => import('./features/settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
-const ActivityPage = lazy(() => import('./features/activity/ActivityPage').then(m => ({ default: m.ActivityPage })));
-const CustomTicketPage = lazy(() => import('./features/customTicket/CustomTicketPage').then(m => ({ default: m.CustomTicketPage })));
-const LoginPage = lazy(() => import('./features/auth/LoginPage').then(m => ({ default: m.LoginPage })));
-const CustomerTrackingPage = lazy(() => import('./features/tracking/CustomerTrackingPage').then(m => ({ default: m.CustomerTrackingPage })));
+// Register all domain-specific offline sync handlers once at app startup
+registerOfflineHandlers();
+
+/**
+ * Smart lazy loader with automatic deployment-recovery.
+ * If a new version was deployed and an older chunk hash is requested
+ * (causing MIME type error or failed fetch), it automatically reloads the
+ * window once to seamlessly load the latest bundle without an error screen.
+ */
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  factory: () => Promise<{ default: T }>
+) {
+  return lazy(async () => {
+    try {
+      return await factory();
+    } catch (error: any) {
+      console.warn('[LazyLoader] Dynamic chunk failed to load:', error);
+      const msg = (error?.message || '').toLowerCase();
+      const isChunkError =
+        msg.includes('mime type') ||
+        msg.includes('failed to fetch dynamically imported') ||
+        msg.includes('importing a module script failed') ||
+        msg.includes('error loading dynamically imported');
+
+      const lastReload = Number(sessionStorage.getItem('last_chunk_reload_ts') || 0);
+      const now = Date.now();
+
+      if (isChunkError && now - lastReload > 8000) {
+        sessionStorage.setItem('last_chunk_reload_ts', String(now));
+        window.location.reload();
+        return new Promise<{ default: T }>(() => {});
+      }
+
+      throw error;
+    }
+  });
+}
+
+// Lazy-loaded routes for instant initial application startup with stale-chunk resilience
+const DashboardPage = lazyWithRetry(() => import('./features/dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const InventoryPage = lazyWithRetry(() => import('./features/inventory/InventoryPage').then(m => ({ default: m.InventoryPage })));
+const PurchasingPage = lazyWithRetry(() => import('./features/purchasing/PurchasingPage').then(m => ({ default: m.PurchasingPage })));
+const POSPage = lazyWithRetry(() => import('./features/pos/POSPage').then(m => ({ default: m.POSPage })));
+const PartsPage = lazyWithRetry(() => import('./features/parts/PartsPage').then(m => ({ default: m.PartsPage })));
+const RepairsPage = lazyWithRetry(() => import('./features/repairs/RepairsPage').then(m => ({ default: m.RepairsPage })));
+const CustomersPage = lazyWithRetry(() => import('./features/customers/CustomersPage').then(m => ({ default: m.CustomersPage })));
+const ReportsPage = lazyWithRetry(() => import('./features/reports/ReportsPage').then(m => ({ default: m.ReportsPage })));
+const SettingsPage = lazyWithRetry(() => import('./features/settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const ActivityPage = lazyWithRetry(() => import('./features/activity/ActivityPage').then(m => ({ default: m.ActivityPage })));
+const CustomTicketPage = lazyWithRetry(() => import('./features/customTicket/CustomTicketPage').then(m => ({ default: m.CustomTicketPage })));
+const LoginPage = lazyWithRetry(() => import('./features/auth/LoginPage').then(m => ({ default: m.LoginPage })));
+const CustomerTrackingPage = lazyWithRetry(() => import('./features/tracking/CustomerTrackingPage').then(m => ({ default: m.CustomerTrackingPage })));
 
 function App() {
   const { isAuthenticated, isInitializing } = useAuthStore();
+
+  useEffect(() => {
+    const cleanupCustomers = offlineCustomerSyncService.init();
+    const cleanupQueue = offlineQueue.init();
+    const cleanupUnified = unifiedOfflineSyncService.init();
+    return () => {
+      cleanupCustomers();
+      cleanupQueue();
+      cleanupUnified();
+    };
+  }, []);
 
   return (
     <ErrorBoundary>

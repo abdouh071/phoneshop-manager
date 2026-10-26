@@ -2177,4 +2177,407 @@
   border-color: #94a3b8;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   POS LAYOUT DENSITY (Compact Laptop vs. Standard vs. Touchscreen POS)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.qtyTouchClickable {
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.qtyTouchClickable:hover {
+  background: rgba(79, 70, 229, 0.1);
+  color: var(--color-primary, #4f46e5);
+}
+
+/* ─── 1. COMPACT LAPTOP MODE (13"–14" Laptops / Scaled Displays) ──────────── */
+[data-pos-density="compact"] .page,
+.compactDensity.page {
+  gap: 12px;
+  min-height: calc(100vh - 64px);
+}
+
+[data-pos-density="compact"] .productsPanel {
+  gap: 10px;
+}
+
+[data-pos-density="compact"] .panelHeader {
+  padding-bottom: 8px;
+  gap: 8px;
+}
+
+[data-pos-density="compact"] .tab {
+  font-size: 14.5px;
+  padding: 4px 0;
+}
+
+[data-pos-density="compact"] .search {
+  min-width: 180px;
+}
+
+[data-pos-density="compact"] .cashDrawerBtn {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+[data-pos-density="compact"] .productsToolbar {
+  margin-bottom: 8px;
+  gap: 6px;
+}
+
+[data-pos-density="compact"] .categoryFilterBar {
+  gap: 4px;
+  padding-bottom: 2px;
+}
+
+[data-pos-density="compact"] .categoryFilterPill {
+  padding: 4px 10px;
+  font-size: 11.5px;
+}
+
+[data-pos-density="compact"] .speedDialSection {
+  padding: 6px 10px;
+  margin-bottom: 8px;
+}
+
+[data-pos-density="compact"] .speedDialGrid {
+  gap: 6px;
+}
+
+[data-pos-density="compact"] .speedDialCard {
+  padding: 5px 8px;
+  min-width: 90px;
+}
+
+[data-pos-density="compact"] .speedDialName {
+  font-size: 11px;
+}
+
+[data-pos-density="compact"] .speedDialPrice {
+  font-size: 11px;
+}
+
+/* Compact Product Cards */
+[data-pos-density="compact"] .productsGrid,
+[data-pos-density="compact"] .productGrid {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+[data-pos-density="compact"] .productCard {
+  min-height: 126px;
+  padding: 8px 10px;
+  border-radius: 12px;
+}
+
+[data-pos-density="compact"] .cardHeaderRow {
+  margin-bottom: 6px;
+  gap: 4px;
+}
+
+[data-pos-density="compact"] .categoryPill {
+  font-size: 10px;
+  padding: 2px 6px;
+  max-width: 90px;
+}
+
+[data-pos-density="compact"] .productCardName {
+  font-size: 12px;
+  margin-bottom: 3px;
+  line-height: 1.25;
+}
+
+[data-pos-density="compact"] .variantChipsContainer {
+  margin-bottom: 4px;
+}
+
+[data-pos-density="compact"] .miniVariantChip {
+  font-size: 9.5px;
+  padding: 2px 5px;
+}
+
+[data-pos-density="compact"] .cardFooterBar {
+  padding-top: 6px;
+}
+
+[data-pos-density="compact"] .productCardPrice {
+  font-size: 13px;
+}
+
+[data-pos-density="compact"] .addBtn {
+  padding: 3px 9px;
+  font-size: 11px;
+  height: 26px;
+  border-radius: 6px;
+}
+
+/* Compact Cart Panel */
+[data-pos-density="compact"] .cartPanel {
+  width: 315px;
+  border-radius: 14px;
+  top: 8px;
+  height: calc(100vh - 72px);
+  max-height: calc(100vh - 72px);
+}
+
+[data-pos-density="compact"] .cartHeader {
+  padding: 8px 12px;
+}
+
+[data-pos-density="compact"] .cartCustomerTop {
+  padding: 6px 10px;
+}
+
+[data-pos-density="compact"] .cartItems {
+  padding: 6px 8px;
+  gap: 5px;
+}
+
+[data-pos-density="compact"] .cartItem {
+  padding: 6px 8px;
+  border-radius: 8px;
+  gap: 6px;
+}
+
+[data-pos-density="compact"] .cartItemName {
+  font-size: 11.5px;
+  margin-bottom: 1px;
+}
+
+[data-pos-density="compact"] .cartItemMeta {
+  font-size: 10.5px;
+}
+
+[data-pos-density="compact"] .qtyBtn {
+  width: 19px;
+  height: 19px;
+}
+
+[data-pos-density="compact"] .qty {
+  font-size: 11.5px;
+  min-width: 16px;
+}
+
+[data-pos-density="compact"] .cartItemTotal {
+  font-size: 12px;
+}
+
+[data-pos-density="compact"] .cartFooter {
+  padding: 6px 10px 10px 10px;
+  gap: 4px;
+}
+
+[data-pos-density="compact"] .payBtn {
+  height: 28px;
+  font-size: 10.5px;
+  border-radius: 6px;
+}
+
+[data-pos-density="compact"] .grandTotal {
+  font-size: 14.5px;
+  padding-top: 2px;
+}
+
+[data-pos-density="compact"] .checkoutBtn {
+  height: 38px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+/* ─── 2. TOUCHSCREEN POS MODE (15"+ All-in-One Touch Terminals) ──────────── */
+[data-pos-density="touch"] .page,
+.touchDensity.page {
+  gap: 20px;
+  min-height: calc(100vh - 64px);
+}
+
+[data-pos-density="touch"] .panelHeader {
+  padding-bottom: 16px;
+  gap: 14px;
+}
+
+[data-pos-density="touch"] .tab {
+  font-size: 18px;
+  padding: 8px 4px;
+}
+
+[data-pos-density="touch"] .categoryFilterBar {
+  gap: 8px;
+  padding-bottom: 6px;
+}
+
+[data-pos-density="touch"] .categoryFilterPill {
+  padding: 10px 18px;
+  font-size: 14px;
+  min-height: 44px;
+  font-weight: 700;
+}
+
+[data-pos-density="touch"] .categoryFilterPill:active {
+  transform: scale(0.96);
+}
+
+/* Touch Product Cards */
+[data-pos-density="touch"] .productsGrid,
+[data-pos-density="touch"] .productGrid {
+  grid-template-columns: repeat(auto-fill, minmax(235px, 1fr));
+  gap: 18px;
+}
+
+[data-pos-density="touch"] .productCard {
+  min-height: 215px;
+  padding: 18px;
+  border-radius: 20px;
+}
+
+[data-pos-density="touch"] .productCard:active:not(.cardOutOfStock) {
+  transform: scale(0.97);
+}
+
+[data-pos-density="touch"] .categoryPill {
+  font-size: 12px;
+  padding: 5px 10px;
+}
+
+[data-pos-density="touch"] .productCardName {
+  font-size: 15.5px;
+  line-height: 1.35;
+  margin-bottom: 8px;
+}
+
+[data-pos-density="touch"] .miniVariantChip {
+  font-size: 12px;
+  padding: 6px 12px;
+  min-height: 34px;
+  border-radius: 8px;
+}
+
+[data-pos-density="touch"] .cardFooterBar {
+  padding-top: 14px;
+}
+
+[data-pos-density="touch"] .productCardPrice {
+  font-size: 17.5px;
+  font-weight: 900;
+}
+
+[data-pos-density="touch"] .addBtn {
+  padding: 10px 18px;
+  font-size: 14px;
+  min-height: 44px;
+  border-radius: 12px;
+}
+
+[data-pos-density="touch"] .addBtn:active {
+  transform: scale(0.95);
+}
+
+/* Touch Cart Panel */
+[data-pos-density="touch"] .cartPanel {
+  width: 410px;
+  border-radius: 22px;
+}
+
+[data-pos-density="touch"] .cartHeader {
+  padding: 16px 18px;
+}
+
+[data-pos-density="touch"] .cartHeader h3 {
+  font-size: 17px;
+}
+
+[data-pos-density="touch"] .cartCustomerTop {
+  padding: 12px 16px;
+}
+
+[data-pos-density="touch"] .cartItems {
+  padding: 14px 16px;
+  gap: 10px;
+}
+
+[data-pos-density="touch"] .cartItem {
+  padding: 12px 14px;
+  border-radius: 14px;
+  gap: 12px;
+}
+
+[data-pos-density="touch"] .cartItemName {
+  font-size: 14.5px;
+}
+
+[data-pos-density="touch"] .cartItemMeta {
+  font-size: 12.5px;
+}
+
+/* Touch Quantity Controls - Large 36px targets for fingers */
+[data-pos-density="touch"] .cartItemControls {
+  padding: 4px 6px;
+  gap: 4px;
+}
+
+[data-pos-density="touch"] .qtyBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 18px;
+  background: var(--color-surface-container, #e2e8f0);
+}
+
+[data-pos-density="touch"] .qtyBtn:active {
+  transform: scale(0.92);
+  background: #cbd5e1;
+}
+
+[data-pos-density="touch"] .qty {
+  font-size: 16px;
+  font-weight: 800;
+  min-width: 28px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+[data-pos-density="touch"] .removeBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+}
+
+/* Touch Payment Buttons & Checkout */
+[data-pos-density="touch"] .cartFooter {
+  padding: 14px 18px 18px 18px;
+  gap: 10px;
+}
+
+[data-pos-density="touch"] .payBtn {
+  height: 48px;
+  font-size: 13.5px;
+  border-radius: 12px;
+  font-weight: 800;
+}
+
+[data-pos-density="touch"] .payBtn:active {
+  transform: scale(0.96);
+}
+
+[data-pos-density="touch"] .grandTotal {
+  font-size: 19px;
+  font-weight: 900;
+  padding-top: 6px;
+}
+
+[data-pos-density="touch"] .checkoutBtn {
+  height: 56px;
+  font-size: 16px;
+  font-weight: 800;
+  border-radius: 14px;
+  box-shadow: 0 6px 18px rgba(79, 70, 229, 0.35);
+}
+
+[data-pos-density="touch"] .checkoutBtn:active {
+  transform: scale(0.97);
+}
+
+
 

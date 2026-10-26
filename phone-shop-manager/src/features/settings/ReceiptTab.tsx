@@ -154,8 +154,9 @@ export const ReceiptTab = () => {
           { product: { name: 'Silicone Case', model: 'MagSafe Black', price: 49 }, quantity: 1 },
         ],
         subtotal: 1048,
-        total: 1048,
-        payments: [{ method: 'cash', amount: 1048 }],
+        discount: { type: 'flat' as const, value: 48 },
+        total: 1000,
+        payments: [{ method: 'cash', amount: 1000 }],
       };
 
       const result = await printReceiptDirect(
@@ -328,13 +329,21 @@ export const ReceiptTab = () => {
             </div>
             
             <div className={styles.previewDivider} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#666' }}>
+              <span>Subtotal</span>
+              <span>{formatCurrency(1048)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#047857', fontWeight: 600, margin: '2px 0' }}>
+              <span>Discount</span>
+              <span>−{formatCurrency(48)}</span>
+            </div>
             <div className={styles.previewTotal}>
               <span>Total</span>
-              <span>{formatCurrency(1048)}</span>
+              <span>{formatCurrency(1000)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#555', marginTop: '2px' }}>
               <span>Payment: CASH</span>
-              <span>{formatCurrency(1048)}</span>
+              <span>{formatCurrency(1000)}</span>
             </div>
             <div className={styles.previewDivider} />
             

@@ -253,7 +253,7 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
           <h3 className={styles.sectionTitle}>Pricing & Stock</h3>
           <div className={styles.grid3}>
             {canViewCosts && (
-              <Input label={`Cost Price (${symbol}) *`} type="number" step="0.01" value={form.costPrice} onChange={e => set('costPrice', e.target.value)} error={errors.costPrice} />
+              <Input className="privacy-cost-input" label={`Cost Price (${symbol}) *`} type="number" step="0.01" value={form.costPrice} onChange={e => set('costPrice', e.target.value)} error={errors.costPrice} />
             )}
             <Input label={`Sell Price (${symbol}) *`} type="number" step="0.01" value={form.price} onChange={e => set('price', e.target.value)} error={errors.price} />
             <Input label="Initial Stock *" type="number" value={form.stock} onChange={e => set('stock', e.target.value)} error={errors.stock} />

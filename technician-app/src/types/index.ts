@@ -129,3 +129,46 @@ export interface User {
   status?: 'active' | 'revoked';
   permissions?: Permissions;
 }
+
+export type StockStatus = 'in_stock' | 'low_stock' | 'out_of_stock';
+export type PaymentMethod = 'cash' | 'card' | 'mobile' | 'transfer' | 'debt' | 'store_credit';
+export type ProductCategory = 'smartphone' | 'tablet' | 'accessory' | 'wearable' | 'repair_part';
+
+export interface PhoneModel {
+  id: string;
+  name: string;
+  model: string;
+  storage?: string;
+  color?: string;
+  price: number;
+  costPrice: number;
+  stock: number;
+  stockStatus: StockStatus;
+  sku: string;
+  barcode?: string;
+  category: ProductCategory;
+  lowStockThreshold: number;
+  imageUrl?: string;
+}
+
+export interface CartItem {
+  product: PhoneModel;
+  quantity: number;
+}
+
+export interface SaleTransaction {
+  id: string;
+  date: string;
+  items: CartItem[];
+  subtotal: number;
+  discount?: { type: 'percent' | 'flat'; value: number };
+  total: number;
+  payments: { method: PaymentMethod; amount: number }[];
+  customerName?: string;
+  customerPhone?: string;
+  customerId?: string;
+  processedById?: string;
+  processedByName?: string;
+  status?: 'completed' | 'refunded';
+}
+

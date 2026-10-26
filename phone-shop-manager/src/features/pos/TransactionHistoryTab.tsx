@@ -297,7 +297,18 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
         isOpen={!!txRequiringUnlock}
         onClose={() => setTxRequiringUnlock(null)}
         onSuccess={handleUnlockSuccess}
-        actionName={txRequiringUnlock?.purpose === 'edit' ? 'edit a past receipt' : 'refund a past transaction'}
+        actionName={txRequiringUnlock?.purpose === 'edit'
+          ? `Edit past receipt #${txRequiringUnlock.tx.invoiceNumber || txRequiringUnlock.tx.id.slice(0, 8)}`
+          : `Refund past transaction #${txRequiringUnlock?.tx.invoiceNumber || txRequiringUnlock?.tx.id.slice(0, 8)}`}
+        actionType={txRequiringUnlock?.purpose === 'edit' ? 'pos_edit_receipt' : 'pos_refund_transaction'}
+        targetId={txRequiringUnlock?.tx.id}
+        actionData={txRequiringUnlock ? {
+          itemType: 'transaction',
+          invoiceNumber: txRequiringUnlock.tx.invoiceNumber || txRequiringUnlock.tx.id.slice(0, 8),
+          total: txRequiringUnlock.tx.total,
+          customerName: txRequiringUnlock.tx.customerName || 'Walk-in Customer',
+          itemCount: txRequiringUnlock.tx.items?.length || 0,
+        } : undefined}
       />
     </div>
   );

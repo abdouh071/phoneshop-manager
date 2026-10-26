@@ -568,16 +568,9 @@ export const useCartStore = create<CartState>((set, get) => ({
         }
       }
 
-      // 5. Update Retail Customer Statistics (Problem 3 fix)
+      // 5. Update Retail Customer Statistics (Authoritative recalculation)
       if (matchedOrCreatedCustomer) {
-        const prevSpent = matchedOrCreatedCustomer.totalSpent || 0;
-        const prevPurchases = matchedOrCreatedCustomer.totalPurchases || 0;
-        const purchaseDelta = total > 0 ? total : 0;
-        await useCustomerStore.getState().updateCustomer(matchedOrCreatedCustomer.id, {
-          totalSpent: prevSpent + purchaseDelta,
-          totalPurchases: prevPurchases + 1,
-          lastVisitDate: new Date().toISOString(),
-        }).catch(console.error);
+        useCustomerStore.getState().recalculateCustomer(matchedOrCreatedCustomer.id).catch(console.error);
       }
       
       // 6. Authoritative Stock Adjustments in Zustand & Firestore (executed ONCE per transaction):
@@ -727,13 +720,9 @@ export const useCartStore = create<CartState>((set, get) => ({
 
       const saved = await transactionService.save(txData);
 
-      // 3. Update customer purchase stats (totalPurchases, totalSpent, lastVisitDate)
+      // 3. Update customer purchase stats (Authoritative recalculation)
       try {
-        await useCustomerStore.getState().updateCustomer(customer.id, {
-          totalPurchases: (customer.totalPurchases || 0) + 1,
-          totalSpent: (customer.totalSpent || 0) + total,
-          lastVisitDate: now,
-        });
+        useCustomerStore.getState().recalculateCustomer(customer.id).catch(console.error);
       } catch (err) {
         console.error('Failed to update customer purchase stats:', err);
       }
@@ -803,7 +792,13 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
 
   refundTransaction: async (txId) => {
-    const tx = get().transactions.find(t => t.id === txId);
+    let tx = get().transactions.find(t => t.id === txId);
+    let isPartsB2B = false;
+    if (!tx) {
+      const { usePartsCartStore } = await import('./partsCartStore');
+      tx = usePartsCartStore.getState().invoices.find(t => t.id === txId);
+      if (tx) isPartsB2B = true;
+    }
     if (!tx || tx.status === 'refunded') return;
     
     // 1. Authoritative stock reversal (Problem 4 fix):
@@ -832,6 +827,14 @@ export const useCartStore = create<CartState>((set, get) => ({
       (d.notes && d.notes.includes(txId))
     );
     if (linkedDebt) {
+      // If customer had already paid part of this debt, convert collected amount to store credit so funds are not lost
+      if (linkedDebt.amountPaid > 0 && tx.customerId) {
+        await customerStore.addStoreCredit(
+          tx.customerId,
+          linkedDebt.amountPaid,
+          `Refund of partial payment made on voided debt (Receipt #${tx.invoiceNumber || txId.slice(0, 8)})`
+        ).catch(console.error);
+      }
       await customerStore.deleteDebt(linkedDebt.id).catch(console.error);
     }
 
@@ -854,24 +857,28 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
 
     // 5. Deduct from customer's totalSpent & totalPurchases
-    if (tx.customerId && tx.total > 0) {
-      const cust = customerStore.customers.find(c => c.id === tx.customerId);
-      if (cust) {
-        await customerStore.updateCustomer(cust.id, {
-          totalSpent: Math.max(0, (cust.totalSpent || 0) - tx.total),
-          totalPurchases: Math.max(0, (cust.totalPurchases || 0) - 1),
-        }).catch(console.error);
-      }
-    }
-    
     // 6. Process refund in Firebase
     await transactionService.refund(txId);
 
-    set(state => ({
-      transactions: state.transactions.map(t =>
-        t.id === txId ? { ...t, status: 'refunded' as const } : t
-      )
-    }));
+    // 5. Authoritative recalculation of customer financials on refund
+    if (tx.customerId) {
+      customerStore.recalculateCustomer(tx.customerId).catch(console.error);
+    }
+
+    if (isPartsB2B) {
+      const { usePartsCartStore } = await import('./partsCartStore');
+      usePartsCartStore.setState(state => ({
+        invoices: state.invoices.map(t =>
+          t.id === txId ? { ...t, status: 'refunded' as const } : t
+        )
+      }));
+    } else {
+      set(state => ({
+        transactions: state.transactions.map(t =>
+          t.id === txId ? { ...t, status: 'refunded' as const } : t
+        )
+      }));
+    }
 
     // 7. Log the refund to the store-wide Activity Log
     const actor = useAuthStore.getState().user;
@@ -901,7 +908,15 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
 
   editTransaction: async (txId, newItems, returnToStockOptions) => {
-    const tx = get().transactions.find(t => t.id === txId);
+    let tx = get().transactions.find(t => t.id === txId);
+    let isPartsB2B = false;
+
+    if (!tx) {
+      const { usePartsCartStore } = await import('./partsCartStore');
+      tx = usePartsCartStore.getState().invoices.find(t => t.id === txId);
+      if (tx) isPartsB2B = true;
+    }
+
     if (!tx) return;
 
     // Handle stock returns for reduced or removed items
@@ -951,14 +966,31 @@ export const useCartStore = create<CartState>((set, get) => ({
       }
     }
 
+    // Split payments adjustment: preserve proportional ratio so payments sum strictly equals total
+    let adjustedPayments: { method: PaymentMethod; amount: number }[] = [];
+    if (!tx.payments || tx.payments.length <= 1) {
+      const method = tx.payments?.[0]?.method || 'cash';
+      adjustedPayments = [{ method, amount: total }];
+    } else {
+      const oldSum = tx.payments.reduce((sum, p) => sum + p.amount, 0) || tx.total || 1;
+      let running = 0;
+      adjustedPayments = tx.payments.map((p, idx) => {
+        if (idx === tx.payments.length - 1) {
+          const remaining = Math.max(0, Math.round((total - running) * 100) / 100);
+          return { ...p, amount: remaining };
+        }
+        const proportional = Math.max(0, Math.round((p.amount / oldSum) * total * 100) / 100);
+        running += proportional;
+        return { ...p, amount: proportional };
+      });
+    }
+
     const updates: Partial<SaleTransaction> = {
       items: newItems,
       subtotal,
       total,
       status,
-      payments: tx.payments && tx.payments.length > 0
-        ? tx.payments.map((p, idx) => idx === 0 ? { ...p, amount: total } : p)
-        : [{ method: 'cash', amount: total }],
+      payments: adjustedPayments,
     };
 
     // If this transaction was linked to a debt entry, update the debt balance accordingly (Problem 8 fix)
@@ -973,26 +1005,27 @@ export const useCartStore = create<CartState>((set, get) => ({
       customerStore.updateDebtAmount(linkedDebt.id, total, itemsSummary).catch(console.error);
     }
 
-    // If this transaction has an attached customer, adjust totalSpent
-    if (tx.customerId) {
-      const diff = total - tx.total;
-      if (diff !== 0) {
-        const cust = useCustomerStore.getState().customers.find(c => c.id === tx.customerId);
-        if (cust) {
-          useCustomerStore.getState().updateCustomer(cust.id, {
-            totalSpent: Math.max(0, (cust.totalSpent || 0) + diff),
-          }).catch(console.error);
-        }
-      }
-    }
-
     await transactionService.updateTransaction(txId, updates);
 
-    set(state => ({
-      transactions: state.transactions.map(t =>
-        t.id === txId ? { ...t, ...updates } : t
-      )
-    }));
+    // If this transaction has an attached customer, recalculate stats authoritatively
+    if (tx.customerId) {
+      useCustomerStore.getState().recalculateCustomer(tx.customerId).catch(console.error);
+    }
+
+    if (isPartsB2B) {
+      const { usePartsCartStore } = await import('./partsCartStore');
+      usePartsCartStore.setState(state => ({
+        invoices: state.invoices.map(t =>
+          t.id === txId ? { ...t, ...updates } : t
+        )
+      }));
+    } else {
+      set(state => ({
+        transactions: state.transactions.map(t =>
+          t.id === txId ? { ...t, ...updates } : t
+        )
+      }));
+    }
 
     const actor = useAuthStore.getState().user;
     const itemsDetail = newItems.map(i => `${i.quantity}x ${i.product.name} @ ${formatCurrency(i.product.price)}`).join(', ');

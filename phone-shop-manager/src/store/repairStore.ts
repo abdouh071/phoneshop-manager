@@ -7,7 +7,8 @@ import { useCustomerStore } from './customerStore';
 import { useAuthStore } from './authStore';
 import { useInventoryStore } from './inventoryStore';
 import { formatCurrency } from '../utils/formatCurrency';
-import { deduplicateTickets, isSameTicketContent } from '../utils/ticketDeduplication';
+import { deduplicateTickets, isSameTicketContent, findDuplicateTickets, type DuplicateTicketPair } from '../utils/ticketDeduplication';
+import { isTicketActiveReturnPending } from '../utils/phoneLifecycle';
 
 // --- Persistent Draft Storage (survives reload & logout) ---
 const STORAGE_KEY_ACTIVE_DRAFT = 'repair_active_draft';
@@ -47,11 +48,11 @@ interface RepairState {
   isCreatingTicket: boolean;
   error: string | null;
   searchQuery: string;
-  statusFilter: RepairTicket['status'] | 'all';
+  statusFilter: RepairTicket['status'] | 'all' | 'overdue';
   // Actions
   fetchTickets: () => Promise<void>;
   setSearchQuery: (query: string) => void;
-  setStatusFilter: (status: RepairTicket['status'] | 'all') => void;
+  setStatusFilter: (status: RepairTicket['status'] | 'all' | 'overdue') => void;
   updateStatus: (id: string, status: RepairTicket['status']) => Promise<void>;
   createTicket: (ticket: Omit<RepairTicket, 'id' | 'ticketNumber' | 'createdAt' | 'updatedAt' | 'createdById' | 'createdByName' | 'statusHistory'>) => Promise<RepairTicket | undefined>;
   updateTicket: (id: string, updates: Partial<RepairTicket>) => Promise<void>;
@@ -59,6 +60,8 @@ interface RepairState {
   deleteDeviceFromCustomer: (customerId: string, customerPhone: string, deviceBrand: string, deviceModel: string) => Promise<number>;
   updateDeviceForCustomer: (customerId: string, customerPhone: string, oldBrand: string, oldModel: string, newBrand: string, newModel: string) => Promise<number>;
   reassignTicketsForMerge: (targetCustomerId: string, targetName: string, targetPhone: string, sourceCustomerId: string, sourcePhone?: string) => Promise<void>;
+  mergeTickets: (primaryTicketId: string, secondaryTicketId: string, customUpdates?: Partial<RepairTicket>) => Promise<RepairTicket>;
+  findDuplicates: () => DuplicateTicketPair[];
   // Draft Hold / Resume Actions
   activeDraft: HeldRepairDraft | null;
   heldDrafts: HeldRepairDraft[];
@@ -85,7 +88,23 @@ export const useRepairStore = create<RepairState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const tickets = await repairService.getAll();
-      set({ tickets: deduplicateTickets(tickets), isLoading: false });
+      const deduped = deduplicateTickets(tickets);
+
+      // Auto-heal historical tickets stuck in 'returned' whose return child was completed
+      const healedTickets = deduped.map(t => {
+        if (t.status === 'returned' && !isTicketActiveReturnPending(t, deduped)) {
+          // Asynchronously persist to server so database is permanently clean
+          repairService.updateStatus(t.id, 'completed').catch(console.warn);
+          return {
+            ...t,
+            status: 'completed' as const,
+            completedAt: t.completedAt || new Date().toISOString(),
+          };
+        }
+        return t;
+      });
+
+      set({ tickets: healedTickets, isLoading: false });
     } catch {
       set({ error: 'Failed to load repair tickets', isLoading: false });
     }
@@ -110,12 +129,16 @@ export const useRepairStore = create<RepairState>((set, get) => ({
     const currentHistory = ticket.statusHistory ?? [];
     const updatedHistory = [...currentHistory, historyEntry];
 
+    const nowIso = new Date().toISOString();
+    const repairedAt = (status === 'ready' && !ticket.repairedAt) ? nowIso : ticket.repairedAt;
+
     // 1. INSTANT OPTIMISTIC LOCAL UPDATE (Immediate 0ms UI transition)
     const optimisticTicket: RepairTicket = {
       ...ticket,
       status,
       statusHistory: updatedHistory,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
+      ...(repairedAt ? { repairedAt } : {}),
     };
 
     set(state => ({
@@ -192,20 +215,30 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         }
       }
 
-      // Problem 11 fix: Update customer statistics if completed directly
-      if (status === 'completed' && ticket.status !== 'completed') {
+      // Synchronize parent and return tickets when marked completed
+      if (status === 'completed') {
+        if (ticket.parentTicketId) {
+          const parent = get().tickets.find(t => t.id === ticket.parentTicketId);
+          if (parent && parent.status === 'returned') {
+            get().updateStatus(parent.id, 'completed').catch(console.error);
+          }
+        } else if (ticket.activeReturnTicketId) {
+          const child = get().tickets.find(t => t.id === ticket.activeReturnTicketId);
+          if (child && child.status !== 'completed') {
+            get().updateStatus(child.id, 'completed').catch(console.error);
+          }
+        }
+      }
+
+      // Authoritative recalculation of customer statistics on status change
+      if (status !== ticket.status) {
         const custStore = useCustomerStore.getState();
         const customer = custStore.customers.find(
           c => (ticket.customerId && c.id === ticket.customerId) ||
                (ticket.customerPhone && c.phone === ticket.customerPhone)
         );
         if (customer) {
-          const cost = ticket.actualCost ?? ticket.estimatedCost ?? 0;
-          custStore.updateCustomer(customer.id, {
-            totalPurchases: (customer.totalPurchases || 0) + 1,
-            totalSpent: (customer.totalSpent || 0) + cost,
-            lastVisitDate: new Date().toISOString(),
-          }).catch(console.error);
+          custStore.recalculateCustomer(customer.id).catch(console.error);
         }
       }
     } catch (err) {
@@ -326,6 +359,29 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         tickets: state.tickets.map(t => t.id === id ? { ...t, ...updated } : t),
       }));
       const actor = useAuthStore.getState().user;
+
+      // Synchronize parent and return tickets when marked completed via updateTicket
+      if (updates.status === 'completed') {
+        if (existing.parentTicketId) {
+          const parent = get().tickets.find(t => t.id === existing.parentTicketId);
+          if (parent && parent.status === 'returned') {
+            get().updateTicket(parent.id, {
+              status: 'completed',
+              completedAt: updates.completedAt || new Date().toISOString(),
+              activeReturnTicketId: undefined,
+            }).catch(console.error);
+          }
+        } else if (existing.activeReturnTicketId) {
+          const child = get().tickets.find(t => t.id === existing.activeReturnTicketId);
+          if (child && child.status !== 'completed') {
+            get().updateTicket(child.id, {
+              status: 'completed',
+              completedAt: updates.completedAt || new Date().toISOString(),
+            }).catch(console.error);
+          }
+        }
+      }
+
       activityLogService.log(
         'repairs',
         `Repair ticket ${updated.ticketNumber || id} details updated`,
@@ -399,10 +455,32 @@ export const useRepairStore = create<RepairState>((set, get) => ({
 
   deleteTicket: async (id: string) => {
     try {
+      const ticket = get().tickets.find(t => t.id === id);
+
+      // Clean up linked customer debt if one exists
+      if (ticket?.debtEntryId) {
+        try {
+          const { useCustomerStore } = await import('./customerStore');
+          await useCustomerStore.getState().deleteDebt(ticket.debtEntryId);
+        } catch (dErr) {
+          console.warn('Could not delete linked debt for deleted ticket:', dErr);
+        }
+      }
+
       await repairService.deleteTicket(id);
       set(state => ({
         tickets: state.tickets.filter(t => t.id !== id),
       }));
+
+      // Authoritative recalculation of customer financials on ticket delete
+      if (ticket?.customerId) {
+        try {
+          const { useCustomerStore } = await import('./customerStore');
+          useCustomerStore.getState().recalculateCustomer(ticket.customerId).catch(console.error);
+        } catch (cErr) {
+          console.warn('Could not recalculate customer stats on deleted ticket:', cErr);
+        }
+      }
     } catch (err) {
       console.error('Failed to delete ticket', err);
       throw err;
@@ -498,6 +576,81 @@ export const useRepairStore = create<RepairState>((set, get) => ({
     }));
   },
 
+  mergeTickets: async (primaryTicketId, secondaryTicketId, customUpdates = {}) => {
+    const { tickets } = get();
+    const primary = tickets.find(t => t.id === primaryTicketId);
+    const secondary = tickets.find(t => t.id === secondaryTicketId);
+
+    if (!primary || !secondary) {
+      throw new Error('Both repair tickets must exist to perform merge.');
+    }
+
+    // Combine partsUsed
+    const mergedParts = [...(primary.partsUsed || [])];
+    if (secondary.partsUsed && secondary.partsUsed.length > 0) {
+      secondary.partsUsed.forEach(part => {
+        if (!mergedParts.some(p => p.productId === part.productId)) {
+          mergedParts.push(part);
+        }
+      });
+    }
+
+    const remarks = [primary.remark, secondary.remark].filter(Boolean);
+    const fusedRemark = remarks.length > 0 ? Array.from(new Set(remarks)).join(' | ') : undefined;
+
+    const fusedSettlementNotes = [primary.settlementNotes, secondary.settlementNotes]
+      .filter(Boolean)
+      .join('\n---\nMerged Notes:\n') || undefined;
+
+    // Combine status history
+    const mergedHistory = [...(primary.statusHistory || []), ...(secondary.statusHistory || [])].sort(
+      (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+    );
+
+    const consolidatedUpdates: Partial<RepairTicket> = {
+      ...customUpdates,
+      partsUsed: mergedParts.length > 0 ? mergedParts : undefined,
+      remark: customUpdates.remark !== undefined ? customUpdates.remark : fusedRemark,
+      settlementNotes: customUpdates.settlementNotes !== undefined ? customUpdates.settlementNotes : fusedSettlementNotes,
+      statusHistory: mergedHistory.length > 0 ? mergedHistory : undefined,
+      depositAmount: Math.max(primary.depositAmount || 0, secondary.depositAmount || 0) || undefined,
+      paidAmount: Math.max(primary.paidAmount || 0, secondary.paidAmount || 0) || undefined,
+      handoverAmountPaid: Math.max(primary.handoverAmountPaid || 0, secondary.handoverAmountPaid || 0) || undefined,
+      debtEntryId: primary.debtEntryId || secondary.debtEntryId,
+      trackingPin: primary.trackingPin || secondary.trackingPin,
+    };
+
+    // 1. Call service to update primary and archive secondary (NEVER delete from DB)
+    const finalPrimary = await repairService.mergeTickets(primary.id, secondary.id, consolidatedUpdates);
+
+    // 2. Update in-memory state: secondary is hidden from active list
+    set(state => ({
+      tickets: state.tickets
+        .filter(t => t.id !== secondary.id)
+        .map(t => t.id === primary.id ? { ...t, ...consolidatedUpdates, ...finalPrimary } : t),
+    }));
+
+    // 3. Audit log
+    const actor = useAuthStore.getState().user;
+    activityLogService.logActivity({
+      type: 'repair_status_change',
+      description: `Duplicate repair ticket #${secondary.ticketNumber} safely merged into #${primary.ticketNumber} by ${actor?.name || 'Staff'}.`,
+      performedBy: actor?.name || 'Staff',
+      details: {
+        primaryTicketId: primary.id,
+        primaryTicketNumber: primary.ticketNumber,
+        secondaryTicketId: secondary.id,
+        secondaryTicketNumber: secondary.ticketNumber,
+      },
+    }).catch(console.warn);
+
+    return finalPrimary;
+  },
+
+  findDuplicates: () => {
+    return findDuplicateTickets(get().tickets);
+  },
+
   discardHeldDraft: (id) => {
     const state = get();
     const updated = state.heldDrafts.filter(d => d.id !== id);
@@ -508,7 +661,16 @@ export const useRepairStore = create<RepairState>((set, get) => ({
   getFilteredTickets: () => {
     const { tickets, searchQuery, statusFilter } = get();
     let filtered = deduplicateTickets(tickets);
-    if (statusFilter !== 'all') {
+    if (statusFilter === 'overdue') {
+      const now = new Date();
+      filtered = filtered.filter(t =>
+        t.estimatedCompletionDate &&
+        new Date(t.estimatedCompletionDate) < now &&
+        t.status !== 'completed' &&
+        t.status !== 'cancelled' &&
+        t.status !== 'returned'
+      );
+    } else if (statusFilter !== 'all') {
       filtered = filtered.filter(t => t.status === statusFilter);
     }
     if (searchQuery.trim()) {

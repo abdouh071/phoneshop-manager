@@ -9,6 +9,8 @@ export interface Supplier {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+  source?: 'registered' | 'product_catalog';
+  productCount?: number;
 }
 
 export interface POItem {

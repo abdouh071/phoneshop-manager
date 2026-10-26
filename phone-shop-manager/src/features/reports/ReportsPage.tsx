@@ -16,8 +16,9 @@ import type { EndOfDayRecord } from '../../services/endOfDayService';
 import { useAuthStore } from '../../store/authStore';
 import { useReportStore } from '../../store/reportStore';
 import { useSettingsStore } from '../../store/settingsStore';
+import { usePrivacyStore } from '../../store/privacyStore';
 import { useToast } from '../../components/ui/Toast';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { exportToCSV, printFormattedReport } from '../../utils/exportUtils';
 import { printZReportDirect } from '../../utils/printWindow';
 import styles from './Reports.module.css';
@@ -27,6 +28,7 @@ type MainTab = 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom';
 export const ReportsPage = () => {
   const { t, i18n } = useTranslation();
   const toast = useToast();
+  const isPrivacyActive = usePrivacyStore((s) => s.isPrivacyActive);
   const { data, isLoading, fetchData, activeOptions } = useReportStore();
   const { user, isHistoryUnlocked } = useAuthStore();
   const settings = useSettingsStore();
@@ -696,11 +698,11 @@ export const ReportsPage = () => {
                 <span className={styles.kpiLabel}>{t('reports.grossRevenue', 'Gross Revenue')}</span>
                 <div className={styles.kpiIcon}><DollarSign size={16} /></div>
               </div>
-              <div className={styles.kpiValue}>{formatCurrency(data.financialSummary.grossRevenue)}</div>
+              <div className={styles.kpiValue}>{formatPrivateCurrency(data.financialSummary.grossRevenue)}</div>
               <div className={styles.kpiSubtext}>
-                <span>Sales: {formatCurrency(data.financialSummary.productSalesRevenue)}</span>
+                <span>Sales: {formatPrivateCurrency(data.financialSummary.productSalesRevenue)}</span>
                 <span>•</span>
-                <span>Repairs: {formatCurrency(data.financialSummary.repairRevenue)}</span>
+                <span>Repairs: {formatPrivateCurrency(data.financialSummary.repairRevenue)}</span>
               </div>
             </div>
 
@@ -709,7 +711,7 @@ export const ReportsPage = () => {
                 <span className={styles.kpiLabel}>{t('reports.netProfit', 'Net Profit')}</span>
                 <div className={styles.kpiIcon}><TrendingUp size={16} /></div>
               </div>
-              <div className={styles.kpiValue}>{formatCurrency(data.financialSummary.grossProfit)}</div>
+              <div className={styles.kpiValue}>{formatPrivateCurrency(data.financialSummary.grossProfit)}</div>
               <div className={styles.kpiSubtext}>
                 <span className={data.financialSummary.profitMarginPercent >= 0 ? styles.badgeSuccess : styles.badgeDanger}>
                   {data.financialSummary.profitMarginPercent}% {t('reports.profitMargin', 'Margin')}
@@ -723,11 +725,11 @@ export const ReportsPage = () => {
                 <span className={styles.kpiLabel}>{t('reports.totalCOGS', 'Total Cost (COGS)')}</span>
                 <div className={styles.kpiIcon}><Package size={16} /></div>
               </div>
-              <div className={styles.kpiValue}>{formatCurrency(data.financialSummary.totalCOGS)}</div>
+              <div className={styles.kpiValue}>{formatPrivateCurrency(data.financialSummary.totalCOGS)}</div>
               <div className={styles.kpiSubtext}>
-                <span>Items: {formatCurrency(data.financialSummary.salesCOGS)}</span>
+                <span>Items: {formatPrivateCurrency(data.financialSummary.salesCOGS)}</span>
                 <span>•</span>
-                <span>Parts: {formatCurrency(data.financialSummary.repairsCOGS)}</span>
+                <span>Parts: {formatPrivateCurrency(data.financialSummary.repairsCOGS)}</span>
               </div>
             </div>
 
@@ -1576,10 +1578,10 @@ export const ReportsPage = () => {
                         <td className={styles.td}><strong>{c.name}</strong></td>
                         <td className={[styles.td, styles.fontMono].join(' ')}>{c.phone || 'N/A'}</td>
                         <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')}>{c.ordersCount}</td>
-                        <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')}>
-                          <strong>{formatCurrency(c.totalSpent)}</strong>
+                        <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')} data-col="spent">
+                          <strong>{formatPrivateCurrency(c.totalSpent)}</strong>
                         </td>
-                        <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')}>{formatCurrency(c.averageOrder)}</td>
+                        <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')}>{formatPrivateCurrency(c.averageOrder)}</td>
                       </tr>
                     ))}
                   </tbody>

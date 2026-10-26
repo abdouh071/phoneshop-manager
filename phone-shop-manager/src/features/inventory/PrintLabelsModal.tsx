@@ -9,6 +9,15 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { printBarcodeDirect } from '../../utils/printWindow';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useToast } from '../../components/ui/Toast';
+import { ACCESSORY_SUB_CATEGORIES } from '../../utils/accessorySubCategories';
+
+const LABEL_CATEGORIES: { value: string; label: string }[] = [
+  { value: 'all', label: '🗂 All' },
+  { value: 'smartphone', label: '📱 Phones' },
+  { value: 'tablet', label: '📟 Tablets' },
+  { value: 'accessory', label: '🎧 Accessories' },
+  { value: 'wearable', label: '⌚ Wearables' },
+];
 
 interface PrintLabelsModalProps {
   isOpen: boolean;
@@ -31,8 +40,10 @@ export const PrintLabelsModal: React.FC<PrintLabelsModalProps> = ({ isOpen, onCl
   const [previewHtml, setPreviewHtml] = useState<string>('');
   const [labelsToPrint, setLabelsToPrint] = useState<(PhoneModel & { hidePrice?: boolean })[]>([]);
   
-  // Search state
+  // Search & category filter state
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>(categoryFilter || 'all');
+  const [activeSubCategoryFilter, setActiveSubCategoryFilter] = useState<string>('all');
 
   // Config state: how many of each to print
   // Key is product.id
@@ -54,23 +65,29 @@ export const PrintLabelsModal: React.FC<PrintLabelsModalProps> = ({ isOpen, onCl
       setConfig(initialConfig);
       setSelectedProducts([...initialProducts]);
       setSearchQuery('');
+      setActiveCategoryFilter(categoryFilter || 'all');
+      setActiveSubCategoryFilter('all');
     }
-  }, [isOpen, initialProducts]);
+  }, [isOpen, initialProducts, categoryFilter]);
 
   const searchResults = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
     return allProducts.filter(p => {
       if (p.category === 'repair_part' || p.sku?.toUpperCase().startsWith('PRT-')) return false;
       if (config[p.id]) return false;
-      if (categoryFilter && p.category !== categoryFilter) return false;
+      if (activeCategoryFilter && activeCategoryFilter !== 'all' && p.category !== activeCategoryFilter) return false;
+      if (activeCategoryFilter === 'accessory' && activeSubCategoryFilter !== 'all') {
+        if ((p.accessorySubCategory || 'other') !== activeSubCategoryFilter) return false;
+      }
       if (!query) return true;
       return (
         p.name.toLowerCase().includes(query) ||
         p.model.toLowerCase().includes(query) ||
-        p.sku.toLowerCase().includes(query)
+        p.sku.toLowerCase().includes(query) ||
+        (p.accessorySubCategory && p.accessorySubCategory.toLowerCase().includes(query))
       );
     }).slice(0, 20); // Limit to 20 results
-  }, [searchQuery, allProducts, config, categoryFilter]);
+  }, [searchQuery, allProducts, config, activeCategoryFilter, activeSubCategoryFilter]);
 
   const handleAddProduct = (product: PhoneModel) => {
     setSelectedProducts(prev => [...prev, product]);
@@ -210,10 +227,47 @@ export const PrintLabelsModal: React.FC<PrintLabelsModalProps> = ({ isOpen, onCl
         </div>
         
         <div className={styles.modalBody}>
+          {/* Category filter pills */}
+          <div className={styles.categoryFilterBar}>
+            {LABEL_CATEGORIES.map(cat => (
+              <button
+                key={cat.value}
+                type="button"
+                className={[
+                  styles.categoryFilterPill,
+                  activeCategoryFilter === cat.value && styles.categoryFilterPillActive,
+                ].filter(Boolean).join(' ')}
+                onClick={() => { setActiveCategoryFilter(cat.value); setActiveSubCategoryFilter('all'); setSearchQuery(''); }}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Accessory sub-category pills */}
+          {activeCategoryFilter === 'accessory' && (
+            <div className={styles.categoryFilterBar} style={{ marginTop: '-8px', marginBottom: '14px', gap: '6px' }}>
+              {ACCESSORY_SUB_CATEGORIES.map(sub => (
+                <button
+                  key={sub.value}
+                  type="button"
+                  style={{ fontSize: '12px', padding: '4px 10px' }}
+                  className={[
+                    styles.categoryFilterPill,
+                    activeSubCategoryFilter === sub.value && styles.categoryFilterPillActive,
+                  ].filter(Boolean).join(' ')}
+                  onClick={() => { setActiveSubCategoryFilter(sub.value); setSearchQuery(''); }}
+                >
+                  <span>{sub.icon}</span> {sub.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className={styles.searchSection}>
             <Input 
               leftIcon={<Search size={16} />}
-              placeholder="Search or select products below to add..."
+              placeholder={`Search ${activeCategoryFilter === 'all' ? 'all products' : LABEL_CATEGORIES.find(c => c.value === activeCategoryFilter)?.label ?? 'products'}…`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />

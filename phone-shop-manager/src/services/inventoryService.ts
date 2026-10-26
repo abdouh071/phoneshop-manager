@@ -105,12 +105,22 @@ export const inventoryService = {
     const snap = await getDoc(ref);
     if (!snap.exists()) throw new Error(`Product ${id} not found`);
     const existing = snap.data() as Omit<PhoneModel, 'id'>;
-    const merged = { ...existing, ...updates };
-    if (updates.stock !== undefined) {
+
+    // Strip undefined values to prevent Firestore 'Unsupported field value: undefined' errors (Gap 6 fix)
+    const cleanUpdates = Object.entries(updates).reduce((acc, [key, val]) => {
+      if (val !== undefined) {
+        acc[key] = val;
+      }
+      return acc;
+    }, {} as Record<string, any>);
+
+    const merged = { ...existing, ...cleanUpdates };
+    if (cleanUpdates.stock !== undefined) {
       const threshold = merged.lowStockThreshold ?? 1;
       merged.stockStatus = computeStockStatus(merged.stock, threshold);
+      cleanUpdates.stockStatus = merged.stockStatus;
     }
-    await updateDoc(ref, merged);
+    await updateDoc(ref, cleanUpdates);
     return { ...merged, id };
   },
 

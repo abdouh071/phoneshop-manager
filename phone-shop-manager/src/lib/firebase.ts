@@ -1,7 +1,11 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 
-import { initializeFirestore } from 'firebase/firestore';
+import { 
+  initializeFirestore, 
+  persistentLocalCache, 
+  persistentMultipleTabManager 
+} from 'firebase/firestore';
 
 // Replace these with your actual Firebase project configuration via .env
 const firebaseConfig = {
@@ -14,5 +18,20 @@ const firebaseConfig = {
 };
 
 export const app = initializeApp(firebaseConfig);
-export const db = initializeFirestore(app, { ignoreUndefinedProperties: true });
+
+let firestoreInstance;
+try {
+  firestoreInstance = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager(),
+    }),
+    ignoreUndefinedProperties: true,
+  });
+} catch (e) {
+  console.warn('[Firestore] Failed to initialize persistentLocalCache, falling back to default:', e);
+  firestoreInstance = initializeFirestore(app, { ignoreUndefinedProperties: true });
+}
+
+export const db = firestoreInstance;
 export const auth = getAuth(app);
+

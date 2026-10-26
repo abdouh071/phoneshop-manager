@@ -24,6 +24,8 @@ import styles from './TicketDetail.module.css';
 import { LockCodeViewer } from './LockCodeWidget';
 import { CustomerHistoryWidget } from './CustomerHistoryWidget';
 import { PrintRepairTicketModal } from './PrintRepairTicketModal';
+import { PhoneLifecycleHistoryCard } from './PhoneLifecycleHistoryCard';
+import { isTicketActiveReturnPending } from '../../utils/phoneLifecycle';
 
 interface TicketDetailPanelProps {
   ticket: RepairTicket | null;
@@ -263,10 +265,47 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
         } catch (debtErr) {
           console.error('Failed to update debt entry:', debtErr);
         }
+      } else if (finalCost > totalPaid && ticket.customerId) {
+        // Gap 3B fix: If price was increased on a fully paid ticket, create a new debt entry for the unpaid remainder
+        try {
+          const unpaidRemainder = finalCost - totalPaid;
+          const newDebt = await useCustomerStore.getState().addDebt({
+            customerId: ticket.customerId,
+            customerName: ticket.customerName,
+            customerPhone: ticket.customerPhone,
+            productOrService: `Repair #${ticket.ticketNumber} - ${ticket.deviceBrand} ${ticket.deviceModel}`,
+            totalAmount: finalCost,
+            amountPaid: totalPaid,
+            date: new Date().toISOString(),
+            type: 'repair',
+            notes: `Repair #${ticket.ticketNumber} price adjusted to ${formatCurrency(finalCost)} (${formatCurrency(unpaidRemainder)} balance due)`,
+            payments: totalPaid > 0 ? [{
+              id: `pay_${Date.now()}`,
+              date: ticket.createdAt || new Date().toISOString(),
+              amount: totalPaid,
+              method: 'cash',
+              note: 'Prior payment before price edit',
+            }] : []
+          });
+          updates.debtEntryId = newDebt.id;
+        } catch (createDebtErr) {
+          console.error('Failed to create debt entry on repair price increase:', createDebtErr);
+        }
+      }
+
+      // Gap 3A fix: Update customer totalSpent in profile
+      const oldPrice = ticket.actualCost ?? ticket.estimatedCost ?? 0;
+      const diff = finalCost - oldPrice;
+      if (diff !== 0 && ticket.customerId) {
+        const cust = useCustomerStore.getState().customers.find(c => c.id === ticket.customerId);
+        if (cust) {
+          useCustomerStore.getState().updateCustomer(cust.id, {
+            totalSpent: Math.max(0, (cust.totalSpent || 0) + diff)
+          }).catch(console.error);
+        }
       }
 
       // Log the price edit audit trail
-      const oldPrice = ticket.actualCost ?? ticket.estimatedCost;
       activityLogService.log(
         'repairs',
         `Repair ticket #${ticket.ticketNumber} price edited on completed ticket`,
@@ -402,11 +441,25 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
       estimatedCompletionDate: returnForm.pickupDate || undefined,
     });
 
+    const newReturnRecord = {
+      id: `ret_${Date.now()}`,
+      returnDate: new Date().toISOString(),
+      reason: returnForm.reason.trim(),
+      returnTicketId: childTicket?.id,
+      returnTicketNumber: childTicket?.ticketNumber,
+      isWarranty,
+      estimatedCost: returnForm.chargeCustomer ? parsedCost : 0,
+      status: 'pending' as const,
+    };
+
+    const existingRecords = (ticket as any).returnRecords || [];
+
     await updateTicket(ticket.id, {
       returnReason: returnForm.reason.trim(),
       returnDate: new Date().toISOString(),
       activeReturnTicketId: childTicket?.id,
       activeReturnTicketNumber: childTicket?.ticketNumber,
+      returnRecords: [...existingRecords, newReturnRecord],
     });
     await updateStatus(ticket.id, 'returned');
     
@@ -510,33 +563,61 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
             </div>
           )}
 
-          {/* Banner if this ticket has a child return ticket in progress */}
-          {ticket.status === 'returned' && childReturnTicket && (
-            <div style={{
-              background: '#eff6ff',
-              border: '1px solid #bfdbfe',
-              borderRadius: '8px',
-              padding: '10px 14px',
-              marginBottom: '14px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '10px',
-            }}>
-              <div>
-                <strong style={{ color: '#1d4ed8', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  ⚠️ RETURN RECORDED
-                </strong>
-                <span style={{ fontSize: '12px', color: '#2563eb', display: 'block', marginTop: '2px' }}>
-                  Active child return ticket: #{childReturnTicket.ticketNumber} ({childReturnTicket.status.replace('_', ' ')}).
-                </span>
+          {/* Banner if this ticket has a child return ticket */}
+          {(ticket.status === 'returned' || childReturnTicket) && childReturnTicket && (
+            childReturnTicket.status === 'completed' ? (
+              <div style={{
+                background: '#f0fdf4',
+                border: '1px solid #bbf7d0',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                marginBottom: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px',
+              }}>
+                <div>
+                  <strong style={{ color: '#166534', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    ✅ RETURN RESOLVED & RE-REPAIRED
+                  </strong>
+                  <span style={{ fontSize: '12px', color: '#15803d', display: 'block', marginTop: '2px' }}>
+                    Return repair #{childReturnTicket.ticketNumber} was completed and handed over to customer.
+                  </span>
+                </div>
+                {onSelectTicket && (
+                  <Button size="sm" variant="ghost" onClick={() => onSelectTicket(childReturnTicket)} style={{ whiteSpace: 'nowrap' }}>
+                    View Return #{childReturnTicket.ticketNumber} →
+                  </Button>
+                )}
               </div>
-              {onSelectTicket && (
-                <Button size="sm" variant="primary" onClick={() => onSelectTicket(childReturnTicket)} style={{ whiteSpace: 'nowrap' }}>
-                  Go to Return Ticket #{childReturnTicket.ticketNumber} →
-                </Button>
-              )}
-            </div>
+            ) : (
+              <div style={{
+                background: '#eff6ff',
+                border: '1px solid #bfdbfe',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                marginBottom: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px',
+              }}>
+                <div>
+                  <strong style={{ color: '#1d4ed8', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    ⚠️ RETURN RECORDED
+                  </strong>
+                  <span style={{ fontSize: '12px', color: '#2563eb', display: 'block', marginTop: '2px' }}>
+                    Active child return ticket: #{childReturnTicket.ticketNumber} ({childReturnTicket.status.replace('_', ' ')}).
+                  </span>
+                </div>
+                {onSelectTicket && (
+                  <Button size="sm" variant="primary" onClick={() => onSelectTicket(childReturnTicket)} style={{ whiteSpace: 'nowrap' }}>
+                    Go to Return Ticket #{childReturnTicket.ticketNumber} →
+                  </Button>
+                )}
+              </div>
+            )
           )}
 
           <div className={styles.statusHeader}>
@@ -972,66 +1053,13 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
             )}
           </div>
 
-          {/* Linked Tickets (Device History) */}
-          {linkedTickets.length > 1 && (
-            <div className={styles.section}>
-              <h3 className={styles.sectionTitle}>
-                <Clock size={14} style={{ marginRight: '6px', color: 'var(--color-primary)' }} />
-                Device Repair History (General Ticket)
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
-                {linkedTickets.map((t, idx) => {
-                  const isActive = t.id === ticket.id;
-                  return (
-                    <div 
-                      key={t.id} 
-                      onClick={(!isActive && onSelectTicket) ? () => onSelectTicket(t) : undefined}
-                      style={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center', 
-                        fontSize: '12px', 
-                        padding: '10px 12px', 
-                        background: isActive ? 'var(--color-primary-light, #e0f2fe)' : 'var(--color-surface-variant, #f8fafc)', 
-                        border: isActive ? '1px solid var(--color-primary)' : '1px solid var(--color-border, #e2e8f0)', 
-                        borderRadius: '6px',
-                        cursor: (!isActive && onSelectTicket) ? 'pointer' : 'default',
-                        transition: 'background 0.15s ease, border-color 0.15s ease',
-                      }}
-                      title={(!isActive && onSelectTicket) ? `Click to view Ticket #${t.ticketNumber}` : undefined}
-                    >
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <strong style={{ textTransform: 'uppercase', color: isActive ? 'var(--color-primary)' : 'var(--color-text)' }}>
-                            {t.ticketNumber}
-                          </strong>
-                          {t.isReturn && <span style={{ background: '#fef08a', color: '#854d0e', padding: '2px 6px', borderRadius: '12px', fontSize: '10px', fontWeight: 600 }}>RETURN</span>}
-                          {idx === 0 && <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '12px', fontSize: '10px', fontWeight: 600 }}>MAIN</span>}
-                          <span style={{ color: 'var(--color-on-surface-variant)', fontSize: '11px', textTransform: 'capitalize' }}>
-                            {t.status.replace('_', ' ')}
-                          </span>
-                          {!isActive && onSelectTicket && (
-                            <span style={{ color: 'var(--color-primary)', fontSize: '11px', fontWeight: 500 }}>
-                              View →
-                            </span>
-                          )}
-                        </div>
-                        <span style={{ color: 'var(--color-on-surface-variant)' }}>
-                          {t.issueDescription}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                        <span style={{ color: 'var(--color-on-surface-variant)', fontSize: '11px' }}>{new Date(t.createdAt).toLocaleDateString()}</span>
-                        <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>
-                          {formatCurrency(t.actualCost ?? t.estimatedCost)}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          {/* Complete Phone Lifecycle & Financial History */}
+          <PhoneLifecycleHistoryCard
+            ticket={ticket}
+            allTickets={tickets}
+            onSelectTicket={onSelectTicket}
+          />
+
 
           {/* Status History Timeline */}
           {ticket.statusHistory && ticket.statusHistory.length > 0 && (
@@ -1301,7 +1329,18 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
           setShowAdminUnlock(false);
           startEditingCost();
         }}
-        actionName={`edit costs on completed ticket #${ticket.ticketNumber}`}
+        actionName={`Edit costs on completed ticket #${ticket.ticketNumber}`}
+        actionType="repair_edit_cost"
+        targetId={ticket.id}
+        actionData={{
+          itemType: 'repair_ticket',
+          ticketNumber: ticket.ticketNumber,
+          deviceModel: `${ticket.deviceBrand} ${ticket.deviceModel}`,
+          customerName: ticket.customerName,
+          cost: ticket.cost,
+          estimatedCost: ticket.estimatedCost,
+          finalCost: ticket.finalCost,
+        }}
       />
     </>
   );

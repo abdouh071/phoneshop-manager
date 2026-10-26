@@ -20,3 +20,12 @@ Thumbs.db
 *.apk
 downloads/*.apk
 public/downloads/*.apk
+
+# Electron & Desktop Build Artifacts
+releases/
+release/
+dist-electron/
+*.exe
+*.dmg
+*.pkg
+*.blockmap

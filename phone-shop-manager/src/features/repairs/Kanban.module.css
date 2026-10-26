@@ -1034,3 +1034,163 @@
   color: #ffffff;
   border-color: #dc2626;
 }
+
+/* ============================================================
+   Completed Repairs Vault View
+   ============================================================ */
+.completedVaultContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: fadeIn 0.2s ease;
+}
+
+.completedVaultHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.completedMetricsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.completedMetricCard {
+  background: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 14px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.completedMetricCard:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.06);
+}
+
+.completedMetricIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.completedMetricContent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.completedMetricValue {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--color-on-surface, #0f172a);
+  letter-spacing: -0.3px;
+  line-height: 1.2;
+}
+
+.completedMetricLabel {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-on-surface-variant, #64748b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.completedToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 14px;
+  padding: 10px 14px;
+  flex-wrap: wrap;
+}
+
+.completedSearchWrapper {
+  flex: 1;
+  min-width: 280px;
+}
+
+.completedFilterPills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.filterPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  background: var(--color-surface-container-low, #f8fafc);
+  color: var(--color-on-surface-variant, #64748b);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.filterPill:hover {
+  background: var(--color-surface-container, #f1f5f9);
+  color: var(--color-on-surface, #0f172a);
+}
+
+.filterPillActive {
+  background: var(--color-primary, #4f46e5);
+  color: #ffffff;
+  border-color: var(--color-primary, #4f46e5);
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);
+}
+
+.filterPillActive:hover {
+  background: #4338ca;
+  color: #ffffff;
+}
+
+.walkinBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.accountBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  margin-left: 6px;
+  vertical-align: middle;
+}

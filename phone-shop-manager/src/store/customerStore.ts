@@ -5,8 +5,12 @@ import { customerService } from '../services/customerService';
 import { debtService } from '../services/debtService';
 import { customerLogService } from '../services/customerLogService';
 import { activityLogService } from '../services/activityLogService';
+import { transactionService } from '../services/transactionService';
+import { repairService } from '../services/repairService';
 import { useAuthStore } from './authStore';
 import { formatCurrency } from '../utils/formatCurrency';
+import { isPhoneMatch, normalizePhoneDigits, isMoreDescriptiveName, formatStandardPhone, GENERIC_NAMES, isValidNameForDeduplication, isDummyPhone } from '../utils/phoneUtils';
+import { calculateCustomerFinancials } from '../utils/customerFinancials';
 
 interface CustomerState {
   customers: Customer[];
@@ -19,6 +23,8 @@ interface CustomerState {
   fetchCustomers: () => Promise<void>;
   fetchDebts: () => Promise<void>;
   fetchCustomerLogs: (customerId?: string) => Promise<void>;
+  recalculateCustomer: (customerId: string) => Promise<void>;
+  recalculateAllCustomerFinancials: () => Promise<void>;
   addCustomerAuditLog: (
     entry: Omit<CustomerActivityLog, 'id' | 'date'> & { date?: string }
   ) => Promise<CustomerActivityLog>;
@@ -55,8 +61,49 @@ interface CustomerState {
   deleteDebt: (debtId: string) => Promise<void>;
   getCustomerDebtTotal: (customerId: string) => number;
   getCustomerDebts: (customerId: string) => CustomerDebtEntry[];
-  /** Find an existing customer by phone or create a new one. Used by POS, repair tickets, etc. */
-  findOrCreateCustomer: (data: { name: string; phone: string; email?: string; accountType?: 'retail' | 'shop_repairer'; shopName?: string }) => Promise<Customer>;
+  /** Find an existing customer by phone or create a new one with seamless non-destructive auto-enrichment. */
+  findOrCreateCustomer: (data: {
+    name: string;
+    phone: string;
+    email?: string;
+    accountType?: 'retail' | 'shop_repairer';
+    shopName?: string;
+    address?: string;
+    rc?: string;
+    nif?: string;
+    nis?: string;
+    art?: string;
+    wholesaleDiscountPercent?: number;
+    creditLimit?: number;
+    notes?: string;
+    device?: {
+      brand: string;
+      model: string;
+      imei?: string;
+      notes?: string;
+    };
+  }) => Promise<Customer>;
+  /** Explicitly enriches an existing customer profile in the background without overwriting existing data. */
+  enrichCustomer: (customerId: string, data: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    shopName?: string;
+    address?: string;
+    rc?: string;
+    nif?: string;
+    nis?: string;
+    art?: string;
+    wholesaleDiscountPercent?: number;
+    creditLimit?: number;
+    notes?: string;
+    device?: {
+      brand: string;
+      model: string;
+      imei?: string;
+      notes?: string;
+    };
+  }) => Promise<Customer>;
   // Store Credit (Avoir) and Exchange Debt Deductions
   addStoreCredit: (customerId: string, amount: number, note?: string) => Promise<number>;
   useStoreCredit: (customerId: string, amount: number, note?: string) => Promise<number>;
@@ -71,7 +118,11 @@ interface CustomerState {
     customName?: string;
     customPhone?: string;
     customShopName?: string;
+    deleteSecondaryDoc?: boolean;
   }) => Promise<Customer>;
+  autoResolveAllDuplicates: (options?: {
+    deleteSecondary?: boolean;
+  }) => Promise<{ mergedCount: number; deletedCount: number }>;
   findDuplicates: () => Array<{ retail: Customer; shop: Customer; reason: string }>;
   // Derived
   getFilteredCustomers: () => Customer[];
@@ -93,26 +144,46 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
   fetchCustomers: async () => {
     set({ isLoading: true, error: null });
     try {
-      const [customers, debts, logs] = await Promise.all([
+      const [customers, debts, logs, transactions, tickets] = await Promise.all([
         customerService.getAll(),
         debtService.getAll(),
         customerLogService.getAll(),
+        transactionService.getAll().catch(() => []),
+        repairService.getAll().catch(() => []),
       ]);
       
-      // Calculate totalDebt per customer
-      const debtMap = debts.reduce((acc, d) => {
-        if (d.status !== 'paid' && d.remainingBalance > 0) {
-          acc[d.customerId] = (acc[d.customerId] || 0) + d.remainingBalance;
-        }
-        return acc;
-      }, {} as Record<string, number>);
-
-      const merged = customers.map(c => ({
-        ...c,
-        totalDebt: debtMap[c.id] || 0,
-      }));
+      const merged = customers.map(c => {
+        const fin = calculateCustomerFinancials(c, tickets, transactions, debts);
+        return {
+          ...c,
+          totalDebt: fin.totalDebt,
+          totalSpent: fin.totalSpent,
+          totalPurchases: fin.totalPurchases,
+          lastVisitDate: fin.lastVisitDate || c.lastVisitDate,
+        };
+      });
 
       set({ customers: merged, debts, customerLogs: logs, isLoading: false });
+
+      // Asynchronously repair any corrupted or stale records in Firestore in background
+      setTimeout(() => {
+        merged.forEach(c => {
+          const original = customers.find(orig => orig.id === c.id);
+          if (
+            original &&
+            (Math.abs((original.totalSpent || 0) - c.totalSpent) > 0.01 ||
+              (original.totalDebt || 0) !== c.totalDebt ||
+              (original.totalPurchases || 0) !== c.totalPurchases)
+          ) {
+            customerService.updateCustomer(c.id, {
+              totalSpent: c.totalSpent,
+              totalDebt: c.totalDebt,
+              totalPurchases: c.totalPurchases,
+              lastVisitDate: c.lastVisitDate,
+            }).catch(console.warn);
+          }
+        });
+      }, 1000);
     } catch {
       set({ error: 'Failed to load customers', isLoading: false });
     }
@@ -120,22 +191,24 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
 
   fetchDebts: async () => {
     try {
-      const debts = await debtService.getAll();
+      const [debts, transactions, tickets] = await Promise.all([
+        debtService.getAll(),
+        transactionService.getAll().catch(() => []),
+        repairService.getAll().catch(() => []),
+      ]);
       
-      // Recalculate customer debts
-      const debtMap = debts.reduce((acc, d) => {
-        if (d.status !== 'paid' && d.remainingBalance > 0) {
-          acc[d.customerId] = (acc[d.customerId] || 0) + d.remainingBalance;
-        }
-        return acc;
-      }, {} as Record<string, number>);
-
       set(state => ({
         debts,
-        customers: state.customers.map(c => ({
-          ...c,
-          totalDebt: debtMap[c.id] || 0,
-        })),
+        customers: state.customers.map(c => {
+          const fin = calculateCustomerFinancials(c, tickets, transactions, debts);
+          return {
+            ...c,
+            totalDebt: fin.totalDebt,
+            totalSpent: fin.totalSpent,
+            totalPurchases: fin.totalPurchases,
+            lastVisitDate: fin.lastVisitDate || c.lastVisitDate,
+          };
+        }),
       }));
     } catch (err) {
       console.error('Failed to fetch debts', err);
@@ -187,7 +260,11 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
   addCustomer: async (customer) => {
     try {
       const newCustomer = await customerService.addCustomer(customer);
-      set(state => ({ customers: [...state.customers, { ...newCustomer, totalDebt: 0 }] }));
+      set(state => ({
+        customers: state.customers.some(c => c.id === newCustomer.id)
+          ? state.customers.map(c => c.id === newCustomer.id ? { ...newCustomer, totalDebt: c.totalDebt || 0 } : c)
+          : [...state.customers, { ...newCustomer, totalDebt: 0 }],
+      }));
 
       // Append-only audit log
       const actor = useAuthStore.getState().user;
@@ -232,7 +309,9 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       const debtBalance = createdDebt ? createdDebt.remainingBalance : 0;
 
       set(state => ({
-        customers: [...state.customers, { ...newCustomer, totalDebt: debtBalance }],
+        customers: state.customers.some(c => c.id === newCustomer.id)
+          ? state.customers.map(c => c.id === newCustomer.id ? { ...newCustomer, totalDebt: debtBalance } : c)
+          : [...state.customers, { ...newCustomer, totalDebt: debtBalance }],
         debts: createdDebt ? [createdDebt, ...state.debts] : state.debts,
       }));
 
@@ -282,6 +361,32 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         actorRole: actor?.role,
         metadata: updates,
       }).catch(console.error);
+
+      // Propagate name and phone updates to open debts and active repairs (Gap 7 fix)
+      if (updates.name || updates.phone) {
+        const newName = updates.name || target?.name || updated.name;
+        const newPhone = updates.phone || target?.phone || updated.phone;
+
+        // 1. Update in-memory debts and Firestore debts
+        debtService.reassignDebtsForCustomer(id, newName, newPhone, id).catch(console.error);
+        set(state => ({
+          debts: state.debts.map(d =>
+            d.customerId === id ? { ...d, customerName: newName, customerPhone: newPhone } : d
+          ),
+        }));
+
+        // 2. Propagate to repair tickets for this customer
+        try {
+          const { useRepairStore } = await import('./repairStore');
+          const repairStore = useRepairStore.getState();
+          const custTickets = repairStore.tickets.filter(t => t.customerId === id);
+          custTickets.forEach(t => {
+            repairStore.updateTicket(t.id, { customerName: newName, customerPhone: newPhone }).catch(console.error);
+          });
+        } catch (repErr) {
+          console.warn('Could not propagate customer updates to repairs:', repErr);
+        }
+      }
     } catch {
       set({ error: 'Failed to update customer' });
     }
@@ -388,6 +493,31 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         },
       }).catch(console.error);
 
+      // Sync payment status and paidAmount with linked Repair Ticket (Gap 2 fix)
+      if (updatedDebt.type === 'repair' || updatedDebt.productOrService?.toLowerCase().includes('repair')) {
+        try {
+          const { useRepairStore } = await import('./repairStore');
+          const repairStore = useRepairStore.getState();
+          const matchingTicket = repairStore.tickets.find(t =>
+            (t.debtEntryId && t.debtEntryId === debtId) ||
+            (t.ticketNumber && updatedDebt.productOrService?.includes(t.ticketNumber))
+          );
+          if (matchingTicket) {
+            const finalCost = matchingTicket.actualCost ?? matchingTicket.estimatedCost ?? 0;
+            const newTotalPaid = Math.max(0, finalCost - updatedDebt.remainingBalance);
+            const newPaymentStatus = updatedDebt.remainingBalance <= 0 ? 'paid' : (newTotalPaid > 0 ? 'partial' : 'debt');
+            await repairStore.updateTicket(matchingTicket.id, {
+              paidAmount: newTotalPaid,
+              paymentStatus: newPaymentStatus,
+            });
+          }
+        } catch (repErr) {
+          console.warn('Failed to sync repair ticket on debt payment:', repErr);
+        }
+      }
+
+      get().recalculateCustomer(updatedDebt.customerId).catch(console.error);
+
       return updatedDebt;
     } catch (err) {
       console.error('Failed to record payment', err);
@@ -471,6 +601,22 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
           actorRole: actor?.role,
           metadata: { debtId, productOrService: target.productOrService, totalAmount: target.totalAmount },
         }).catch(console.error);
+
+        // If deleting a debt that was linked to a repair ticket, update the ticket
+        if (target.type === 'repair' || target.productOrService?.toLowerCase().includes('repair')) {
+          try {
+            const { useRepairStore } = await import('./repairStore');
+            const repairStore = useRepairStore.getState();
+            const matchingTicket = repairStore.tickets.find(t => t.debtEntryId === debtId);
+            if (matchingTicket) {
+              await repairStore.updateTicket(matchingTicket.id, {
+                paymentStatus: 'paid',
+              });
+            }
+          } catch (e) {
+            console.warn('Failed to update repair ticket on debt delete:', e);
+          }
+        }
       }
     } catch (err) {
       console.error('Failed to delete debt', err);
@@ -490,59 +636,290 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   },
 
-  findOrCreateCustomer: async ({ name, phone, email, accountType = 'retail', shopName }) => {
-    const trimmedName = name.trim().toLowerCase();
-    const trimmedPhone = phone ? phone.trim() : '';
+  recalculateCustomer: async (customerId: string) => {
+    try {
+      const state = get();
+      const targetCustomer = state.customers.find(c => c.id === customerId);
+      if (!targetCustomer) return;
 
-    // Match by BOTH name AND phone (both must match for same account)
-    const normalizeDigits = (p: string) => p.replace(/\D/g, '');
-    const phoneDigits = normalizeDigits(trimmedPhone);
-    const key = `${trimmedName}_${phoneDigits || 'nophone'}`;
+      const [transactions, tickets] = await Promise.all([
+        transactionService.getAll().catch(() => []),
+        repairService.getAll().catch(() => []),
+      ]);
+
+      const fin = calculateCustomerFinancials(targetCustomer, tickets, transactions, state.debts);
+      set({
+        customers: state.customers.map(c =>
+          c.id === customerId
+            ? {
+                ...c,
+                totalSpent: fin.totalSpent,
+                totalPurchases: fin.totalPurchases,
+                totalDebt: fin.totalDebt,
+                lastVisitDate: fin.lastVisitDate || c.lastVisitDate,
+              }
+            : c
+        ),
+      });
+
+      // Background sync to Firestore
+      customerService.updateCustomer(customerId, {
+        totalSpent: fin.totalSpent,
+        totalPurchases: fin.totalPurchases,
+        totalDebt: fin.totalDebt,
+        lastVisitDate: fin.lastVisitDate,
+      }).catch(console.warn);
+    } catch (err) {
+      console.error('Failed to recalculate customer financials:', err);
+    }
+  },
+
+  recalculateAllCustomerFinancials: async () => {
+    try {
+      const state = get();
+      const [transactions, tickets] = await Promise.all([
+        transactionService.getAll().catch(() => []),
+        repairService.getAll().catch(() => []),
+      ]);
+
+      const updated = state.customers.map(c => {
+        const fin = calculateCustomerFinancials(c, tickets, transactions, state.debts);
+        return {
+          ...c,
+          totalSpent: fin.totalSpent,
+          totalPurchases: fin.totalPurchases,
+          totalDebt: fin.totalDebt,
+          lastVisitDate: fin.lastVisitDate || c.lastVisitDate,
+        };
+      });
+
+      set({ customers: updated });
+
+      setTimeout(() => {
+        updated.forEach(c => {
+          customerService.updateCustomer(c.id, {
+            totalSpent: c.totalSpent,
+            totalPurchases: c.totalPurchases,
+            totalDebt: c.totalDebt,
+            lastVisitDate: c.lastVisitDate,
+          }).catch(console.warn);
+        });
+      }, 500);
+    } catch (err) {
+      console.error('Failed to recalculate all customer financials:', err);
+    }
+  },
+
+  findOrCreateCustomer: async ({ name, phone, email, accountType = 'retail', shopName, address, rc, nif, nis, art, wholesaleDiscountPercent, creditLimit, notes, device }) => {
+    const rawInputName = (name || '').trim();
+    const normalizedInputName = rawInputName.toLowerCase();
+    const trimmedPhone = phone ? phone.trim() : '';
+    const phoneDigits = normalizePhoneDigits(trimmedPhone);
+    const hasValidPhone = phoneDigits.length >= 7;
+
+    // Concurrency key: Lock by phone line if valid (>= 8 digits), otherwise by normalized name
+    const key = hasValidPhone && phoneDigits.length >= 8
+      ? `phone_${phoneDigits.slice(-9)}`
+      : `name_${normalizedInputName || 'unnamed'}`;
 
     if (inFlightCustomerCreations.has(key)) {
-      return await inFlightCustomerCreations.get(key)!;
+      const existingPromiseCustomer = await inFlightCustomerCreations.get(key)!;
+      if (rawInputName && isMoreDescriptiveName(rawInputName, existingPromiseCustomer.name)) {
+        await get().updateCustomer(existingPromiseCustomer.id, { name: rawInputName });
+        return { ...existingPromiseCustomer, name: rawInputName };
+      }
+      return existingPromiseCustomer;
     }
 
     const runCreation = async (): Promise<Customer> => {
-      const existing = get().customers.find(c => {
-        const cDigits = normalizeDigits(c.phone || '');
-        const cName = c.name.toLowerCase().trim();
-        const phoneMatches = phoneDigits && cDigits && (cDigits === phoneDigits || (phoneDigits.length >= 9 && cDigits.endsWith(phoneDigits)));
-        return phoneMatches && cName === trimmedName;
-      });
+      // 1. Search in-memory customers (Primary search)
+      let existing: Customer | undefined;
+
+      // 1A. If valid phone is provided, match by phone line (single source of truth)
+      if (hasValidPhone) {
+        existing = get().customers.find(c =>
+          isPhoneMatch(c.phone, trimmedPhone) ||
+          (c.normalizedPhone && (c.normalizedPhone === phoneDigits || isPhoneMatch(c.normalizedPhone, trimmedPhone)))
+        );
+      }
+
+      // 1B. If no match found by phone (or phone wasn't provided), match by name if provided
+      if (!existing && normalizedInputName) {
+        existing = get().customers.find(c => c.name.trim().toLowerCase() === normalizedInputName);
+      }
+
+      // Helper to calculate and apply non-destructive customer enrichments
+      const applyEnrichments = async (targetCustomer: Customer): Promise<Customer> => {
+        const updates: Partial<Customer> = {};
+
+        // 1. Name Enrichment
+        if (rawInputName && isMoreDescriptiveName(rawInputName, targetCustomer.name)) {
+          updates.name = rawInputName;
+        }
+
+        // 2. Phone Enrichment: if existing had no phone or an incomplete one, and new one is valid
+        if (trimmedPhone && (!targetCustomer.phone || (!hasValidPhone && targetCustomer.phone.length < trimmedPhone.length))) {
+          updates.phone = formatStandardPhone(trimmedPhone) || trimmedPhone;
+          updates.normalizedPhone = phoneDigits;
+        } else if (!targetCustomer.normalizedPhone && hasValidPhone) {
+          updates.normalizedPhone = phoneDigits;
+        }
+
+        // 3. Email Enrichment
+        if (!targetCustomer.email && email?.trim()) {
+          updates.email = email.trim();
+        }
+
+        // 4. Shop Name Enrichment
+        if (!targetCustomer.shopName && shopName?.trim()) {
+          updates.shopName = shopName.trim();
+        }
+
+        // 5. Account Type Upgrade (retail -> shop_repairer)
+        if (accountType === 'shop_repairer' && targetCustomer.accountType !== 'shop_repairer') {
+          updates.accountType = 'shop_repairer';
+          if (!targetCustomer.shopName && shopName?.trim()) {
+            updates.shopName = shopName.trim();
+          }
+        }
+
+        if (!targetCustomer.address && address?.trim()) {
+          updates.address = address.trim();
+        }
+        if (!targetCustomer.rc && rc?.trim()) {
+          updates.rc = rc.trim();
+        }
+        if (!targetCustomer.nif && nif?.trim()) {
+          updates.nif = nif.trim();
+        }
+        if (!targetCustomer.nis && nis?.trim()) {
+          updates.nis = nis.trim();
+        }
+        if (!targetCustomer.art && art?.trim()) {
+          updates.art = art.trim();
+        }
+        if ((!targetCustomer.wholesaleDiscountPercent || targetCustomer.wholesaleDiscountPercent <= 0) && wholesaleDiscountPercent && wholesaleDiscountPercent > 0) {
+          updates.wholesaleDiscountPercent = wholesaleDiscountPercent;
+        }
+        if ((!targetCustomer.creditLimit || targetCustomer.creditLimit <= 0) && creditLimit && creditLimit > 0) {
+          updates.creditLimit = creditLimit;
+        }
+
+        // 7. Non-destructive Notes Merging
+        const cleanNotes = notes?.trim();
+        if (cleanNotes) {
+          if (!targetCustomer.notes || !targetCustomer.notes.trim()) {
+            updates.notes = cleanNotes;
+          } else if (!targetCustomer.notes.includes(cleanNotes)) {
+            const today = new Date().toLocaleDateString('fr-DZ', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            updates.notes = `${targetCustomer.notes.trim()}\n[${today}]: ${cleanNotes}`;
+          }
+        }
+
+        // 8. Registered Device Vault Enrichment
+        if (device && device.brand?.trim() && device.model?.trim()) {
+          const brandTrim = device.brand.trim();
+          const modelTrim = device.model.trim();
+          const imeiTrim = device.imei?.trim() || '';
+          const devNotesTrim = device.notes?.trim() || '';
+
+          const existingDevices = targetCustomer.registeredDevices || [];
+          const matchedDeviceIndex = existingDevices.findIndex(d =>
+            d.brand.toLowerCase() === brandTrim.toLowerCase() &&
+            d.model.toLowerCase() === modelTrim.toLowerCase() &&
+            (!imeiTrim || !d.imei || d.imei === imeiTrim)
+          );
+
+          if (matchedDeviceIndex === -1) {
+            const newVaultDevice: CustomerRegisteredDevice = {
+              id: `dev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+              brand: brandTrim,
+              model: modelTrim,
+              imei: imeiTrim || undefined,
+              notes: devNotesTrim || undefined,
+              createdAt: new Date().toISOString(),
+            };
+            updates.registeredDevices = [newVaultDevice, ...existingDevices];
+          } else {
+            const existingDev = existingDevices[matchedDeviceIndex];
+            const needsImei = imeiTrim && !existingDev.imei;
+            const needsNotes = devNotesTrim && !existingDev.notes;
+            if (needsImei || needsNotes) {
+              const updatedDevices = [...existingDevices];
+              updatedDevices[matchedDeviceIndex] = {
+                ...existingDev,
+                ...(needsImei ? { imei: imeiTrim } : {}),
+                ...(needsNotes ? { notes: devNotesTrim } : {}),
+              };
+              updates.registeredDevices = updatedDevices;
+            }
+          }
+        }
+
+        if (Object.keys(updates).length > 0) {
+          const updated = await get().updateCustomer(targetCustomer.id, updates);
+          const fresh = get().customers.find(c => c.id === targetCustomer.id);
+          const debtTotal = get().getCustomerDebtTotal(targetCustomer.id);
+          return { ...(fresh || { ...targetCustomer, ...updates }), totalDebt: debtTotal };
+        }
+
+        const debtTotal = get().getCustomerDebtTotal(targetCustomer.id);
+        return { ...targetCustomer, totalDebt: debtTotal };
+      };
 
       if (existing) {
-        const updates: Partial<Customer> = {};
-        if (!existing.phone && trimmedPhone) updates.phone = trimmedPhone;
-        if (!existing.accountType && accountType) updates.accountType = accountType;
-        if (Object.keys(updates).length > 0) {
-          await get().updateCustomer(existing.id, updates);
-          return { ...existing, ...updates };
-        }
-        return existing;
+        return await applyEnrichments(existing);
       }
 
-      if (trimmedPhone) {
+      // 2. Search remote Firestore fallback if phone was provided
+      if (hasValidPhone) {
         const remote = await customerService.findByPhone(trimmedPhone);
-        if (remote && remote.name.toLowerCase().trim() === trimmedName) {
-          const debtTotal = get().getCustomerDebtTotal(remote.id);
-          const withDebt = { ...remote, totalDebt: debtTotal };
+        if (remote) {
+          const enriched = await applyEnrichments(remote);
           set(state => ({
-            customers: state.customers.some(c => c.id === remote.id)
-              ? state.customers.map(c => c.id === remote.id ? withDebt : c)
-              : [...state.customers, withDebt],
+            customers: state.customers.some(c => c.id === enriched.id)
+              ? state.customers.map(c => c.id === enriched.id ? enriched : c)
+              : [...state.customers, enriched],
           }));
-          return withDebt;
+          return enriched;
         }
       }
+
+      // 3. Customer account requires a valid phone number besides the name
+      if (!hasValidPhone) {
+        console.warn('Customer account requires a valid phone number. Cannot auto-create account for:', rawInputName);
+        return undefined as any;
+      }
+
+      // Customer truly does not exist -> Create new customer profile
+      const newDevices: CustomerRegisteredDevice[] = (device && device.brand?.trim() && device.model?.trim())
+        ? [{
+            id: `dev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            brand: device.brand.trim(),
+            model: device.model.trim(),
+            imei: device.imei?.trim() || undefined,
+            notes: device.notes?.trim() || undefined,
+            createdAt: new Date().toISOString(),
+          }]
+        : [];
 
       const newCustomer = await customerService.addCustomer({
-        name: name.trim(),
-        phone: trimmedPhone,
+        name: rawInputName || 'Client',
+        phone: formatStandardPhone(trimmedPhone) || trimmedPhone,
         email: email?.trim(),
         accountType,
         shopName: accountType === 'shop_repairer' ? shopName?.trim() : undefined,
+        address: address?.trim(),
+        rc: rc?.trim(),
+        nif: nif?.trim(),
+        nis: nis?.trim(),
+        art: art?.trim(),
+        wholesaleDiscountPercent,
+        creditLimit,
+        notes: notes?.trim(),
+        registeredDevices: newDevices.length > 0 ? newDevices : undefined,
       });
+
       const withDebt = { ...newCustomer, totalDebt: 0 };
       set(state => ({ customers: [...state.customers, withDebt] }));
 
@@ -568,6 +945,104 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
     } finally {
       inFlightCustomerCreations.delete(key);
     }
+  },
+
+  enrichCustomer: async (customerId, data) => {
+    const customer = get().customers.find(c => c.id === customerId);
+    if (!customer) throw new Error('Customer not found');
+
+    const updates: Partial<Customer> = {};
+
+    if (data.name && isMoreDescriptiveName(data.name, customer.name)) {
+      updates.name = data.name.trim();
+    }
+    if (data.phone) {
+      const cleanPhone = normalizePhoneDigits(data.phone);
+      if (!customer.phone || customer.phone.length < data.phone.length) {
+        updates.phone = formatStandardPhone(data.phone) || data.phone.trim();
+        updates.normalizedPhone = cleanPhone;
+      }
+    }
+    if (!customer.email && data.email?.trim()) {
+      updates.email = data.email.trim();
+    }
+    if (!customer.shopName && data.shopName?.trim()) {
+      updates.shopName = data.shopName.trim();
+    }
+    if (!customer.address && data.address?.trim()) {
+      updates.address = data.address.trim();
+    }
+    if (!customer.rc && data.rc?.trim()) {
+      updates.rc = data.rc.trim();
+    }
+    if (!customer.nif && data.nif?.trim()) {
+      updates.nif = data.nif.trim();
+    }
+    if (!customer.nis && data.nis?.trim()) {
+      updates.nis = data.nis.trim();
+    }
+    if (!customer.art && data.art?.trim()) {
+      updates.art = data.art.trim();
+    }
+    if (data.wholesaleDiscountPercent !== undefined && data.wholesaleDiscountPercent > 0) {
+      updates.wholesaleDiscountPercent = data.wholesaleDiscountPercent;
+    }
+    if (data.creditLimit !== undefined && data.creditLimit > 0) {
+      updates.creditLimit = data.creditLimit;
+    }
+    const cleanNotes = data.notes?.trim();
+    if (cleanNotes) {
+      if (!customer.notes || !customer.notes.trim()) {
+        updates.notes = cleanNotes;
+      } else if (!customer.notes.includes(cleanNotes)) {
+        const today = new Date().toLocaleDateString('fr-DZ', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        updates.notes = `${customer.notes.trim()}\n[${today}]: ${cleanNotes}`;
+      }
+    }
+    if (data.device && data.device.brand?.trim() && data.device.model?.trim()) {
+      const brandTrim = data.device.brand.trim();
+      const modelTrim = data.device.model.trim();
+      const imeiTrim = data.device.imei?.trim() || '';
+      const devNotesTrim = data.device.notes?.trim() || '';
+
+      const existingDevices = customer.registeredDevices || [];
+      const matchedDeviceIndex = existingDevices.findIndex(d =>
+        d.brand.toLowerCase() === brandTrim.toLowerCase() &&
+        d.model.toLowerCase() === modelTrim.toLowerCase() &&
+        (!imeiTrim || !d.imei || d.imei === imeiTrim)
+      );
+
+      if (matchedDeviceIndex === -1) {
+        const newVaultDevice: CustomerRegisteredDevice = {
+          id: `dev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          brand: brandTrim,
+          model: modelTrim,
+          imei: imeiTrim || undefined,
+          notes: devNotesTrim || undefined,
+          createdAt: new Date().toISOString(),
+        };
+        updates.registeredDevices = [newVaultDevice, ...existingDevices];
+      } else {
+        const existingDev = existingDevices[matchedDeviceIndex];
+        const needsImei = imeiTrim && !existingDev.imei;
+        const needsNotes = devNotesTrim && !existingDev.notes;
+        if (needsImei || needsNotes) {
+          const updatedDevices = [...existingDevices];
+          updatedDevices[matchedDeviceIndex] = {
+            ...existingDev,
+            ...(needsImei ? { imei: imeiTrim } : {}),
+            ...(needsNotes ? { notes: devNotesTrim } : {}),
+          };
+          updates.registeredDevices = updatedDevices;
+        }
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      const updated = await get().updateCustomer(customerId, updates);
+      return updated;
+    }
+    return customer;
   },
 
   addStoreCredit: async (customerId, amount, note) => {
@@ -736,7 +1211,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
     }
   },
 
-  mergeCustomers: async ({ primaryCustomerId, secondaryCustomerId, keepAs, customName, customPhone, customShopName }) => {
+  mergeCustomers: async ({ primaryCustomerId, secondaryCustomerId, keepAs, customName, customPhone, customShopName, deleteSecondaryDoc = true }) => {
     const { customers, debts } = get();
     const primary = customers.find(c => c.id === primaryCustomerId);
     const secondary = customers.find(c => c.id === secondaryCustomerId);
@@ -813,12 +1288,35 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
           return t;
         }),
       }));
+
+      // Also update in-memory partsCartStore state for immediate UI reflection
+      const { usePartsCartStore } = await import('./partsCartStore');
+      usePartsCartStore.setState(state => ({
+        invoices: state.invoices.map(t => {
+          if (t.customerId === secondary.id) {
+            return {
+              ...t,
+              customerId: primary.id,
+              customerName: mergedName,
+              customerPhone: mergedPhone,
+            };
+          }
+          return t;
+        }),
+      }));
     } catch (e) {
       console.warn('Could not reassign cart transactions during merge:', e);
     }
 
-    // 5. Delete the absorbed secondary customer
-    await customerService.deleteCustomer(secondary.id);
+    // 5. Delete or Archive the absorbed secondary customer (only the duplicate customer record is removed; all debts, tickets, and transactions are preserved)
+    if (deleteSecondaryDoc) {
+      await customerService.deleteCustomer(secondary.id);
+    } else {
+      await customerService.updateCustomer(secondary.id, {
+        mergedIntoId: primary.id,
+        mergedAt: new Date().toISOString(),
+      });
+    }
 
     // 6. Update in-memory debts & calculate updated primary debt
     const updatedDebts = debts.map(d => {
@@ -847,7 +1345,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
     set(state => ({
       debts: updatedDebts,
       customers: state.customers
-        .filter(c => c.id !== secondary.id)
+        .filter(c => c.id !== secondary.id)  // remove duplicate customer from active list
         .map(c => c.id === primary.id ? finalPrimary : c),
     }));
 
@@ -859,7 +1357,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       customerName: mergedName,
       actionType: 'customer_updated',
       actionTitle: `Duplicate Accounts Merged (Kept as ${destLabel})`,
-      actionDescription: `Merged duplicate account "${secondary.name}" (${secondary.shopName ? 'Shop: ' + secondary.shopName : 'Retail'}) into "${mergedName}". Retained as ${destLabel}. Combined ${combinedPurchases} orders and transferred debts by ${actor?.name || 'Staff'}.`,
+      actionDescription: `Merged duplicate account "${secondary.name}" (${secondary.shopName ? 'Shop: ' + secondary.shopName : 'Retail'}) into "${mergedName}". Retained as ${destLabel}. Combined ${combinedPurchases} orders and transferred debts by ${actor?.name || 'Staff'}.${deleteSecondaryDoc ? ' Redundant duplicate customer profile was deleted from database.' : ''}`,
       actorId: actor?.id,
       actorName: actor?.name || 'Staff',
       actorRole: actor?.role,
@@ -867,15 +1365,117 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         absorbedCustomerId: secondary.id,
         absorbedCustomerName: secondary.name,
         keptAs: keepAs,
+        deletedSecondaryDoc: deleteSecondaryDoc,
       },
     }).catch(console.error);
 
     return finalPrimary;
   },
 
+  autoResolveAllDuplicates: async (options) => {
+    const deleteSecondary = options?.deleteSecondary ?? true;
+    let totalMerged = 0;
+    let totalDeleted = 0;
+    const maxPasses = 15;
+    let pass = 0;
+
+    while (pass < maxPasses) {
+      pass++;
+      const duplicates = get().findDuplicates();
+      if (duplicates.length === 0) break;
+
+      let mergedInPass = 0;
+      const processedInPass = new Set<string>();
+
+      for (const pair of duplicates) {
+        const stateCustomers = get().customers;
+        const cA = stateCustomers.find(c => c.id === pair.retail.id && !c.mergedIntoId);
+        const cB = stateCustomers.find(c => c.id === pair.shop.id && !c.mergedIntoId);
+
+        if (!cA || !cB || cA.id === cB.id) continue;
+        if (processedInPass.has(cA.id) || processedInPass.has(cB.id)) continue;
+
+        // Choose primary:
+        // 1. Phone priority: real phone vs dummy/missing
+        const aHasPhone = !isDummyPhone(cA.phone);
+        const bHasPhone = !isDummyPhone(cB.phone);
+
+        // 2. Shop priority: shop vs retail
+        const aIsShop = isShopCustomer(cA);
+        const bIsShop = isShopCustomer(cB);
+
+        let primary = cA;
+        let secondary = cB;
+
+        if (!aHasPhone && bHasPhone) {
+          primary = cB;
+          secondary = cA;
+        } else if (aHasPhone && !bHasPhone) {
+          primary = cA;
+          secondary = cB;
+        } else if (!aIsShop && bIsShop) {
+          primary = cB;
+          secondary = cA;
+        } else if (aIsShop && !bIsShop) {
+          primary = cA;
+          secondary = cB;
+        } else if ((cB.totalPurchases || 0) > (cA.totalPurchases || 0)) {
+          primary = cB;
+          secondary = cA;
+        } else if ((cB.totalSpent || 0) > (cA.totalSpent || 0)) {
+          primary = cB;
+          secondary = cA;
+        }
+
+        const keepAsType: 'shop_repairer' | 'retail' = (isShopCustomer(primary) || isShopCustomer(secondary))
+          ? 'shop_repairer'
+          : 'retail';
+
+        const mergedName = isMoreDescriptiveName(secondary.name, primary.name)
+          ? secondary.name.trim()
+          : primary.name.trim();
+
+        const mergedPhone = (!isDummyPhone(primary.phone) ? primary.phone : secondary.phone) || primary.phone || secondary.phone || '';
+
+        const mergedShop = keepAsType === 'shop_repairer'
+          ? (primary.shopName || secondary.shopName || `${mergedName}'s Workshop`).trim()
+          : undefined;
+
+        try {
+          await get().mergeCustomers({
+            primaryCustomerId: primary.id,
+            secondaryCustomerId: secondary.id,
+            keepAs: keepAsType,
+            customName: mergedName,
+            customPhone: mergedPhone,
+            customShopName: mergedShop,
+            deleteSecondaryDoc: deleteSecondary,
+          });
+          processedInPass.add(primary.id);
+          processedInPass.add(secondary.id);
+          mergedInPass++;
+          totalMerged++;
+          if (deleteSecondary) totalDeleted++;
+        } catch (err) {
+          console.error('Failed to merge duplicate pair in autoResolveAllDuplicates:', err);
+        }
+      }
+
+      if (mergedInPass === 0) break;
+    }
+
+    try {
+      await get().recalculateAllCustomerFinancials();
+    } catch (e) {
+      console.warn('Could not recalculate financials after auto-fusion:', e);
+    }
+
+    return { mergedCount: totalMerged, deletedCount: totalDeleted };
+  },
+
   findDuplicates: () => {
-    const { customers } = get();
-    const normalizeDigits = (p: string) => (p || '').replace(/\D/g, '');
+    // Exclude already-merged / archived customers from duplicate detection
+    const activeCustomers = get().customers.filter(c => !c.mergedIntoId);
     const duplicates: Array<{ retail: Customer; shop: Customer; reason: string }> = [];
     const seenPairs = new Set<string>();
 
@@ -885,34 +1485,49 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       const pairKey = [a.id, b.id].sort().join(':::');
       if (seenPairs.has(pairKey)) return;
 
-      const aPhone = normalizeDigits(a.phone);
-      const bPhone = normalizeDigits(b.phone);
-      const aName = a.name.toLowerCase().trim();
-      const bName = b.name.toLowerCase().trim();
-      const bShop = (b.shopName || '').toLowerCase().trim();
+      const aPhone = a.phone || '';
+      const bPhone = b.phone || '';
+      const phoneMatch = isPhoneMatch(aPhone, bPhone);
 
-      const phoneMatch = aPhone.length >= 7 && bPhone.length >= 7 && (
-        aPhone === bPhone ||
-        aPhone.endsWith(bPhone) ||
-        bPhone.endsWith(aPhone)
-      );
+      const aHasRealPhone = !isDummyPhone(aPhone);
+      const bHasRealPhone = !isDummyPhone(bPhone);
 
-      const nameMatch = (aName === bName) || (bShop && bShop === aName) || (bShop && bShop.includes(aName));
+      // If both have different REAL phone numbers, they are definitely different customers!
+      if (aHasRealPhone && bHasRealPhone && !phoneMatch) {
+        return;
+      }
 
-      if (phoneMatch && nameMatch) {
+      const aName = (a.name || '').trim().toLowerCase();
+      const bName = (b.name || '').trim().toLowerCase();
+      const aShop = (a.shopName || '').trim().toLowerCase();
+      const bShop = (b.shopName || '').trim().toLowerCase();
+
+      const exactNameMatch = aName && bName && aName === bName;
+      const exactShopMatch =
+        (aShop && bShop && aShop === bShop) ||
+        (aName && bShop && aName === bShop) ||
+        (bName && aShop && bName === aShop);
+
+      if (phoneMatch && (exactNameMatch || exactShopMatch)) {
         duplicates.push({ retail: a, shop: b, reason: 'Identical Name & Phone Number' });
         seenPairs.add(pairKey);
       } else if (phoneMatch) {
         duplicates.push({ retail: a, shop: b, reason: `Matching Phone (${a.phone})` });
         seenPairs.add(pairKey);
-      } else if (nameMatch && aName.length >= 3) {
-        duplicates.push({ retail: a, shop: b, reason: `Matching Name ("${a.name}")` });
-        seenPairs.add(pairKey);
+      } else if (exactNameMatch || exactShopMatch) {
+        const targetName = exactNameMatch ? aName : (aShop || bShop);
+        if (isValidNameForDeduplication(targetName)) {
+          const isMultiWord = targetName.includes(' ') && targetName.trim().split(/\s+/).filter(Boolean).length >= 2;
+          if (isMultiWord) {
+            duplicates.push({ retail: a, shop: b, reason: `Matching Name ("${a.name || a.shopName}")` });
+            seenPairs.add(pairKey);
+          }
+        }
       }
     };
 
-    const retails = customers.filter(isRetailCustomer);
-    const shops = customers.filter(isShopCustomer);
+    const retails = activeCustomers.filter(isRetailCustomer);
+    const shops = activeCustomers.filter(isShopCustomer);
 
     // Cross-type: retail vs shop
     for (const r of retails) {
@@ -940,9 +1555,11 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
 
   getFilteredCustomers: () => {
     const { customers, searchQuery } = get();
-    if (!searchQuery.trim()) return customers;
+    // Exclude merged/archived customers from all active views
+    const active = customers.filter(c => !c.mergedIntoId);
+    if (!searchQuery.trim()) return active;
     const q = searchQuery.toLowerCase();
-    return customers.filter(c =>
+    return active.filter(c =>
       c.name.toLowerCase().includes(q) ||
       (c.shopName && c.shopName.toLowerCase().includes(q)) ||
       c.phone.toLowerCase().includes(q) ||
@@ -951,10 +1568,10 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
   },
 
   getRetailCustomers: () => {
-    return get().customers.filter(isRetailCustomer);
+    return get().customers.filter(c => !c.mergedIntoId && isRetailCustomer(c));
   },
 
   getShopCustomers: () => {
-    return get().customers.filter(isShopCustomer);
+    return get().customers.filter(c => !c.mergedIntoId && isShopCustomer(c));
   },
 }));

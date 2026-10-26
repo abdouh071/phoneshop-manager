@@ -4,7 +4,7 @@ import {
   Eye, Edit, Trash2, TrendingUp, AlertTriangle, Package, Plus,
   ChevronDown, ChevronUp, ChevronRight, CornerDownRight, DollarSign,
   ScanLine, ClipboardList, Upload, CheckCircle2, AlertCircle, XCircle,
-  LayoutList, Table, Printer
+  LayoutList, Table, Printer, FileSpreadsheet
 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -22,6 +22,7 @@ import { AddProductModal } from './AddProductModal';
 import { EditProductPanel } from './EditProductPanel';
 import { ProductDetailPanel } from './ProductDetailPanel';
 import { PrintLabelsModal } from './PrintLabelsModal';
+import { ExportLowStockModal } from './ExportLowStockModal';
 import { RestockHistoryPanel } from './RestockHistoryPanel';
 import { WriteOffLogPanel } from './WriteOffLogPanel';
 import { WriteOffModal } from './WriteOffModal';
@@ -32,7 +33,9 @@ import { groupProductsByBaseModel } from '../../utils/productGrouping';
 import type { ProductGroup } from '../../utils/productGrouping';
 import { StockAudit } from './StockAudit';
 import styles from './Inventory.module.css';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { usePrivacyStore } from '../../store/privacyStore';
+import { ACCESSORY_SUB_CATEGORIES } from '../../utils/accessorySubCategories';
 
 const margin = (p: PhoneModel) =>
   p.price > 0 ? (((p.price - p.costPrice) / p.price) * 100) : 0;
@@ -46,6 +49,7 @@ export const InventoryPage = () => {
   const { fetchProducts, searchQuery, setSearchQuery, isLoading, products, restockProduct } = useInventoryStore();
   const { user } = useAuthStore();
   const permissions = usePermissions();
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
@@ -57,6 +61,7 @@ export const InventoryPage = () => {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [subCategoryFilter, setSubCategoryFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -69,7 +74,23 @@ export const InventoryPage = () => {
   const [isRestockLogOpen, setIsRestockLogOpen] = useState(false);
   const [isWriteOffLogOpen, setIsWriteOffLogOpen] = useState(false);
   const [writeOffProduct, setWriteOffProduct] = useState<PhoneModel | null>(null);
-  const [actionRequiringUnlock, setActionRequiringUnlock] = useState<{ name: string; callback: () => void } | null>(null);
+  const [actionRequiringUnlock, setActionRequiringUnlock] = useState<{
+    name: string;
+    callback: () => void;
+    actionType?: string;
+    actionData?: Record<string, any>;
+    targetId?: string;
+  } | null>(null);
+  const [isExportLowStockOpen, setIsExportLowStockOpen] = useState(false);
+  const [exportInitialCategory, setExportInitialCategory] = useState<string>('all');
+  const [exportInitialSubCategory, setExportInitialSubCategory] = useState<string>('all');
+
+  const handleOpenExportLowStock = (cat?: string, sub?: string) => {
+    setExportInitialCategory(cat || categoryFilter || 'all');
+    setExportInitialSubCategory(sub || subCategoryFilter || 'all');
+    setIsExportLowStockOpen(true);
+  };
+
   const itemsPerPage = 10;
 
   const location = useLocation();
@@ -125,22 +146,36 @@ export const InventoryPage = () => {
     });
   }, [products, permissions.inventory_products]);
 
+  const isLowStock = (p: PhoneModel) => {
+    const threshold = p.lowStockThreshold || 1;
+    return p.stockStatus === 'low_stock' || (p.stock > 0 && p.stock <= threshold);
+  };
+
   const filtered = useMemo(() => {
     return roleFilteredProducts.filter(p => {
       let matchesSearch = true;
       if (searchQuery.trim()) {
         const words = searchQuery.toLowerCase().trim().split(/\s+/);
-        const full = [p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier].filter(Boolean).join(' ').toLowerCase();
+        const full = [p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier, p.accessorySubCategory].filter(Boolean).join(' ').toLowerCase();
         matchesSearch = words.every(w => full.includes(w));
       }
-      const matchesStatus = statusFilter === 'all' || p.stockStatus === statusFilter;
+      const matchesStatus =
+        statusFilter === 'all'
+          ? true
+          : statusFilter === 'low_stock'
+          ? isLowStock(p)
+          : statusFilter === 'out_of_stock'
+          ? (p.stock === 0 || p.stockStatus === 'out_of_stock')
+          : (p.stockStatus === statusFilter && !isLowStock(p));
+
       const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
-      return matchesSearch && matchesStatus && matchesCategory;
+      const matchesSubCategory = categoryFilter !== 'accessory' || subCategoryFilter === 'all' || (p.accessorySubCategory || 'other') === subCategoryFilter;
+      return matchesSearch && matchesStatus && matchesCategory && matchesSubCategory;
     });
-  }, [roleFilteredProducts, searchQuery, statusFilter, categoryFilter]);
+  }, [roleFilteredProducts, searchQuery, statusFilter, categoryFilter, subCategoryFilter]);
 
   const lowStockCount = useMemo(() => {
-    return roleFilteredProducts.filter(p => p.stockStatus === 'low_stock' || p.stockStatus === 'out_of_stock').length;
+    return roleFilteredProducts.filter(p => isLowStock(p)).length;
   }, [roleFilteredProducts]);
 
   const sortedGroups = useMemo(() => {
@@ -206,32 +241,54 @@ export const InventoryPage = () => {
     setRestockMeta({ supplier: '', note: '', cost: '' });
   };
 
-  const requirePermission = (actionName: string, callback: () => void) => {
+  const requirePermission = (
+    actionName: string,
+    callback: () => void,
+    meta?: { actionType?: string; actionData?: Record<string, any>; targetId?: string }
+  ) => {
     if (permissions.inventory_edit || user?.role === 'admin') {
       callback();
     } else {
-      setActionRequiringUnlock({ name: actionName, callback });
+      setActionRequiringUnlock({
+        name: actionName,
+        callback,
+        actionType: meta?.actionType,
+        actionData: meta?.actionData,
+        targetId: meta?.targetId,
+      });
     }
   };
 
   const canViewCosts = user?.role === 'admin' || (permissions.inventory_edit && permissions.reports);
 
-  // Category counts for pills
+  // Category counts for pills (dynamically reflects low stock when low_stock status filter is active)
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {
-      all: roleFilteredProducts.length,
+      all: 0,
       smartphone: 0,
       tablet: 0,
       accessory: 0,
       wearable: 0,
     };
     roleFilteredProducts.forEach(p => {
-      if (p.category && counts[p.category] !== undefined) {
-        counts[p.category]++;
+      const matchesStatus =
+        statusFilter === 'all'
+          ? true
+          : statusFilter === 'low_stock'
+          ? isLowStock(p)
+          : statusFilter === 'out_of_stock'
+          ? (p.stock === 0 || p.stockStatus === 'out_of_stock')
+          : (p.stockStatus === statusFilter && !isLowStock(p));
+
+      if (matchesStatus) {
+        counts.all++;
+        if (p.category && counts[p.category] !== undefined) {
+          counts[p.category]++;
+        }
       }
     });
     return counts;
-  }, [roleFilteredProducts]);
+  }, [roleFilteredProducts, statusFilter]);
 
   // Audit Mode overlay
   if (isAuditOpen) {
@@ -247,15 +304,39 @@ export const InventoryPage = () => {
         onClose={() => setDetailProduct(null)}
         onEdit={(p) => {
           setDetailProduct(null);
-          requirePermission('edit this product', () => setEditingProduct(p));
+          requirePermission(`Edit product: ${p.name}`, () => setEditingProduct(p), {
+            actionType: 'inventory_edit_product',
+            targetId: p.id,
+            actionData: {
+              itemType: 'product',
+              productName: p.name,
+              model: p.model,
+              sku: p.sku,
+              category: p.category,
+              price: p.price,
+              costPrice: p.costPrice,
+              currentStock: p.stock,
+            },
+          });
         }}
       />
-      <PrintLabelsModal isOpen={isPrintOpen} onClose={() => setIsPrintOpen(false)} products={[]} />
+      <PrintLabelsModal isOpen={isPrintOpen} onClose={() => setIsPrintOpen(false)} products={[]} categoryFilter={categoryFilter !== 'all' ? categoryFilter : undefined} />
+      <ExportLowStockModal
+        isOpen={isExportLowStockOpen}
+        onClose={() => setIsExportLowStockOpen(false)}
+        products={roleFilteredProducts}
+        initialCategory={exportInitialCategory}
+        initialSubCategory={exportInitialSubCategory}
+        canViewCosts={canViewCosts}
+      />
       <AdminUnlockModal
         isOpen={actionRequiringUnlock !== null}
         onClose={() => setActionRequiringUnlock(null)}
         onSuccess={() => { actionRequiringUnlock?.callback(); setActionRequiringUnlock(null); }}
         actionName={actionRequiringUnlock?.name}
+        actionType={actionRequiringUnlock?.actionType}
+        actionData={actionRequiringUnlock?.actionData}
+        targetId={actionRequiringUnlock?.targetId}
       />
 
       <RestockHistoryPanel isOpen={isRestockLogOpen} onClose={() => setIsRestockLogOpen(false)} />
@@ -270,16 +351,28 @@ export const InventoryPage = () => {
             <AlertTriangle size={18} />
             <span><strong>Attention Needed:</strong> {lowStockCount} products are running low on stock or sold out.</span>
           </div>
-          <button
-            type="button"
-            className={styles.warningActionBtn}
-            onClick={() => {
-              setStatusFilter(statusFilter === 'low_stock' ? 'all' : 'low_stock');
-              setCurrentPage(1);
-            }}
-          >
-            {statusFilter === 'low_stock' ? 'Show All Products' : 'Filter Low Stock'}
-          </button>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              type="button"
+              className={styles.warningActionBtn}
+              onClick={() => {
+                setStatusFilter(statusFilter === 'low_stock' ? 'all' : 'low_stock');
+                setCurrentPage(1);
+              }}
+            >
+              {statusFilter === 'low_stock' ? 'Show All Products' : 'Filter Low Stock'}
+            </button>
+            <button
+              type="button"
+              className={styles.warningActionBtn}
+              onClick={() => handleOpenExportLowStock()}
+              style={{ background: '#d97706', borderColor: '#d97706', color: '#ffffff' }}
+              title="Export low stock products with category filters"
+            >
+              <FileSpreadsheet size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+              Export Low Stock
+            </button>
+          </div>
         </div>
       )}
 
@@ -290,6 +383,9 @@ export const InventoryPage = () => {
           <p className={styles.subtitle}>{filtered.length} products available · {roleFilteredProducts.reduce((sum, p) => sum + p.stock, 0)} units in stock</p>
         </div>
         <div className={styles.headerActions}>
+          <Button variant="secondary" leftIcon={<FileSpreadsheet size={16} />} onClick={() => handleOpenExportLowStock()}>
+            Export Low Stock
+          </Button>
           <Button variant="secondary" leftIcon={<ScanLine size={16} />} onClick={() => requirePermission('perform stock audit', () => setIsAuditOpen(true))}>
             Stock Audit
           </Button>
@@ -329,7 +425,7 @@ export const InventoryPage = () => {
             <button
               key={cat.value}
               type="button"
-              onClick={() => { setCategoryFilter(cat.value); setCurrentPage(1); }}
+              onClick={() => { setCategoryFilter(cat.value); setSubCategoryFilter('all'); setCurrentPage(1); }}
               className={[styles.categoryTab, isActive && styles.categoryTabActive].filter(Boolean).join(' ')}
             >
               <span>{cat.label}</span>
@@ -338,6 +434,50 @@ export const InventoryPage = () => {
           );
         })}
       </div>
+
+      {/* Accessory Sub-Category Tabs */}
+      {categoryFilter === 'accessory' && (
+        <div className={styles.subCategoryTabs}>
+          {ACCESSORY_SUB_CATEGORIES.map(sub => {
+            const isActive = subCategoryFilter === sub.value;
+            const count = sub.value === 'all'
+              ? roleFilteredProducts.filter(p => {
+                  const matchStatus =
+                    statusFilter === 'all'
+                      ? true
+                      : statusFilter === 'low_stock'
+                      ? isLowStock(p)
+                      : statusFilter === 'out_of_stock'
+                      ? (p.stock === 0 || p.stockStatus === 'out_of_stock')
+                      : (p.stockStatus === statusFilter && !isLowStock(p));
+                  return p.category === 'accessory' && matchStatus;
+                }).length
+              : roleFilteredProducts.filter(p => {
+                  const matchStatus =
+                    statusFilter === 'all'
+                      ? true
+                      : statusFilter === 'low_stock'
+                      ? isLowStock(p)
+                      : statusFilter === 'out_of_stock'
+                      ? (p.stock === 0 || p.stockStatus === 'out_of_stock')
+                      : (p.stockStatus === statusFilter && !isLowStock(p));
+                  return p.category === 'accessory' && (p.accessorySubCategory || 'other') === sub.value && matchStatus;
+                }).length;
+            return (
+              <button
+                key={sub.value}
+                type="button"
+                onClick={() => { setSubCategoryFilter(sub.value); setCurrentPage(1); }}
+                className={[styles.subCategoryTab, isActive && styles.subCategoryTabActive].filter(Boolean).join(' ')}
+              >
+                <span>{sub.icon}</span>
+                <span>{sub.label}</span>
+                <span className={styles.subTabCount}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Interactive 6-KPI Summary Grid */}
       <div className={styles.summaryGrid}>
@@ -377,7 +517,7 @@ export const InventoryPage = () => {
             <div className={[styles.summaryIconWrap, styles.iconLowStock].join(' ')}><AlertCircle size={16} /></div>
           </div>
           <p className={styles.summaryValue} style={{ color: '#d97706' }}>
-            {roleFilteredProducts.filter(p => p.stockStatus === 'low_stock').length}
+            {roleFilteredProducts.filter(p => isLowStock(p)).length}
           </p>
         </div>
 
@@ -401,7 +541,7 @@ export const InventoryPage = () => {
               <span className={styles.summaryLabel}>Cost Valuation</span>
               <div className={[styles.summaryIconWrap, styles.iconValuation].join(' ')}><DollarSign size={16} /></div>
             </div>
-            <p className={styles.summaryValue}>{formatCurrency(totalInventoryValue)}</p>
+            <p className={styles.summaryValue}>{formatPrivateCurrency(totalInventoryValue)}</p>
           </div>
         )}
 
@@ -471,12 +611,50 @@ export const InventoryPage = () => {
           products={filtered}
           canViewCosts={canViewCosts}
           onSelectProduct={p => setDetailProduct(p)}
-          onEditProduct={p => requirePermission('edit this product', () => setEditingProduct(p))}
+          onEditProduct={p => requirePermission(`Edit product: ${p.name}`, () => setEditingProduct(p), {
+            actionType: 'inventory_edit_product',
+            targetId: p.id,
+            actionData: {
+              itemType: 'product',
+              productName: p.name,
+              model: p.model,
+              sku: p.sku,
+              category: p.category,
+              price: p.price,
+              costPrice: p.costPrice,
+              currentStock: p.stock,
+            },
+          })}
           onRestockProduct={async (p, amount, meta) => {
             await restockProduct(p.id, amount, meta);
           }}
-          onWriteOffProduct={p => requirePermission('write off products', () => setWriteOffProduct(p))}
+          onWriteOffProduct={p => requirePermission(`Write off product: ${p.name}`, () => setWriteOffProduct(p), {
+            actionType: 'inventory_write_off',
+            targetId: p.id,
+            actionData: {
+              itemType: 'product',
+              productName: p.name,
+              model: p.model,
+              sku: p.sku,
+              category: p.category,
+              price: p.price,
+              currentStock: p.stock,
+            },
+          })}
           onPrintLabel={() => setIsPrintOpen(true)}
+          statusFilter={statusFilter}
+          categoryFilter={categoryFilter}
+          subCategoryFilter={subCategoryFilter}
+          onSelectCategory={cat => {
+            setCategoryFilter(cat);
+            setSubCategoryFilter('all');
+            setCurrentPage(1);
+          }}
+          onSelectSubCategory={sub => {
+            setSubCategoryFilter(sub);
+            setCurrentPage(1);
+          }}
+          onExportLowStock={(cat, sub) => handleOpenExportLowStock(cat, sub)}
         />
       )}
 
@@ -597,12 +775,14 @@ export const InventoryPage = () => {
                         </td>
                         <td className={styles.td}>{isSingle ? single.location || '-' : '-'}</td>
                         {canViewCosts && (
-                          <td className={styles.td}>
-                            {isSingle
-                              ? formatCurrency(single.costPrice)
-                              : group.minCost === group.maxCost
-                                ? formatCurrency(group.minCost)
-                                : `${formatCurrency(group.minCost)} - ${formatCurrency(group.maxCost)}`}
+                          <td className={styles.td} data-col="cost">
+                            <span data-privacy-cost className="privacy-cost">
+                              {isSingle
+                                ? formatPrivateCurrency(single.costPrice)
+                                : group.minCost === group.maxCost
+                                  ? formatPrivateCurrency(group.minCost)
+                                  : (isPrivacyActive ? '•••••' : `${formatCurrency(group.minCost)} - ${formatCurrency(group.maxCost)}`)}
+                            </span>
                           </td>
                         )}
                         <td className={styles.td} style={{ fontWeight: 600 }}>
@@ -616,10 +796,10 @@ export const InventoryPage = () => {
                           <strong>{group.totalStock}</strong> units
                         </td>
                         {canViewCosts && (
-                          <td className={styles.td}>
+                          <td className={styles.td} data-col="margin">
                             {singleMargin !== null ? (
-                              <span className={singleMargin >= 20 ? styles.marginGood : singleMargin >= 10 ? styles.marginOk : styles.marginBad}>
-                                {singleMargin.toFixed(1)}%
+                              <span data-privacy-cost className={[singleMargin >= 20 ? styles.marginGood : singleMargin >= 10 ? styles.marginOk : styles.marginBad, 'privacy-cost'].join(' ')}>
+                                {isPrivacyActive ? '••%' : `${singleMargin.toFixed(1)}%`}
                               </span>
                             ) : '-'}
                           </td>
@@ -659,13 +839,50 @@ export const InventoryPage = () => {
                                 <Button variant="ghost" size="sm" onClick={() => setDetailProduct(v)} title="View Product Details">
                                   <Eye size={15} />
                                 </Button>
-                                <Button variant="secondary" size="sm" onClick={() => requirePermission('edit this product', () => setEditingProduct(v))}>
+                                <Button variant="secondary" size="sm" onClick={() => requirePermission(`Edit product: ${v.name}`, () => setEditingProduct(v), {
+                                  actionType: 'inventory_edit_product',
+                                  targetId: v.id,
+                                  actionData: {
+                                    itemType: 'product',
+                                    productName: v.name,
+                                    model: v.model,
+                                    sku: v.sku,
+                                    category: v.category,
+                                    price: v.price,
+                                    costPrice: v.costPrice,
+                                    currentStock: v.stock,
+                                  },
+                                })}>
                                   Edit
                                 </Button>
-                                <Button variant="secondary" size="sm" onClick={() => requirePermission('restock products', () => { setRestockingId(v.id); setRestockAmt(''); })}>
+                                <Button variant="secondary" size="sm" onClick={() => requirePermission(`Restock product: ${v.name}`, () => { setRestockingId(v.id); setRestockAmt(''); }, {
+                                  actionType: 'inventory_restock',
+                                  targetId: v.id,
+                                  actionData: {
+                                    itemType: 'product',
+                                    productName: v.name,
+                                    model: v.model,
+                                    sku: v.sku,
+                                    category: v.category,
+                                    price: v.price,
+                                    currentStock: v.stock,
+                                  },
+                                })}>
                                   + Restock
                                 </Button>
-                                <Button variant="danger" size="sm" onClick={() => requirePermission('write off products', () => setWriteOffProduct(v))} disabled={v.stock === 0} title="Write-Off">
+                                <Button variant="danger" size="sm" onClick={() => requirePermission(`Write off product: ${v.name}`, () => setWriteOffProduct(v), {
+                                  actionType: 'inventory_write_off',
+                                  targetId: v.id,
+                                  actionData: {
+                                    itemType: 'product',
+                                    productName: v.name,
+                                    model: v.model,
+                                    sku: v.sku,
+                                    category: v.category,
+                                    price: v.price,
+                                    currentStock: v.stock,
+                                  },
+                                })} disabled={v.stock === 0} title="Write-Off">
                                   <AlertTriangle size={15} />
                                 </Button>
                               </div>
@@ -694,14 +911,18 @@ export const InventoryPage = () => {
                             <td className={styles.td}><code className={styles.sku}>{product.sku}</code></td>
                             <td className={styles.td}>{product.location || '-'}</td>
                             {canViewCosts && (
-                              <td className={styles.td}>{formatCurrency(product.costPrice)}</td>
+                              <td className={styles.td} data-col="cost">
+                                <span data-privacy-cost className="privacy-cost">
+                                  {formatPrivateCurrency(product.costPrice)}
+                                </span>
+                              </td>
                             )}
                             <td className={styles.td} style={{ fontWeight: 600 }}>{formatCurrency(product.price)}</td>
                             <td className={styles.td}>{product.stock} units</td>
                             {canViewCosts && (
-                              <td className={styles.td}>
-                                <span className={vMargin >= 20 ? styles.marginGood : vMargin >= 10 ? styles.marginOk : styles.marginBad}>
-                                  {vMargin.toFixed(1)}%
+                              <td className={styles.td} data-col="margin">
+                                <span data-privacy-cost className={[vMargin >= 20 ? styles.marginGood : vMargin >= 10 ? styles.marginOk : styles.marginBad, 'privacy-cost'].join(' ')}>
+                                  {isPrivacyActive ? '••%' : `${vMargin.toFixed(1)}%`}
                                 </span>
                               </td>
                             )}
@@ -738,13 +959,50 @@ export const InventoryPage = () => {
                                   <Button variant="ghost" size="sm" onClick={() => setDetailProduct(product)} title="View Details">
                                     <Eye size={15} />
                                   </Button>
-                                  <Button variant="secondary" size="sm" onClick={() => requirePermission('edit this product', () => setEditingProduct(product))}>
+                                  <Button variant="secondary" size="sm" onClick={() => requirePermission(`Edit product: ${product.name}`, () => setEditingProduct(product), {
+                                    actionType: 'inventory_edit_product',
+                                    targetId: product.id,
+                                    actionData: {
+                                      itemType: 'product',
+                                      productName: product.name,
+                                      model: product.model,
+                                      sku: product.sku,
+                                      category: product.category,
+                                      price: product.price,
+                                      costPrice: product.costPrice,
+                                      currentStock: product.stock,
+                                    },
+                                  })}>
                                     Edit
                                   </Button>
-                                  <Button variant="secondary" size="sm" onClick={() => requirePermission('restock products', () => { setRestockingId(product.id); setRestockAmt(''); })}>
+                                  <Button variant="secondary" size="sm" onClick={() => requirePermission(`Restock product: ${product.name}`, () => { setRestockingId(product.id); setRestockAmt(''); }, {
+                                    actionType: 'inventory_restock',
+                                    targetId: product.id,
+                                    actionData: {
+                                      itemType: 'product',
+                                      productName: product.name,
+                                      model: product.model,
+                                      sku: product.sku,
+                                      category: product.category,
+                                      price: product.price,
+                                      currentStock: product.stock,
+                                    },
+                                  })}>
                                     + Restock
                                   </Button>
-                                  <Button variant="danger" size="sm" onClick={() => requirePermission('write off products', () => setWriteOffProduct(product))} disabled={product.stock === 0} title="Write-Off">
+                                  <Button variant="danger" size="sm" onClick={() => requirePermission(`Write off product: ${product.name}`, () => setWriteOffProduct(product), {
+                                    actionType: 'inventory_write_off',
+                                    targetId: product.id,
+                                    actionData: {
+                                      itemType: 'product',
+                                      productName: product.name,
+                                      model: product.model,
+                                      sku: product.sku,
+                                      category: product.category,
+                                      price: product.price,
+                                      currentStock: product.stock,
+                                    },
+                                  })} disabled={product.stock === 0} title="Write-Off">
                                     <AlertTriangle size={15} />
                                   </Button>
                                 </div>

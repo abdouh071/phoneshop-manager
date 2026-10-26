@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   AlertTriangle,
   AlertCircle,
@@ -20,10 +20,13 @@ import {
   Sparkles,
   Package,
   Layers,
-  ArrowRight
+  ArrowRight,
+  FileSpreadsheet
 } from 'lucide-react';
 import type { PhoneModel } from '../../types';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { ACCESSORY_SUB_CATEGORIES, getSubCategoryMeta } from '../../utils/accessorySubCategories';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { usePrivacyStore } from '../../store/privacyStore';
 import styles from './InventoryTables.module.css';
 
 export interface InventoryTablesViewProps {
@@ -34,6 +37,12 @@ export interface InventoryTablesViewProps {
   onRestockProduct: (product: PhoneModel, amount: number, meta?: { supplier?: string; note?: string; cost?: number }) => Promise<void>;
   onWriteOffProduct: (product: PhoneModel) => void;
   onPrintLabel?: (product: PhoneModel) => void;
+  statusFilter?: string;
+  categoryFilter?: string;
+  subCategoryFilter?: string;
+  onSelectCategory?: (category: string) => void;
+  onSelectSubCategory?: (subCategory: string) => void;
+  onExportLowStock?: (category?: string, subCategory?: string) => void;
 }
 
 const margin = (p: PhoneModel) =>
@@ -74,7 +83,15 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
   onRestockProduct,
   onWriteOffProduct,
   onPrintLabel,
+  statusFilter,
+  categoryFilter,
+  subCategoryFilter,
+  onSelectCategory,
+  onSelectSubCategory,
+  onExportLowStock,
 }) => {
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
+
   // Collapsible state for each section
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
     healthy: false,
@@ -82,6 +99,18 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
     lowStock: false,
     stockouts: false,
   });
+
+  // When low_stock status filter is active, automatically expand low stock and collapse healthy/stockouts
+  useEffect(() => {
+    if (statusFilter === 'low_stock') {
+      setCollapsedSections({
+        healthy: true,
+        vault: false,
+        lowStock: false,
+        stockouts: true,
+      });
+    }
+  }, [statusFilter]);
 
   // Inline custom restock state: { [productId]: { open: boolean, qty: string, cost: string } }
   const [inlineRestock, setInlineRestock] = useState<Record<string, { open: boolean; qty: string; cost: string }>>({});
@@ -112,6 +141,67 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
     });
   }, [products]);
 
+  // Section 3 Category & Sub-Category Filter States
+  const [lowStockCategory, setLowStockCategory] = useState<string>('all');
+  const [lowStockSubCategory, setLowStockSubCategory] = useState<string>('all');
+
+  // Sync with parent filters when provided
+  useEffect(() => {
+    if (categoryFilter && categoryFilter !== 'all') {
+      setLowStockCategory(categoryFilter);
+    }
+  }, [categoryFilter]);
+
+  useEffect(() => {
+    if (subCategoryFilter && subCategoryFilter !== 'all') {
+      setLowStockSubCategory(subCategoryFilter);
+    }
+  }, [subCategoryFilter]);
+
+  // Counts of low stock items by category
+  const lowStockCategoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      all: lowStockProducts.length,
+      smartphone: 0,
+      tablet: 0,
+      accessory: 0,
+      wearable: 0,
+    };
+    lowStockProducts.forEach(p => {
+      if (p.category && counts[p.category] !== undefined) {
+        counts[p.category]++;
+      }
+    });
+    return counts;
+  }, [lowStockProducts]);
+
+  // Counts of low stock items by accessory sub-category
+  const lowStockSubCategoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      all: lowStockProducts.filter(p => p.category === 'accessory').length,
+    };
+    ACCESSORY_SUB_CATEGORIES.forEach(sub => {
+      if (sub.value !== 'all') {
+        counts[sub.value] = lowStockProducts.filter(
+          p => p.category === 'accessory' && (p.accessorySubCategory || 'other') === sub.value
+        ).length;
+      }
+    });
+    return counts;
+  }, [lowStockProducts]);
+
+  // Filtered low stock products based on Section 3 category & sub-category selection
+  const displayedLowStockProducts = useMemo(() => {
+    return lowStockProducts.filter(p => {
+      const matchCat = lowStockCategory === 'all' || p.category === lowStockCategory;
+      const matchSub =
+        lowStockCategory !== 'accessory' ||
+        lowStockSubCategory === 'all' ||
+        (p.accessorySubCategory || 'other') === lowStockSubCategory;
+      return matchCat && matchSub;
+    });
+  }, [lowStockProducts, lowStockCategory, lowStockSubCategory]);
+
   // 4. Stockouts & Critical Deficit (stock === 0 or stockStatus === 'out_of_stock')
   const stockoutProducts = useMemo(() => {
     return products.filter(p => p.stock === 0 || p.stockStatus === 'out_of_stock');
@@ -123,11 +213,11 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
   }, [stockoutProducts]);
 
   const replenishmentCostNeeded = useMemo(() => {
-    return lowStockProducts.reduce((sum, p) => {
+    return displayedLowStockProducts.reduce((sum, p) => {
       const deficit = Math.max(1, (p.lowStockThreshold || 1) - p.stock);
       return sum + deficit * (p.costPrice || 0);
     }, 0);
-  }, [lowStockProducts]);
+  }, [displayedLowStockProducts]);
 
   const healthyTotalUnits = useMemo(() => {
     return healthyProducts.reduce((sum, p) => sum + (p.stock || 0), 0);
@@ -263,6 +353,11 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                                     {product.color}
                                   </span>
                                 )}
+                                {product.category === 'accessory' && product.accessorySubCategory && (
+                                  <span className={styles.specChip}>
+                                    {getSubCategoryMeta(product.accessorySubCategory).icon} {getSubCategoryMeta(product.accessorySubCategory).label}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -293,9 +388,9 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                           </div>
                         </td>
                         {canViewCosts && (
-                          <td>
-                            <span className={styles.costSub}>
-                              {formatCurrency(product.costPrice || 0)}
+                          <td data-col="cost">
+                            <span data-privacy-cost className={[styles.costSub, 'privacy-cost'].join(' ')}>
+                              {formatPrivateCurrency(product.costPrice || 0)}
                             </span>
                           </td>
                         )}
@@ -305,9 +400,9 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                           </span>
                         </td>
                         {canViewCosts && (
-                          <td>
-                            <span className={[styles.marginPill, prodMargin >= 20 ? styles.marginHigh : prodMargin >= 10 ? styles.marginMid : styles.marginLow].join(' ')}>
-                              {prodMargin.toFixed(1)}%
+                          <td data-col="margin">
+                            <span data-privacy-cost className={[styles.marginPill, prodMargin >= 20 ? styles.marginHigh : prodMargin >= 10 ? styles.marginMid : styles.marginLow, 'privacy-cost'].join(' ')}>
+                              {isPrivacyActive ? '••%' : `${prodMargin.toFixed(1)}%`}
                             </span>
                           </td>
                         )}
@@ -386,7 +481,7 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
             {canViewCosts && (
               <div className={[styles.metricPill, styles.metricPrimary].join(' ')}>
                 <ShieldCheck size={13} />
-                <span>Capital Held: {formatCurrency(vaultCapitalTiedUp)}</span>
+                <span data-privacy-cost className="privacy-cost">Capital Held: {formatPrivateCurrency(vaultCapitalTiedUp)}</span>
               </div>
             )}
             <button
@@ -462,6 +557,11 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                                 {product.color}
                               </span>
                             )}
+                            {product.category === 'accessory' && product.accessorySubCategory && (
+                              <span className={styles.specChip}>
+                                {getSubCategoryMeta(product.accessorySubCategory).icon} {getSubCategoryMeta(product.accessorySubCategory).label}
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td>
@@ -487,9 +587,9 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                           </div>
                         </td>
                         {canViewCosts && (
-                          <td>
-                            <span className={styles.costSub}>
-                              {formatCurrency(product.costPrice || 0)}
+                          <td data-col="cost">
+                            <span data-privacy-cost className={[styles.costSub, 'privacy-cost'].join(' ')}>
+                              {formatPrivateCurrency(product.costPrice || 0)}
                             </span>
                           </td>
                         )}
@@ -499,16 +599,16 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                           </span>
                         </td>
                         {canViewCosts && (
-                          <td>
-                            <span style={{ fontWeight: 700, color: '#4338ca', fontSize: '13px' }}>
-                              {formatCurrency(capital)}
+                          <td data-col="cost">
+                            <span data-privacy-cost className="privacy-cost" style={{ fontWeight: 700, color: '#4338ca', fontSize: '13px' }}>
+                              {formatPrivateCurrency(capital)}
                             </span>
                           </td>
                         )}
                         {canViewCosts && (
-                          <td>
-                            <span className={[styles.marginPill, prodMargin >= 20 ? styles.marginHigh : prodMargin >= 10 ? styles.marginMid : styles.marginLow].join(' ')}>
-                              {prodMargin.toFixed(1)}%
+                          <td data-col="margin">
+                            <span data-privacy-cost className={[styles.marginPill, prodMargin >= 20 ? styles.marginHigh : prodMargin >= 10 ? styles.marginMid : styles.marginLow, 'privacy-cost'].join(' ')}>
+                              {isPrivacyActive ? '••%' : `${prodMargin.toFixed(1)}%`}
                             </span>
                           </td>
                         )}
@@ -575,7 +675,9 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
               <div className={styles.titleRow}>
                 <h3 className={styles.title}>Replenishment Buffer & Low Stock</h3>
                 <span className={[styles.countBadge, styles.countLowStock].join(' ')}>
-                  {lowStockProducts.length} Items Below Threshold
+                  {displayedLowStockProducts.length !== lowStockProducts.length
+                    ? `${displayedLowStockProducts.length} of ${lowStockProducts.length} Items Below Threshold`
+                    : `${lowStockProducts.length} Items Below Threshold`}
                 </span>
               </div>
               <p className={styles.subtitle}>
@@ -585,9 +687,20 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
           </div>
 
           <div className={styles.headerRight} onClick={e => e.stopPropagation()}>
+            {onExportLowStock && (
+              <button
+                type="button"
+                className={styles.sectionExportBtn}
+                onClick={() => onExportLowStock(lowStockCategory, lowStockSubCategory)}
+                title="Export filtered low stock products"
+              >
+                <FileSpreadsheet size={13} />
+                <span>Export Report</span>
+              </button>
+            )}
             <div className={[styles.metricPill, styles.metricWarning].join(' ')}>
               <Package size={13} />
-              <span>Est. Buffer Cost: ~{formatCurrency(replenishmentCostNeeded)}</span>
+              <span data-privacy-cost className="privacy-cost">Est. Buffer Cost: ~{formatPrivateCurrency(replenishmentCostNeeded)}</span>
             </div>
             <button
               type="button"
@@ -602,6 +715,76 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
 
         {!collapsedSections.lowStock && (
           <div className={styles.tableWrapper}>
+            {/* Category & Sub-Category Filter Bar for Low Stock */}
+            <div className={styles.sectionFilterBar}>
+              <div className={styles.sectionFilterGroup}>
+                <span className={styles.filterLabel}>Filter Category:</span>
+                <div className={styles.pillGroup}>
+                  {[
+                    { value: 'all', label: 'All Items' },
+                    { value: 'smartphone', label: '📱 Smartphones' },
+                    { value: 'tablet', label: '📟 Tablets' },
+                    { value: 'accessory', label: '🎧 Accessories' },
+                    { value: 'wearable', label: '⌚ Wearables' },
+                  ].map(cat => {
+                    const isActive = lowStockCategory === cat.value;
+                    const count = lowStockCategoryCounts[cat.value] || 0;
+                    return (
+                      <button
+                        key={cat.value}
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          setLowStockCategory(cat.value);
+                          setLowStockSubCategory('all');
+                        }}
+                        className={[
+                          styles.filterPill,
+                          isActive && styles.filterPillActive,
+                          count === 0 && !isActive && styles.filterPillEmpty,
+                        ].filter(Boolean).join(' ')}
+                      >
+                        <span>{cat.label}</span>
+                        <span className={styles.filterPillBadge}>{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Accessory Sub-Category Bar if Accessories Selected */}
+              {lowStockCategory === 'accessory' && (
+                <div className={styles.sectionSubFilterGroup}>
+                  <span className={styles.filterLabel}>Accessory Sub-Category:</span>
+                  <div className={styles.pillGroup}>
+                    {ACCESSORY_SUB_CATEGORIES.map(sub => {
+                      const isActive = lowStockSubCategory === sub.value;
+                      const count = lowStockSubCategoryCounts[sub.value] || 0;
+                      return (
+                        <button
+                          key={sub.value}
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setLowStockSubCategory(sub.value);
+                          }}
+                          className={[
+                            styles.subFilterPill,
+                            isActive && styles.subFilterPillActive,
+                            count === 0 && !isActive && styles.filterPillEmpty,
+                          ].filter(Boolean).join(' ')}
+                        >
+                          <span>{sub.icon}</span>
+                          <span>{sub.label}</span>
+                          <span className={styles.filterPillBadge}>{count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {lowStockProducts.length === 0 ? (
               <div className={styles.emptySection}>
                 <div className={styles.emptyIcon} style={{ color: '#16a34a', background: '#dcfce7' }}>
@@ -609,6 +792,28 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                 </div>
                 <p className={styles.emptyTitle}>Healthy Buffers</p>
                 <p className={styles.emptyDesc}>No products are currently under their low-stock safety threshold.</p>
+              </div>
+            ) : displayedLowStockProducts.length === 0 ? (
+              <div className={styles.emptySection}>
+                <div className={styles.emptyIcon} style={{ color: '#d97706', background: '#fef3c7' }}>
+                  <AlertTriangle size={22} />
+                </div>
+                <p className={styles.emptyTitle}>No Low Stock Items in this Selection</p>
+                <p className={styles.emptyDesc}>
+                  {lowStockCategory === 'accessory' && lowStockSubCategory !== 'all'
+                    ? `No low-stock accessories found in sub-category "${lowStockSubCategory}".`
+                    : `No low-stock products found in category "${lowStockCategory}".`}
+                </p>
+                <button
+                  type="button"
+                  className={styles.resetFilterBtn}
+                  onClick={() => {
+                    setLowStockCategory('all');
+                    setLowStockSubCategory('all');
+                  }}
+                >
+                  Show All Low Stock ({lowStockProducts.length})
+                </button>
               </div>
             ) : (
               <table className={styles.table}>
@@ -625,7 +830,7 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {lowStockProducts.map(product => {
+                  {displayedLowStockProducts.map(product => {
                     const avatar = getBrandAvatar(product.name, product.model);
                     const prodMargin = margin(product);
                     const threshold = product.lowStockThreshold || 1;
@@ -654,6 +859,11 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                                   <span className={styles.colorChip}>
                                     <span className={styles.colorDot} style={{ backgroundColor: product.color.toLowerCase() }} />
                                     {product.color}
+                                  </span>
+                                )}
+                                {product.category === 'accessory' && product.accessorySubCategory && (
+                                  <span className={styles.specChip}>
+                                    {getSubCategoryMeta(product.accessorySubCategory).icon} {getSubCategoryMeta(product.accessorySubCategory).label}
                                   </span>
                                 )}
                               </div>
@@ -689,9 +899,9 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                           </div>
                         </td>
                         {canViewCosts && (
-                          <td>
-                            <span className={styles.costSub}>
-                              {formatCurrency(product.costPrice || 0)}
+                          <td data-col="cost">
+                            <span data-privacy-cost className={[styles.costSub, 'privacy-cost'].join(' ')}>
+                              {formatPrivateCurrency(product.costPrice || 0)}
                             </span>
                           </td>
                         )}
@@ -701,9 +911,9 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                           </span>
                         </td>
                         {canViewCosts && (
-                          <td>
-                            <span className={[styles.marginPill, prodMargin >= 20 ? styles.marginHigh : prodMargin >= 10 ? styles.marginMid : styles.marginLow].join(' ')}>
-                              {prodMargin.toFixed(1)}%
+                          <td data-col="margin">
+                            <span data-privacy-cost className={[styles.marginPill, prodMargin >= 20 ? styles.marginHigh : prodMargin >= 10 ? styles.marginMid : styles.marginLow, 'privacy-cost'].join(' ')}>
+                              {isPrivacyActive ? '••%' : `${prodMargin.toFixed(1)}%`}
                             </span>
                           </td>
                         )}
@@ -892,6 +1102,11 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                                     {product.color}
                                   </span>
                                 )}
+                                {product.category === 'accessory' && product.accessorySubCategory && (
+                                  <span className={styles.specChip}>
+                                    {getSubCategoryMeta(product.accessorySubCategory).icon} {getSubCategoryMeta(product.accessorySubCategory).label}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -917,9 +1132,9 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                           </span>
                         </td>
                         {canViewCosts && (
-                          <td>
-                            <span className={styles.costSub}>
-                              {formatCurrency(product.costPrice || 0)}
+                          <td data-col="cost">
+                            <span data-privacy-cost className={[styles.costSub, 'privacy-cost'].join(' ')}>
+                              {formatPrivateCurrency(product.costPrice || 0)}
                             </span>
                           </td>
                         )}

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Save, ShieldAlert, Globe, AlertTriangle, Loader2 } from 'lucide-react';
+import { Save, ShieldAlert, Globe, AlertTriangle, Loader2, Palette, Check, Laptop, Monitor, TabletSmartphone } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -8,6 +8,7 @@ import { Select } from '../../components/ui/Select';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useToast } from '../../components/ui/Toast';
 import { fetchPublicIP, useAuthStore } from '../../store/authStore';
+import { usePosDensityStore, POS_DENSITY_OPTIONS } from '../../store/posDensityStore';
 import { UsersTab } from './UsersTab';
 import { ReceiptTab } from './ReceiptTab';
 import { PrintersTab } from './PrintersTab';
@@ -15,7 +16,69 @@ import { BackupTab } from './BackupTab';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import styles from './Settings.module.css';
-import type { StoreSettings } from '../../services/settingsService';
+import type { StoreSettings, ColorThemeKey } from '../../services/settingsService';
+
+const COLOR_THEMES: {
+  key: ColorThemeKey;
+  name: string;
+  tag: string;
+  desc: string;
+  primaryLight: string;
+  surfaceLight: string;
+  primaryDark: string;
+  surfaceDark: string;
+}[] = [
+  {
+    key: 'default',
+    name: 'Precision Blue',
+    tag: 'Default Store Theme',
+    desc: 'Classic cobalt blue & clean cool slate surfaces. The original clean look.',
+    primaryLight: '#0050cb',
+    surfaceLight: '#f9f9ff',
+    primaryDark: '#3b82f6',
+    surfaceDark: '#111c2d',
+  },
+  {
+    key: 'cyan',
+    name: 'Titanium & Cyber Cyan',
+    tag: 'Modern Tech',
+    desc: 'Deep obsidian & carbon slate with glowing neon cyan accents.',
+    primaryLight: '#0891b2',
+    surfaceLight: '#f4f8fb',
+    primaryDark: '#06b6d4',
+    surfaceDark: '#0a111a',
+  },
+  {
+    key: 'emerald',
+    name: 'Emerald Mint & Fintech',
+    tag: 'Financial Growth',
+    desc: 'Crisp emerald green with mint highlights and deep spruce dark mode.',
+    primaryLight: '#059669',
+    surfaceLight: '#f4faf6',
+    primaryDark: '#10b981',
+    surfaceDark: '#061810',
+  },
+  {
+    key: 'purple',
+    name: 'Royal Velvet & Nebula',
+    tag: 'Boutique Luxury',
+    desc: 'Elegant royal violet with soft lavender containers and twilight slate.',
+    primaryLight: '#7c3aed',
+    surfaceLight: '#f9f6fc',
+    primaryDark: '#8b5cf6',
+    surfaceDark: '#120922',
+  },
+  {
+    key: 'amber',
+    name: 'Warm Amber & Crimson Gold',
+    tag: 'Warm Workshop',
+    desc: 'High-energy golden amber and warm sand with basalt charcoal contrast.',
+    primaryLight: '#d97706',
+    surfaceLight: '#fffaf4',
+    primaryDark: '#f59e0b',
+    surfaceDark: '#181108',
+  },
+];
 
 // ─── Types ───────────────────────────────────────────────────
 type TabKey = 'general' | 'users' | 'receipt' | 'printers' | 'backup' | 'preferences';
@@ -76,6 +139,8 @@ export const SettingsPage = () => {
 
   // Tab routing (support deep-links e.g. /settings?tab=users)
   const [activeTab, setActiveTab] = useState<TabKey>('general');
+  const posDensity = usePosDensityStore((s) => s.density);
+  const setPosDensity = usePosDensityStore((s) => s.setDensity);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -93,6 +158,11 @@ export const SettingsPage = () => {
   useEffect(() => {
     settings.fetchSettings();
   }, []);
+
+  const handleSelectColorTheme = async (themeKey: ColorThemeKey) => {
+    await settings.updateSetting('colorTheme', themeKey);
+    toast.success('Theme Palette Applied', `Switched to ${COLOR_THEMES.find(t => t.key === themeKey)?.name}.`);
+  };
 
   // ─── Local draft state (Problem 1 fix) ─────────────────────
   const [draft, setDraft] = useState<DraftSettings>(() => snapshotFromStore(settings));
@@ -392,6 +462,58 @@ export const SettingsPage = () => {
             </div>
           </Card>
 
+          {/* ── Store Theme Combinations Palette ── */}
+          <Card padding="lg">
+            <h2 className={styles.sectionTitle} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Palette size={18} style={{ color: 'var(--color-primary)' }} />
+              <span>Store Theme Palette (5 Combinations)</span>
+            </h2>
+            <p style={{ fontSize: '12px', color: 'var(--color-on-surface-variant, #666)', marginBottom: '16px', lineHeight: 1.4 }}>
+              Select a harmonious color combination for your store. The palette will instantly apply across all buttons, navigation, cards, and screens on all connected computers and mobile devices.
+            </p>
+            
+            <div className={styles.themeGrid}>
+              {COLOR_THEMES.map(theme => {
+                const isActive = (settings.colorTheme || 'default') === theme.key;
+                return (
+                  <div
+                    key={theme.key}
+                    className={[styles.themeCard, isActive && styles.themeCardActive].filter(Boolean).join(' ')}
+                    onClick={() => handleSelectColorTheme(theme.key)}
+                  >
+                    <div className={styles.themeCardHeader}>
+                      <h3 className={styles.themeCardTitle}>
+                        <span>{theme.name}</span>
+                      </h3>
+                      <span className={styles.themeTag}>{theme.tag}</span>
+                    </div>
+
+                    <p className={styles.themeCardSubtitle}>{theme.desc}</p>
+
+                    <div className={styles.themeSwatches}>
+                      <div className={styles.themeSwatchGroup}>
+                        <span className={styles.themeSwatchLabel}>Light:</span>
+                        <span className={styles.themeSwatchDot} style={{ background: theme.primaryLight }} title="Primary Accent" />
+                        <span className={styles.themeSwatchDot} style={{ background: theme.surfaceLight, border: '1.5px solid #cbd5e1' }} title="Surface Background" />
+                      </div>
+                      <div className={styles.themeSwatchGroup}>
+                        <span className={styles.themeSwatchLabel}>Dark:</span>
+                        <span className={styles.themeSwatchDot} style={{ background: theme.primaryDark }} title="Dark Primary Accent" />
+                        <span className={styles.themeSwatchDot} style={{ background: theme.surfaceDark, border: '1.5px solid #334155' }} title="Dark Surface Background" />
+                      </div>
+                    </div>
+
+                    {isActive && (
+                      <div className={styles.activeIndicator}>
+                        <Check size={14} /> Active Palette
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
           {/* ── Customer Tracking Portal ── */}
           <Card padding="lg">
             <h2 className={styles.sectionTitle}>{t('settings.customerTracking', 'Customer Tracking Portal')}</h2>
@@ -541,6 +663,97 @@ export const SettingsPage = () => {
                   { value: 'ar', label: '🇩🇿 العربية' },
                 ]}
               />
+            </div>
+
+            <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--color-surface-container-low)' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-on-surface)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Palette size={16} style={{ color: 'var(--color-primary)' }} />
+                <span>Color Palette Combinations</span>
+              </h3>
+              <p style={{ fontSize: '12px', color: 'var(--color-on-surface-variant, #666)', marginBottom: '14px' }}>
+                Choose which color combination to view the application in.
+              </p>
+
+              <div className={styles.themeGrid}>
+                {COLOR_THEMES.map(theme => {
+                  const isActive = (settings.colorTheme || 'default') === theme.key;
+                  return (
+                    <div
+                      key={theme.key}
+                      className={[styles.themeCard, isActive && styles.themeCardActive].filter(Boolean).join(' ')}
+                      onClick={() => handleSelectColorTheme(theme.key)}
+                    >
+                      <div className={styles.themeCardHeader}>
+                        <h4 className={styles.themeCardTitle}>{theme.name}</h4>
+                        <span className={styles.themeTag}>{theme.tag}</span>
+                      </div>
+                      <p className={styles.themeCardSubtitle}>{theme.desc}</p>
+                      <div className={styles.themeSwatches}>
+                        <div className={styles.themeSwatchGroup}>
+                          <span className={styles.themeSwatchLabel}>Light:</span>
+                          <span className={styles.themeSwatchDot} style={{ background: theme.primaryLight }} />
+                          <span className={styles.themeSwatchDot} style={{ background: theme.surfaceLight, border: '1.5px solid #cbd5e1' }} />
+                        </div>
+                        <div className={styles.themeSwatchGroup}>
+                          <span className={styles.themeSwatchLabel}>Dark:</span>
+                          <span className={styles.themeSwatchDot} style={{ background: theme.primaryDark }} />
+                          <span className={styles.themeSwatchDot} style={{ background: theme.surfaceDark, border: '1.5px solid #334155' }} />
+                        </div>
+                      </div>
+                      {isActive && (
+                        <div className={styles.activeIndicator}>
+                          <Check size={14} /> Active
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--color-surface-container-low)' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-on-surface)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Monitor size={16} style={{ color: 'var(--color-primary)' }} />
+                <span>POS Counter Layout Density</span>
+              </h3>
+              <p style={{ fontSize: '12px', color: 'var(--color-on-surface-variant, #666)', marginBottom: '14px' }}>
+                Select the ideal spacing and tap-target size for this counter workstation or touchscreen device. You can also press <kbd style={{ padding: '2px 6px', background: '#e2e8f0', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>Alt + D</kbd> directly on the POS screen.
+              </p>
+
+              <div className={styles.themeGrid}>
+                {POS_DENSITY_OPTIONS.map((opt) => {
+                  const isActive = posDensity === opt.key;
+                  return (
+                    <div
+                      key={opt.key}
+                      className={[styles.themeCard, isActive && styles.themeCardActive].filter(Boolean).join(' ')}
+                      onClick={() => {
+                        setPosDensity(opt.key);
+                        toast.info(`POS Density: ${opt.name}`, opt.description);
+                      }}
+                    >
+                      <div className={styles.themeCardHeader}>
+                        <h4 className={styles.themeCardTitle}>
+                          {opt.iconName === 'laptop' && <Laptop size={15} style={{ verticalAlign: 'middle', marginRight: '6px' }} />}
+                          {opt.iconName === 'monitor' && <Monitor size={15} style={{ verticalAlign: 'middle', marginRight: '6px' }} />}
+                          {opt.iconName === 'touch' && <TabletSmartphone size={15} style={{ verticalAlign: 'middle', marginRight: '6px' }} />}
+                          {opt.name}
+                        </h4>
+                        <span className={styles.themeTag}>{opt.tag}</span>
+                      </div>
+                      <p className={styles.themeCardSubtitle}>{opt.description}</p>
+                      <div style={{ fontSize: '11px', color: 'var(--color-primary)', fontWeight: 600, marginTop: '6px' }}>
+                        🎯 {opt.targetDevice}
+                      </div>
+                      {isActive && (
+                        <div className={styles.activeIndicator}>
+                          <Check size={14} /> Active
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </Card>
         </div>

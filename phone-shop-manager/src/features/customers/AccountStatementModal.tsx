@@ -9,7 +9,8 @@ import { useCartStore } from '../../store/cartStore';
 import { useCustomerStore } from '../../store/customerStore';
 import { useRepairStore } from '../../store/repairStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { usePrivacyStore } from '../../store/privacyStore';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { exportToCSV } from '../../utils/exportUtils';
 import type { Customer, SaleTransaction, CustomerDebtEntry } from '../../types';
 import styles from './AccountStatement.module.css';
@@ -53,6 +54,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
   const { getCustomerDebts, getCustomerDebtTotal } = useCustomerStore();
   const { tickets } = useRepairStore();
   const settings = useSettingsStore();
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
 
   const [datePreset, setDatePreset] = useState<DatePreset>('this_month');
   const [customStart, setCustomStart] = useState<string>(() => {
@@ -569,9 +571,18 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
               {customer.shopName && <p className={styles.clientDetail}>Contact Person: <strong>{customer.name}</strong></p>}
               <p className={styles.clientDetail}>Phone: {customer.phone}</p>
               {customer.email && <p className={styles.clientDetail}>Email: {customer.email}</p>}
+              {customer.address && <p className={styles.clientDetail}>Address: {customer.address}</p>}
+              {(customer.rc || customer.nif || customer.nis || customer.art) && (
+                <div style={{ marginTop: '4px', fontSize: '11px', color: '#475569', lineHeight: 1.4 }}>
+                  {customer.rc && <div>RC: <strong>{customer.rc}</strong></div>}
+                  {customer.nif && <div>NIF: <strong>{customer.nif}</strong></div>}
+                  {customer.nis && <div>NIS: <strong>{customer.nis}</strong></div>}
+                  {customer.art && <div>Art: <strong>{customer.art}</strong></div>}
+                </div>
+              )}
               {customer.creditLimit && customer.creditLimit > 0 && (
                 <p className={styles.clientDetail} style={{ color: '#2563eb', fontWeight: 600 }}>
-                  Credit Limit: {formatCurrency(customer.creditLimit)}
+                  Credit Limit: {formatPrivateCurrency(customer.creditLimit)}
                 </p>
               )}
             </div>
@@ -580,7 +591,7 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
               <h4>STATEMENT PERIOD</h4>
               <p className={styles.clientName}>{dateRangeLabel}</p>
               <p className={styles.clientDetail}>Account Type: <strong>{customer.shopName ? '🏪 Commercial / Phone Shop' : '👤 Retail Client'}</strong></p>
-              <p className={styles.clientDetail}>Live Ledger Balance: <strong style={{ color: currentTotalDebt > 0 ? '#dc2626' : '#16a34a' }}>{formatCurrency(currentTotalDebt)}</strong></p>
+              <p className={styles.clientDetail}>Live Ledger Balance: <strong style={{ color: currentTotalDebt > 0 ? '#dc2626' : '#16a34a' }}>{formatPrivateCurrency(currentTotalDebt)}</strong></p>
             </div>
           </div>
 
@@ -588,19 +599,19 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
           <div className={styles.kpiGrid}>
             <div className={styles.kpiCard}>
               <div className={styles.kpiLabel}>1. Opening Balance</div>
-              <p className={styles.kpiValue}>{formatCurrency(statementData.openingBalance)}</p>
+              <p className={styles.kpiValue}>{formatPrivateCurrency(statementData.openingBalance)}</p>
             </div>
             <div className={styles.kpiCard}>
               <div className={styles.kpiLabel}>2. Billed / Invoices (+)</div>
-              <p className={styles.kpiValue} style={{ color: '#2563eb' }}>+{formatCurrency(statementData.periodDebits)}</p>
+              <p className={styles.kpiValue} style={{ color: '#2563eb' }}>+{formatPrivateCurrency(statementData.periodDebits)}</p>
             </div>
             <div className={styles.kpiCard}>
               <div className={styles.kpiLabel}>3. Payments Received (-)</div>
-              <p className={[styles.kpiValue, styles.kpiValuePaid].join(' ')}>-{formatCurrency(statementData.periodCredits)}</p>
+              <p className={[styles.kpiValue, styles.kpiValuePaid].join(' ')}>-{formatPrivateCurrency(statementData.periodCredits)}</p>
             </div>
             <div className={styles.kpiCard} style={{ background: '#fef2f2', borderColor: '#fecaca' }}>
               <div className={styles.kpiLabel} style={{ color: '#991b1b' }}>4. Closing Balance Due</div>
-              <p className={[styles.kpiValue, styles.kpiValueClosing].join(' ')}>{formatCurrency(statementData.closingBalance)}</p>
+              <p className={[styles.kpiValue, styles.kpiValueClosing].join(' ')}>{formatPrivateCurrency(statementData.closingBalance)}</p>
             </div>
           </div>
 
@@ -631,8 +642,8 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
                   <td>Balance brought forward from prior transactions</td>
                   <td className={styles.numCol}>-</td>
                   <td className={styles.numCol}>-</td>
-                  <td className={[styles.numCol, styles.balanceText].join(' ')}>
-                    {formatCurrency(statementData.openingBalance)}
+                  <td className={[styles.numCol, styles.balanceText].join(' ')} data-col="balance">
+                    {formatPrivateCurrency(statementData.openingBalance)}
                   </td>
                 </tr>
 
@@ -659,14 +670,14 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
                         </span>
                       </td>
                       <td style={{ maxWidth: '280px', lineHeight: 1.3 }}>{item.description}</td>
-                      <td className={[styles.numCol, item.debit > 0 && styles.debitText].filter(Boolean).join(' ')}>
-                        {item.debit > 0 ? `+${formatCurrency(item.debit)}` : '-'}
+                      <td className={[styles.numCol, item.debit > 0 && styles.debitText].filter(Boolean).join(' ')} data-col="debit">
+                        {item.debit > 0 ? `+${formatPrivateCurrency(item.debit)}` : '-'}
                       </td>
-                      <td className={[styles.numCol, item.credit > 0 && styles.creditText].filter(Boolean).join(' ')}>
-                        {item.credit > 0 ? `-${formatCurrency(item.credit)}` : '-'}
+                      <td className={[styles.numCol, item.credit > 0 && styles.creditText].filter(Boolean).join(' ')} data-col="credit">
+                        {item.credit > 0 ? `-${formatPrivateCurrency(item.credit)}` : '-'}
                       </td>
-                      <td className={[styles.numCol, styles.balanceText].join(' ')}>
-                        {formatCurrency(item.runningBalance)}
+                      <td className={[styles.numCol, styles.balanceText].join(' ')} data-col="balance">
+                        {formatPrivateCurrency(item.runningBalance)}
                       </td>
                     </tr>
                   ))

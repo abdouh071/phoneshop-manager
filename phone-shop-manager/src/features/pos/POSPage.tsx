@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Plus, Minus, Trash2, ShoppingCart, CheckCircle, X, Scan, Clock, User, UserCheck, ArrowLeft, Search, LayoutGrid, List, BadgeDollarSign, BookOpen, AlertCircle, RefreshCw, Zap, ChevronDown } from 'lucide-react';
+import { Plus, Minus, Trash2, ShoppingCart, CheckCircle, X, Scan, Camera, Clock, User, UserCheck, ArrowLeft, Search, LayoutGrid, List, BadgeDollarSign, BookOpen, AlertCircle, RefreshCw, Zap, ChevronDown } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { SearchInput, Input } from '../../components/ui/Input';
 import { StockBadge } from '../../components/ui/Badge';
@@ -19,10 +19,16 @@ import { useToast } from '../../components/ui/Toast';
 import type { PaymentMethod, SaleTransaction, SuspendedCart, PhoneModel } from '../../types';
 import { groupProductsByBaseModel } from '../../utils/productGrouping';
 import type { ProductGroup } from '../../utils/productGrouping';
+import { ACCESSORY_SUB_CATEGORIES } from '../../utils/accessorySubCategories';
 import styles from './POS.module.css';
-import { formatCurrency, getCurrencySymbol } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency, getCurrencySymbol } from '../../utils/formatCurrency';
+import { usePrivacyStore } from '../../store/privacyStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { EndOfDayButton } from '../endofday/EndOfDayButton';
+import { usePosDensityStore } from '../../store/posDensityStore';
+import { PosDensityToggle } from '../../components/pos/PosDensityToggle';
+import { TouchQuantityModal } from './TouchQuantityModal';
+import { MobileBarcodeScannerModal } from '../../components/pos/MobileBarcodeScannerModal';
 
 const getCategoryIcon = (category: string) => {
   switch (category) {
@@ -223,6 +229,7 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
 ];
 
 export const POSPage = () => {
+  const isPrivacyActive = usePrivacyStore((s) => s.isPrivacyActive);
   const { fetchProducts, products: allProducts } = useInventoryStore();
   const [searchQuery, setSearchQuery] = useState('');
   const {
@@ -240,9 +247,17 @@ export const POSPage = () => {
   const toast = useToast();
 
   const location = useLocation();
+  const posDensity = usePosDensityStore((s) => s.density);
+  const [touchQtyTarget, setTouchQtyTarget] = useState<{
+    item: any;
+    maxStock: number;
+    isReturn: boolean;
+  } | null>(null);
+
   const [activeTab, setActiveTab] = useState<'products' | 'history'>('products');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [subCategoryFilter, setSubCategoryFilter] = useState<string>('all');
   const [completedTx, setCompletedTx] = useState<SaleTransaction | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<ProductGroup | null>(null);
   const [showSuspended, setShowSuspended] = useState(false);
@@ -275,6 +290,7 @@ export const POSPage = () => {
 
   // Hardware barcode scanner pulse state
   const [scannerScanned, setScannerScanned] = useState(false);
+  const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
   // Cash Tendered & Change Due Calculator
   const [cashTendered, setCashTendered] = useState<number | string>('');
 
@@ -304,6 +320,16 @@ export const POSPage = () => {
     return useCustomerStore.getState().getCustomerDebtTotal(matchedCustomer.id);
   }, [matchedCustomer, customers]);
 
+  // Current cart total
+  const total = getTotal();
+
+  // Net payable amount after applying store credit (if active)
+  const netPayable = useMemo(() => {
+    const availableCredit = (applyStoreCredit && matchedCustomer?.storeCredit) ? matchedCustomer.storeCredit : 0;
+    const creditToUse = Math.min(availableCredit, Math.max(0, total));
+    return Math.max(0, total - creditToUse);
+  }, [total, applyStoreCredit, matchedCustomer]);
+
   // Credit debt amount that would be logged if this sale completes
   const creditDebtToLog = useMemo(() => {
     if (paymentMode !== 'debt') return 0;
@@ -327,14 +353,6 @@ export const POSPage = () => {
     const ref = refunded.reduce((sum, t) => sum + t.total, 0);
     return Math.max(0, gross - ref);
   }, [transactions]);
-
-  // Net payable amount after applying store credit (if active)
-  const netPayable = useMemo(() => {
-    const total = getTotal();
-    const availableCredit = (applyStoreCredit && matchedCustomer?.storeCredit) ? matchedCustomer.storeCredit : 0;
-    const creditToUse = Math.min(availableCredit, Math.max(0, total));
-    return Math.max(0, total - creditToUse);
-  }, [getTotal, applyStoreCredit, matchedCustomer]);
 
   // Dynamic quick tender denomination presets for Cash checkout
   const tenderPresets = useMemo(() => {
@@ -645,7 +663,7 @@ export const POSPage = () => {
     if (searchQuery.trim()) {
       const words = searchQuery.toLowerCase().trim().split(/\s+/);
       filtered = filtered.filter(p => {
-        const full = [p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier].filter(Boolean).join(' ').toLowerCase();
+        const full = [p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier, p.accessorySubCategory].filter(Boolean).join(' ').toLowerCase();
         return words.every(word => full.includes(word));
       });
     }
@@ -700,9 +718,15 @@ export const POSPage = () => {
   }, [groups]);
 
   const displayedGroups = useMemo(() => {
-    if (categoryFilter === 'all') return groups;
-    return groups.filter(g => g.category === categoryFilter);
-  }, [groups, categoryFilter]);
+    let result = groups;
+    if (categoryFilter !== 'all') {
+      result = result.filter(g => g.category === categoryFilter);
+    }
+    if (categoryFilter === 'accessory' && subCategoryFilter !== 'all') {
+      result = result.filter(g => (g.accessorySubCategory || 'other') === subCategoryFilter);
+    }
+    return result;
+  }, [groups, categoryFilter, subCategoryFilter]);
 
   const PAGE_SIZE = 12;
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -710,7 +734,7 @@ export const POSPage = () => {
   // Reset pagination when category or search changes
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [searchQuery, categoryFilter]);
+  }, [searchQuery, categoryFilter, subCategoryFilter]);
 
   const paginatedGroups = useMemo(() => {
     return displayedGroups.slice(0, visibleCount);
@@ -722,7 +746,11 @@ export const POSPage = () => {
 
 
   return (
-    <div className={styles.page}>
+    <div
+      className={[styles.page, styles[`${posDensity}Density`]].filter(Boolean).join(' ')}
+      data-pos-density={posDensity}
+      data-pos-root
+    >
       <ReceiptModal
         transaction={completedTx}
         onClose={() => setCompletedTx(null)}
@@ -740,6 +768,23 @@ export const POSPage = () => {
           addToCart(variant);
           setSelectedGroup(null);
         }}
+      />
+
+      <TouchQuantityModal
+        isOpen={Boolean(touchQtyTarget)}
+        item={touchQtyTarget?.item || null}
+        maxStock={touchQtyTarget?.maxStock || 999}
+        onClose={() => setTouchQtyTarget(null)}
+        onApply={(newQty) => {
+          if (touchQtyTarget) {
+            updateQuantity(touchQtyTarget.item.product.id, newQty, touchQtyTarget.isReturn);
+          }
+        }}
+      />
+
+      <MobileBarcodeScannerModal
+        isOpen={isCameraScannerOpen}
+        onClose={() => setIsCameraScannerOpen(false)}
       />
 
       {/* Left: Main Panel */}
@@ -769,6 +814,16 @@ export const POSPage = () => {
               <span className={styles.scannerDot} />
               <span>{scannerScanned ? 'Barcode Scanned!' : 'Scanner Ready'}</span>
             </div>
+
+            <button
+              type="button"
+              className={styles.cashDrawerBtn}
+              onClick={() => setIsCameraScannerOpen(true)}
+              title="Scan product barcode with phone camera"
+            >
+              <Camera size={16} />
+              <span>Camera Scan</span>
+            </button>
 
             <button
               type="button"
@@ -818,24 +873,55 @@ export const POSPage = () => {
               })}
             </div>
 
-            {/* View Mode Toggle */}
-            <div className={styles.viewModeToggle}>
-              <button
-                type="button"
-                className={[styles.viewModeBtn, viewMode === 'grid' && styles.viewModeBtnActive].filter(Boolean).join(' ')}
-                onClick={() => setViewMode('grid')}
-                title="Grid View (Cards)"
-              >
-                <LayoutGrid size={15} />
-              </button>
-              <button
-                type="button"
-                className={[styles.viewModeBtn, viewMode === 'list' && styles.viewModeBtnActive].filter(Boolean).join(' ')}
-                onClick={() => setViewMode('list')}
-                title="Compact List View"
-              >
-                <List size={16} />
-              </button>
+            {/* Accessory Sub-Category Filter Bar */}
+            {categoryFilter === 'accessory' && (
+              <div className={styles.categoryFilterBar} style={{ marginTop: '6px', gap: '6px' }}>
+                {ACCESSORY_SUB_CATEGORIES.map(sub => {
+                  const count = sub.value === 'all'
+                    ? groups.filter(g => g.category === 'accessory').length
+                    : groups.filter(g => g.category === 'accessory' && (g.accessorySubCategory || 'other') === sub.value).length;
+                  return (
+                    <button
+                      key={sub.value}
+                      type="button"
+                      style={{ fontSize: '12px', padding: '4px 10px' }}
+                      className={[
+                        styles.categoryFilterPill,
+                        subCategoryFilter === sub.value && styles.categoryFilterPillActive
+                      ].filter(Boolean).join(' ')}
+                      onClick={() => setSubCategoryFilter(sub.value)}
+                    >
+                      <span>{sub.icon}</span>
+                      <span>{sub.label}</span>
+                      <span className={styles.pillCount}>{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <PosDensityToggle />
+
+              {/* View Mode Toggle */}
+              <div className={styles.viewModeToggle}>
+                <button
+                  type="button"
+                  className={[styles.viewModeBtn, viewMode === 'grid' && styles.viewModeBtnActive].filter(Boolean).join(' ')}
+                  onClick={() => setViewMode('grid')}
+                  title="Grid View (Cards)"
+                >
+                  <LayoutGrid size={15} />
+                </button>
+                <button
+                  type="button"
+                  className={[styles.viewModeBtn, viewMode === 'list' && styles.viewModeBtnActive].filter(Boolean).join(' ')}
+                  onClick={() => setViewMode('list')}
+                  title="Compact List View"
+                >
+                  <List size={16} />
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1031,12 +1117,12 @@ export const POSPage = () => {
                       </span>
                       {(matchedCustomer?.storeCredit || 0) > 0 && (
                         <span className={styles.attachedStoreCreditBadge}>
-                          🎟️ Avoir: {formatCurrency(matchedCustomer?.storeCredit || 0)}
+                          🎟️ Avoir: {formatPrivateCurrency(matchedCustomer?.storeCredit || 0)}
                         </span>
                       )}
                       {(matchedCustomer?.totalDebt || 0) > 0 ? (
                         <span className={styles.attachedDebtBadge}>
-                          Debt: {formatCurrency(matchedCustomer?.totalDebt || 0)}
+                          Debt: {formatPrivateCurrency(matchedCustomer?.totalDebt || 0)}
                         </span>
                       ) : (
                         <span className={styles.attachedNoDebtBadge}>
@@ -1073,6 +1159,10 @@ export const POSPage = () => {
                       setCustomerAttached(true);
                       if (cust.phone) {
                         setCustomerPhone(cust.phone);
+                      }
+                      if (cust.wholesaleDiscountPercent && cust.wholesaleDiscountPercent > 0) {
+                        setDiscount({ type: 'percent', value: cust.wholesaleDiscountPercent });
+                        toast.success('Wholesale Discount Applied', `${cust.wholesaleDiscountPercent}% discount applied for ${cust.shopName || cust.name}.`);
                       }
                     } else {
                       // Detach the registered-customer link, but only
@@ -1288,7 +1378,19 @@ export const POSPage = () => {
                   >
                     <Minus size={11} />
                   </button>
-                  <span className={styles.qty}>{item.quantity}</span>
+                  <span
+                    className={[styles.qty, styles.qtyTouchClickable].join(' ')}
+                    onClick={() => {
+                      setTouchQtyTarget({
+                        item,
+                        maxStock: isReturn ? 999 : (liveProduct ? liveProduct.stock : 999),
+                        isReturn,
+                      });
+                    }}
+                    title="Click/tap to enter exact quantity via numeric keypad"
+                  >
+                    {item.quantity}
+                  </span>
                   <button
                     className={styles.qtyBtn}
                     onClick={() => updateQuantity(item.product.id, item.quantity + 1, isReturn)}
@@ -1384,11 +1486,11 @@ export const POSPage = () => {
                         onChange={e => setApplyStoreCredit(e.target.checked)}
                         style={{ cursor: 'pointer', accentColor: '#16a34a' }}
                       />
-                      <span>🎟️ Use Store Credit ({formatCurrency(matchedCustomer.storeCredit || 0)} available)</span>
+                      <span>🎟️ Use Store Credit ({formatPrivateCurrency(matchedCustomer.storeCredit || 0)} available)</span>
                     </div>
                     {applyStoreCredit && (
                       <span style={{ color: '#15803d', fontWeight: 800 }}>
-                        -{formatCurrency(Math.min(matchedCustomer.storeCredit || 0, getTotal()))}
+                        -{formatPrivateCurrency(Math.min(matchedCustomer.storeCredit || 0, getTotal()))}
                       </span>
                     )}
                   </label>
@@ -1590,13 +1692,13 @@ export const POSPage = () => {
                       <div className={styles.creditMetric}>
                         <span className={styles.creditMetricLabel}>On Credit:</span>
                         <strong className={styles.creditMetricValue}>
-                          +{formatCurrency(Math.max(0, getTotal() - ((applyStoreCredit && matchedCustomer?.storeCredit) ? Math.min(matchedCustomer.storeCredit, getTotal()) : 0) - (downPayment || 0)))}
+                          +{formatPrivateCurrency(Math.max(0, getTotal() - ((applyStoreCredit && matchedCustomer?.storeCredit) ? Math.min(matchedCustomer.storeCredit, getTotal()) : 0) - (downPayment || 0)))}
                         </strong>
                       </div>
                       <div className={styles.creditMetric}>
                         <span className={styles.creditMetricLabel}>New Total:</span>
                         <strong className={styles.creditMetricTotal}>
-                          {formatCurrency((matchedCustomer?.totalDebt || 0) + Math.max(0, getTotal() - ((applyStoreCredit && matchedCustomer?.storeCredit) ? Math.min(matchedCustomer.storeCredit, getTotal()) : 0) - (downPayment || 0)))}
+                          {formatPrivateCurrency((matchedCustomer?.totalDebt || 0) + Math.max(0, getTotal() - ((applyStoreCredit && matchedCustomer?.storeCredit) ? Math.min(matchedCustomer.storeCredit, getTotal()) : 0) - (downPayment || 0)))}
                         </strong>
                       </div>
                     </div>
@@ -1609,8 +1711,8 @@ export const POSPage = () => {
                           <span>Credit Limit Exceeded!</span>
                         </div>
                         <p style={{ margin: '3px 0 0' }}>
-                          Current debt: {formatCurrency(currentCustomerDebt)} + New: {formatCurrency(creditDebtToLog)} = {formatCurrency(currentCustomerDebt + creditDebtToLog)}.
-                          Limit is {formatCurrency(matchedCustomer?.creditLimit || 0)}.
+                          Current debt: {formatPrivateCurrency(currentCustomerDebt)} + New: {formatPrivateCurrency(creditDebtToLog)} = {formatPrivateCurrency(currentCustomerDebt + creditDebtToLog)}.
+                          Limit is {formatPrivateCurrency(matchedCustomer?.creditLimit || 0)}.
                         </p>
                         {creditLimitOverrideApproved || isAdmin ? (
                           <p style={{ margin: '4px 0 0', color: '#15803d', fontWeight: 600 }}>
@@ -1751,7 +1853,16 @@ export const POSPage = () => {
           setCreditLimitOverrideApproved(true);
           toast.success('Credit Limit Overridden', 'Admin authorization verified.');
         }}
-        actionName={`override credit limit for ${matchedCustomer?.name || customerName || 'customer'}`}
+        actionName={`Override credit limit for ${matchedCustomer?.name || customerName || 'customer'}`}
+        actionType="pos_credit_limit_override"
+        actionData={{
+          itemType: 'pos_credit',
+          customerName: matchedCustomer?.name || customerName || 'Customer',
+          creditLimit: matchedCustomer?.creditLimit || 0,
+          currentDebt: matchedCustomer?.debt || 0,
+          cartTotal: total,
+          itemCount: items.length,
+        }}
       />
 
       {/* Admin Unlock Modal for Large Manual Discount (Problem 5) */}
@@ -1769,7 +1880,15 @@ export const POSPage = () => {
             toast.success('Discount Authorized', 'Admin authorization verified.');
           }
         }}
-        actionName={`authorize discount of ${pendingDiscountValue ? formatCurrency(pendingDiscountValue) : ''}`}
+        actionName={`Authorize discount of ${pendingDiscountValue ? formatCurrency(pendingDiscountValue) : ''}`}
+        actionType="pos_discount_override"
+        actionData={{
+          itemType: 'pos_discount',
+          discountAmount: pendingDiscountValue || 0,
+          cartTotal: total,
+          customerName: matchedCustomer?.name || customerName || 'Walk-in Customer',
+          itemCount: items.length,
+        }}
       />
     </div>
   );

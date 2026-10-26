@@ -15,6 +15,24 @@ A powerful, all-in-one, production-grade management system designed specifically
 
 ---
 
+## 🧪 Live Demo & Quick Evaluation Account
+
+Want to test drive the platform without configuring your own backend first? Use the pre-configured evaluation credentials:
+
+| Field | Value |
+|---|---|
+| **Demo Login Email** | `Adou4849@gmail.com` |
+| **Demo Password** | `Abdouh071` |
+| **Assigned Role** | **Super Admin** *(Full master access to POS, Repairs, Inventory, Parts, Financials & Settings)* |
+
+> [!CAUTION]
+> **CRITICAL NOTICE FOR USERS CLONING THIS REPOSITORY:**
+> The credentials above are provided strictly for sandbox preview and evaluation. **Anyone who clones or forks this project MUST set up their own dedicated Firebase database and create their own initial admin account** following [Step 2: Set Up Your Own Firebase Backend](#step-2-set-up-your-own-firebase-backend).
+> - Never record real store inventory, customer IMEI numbers, cash transactions, or passwords in a shared demo database.
+> - Always supply your own isolated project keys in `.env` and configure your own initial administrator account via the Firebase Console.
+
+---
+
 ## 📸 Visual Tour & Core Pages
 
 ### 📊 Executive Dashboard
@@ -314,6 +332,10 @@ cd phoneshop-manager
 
 ### Step 2: Set Up Your Own Firebase Backend
 
+> [!CAUTION]
+> **MANDATORY FOR WORKSHOP PRODUCTION DEPLOYMENTS:**
+> If you are setting up this system for your own shop, **do not rely on the demo project**. You must create your own isolated Firebase project, configure your own credentials in `.env`, and create your own initial administrator account as described below.
+
 1. Navigate to the [Firebase Console](https://console.firebase.google.com/) and click **Add project**.
 2. Give your project a name (e.g., `my-phone-shop`).
 3. Enable **Authentication**:
@@ -327,30 +349,28 @@ cd phoneshop-manager
    - Under **Your apps**, click the Web icon `</>` to register your web application.
    - Note down the `firebaseConfig` keys provided.
 
-#### 👤 Creating the Shop Administrator Account
-Because this is a private internal enterprise application, **there is intentionally no public "Sign Up" button** on the login screen (this prevents random visitors from registering accounts into your store).
-- In the **Firebase Console**, go to **Authentication → Users**.
-- Click **Add User**.
-- Enter your admin email address (e.g. `admin@example.com` or your own personal email) and set a secure password.
+#### 👤 Creating the First Account via Firebase (Initial Super Admin)
+Because this is a private enterprise application with sensitive store and customer data, **there is intentionally no public "Sign Up" button** on the login screen (preventing unauthorized public registrations).
 
-#### 🛡️ Configuring Security Rules & Super Admin Email
-1. Open the file [`firestore.rules`](firestore.rules).
-2. The initial fallback bootstrap email is set to:
-   ```javascript
-   function isSuperAdmin() {
-     return request.auth != null && (
-       request.auth.token.email == 'admin@example.com' || ...
-     );
-   }
-   ```
-   - **If you created your user with `admin@example.com`**, no code change is required.
-   - **If you used a different email** (e.g. `owner@myshop.com`), simply replace `admin@example.com` in `firestore.rules` with your email.
-3. Deploy the security rules to your Firebase project:
+> [!IMPORTANT]
+> **The very first user MUST be added directly in Firebase (Console / Database):**
+> 1. In the [Firebase Console](https://console.firebase.google.com/), open your project and go to **Authentication → Users**.
+> 2. Click **Add User**.
+> 3. Enter your email (e.g. `admin@example.com` or your personal email) and set a secure password.
+> 4. Click **Add User** to save.
+
+#### 🛡️ Auto-Bootstrapping to Super Admin
+The system features an **automated initial bootstrap mechanism**:
+- When the first user ever created in the database logs in, the system automatically detects that no profiles exist yet (or matches `VITE_SUPER_ADMIN_EMAIL`) and **automatically crowns that first account as the Super Admin** with full master permissions in Firestore.
+- You do **not** need to manually construct Firestore documents or set roles in JSON.
+
+1. Deploy the security rules to your Firebase project:
    ```bash
    npx firebase-tools login
    npx firebase-tools use --add
    npx firebase-tools deploy --only firestore:rules
    ```
+   *(The included `firestore.rules` already supports initial auto-bootstrap and grants administrative ownership)*.
 
 ---
 
@@ -387,12 +407,23 @@ Because this is a private internal enterprise application, **there is intentiona
 
 ---
 
-### Step 4: First Login & Adding Employees
+### Step 4: First Login & Creating Other Staff Profiles
 
-1. Visit **http://localhost:5173** and log in with your admin credentials.
-2. The system automatically initializes your user profile as **Super Admin** with full master permissions.
-3. Once logged in, go to **Settings → Users**:
-   - You can now invite and create accounts for all your staff members (**Cashiers**, **Technicians**, **Managers**) directly inside the application interface without touching the Firebase Console!
+1. Open your browser and navigate to **http://localhost:5173** (or your hosted URL).
+2. Log in using the initial administrator credentials you created in Firebase.
+3. **Automatic Super Admin Activation**: Upon successful sign-in, the system automatically creates your master administrator profile in Firestore, granting complete access to financial reports, inventory, system settings, and user management.
+4. **Creating All Other User Profiles Later (In-App)**:
+   > [!TIP]
+   > **You never need to touch the Firebase Console again to add users!**
+   > All future team members are managed directly inside the application interface:
+   - Navigate to **Settings ⚙️ → Users & Staff**.
+   - Click **Add User** (or "+ New Staff Member").
+   - Enter their Name, Email, Password, and Role:
+     - **Admin / Store Owner**: Full operational and management access.
+     - **Manager**: Day-to-day oversight, inventory, repairs, POS.
+     - **Cashier / Sales Agent**: POS sales, customer ledger, basic repair intake.
+     - **Repair Technician**: Workbench queue and mobile companion app access.
+   - The system automatically creates both their Firebase Authentication credentials and their role-guarded Firestore profile with the appropriate permission matrix.
 
 ---
 
@@ -429,6 +460,29 @@ If you have an 80mm thermal receipt printer or adhesive label printer connected 
    node server.js
    ```
    The print server will listen on port `3355`. When you click "Print Receipt" or "Print Label" anywhere in the web app, print jobs will dispatch instantly to your thermal printer.
+
+---
+
+### Step 5.1: Standalone Desktop Applications (macOS & Windows)
+
+For production cashier and counter setups, **PhoneShop Manager Pro** is distributed as standalone native desktop applications with an **integrated auto-starting thermal print server**.
+
+> [!TIP]
+> **No manual terminal commands required!** When you run any of the desktop applications below, the hardware thermal print server automatically boots in the background on port `3355`, ready to dispatch receipt and barcode label jobs directly to USB, Network, and Windows shared printers.
+
+Pre-compiled standalone packages are located in the [`releases/`](file:///Users/Abdouh71/Phones-workspace/releases) folder:
+
+| Operating System | Package File | Architecture | Compatibility Notes |
+|---|---|---|---|
+| 🍏 **macOS** | `PhoneShop Manager Pro-1.0.0-arm64.dmg` | ARM64 | Apple Silicon (M1/M2/M3/M4) |
+| 🪟 **Windows 64-bit** | `PhoneShop Manager Pro Setup 1.0.0.exe` | x64 | Windows 10 & Windows 11 |
+| 🪟 **Windows Legacy / 32-bit** | `PhoneShop-Manager-Pro-Setup-1.0.0-win7-32bit.exe` | ia32 / x64 | **Windows 7**, 8, 8.1, 10 & 11 (32 & 64-bit) |
+
+#### Features of Desktop Packages:
+- **Instant Launch**: Connects directly to the official production database (`phoneshop-mgr-pro-2026`).
+- **Integrated Print Server**: Automatically detects and drives 80mm thermal receipt printers and 4x6" / jewelry label printers without needing Node.js installed on client machines.
+- **Offline / Disconnect Guard**: In case of network interruption, displays an interactive status screen with instant reconnection fallback.
+- **Hardware Acceleration & Security**: Chromium security flags are tailored to allow seamless local printing communication between the secured application renderer and the embedded localhost print service.
 
 ---
 

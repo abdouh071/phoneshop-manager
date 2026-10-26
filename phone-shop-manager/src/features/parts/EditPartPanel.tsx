@@ -96,7 +96,18 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, onClose }
         isOpen={showAdminUnlock}
         onClose={() => setShowAdminUnlock(false)}
         onSuccess={() => { setShowAdminUnlock(false); setIsDeleting(true); }}
-        actionName="delete this part"
+        actionName={`Delete part: ${product.name}`}
+        actionType="parts_delete"
+        targetId={product.id}
+        actionData={{
+          itemType: 'part',
+          partName: product.name,
+          partNumber: product.partNumber,
+          category: product.category,
+          price: product.price,
+          cost: product.cost,
+          stock: product.stock,
+        }}
       />
 
       <ConfirmDialog
@@ -137,7 +148,7 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, onClose }
           <h3 className={styles.sectionTitle}>Pricing & Stock</h3>
           <div className={styles.grid3}>
             {canViewCosts && (
-              <Input label={`Cost Price (${symbol}) *`} type="number" step="0.01" value={form.costPrice?.toString() || ''} onChange={e => set('costPrice', e.target.value)} />
+              <Input className="privacy-cost-input" label={`Cost Price (${symbol}) *`} type="number" step="0.01" value={form.costPrice?.toString() || ''} onChange={e => set('costPrice', e.target.value)} />
             )}
             <Input label={`Sell Price (${symbol}) *`} type="number" step="0.01" value={form.price?.toString() || ''} onChange={e => set('price', e.target.value)} />
             <Input label="Current Stock *" type="number" value={form.stock?.toString() || ''} onChange={e => set('stock', e.target.value)} />

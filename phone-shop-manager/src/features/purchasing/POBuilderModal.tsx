@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { X, Search, Plus, Trash2, Save, Send } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Select } from '../../components/ui/Select';
@@ -7,6 +7,7 @@ import { usePurchasingStore } from '../../store/purchasingStore';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useToast } from '../../components/ui/Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { extractSuppliersFromInventory } from '../../utils/supplierUtils';
 import type { PurchaseOrder, POItem, PhoneModel } from '../../types';
 import styles from './POBuilderModal.module.css';
 
@@ -17,8 +18,8 @@ interface POBuilderModalProps {
 }
 
 export const POBuilderModal: React.FC<POBuilderModalProps> = ({ isOpen, onClose, poId }) => {
-  const { suppliers, purchaseOrders, addPO, updatePO } = usePurchasingStore();
-  const { products, fetchProducts } = useInventoryStore();
+  const { suppliers, purchaseOrders, addPO, updatePO, addSupplier } = usePurchasingStore();
+  const { products, parts, fetchAll } = useInventoryStore();
   const toast = useToast();
 
   const [supplierId, setSupplierId] = useState('');
@@ -28,44 +29,73 @@ export const POBuilderModal: React.FC<POBuilderModalProps> = ({ isOpen, onClose,
   const [search, setSearch] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Fetch full inventory (products & repair parts) to ensure all product suppliers are available
   useEffect(() => {
     if (isOpen) {
-      if (products.length === 0) fetchProducts();
+      fetchAll();
     }
-  }, [isOpen, products.length, fetchProducts]);
+  }, [isOpen, fetchAll]);
+
+  // Merge registered suppliers with suppliers previously added to products or parts
+  const allSuppliers = useMemo(() => {
+    return extractSuppliersFromInventory(suppliers, products, parts, purchaseOrders);
+  }, [suppliers, products, parts, purchaseOrders]);
+
+  const supplierOptions = useMemo(() => {
+    const registeredCount = allSuppliers.filter(s => s.source === 'registered').length;
+    const catalogCount = allSuppliers.filter(s => s.source === 'product_catalog').length;
+
+    return [
+      { value: '', label: 'Select a supplier...' },
+      ...allSuppliers.map(s => {
+        const isFromCatalog = s.source === 'product_catalog';
+        const groupLabel = isFromCatalog ? '📦 Suppliers from Added Products' : '🏢 Registered Suppliers';
+        return {
+          value: s.id,
+          label: isFromCatalog ? `${s.name} (from product catalog)` : s.name,
+          group: registeredCount > 0 && catalogCount > 0 ? groupLabel : (isFromCatalog ? '📦 Suppliers from Added Products' : undefined),
+        };
+      })
+    ];
+  }, [allSuppliers]);
 
   useEffect(() => {
     if (isOpen && poId) {
       const po = purchaseOrders.find(p => p.id === poId);
       if (po) {
-        setSupplierId(po.supplierId);
+        // Match existing supplier by ID or case-insensitive name
+        const match = allSuppliers.find(
+          s => s.id === po.supplierId || s.name.toLowerCase() === po.supplierName?.toLowerCase()
+        );
+        setSupplierId(match ? match.id : po.supplierId);
         setNotes(po.notes || '');
         setExpectedDelivery(po.expectedDelivery ? po.expectedDelivery.split('T')[0] : '');
         setItems(po.items);
       }
-    } else {
+    } else if (isOpen && !poId) {
       setSupplierId('');
       setNotes('');
       setExpectedDelivery('');
       setItems([]);
       setSearch('');
     }
-  }, [isOpen, poId, purchaseOrders]);
+  }, [isOpen, poId, purchaseOrders, allSuppliers]);
 
   if (!isOpen) return null;
 
   const handleAddItem = (p: PhoneModel) => {
     if (items.some(i => i.productId === p.id)) {
-      toast.error('Already added', 'This product is already in the PO.');
+      toast.error('Already added', 'This item is already in the PO.');
       return;
     }
+    const displayName = [p.name, p.model, p.color, p.storage].filter(Boolean).join(' ');
     setItems([...items, {
       productId: p.id,
-      productName: `${p.name} ${p.model} ${p.color} ${p.storage}`,
-      productSku: p.sku,
+      productName: displayName,
+      productSku: p.sku || 'N/A',
       requestedQty: 1,
       receivedQty: 0,
-      unitCost: p.costPrice
+      unitCost: p.costPrice || 0
     }]);
     setSearch('');
   };
@@ -92,13 +122,34 @@ export const POBuilderModal: React.FC<POBuilderModalProps> = ({ isOpen, onClose,
       return;
     }
 
-    const supplier = suppliers.find(s => s.id === supplierId);
-    if (!supplier) return;
+    const supplier = allSuppliers.find(s => s.id === supplierId);
+    if (!supplier) {
+      toast.error('Supplier Not Found', 'Could not resolve the selected supplier.');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
+      let finalSupplierId = supplier.id;
+
+      // If supplier was picked from product catalog and isn't yet an official registered supplier,
+      // register it in Firestore suppliers collection so it has a permanent profile and ID.
+      if (supplier.source === 'product_catalog' || supplier.id.startsWith('inv_sup_')) {
+        try {
+          const registered = await addSupplier({
+            name: supplier.name,
+            notes: `Auto-registered from inventory product catalog when creating PO.`,
+          });
+          if (registered?.id) {
+            finalSupplierId = registered.id;
+          }
+        } catch (e) {
+          console.warn('Could not auto-register supplier to suppliers collection, continuing with synthesized ID:', e);
+        }
+      }
+
       const payload = {
-        supplierId,
+        supplierId: finalSupplierId,
         supplierName: supplier.name,
         status,
         orderDate: new Date().toISOString(),
@@ -123,10 +174,12 @@ export const POBuilderModal: React.FC<POBuilderModalProps> = ({ isOpen, onClose,
     }
   };
 
-  const searchResults = search.trim() === '' ? [] : products.filter(p => 
+  const allInventory = [...products, ...parts];
+  const searchResults = search.trim() === '' ? [] : allInventory.filter(p => 
     p.name.toLowerCase().includes(search.toLowerCase()) || 
-    p.sku.toLowerCase().includes(search.toLowerCase())
-  ).slice(0, 5);
+    (p.sku && p.sku.toLowerCase().includes(search.toLowerCase())) ||
+    (p.model && p.model.toLowerCase().includes(search.toLowerCase()))
+  ).slice(0, 8);
 
   return (
     <div className={styles.overlay}>
@@ -145,7 +198,7 @@ export const POBuilderModal: React.FC<POBuilderModalProps> = ({ isOpen, onClose,
               label="Supplier *"
               value={supplierId}
               onChange={setSupplierId}
-              options={[{ value: '', label: 'Select a supplier...' }, ...suppliers.map(s => ({ value: s.id, label: s.name }))]}
+              options={supplierOptions}
             />
             <Input
               label="Expected Delivery (Optional)"

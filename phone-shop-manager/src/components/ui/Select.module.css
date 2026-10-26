@@ -61,3 +61,15 @@
   font-size: var(--text-label-sm-size);
   color: var(--color-error);
 }
+
+.select optgroup {
+  font-weight: 700;
+  color: var(--color-on-surface);
+  background: var(--color-surface-container);
+}
+
+.select option {
+  font-weight: 400;
+  color: var(--color-on-surface);
+  background: var(--color-surface-container-lowest);
+}

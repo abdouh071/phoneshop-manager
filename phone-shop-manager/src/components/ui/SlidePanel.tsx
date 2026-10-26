@@ -7,7 +7,7 @@ interface SlidePanelProps {
   onClose: () => void;
   title: string;
   subtitle?: string;
-  width?: 'sm' | 'md' | 'lg';
+  width?: 'sm' | 'md' | 'lg' | 'xl';
   children: React.ReactNode;
   footer?: React.ReactNode;
 }

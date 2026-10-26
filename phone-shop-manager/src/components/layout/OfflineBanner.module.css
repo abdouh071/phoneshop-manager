@@ -14,6 +14,18 @@
   animation: slideDown 0.25s ease-out;
 }
 
+.bannerOnline {
+  background: linear-gradient(90deg, #16a34a, #15803d);
+}
+
+.spinIcon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 @keyframes slideDown {
   from {
     transform: translateY(-100%);
@@ -22,3 +34,4 @@
     transform: translateY(0);
   }
 }
+

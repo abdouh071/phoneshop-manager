@@ -4,7 +4,8 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import type { PhoneModel } from '../../types';
 import styles from './StockAudit.module.css';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { usePrivacyStore } from '../../store/privacyStore';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface ScannedEntry {
@@ -31,6 +32,7 @@ interface StockAuditProps {
 }
 
 export const StockAudit: React.FC<StockAuditProps> = ({ products, onClose }) => {
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
   const [phase, setPhase] = useState<AuditPhase>('scanning');
   const [skuInput, setSkuInput] = useState('');
   const [scanned, setScanned] = useState<Map<string, ScannedEntry>>(new Map());
@@ -335,7 +337,7 @@ export const StockAudit: React.FC<StockAuditProps> = ({ products, onClose }) => 
         <Card className={`${styles.summaryCard} ${styles.summaryShrinkage}`}>
           <AlertTriangle size={20} />
           <div>
-            <p className={styles.summaryNum}>{formatCurrency(shrinkageValue)}</p>
+            <p data-privacy-cost className={[styles.summaryNum, 'privacy-cost'].join(' ')}>{formatPrivateCurrency(shrinkageValue)}</p>
             <p className={styles.summaryLabel}>Shrinkage Value</p>
           </div>
         </Card>
@@ -375,7 +377,7 @@ export const StockAudit: React.FC<StockAuditProps> = ({ products, onClose }) => 
                       <td>{r.counted}</td>
                       <td className={styles.deltaMissing}>{r.delta}</td>
                       <td><span className={styles.badgeMissing}>Short</span></td>
-                      <td className={styles.shrinkageVal}>{formatCurrency(Math.abs(r.delta) * r.product.costPrice)}</td>
+                      <td data-privacy-cost className={[styles.shrinkageVal, 'privacy-cost'].join(' ')}>{formatPrivateCurrency(Math.abs(r.delta) * r.product.costPrice)}</td>
                     </tr>
                   ))}
                 </>

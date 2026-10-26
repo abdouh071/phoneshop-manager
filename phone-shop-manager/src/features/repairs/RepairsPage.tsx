@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { useLocation } from 'react-router-dom';
-import { Plus, Clock, Wrench, CheckCircle2, Archive, LayoutList, Columns, AlertTriangle, User, Phone, ArrowRight, Smartphone, Sparkles, Filter, PauseCircle, PlayCircle, Trash2, Printer, XCircle, RotateCcw } from 'lucide-react';
+import { useLocation, useSearchParams } from 'react-router-dom';
+import { Plus, Clock, Wrench, CheckCircle2, Archive, LayoutList, Columns, AlertTriangle, User, Smartphone, Sparkles, PauseCircle, PlayCircle, Trash2, Printer, XCircle, RotateCcw, Eye, GitMerge } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { Button } from '../../components/ui/Button';
 import { SearchInput } from '../../components/ui/Input';
@@ -11,6 +11,7 @@ import { TicketDetailPanel } from './TicketDetailPanel';
 import { RepairSettlementModal } from './RepairSettlementModal';
 import { PrintRepairTicketModal } from './PrintRepairTicketModal';
 import { CustomerProfilePanel } from '../customers/CustomerProfilePanel';
+import { MergeRepairsModal } from './MergeRepairsModal';
 import { StatusTablesView } from './StatusTablesView';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { useAuthStore } from '../../store/authStore';
@@ -19,9 +20,31 @@ import type { RepairTicket, Customer } from '../../types';
 import styles from './Kanban.module.css';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { deduplicateTickets } from '../../utils/ticketDeduplication';
+import { MobileRepairsView } from './MobileRepairsView';
 import { EndOfDayButton } from '../endofday/EndOfDayButton';
 import { TechnicianSettlementsTab } from './TechnicianSettlementsTab';
 import { detectIssueTag, getBrandIcon, nextStatusMap, nextActionLabels } from './repairConstants';
+import { isPhoneMatch, normalizePhoneDigits } from '../../utils/phoneUtils';
+import { isTicketActiveReturnPending } from '../../utils/phoneLifecycle';
+
+export type RepairViewMode = 'tables' | 'board' | 'completed' | 'history' | 'cancelled' | 'settlements';
+
+const formatTimeAgo = (dateStr?: string) => {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 5) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+};
 
 type KanbanStatus = 'pending' | 'in_progress' | 'ready' | 'completed';
 
@@ -272,14 +295,63 @@ const TicketCard: React.FC<{
 };
 
 export const RepairsPage = () => {
-  const { fetchTickets, searchQuery, setSearchQuery, updateStatus, tickets, getFilteredTickets, heldDrafts, resumeDraft, discardHeldDraft, clearActiveDraft } = useRepairStore();
+  const {
+    fetchTickets,
+    searchQuery,
+    setSearchQuery,
+    updateStatus,
+    tickets,
+    getFilteredTickets,
+    heldDrafts,
+    resumeDraft,
+    discardHeldDraft,
+    clearActiveDraft,
+    statusFilter,
+    setStatusFilter,
+    findDuplicates,
+  } = useRepairStore();
   const { customers, fetchCustomers } = useCustomerStore();
+
+  // Deduplication & safe fusion state
+  const detectedDuplicateTickets = useMemo(() => findDuplicates(), [tickets, findDuplicates]);
+  const [isMergeRepairsOpen, setIsMergeRepairsOpen] = useState(false);
+  const [mergeInitialTicketA, setMergeInitialTicketA] = useState<RepairTicket | null>(null);
+  const [mergeInitialTicketB, setMergeInitialTicketB] = useState<RepairTicket | null>(null);
+
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [ticketToEdit, setTicketToEdit] = useState<RepairTicket | null>(null);
   const [selectedTicket, setSelectedTicket] = useState<RepairTicket | null>(null);
-  const [profileCustomer, setProfileCustomer] = useState<Customer | null>(null);
-  const [viewMode, setViewMode] = useState<'tables' | 'board' | 'history' | 'cancelled' | 'settlements'>('tables');
-  const [statusFilter, setStatusFilter] = useState<'all' | KanbanStatus | 'overdue' | 'returned'>('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlTab = searchParams.get('tab') as RepairViewMode | null;
+  const [viewMode, setViewModeState] = useState<RepairViewMode>(() => {
+    if (urlTab && ['tables', 'board', 'completed', 'history', 'cancelled', 'settlements'].includes(urlTab)) {
+      return urlTab;
+    }
+    return 'tables';
+  });
+
+  const setViewMode = useCallback((mode: RepairViewMode) => {
+    setViewModeState(mode);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (mode === 'tables') {
+        next.delete('tab');
+      } else {
+        next.set('tab', mode);
+      }
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  useEffect(() => {
+    if (urlTab && ['tables', 'board', 'completed', 'history', 'cancelled', 'settlements'].includes(urlTab) && urlTab !== viewMode) {
+      setViewModeState(urlTab);
+    }
+  }, [urlTab, viewMode]);
+
+  // Dedicated search and filter state for Completed Repairs Vault tab
+  const [completedSearchQuery, setCompletedSearchQuery] = useState('');
+  const [completedFilterTag, setCompletedFilterTag] = useState<'all' | 'walkin' | 'account' | 'today'>('all');
   const [selectedTech, setSelectedTech] = useState<string>('all');
   const toast = useToast();
   const location = useLocation();
@@ -289,6 +361,7 @@ export const RepairsPage = () => {
   const [printingTicket, setPrintingTicket] = useState<RepairTicket | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
   const [prefillCustomer, setPrefillCustomer] = useState<{name: string; phone: string; deviceBrand?: string; deviceModel?: string; parentTicketId?: string} | null>(null);
+  const [profileCustomer, setProfileCustomer] = useState<Customer | null>(null);
 
   const handlePrintTicket = (ticket: RepairTicket) => {
     setPrintingTicket(ticket);
@@ -330,16 +403,30 @@ export const RepairsPage = () => {
       found = customers.find(c => c.id === ticket.customerId);
     }
     if (!found) {
-      const cleanPhone = (ticket.customerPhone || '').replace(/\D/g, '');
       found = customers.find(c =>
-        (cleanPhone && c.phone.replace(/\D/g, '') === cleanPhone) ||
+        isPhoneMatch(c.phone, ticket.customerPhone) ||
+        (c.normalizedPhone && isPhoneMatch(c.normalizedPhone, ticket.customerPhone)) ||
         (c.name.toLowerCase().trim() === ticket.customerName.toLowerCase().trim())
       );
     }
     if (found) {
       setProfileCustomer(found);
     } else {
-      toast.info('Customer Profile', `${ticket.customerName} does not have a registered profile yet.`);
+      // Synthesize a walk-in Customer profile so staff can inspect all records for this walk-in customer
+      const cleanDigits = normalizePhoneDigits(ticket.customerPhone);
+      const walkInCustomer: Customer = {
+        id: `walkin_${cleanDigits || ticket.id}`,
+        name: ticket.customerName || 'Walk-in Client',
+        phone: ticket.customerPhone || 'Walk-in',
+        normalizedPhone: cleanDigits || undefined,
+        accountType: 'retail',
+        totalPurchases: 0,
+        totalSpent: 0,
+        lastVisitDate: ticket.createdAt,
+        joinDate: ticket.createdAt,
+        notes: 'Walk-in Customer Record',
+      };
+      setProfileCustomer(walkInCustomer);
     }
   };
 
@@ -376,19 +463,21 @@ export const RepairsPage = () => {
     }
   }, [location.search, tickets]);
 
-  // Autocomplete search results (top 8 matches)
+  // Autocomplete search results (top 8 matches) — child return tickets excluded
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const q = searchQuery.toLowerCase().trim();
-    return tickets.filter(t =>
-      (t.ticketNumber || '').toLowerCase().includes(q) ||
-      (t.customerName || '').toLowerCase().includes(q) ||
-      (t.deviceModel || '').toLowerCase().includes(q) ||
-      (t.deviceBrand || '').toLowerCase().includes(q) ||
-      (t.customerPhone || '').toLowerCase().includes(q) ||
-      (t.issueDescription || '').toLowerCase().includes(q) ||
-      (t.assignedTechnician || '').toLowerCase().includes(q)
-    ).slice(0, 8);
+    return tickets
+      .filter(t => !t.isReturn)  // never surface child return tickets in search
+      .filter(t =>
+        (t.ticketNumber || '').toLowerCase().includes(q) ||
+        (t.customerName || '').toLowerCase().includes(q) ||
+        (t.deviceModel || '').toLowerCase().includes(q) ||
+        (t.deviceBrand || '').toLowerCase().includes(q) ||
+        (t.customerPhone || '').toLowerCase().includes(q) ||
+        (t.issueDescription || '').toLowerCase().includes(q) ||
+        (t.assignedTechnician || '').toLowerCase().includes(q)
+      ).slice(0, 8);
   }, [tickets, searchQuery]);
 
   // Auto-scroll highlighted search item into view
@@ -479,8 +568,12 @@ export const RepairsPage = () => {
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
-  // Deduplicated base list of tickets to guarantee no ticket can ever render twice
-  const uniqueTickets = useMemo(() => deduplicateTickets(tickets), [tickets]);
+  // Deduplicated base list — child return tickets (isReturn: true) are excluded from
+  // the main board/search; they are only visible inside the parent ticket detail panel.
+  const uniqueTickets = useMemo(
+    () => deduplicateTickets(tickets).filter(t => !t.isReturn),
+    [tickets]
+  );
 
   // Unique list of technicians
   const technicians = useMemo(() => {
@@ -498,12 +591,19 @@ export const RepairsPage = () => {
     // 1. Text Search Filter
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
+      const cleanQueryDigits = normalizePhoneDigits(searchQuery);
+      const rawQueryDigits = searchQuery.replace(/\D/g, '');
+
       list = list.filter(t =>
         (t.customerName || '').toLowerCase().includes(q) ||
         (t.ticketNumber || '').toLowerCase().includes(q) ||
         (t.deviceModel || '').toLowerCase().includes(q) ||
         (t.deviceBrand || '').toLowerCase().includes(q) ||
+        `${t.deviceBrand || ''} ${t.deviceModel || ''}`.toLowerCase().includes(q) ||
         (t.customerPhone || '').toLowerCase().includes(q) ||
+        (t.assignedTechnician || '').toLowerCase().includes(q) ||
+        (cleanQueryDigits.length >= 2 && isPhoneMatch(t.customerPhone, searchQuery)) ||
+        (rawQueryDigits.length >= 2 && (t.customerPhone || '').replace(/\D/g, '').includes(rawQueryDigits)) ||
         (t.issueDescription || '').toLowerCase().includes(q)
       );
     }
@@ -523,7 +623,11 @@ export const RepairsPage = () => {
         t.status !== 'returned'
       );
     } else if (statusFilter === 'pending') {
-      list = list.filter(t => t.status === 'pending' || t.status === 'returned');
+      list = list.filter(t => t.status === 'pending' || isTicketActiveReturnPending(t, uniqueTickets));
+    } else if (statusFilter === 'completed') {
+      list = list.filter(t => t.status === 'completed' || (t.status === 'returned' && !isTicketActiveReturnPending(t, uniqueTickets)));
+    } else if (statusFilter === 'returned') {
+      list = list.filter(t => isTicketActiveReturnPending(t, uniqueTickets));
     } else if (statusFilter !== 'all') {
       list = list.filter(t => t.status === statusFilter);
     }
@@ -531,36 +635,90 @@ export const RepairsPage = () => {
     return list;
   }, [uniqueTickets, searchQuery, selectedTech, statusFilter]);
 
-  const returnedTickets = filtered.filter(t => t.status === 'returned');
+  const returnedTickets = filtered.filter(t => isTicketActiveReturnPending(t, uniqueTickets));
 
   const getColumnTickets = (status: KanbanStatus) => {
     if (status === 'pending') {
       return filtered
-        .filter(t => t.status === 'pending' || t.status === 'returned')
+        .filter(t => t.status === 'pending' || isTicketActiveReturnPending(t, uniqueTickets))
         .sort((a, b) => {
-          if (a.status === 'returned' && b.status !== 'returned') return -1;
-          if (b.status === 'returned' && a.status !== 'returned') return 1;
+          const aRet = isTicketActiveReturnPending(a, uniqueTickets);
+          const bRet = isTicketActiveReturnPending(b, uniqueTickets);
+          if (aRet && !bRet) return -1;
+          if (bRet && !aRet) return 1;
           return 0;
         });
+    }
+    if (status === 'completed') {
+      return filtered.filter(t => t.status === 'completed' || (t.status === 'returned' && !isTicketActiveReturnPending(t, uniqueTickets)));
     }
     return filtered.filter(t => t.status === status);
   };
 
   const counts = useMemo(() => ({
-    pending:     uniqueTickets.filter(t => t.status === 'pending' || t.status === 'returned').length,
+    pending:     uniqueTickets.filter(t => t.status === 'pending' || isTicketActiveReturnPending(t, uniqueTickets)).length,
     in_progress: uniqueTickets.filter(t => t.status === 'in_progress').length,
     ready:       uniqueTickets.filter(t => t.status === 'ready').length,
-    completed:   uniqueTickets.filter(t => t.status === 'completed').length,
-    returned:    uniqueTickets.filter(t => t.status === 'returned').length,
+    completed:   uniqueTickets.filter(t => t.status === 'completed' || (t.status === 'returned' && !isTicketActiveReturnPending(t, uniqueTickets))).length,
+    returned:    uniqueTickets.filter(t => isTicketActiveReturnPending(t, uniqueTickets)).length,
     cancelled:   uniqueTickets.filter(t => t.status === 'cancelled').length,
     overdue:     uniqueTickets.filter(t =>
       t.estimatedCompletionDate &&
       new Date(t.estimatedCompletionDate) < new Date() &&
       t.status !== 'completed' &&
       t.status !== 'cancelled' &&
-      t.status !== 'returned'
+      isTicketActiveReturnPending(t, uniqueTickets)
     ).length,
   }), [uniqueTickets]);
+
+  // Dedicated metrics for Completed Repairs Vault
+  const completedMetrics = useMemo(() => {
+    const completedList = uniqueTickets.filter(t => t.status === 'completed' || (t.status === 'returned' && !isTicketActiveReturnPending(t, uniqueTickets)));
+    const totalCount = completedList.length;
+    const walkInCount = completedList.filter(t => !t.customerId && (!t.customerPhone || !t.customerPhone.trim())).length;
+    const accountCount = completedList.filter(t => Boolean(t.customerId || (t.customerPhone && t.customerPhone.trim().length >= 7))).length;
+    const todayCount = completedList.filter(t => (t.completedAt && isToday(t.completedAt)) || (t.updatedAt && isToday(t.updatedAt))).length;
+    const totalRevenue = completedList.reduce((sum, t) => sum + (t.actualCost ?? t.estimatedCost ?? 0), 0);
+    return { totalCount, walkInCount, accountCount, todayCount, totalRevenue };
+  }, [uniqueTickets]);
+
+  // Dedicated filtered dataset for Completed Repairs Vault (supports client name, phone model, problem, technician, ticket #)
+  const completedTicketsList = useMemo(() => {
+    let list = uniqueTickets.filter(t => t.status === 'completed');
+
+    if (completedFilterTag === 'walkin') {
+      list = list.filter(t => !t.customerId && (!t.customerPhone || !t.customerPhone.trim()));
+    } else if (completedFilterTag === 'account') {
+      list = list.filter(t => Boolean(t.customerId || (t.customerPhone && t.customerPhone.trim().length >= 7)));
+    } else if (completedFilterTag === 'today') {
+      list = list.filter(t => (t.completedAt && isToday(t.completedAt)) || (t.updatedAt && isToday(t.updatedAt)));
+    }
+
+    if (completedSearchQuery.trim()) {
+      const q = completedSearchQuery.toLowerCase().trim();
+      const rawDigits = completedSearchQuery.replace(/\D/g, '');
+      const cleanDigits = normalizePhoneDigits(completedSearchQuery);
+
+      list = list.filter(t =>
+        (t.customerName || '').toLowerCase().includes(q) ||
+        (t.deviceModel || '').toLowerCase().includes(q) ||
+        (t.deviceBrand || '').toLowerCase().includes(q) ||
+        `${t.deviceBrand || ''} ${t.deviceModel || ''}`.toLowerCase().includes(q) ||
+        (t.issueDescription || '').toLowerCase().includes(q) ||
+        (t.assignedTechnician || '').toLowerCase().includes(q) ||
+        (t.ticketNumber || '').toLowerCase().includes(q) ||
+        (t.customerPhone || '').toLowerCase().includes(q) ||
+        (cleanDigits.length >= 2 && isPhoneMatch(t.customerPhone, completedSearchQuery)) ||
+        (rawDigits.length >= 2 && (t.customerPhone || '').replace(/\D/g, '').includes(rawDigits))
+      );
+    }
+
+    return list.slice().sort((a, b) => {
+      const dateA = a.completedAt || a.updatedAt || a.createdAt;
+      const dateB = b.completedAt || b.updatedAt || b.createdAt;
+      return new Date(dateB).getTime() - new Date(dateA).getTime();
+    });
+  }, [uniqueTickets, completedSearchQuery, completedFilterTag]);
 
   const handleDragEnd = async (result: DropResult) => {
     const { destination, source, draggableId } = result;
@@ -602,6 +760,8 @@ export const RepairsPage = () => {
     if (!selectedTicket) return null;
     return tickets.find(t => t.id === selectedTicket.id) || selectedTicket;
   }, [selectedTicket, tickets]);
+
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
 
   return (
     <div className={styles.page}>
@@ -678,9 +838,26 @@ export const RepairsPage = () => {
           setIsNewOpen(true);
         }}
       />
+      <MergeRepairsModal
+        isOpen={isMergeRepairsOpen}
+        onClose={() => {
+          setIsMergeRepairsOpen(false);
+          setMergeInitialTicketA(null);
+          setMergeInitialTicketB(null);
+        }}
+        initialTicketA={mergeInitialTicketA}
+        initialTicketB={mergeInitialTicketB}
+      />
 
-      {/* Header */}
-      <div className={styles.header}>
+      {isMobile ? (
+        <MobileRepairsView
+          onTicketClick={(ticket) => setSelectedTicket(ticket)}
+          onNewTicket={() => setIsNewOpen(true)}
+        />
+      ) : (
+        <>
+          {/* Header */}
+          <div className={styles.header}>
         <div>
           <h1 className={styles.title}>Repairs Management</h1>
           <p className={styles.subtitle}>{tickets.length} total active tickets across workshop</p>
@@ -809,6 +986,32 @@ export const RepairsPage = () => {
             </button>
             <button
               type="button"
+              className={[styles.viewSwitcherBtn, viewMode === 'completed' && styles.viewSwitcherBtnActive].filter(Boolean).join(' ')}
+              onClick={() => setViewMode('completed')}
+              title="Completed Repairs Vault"
+              style={{ position: 'relative' }}
+            >
+              <CheckCircle2 size={15} />
+              <span>Completed</span>
+              {counts.completed > 0 && (
+                <span style={{
+                  minWidth: '16px',
+                  height: '16px',
+                  borderRadius: '8px',
+                  background: viewMode === 'completed' ? 'rgba(255, 255, 255, 0.25)' : 'rgba(16, 185, 129, 0.15)',
+                  color: viewMode === 'completed' ? '#ffffff' : '#059669',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '0 4px',
+                  marginLeft: '4px',
+                }}>{counts.completed}</span>
+              )}
+            </button>
+            <button
+              type="button"
               className={[styles.viewSwitcherBtn, viewMode === 'history' && styles.viewSwitcherBtnActive].filter(Boolean).join(' ')}
               onClick={() => setViewMode('history')}
               title="All History & Logs"
@@ -862,6 +1065,59 @@ export const RepairsPage = () => {
           </Button>
         </div>
       </div>
+
+      {/* Detected Duplicate Repairs Alert Banner */}
+      {detectedDuplicateTickets.length > 0 && (
+        <div style={{
+          background: '#fefce8',
+          border: '1px solid #fde047',
+          borderRadius: '10px',
+          padding: '12px 18px',
+          marginBottom: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '14px',
+          flexWrap: 'wrap',
+          boxShadow: '0 1px 4px rgba(234, 179, 8, 0.1)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{
+              background: '#fef08a',
+              color: '#854d0e',
+              width: '36px',
+              height: '36px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <GitMerge size={20} />
+            </div>
+            <div>
+              <h4 style={{ margin: '0 0 2px 0', fontSize: '13.5px', fontWeight: 700, color: '#854d0e' }}>
+                {detectedDuplicateTickets.length} Duplicate Repair Ticket{detectedDuplicateTickets.length !== 1 ? 's' : ''} Detected
+              </h4>
+              <p style={{ margin: 0, fontSize: '12px', color: '#a16207' }}>
+                Duplicate repair tickets detected for the same customer and device. You can safely fusion them without deleting any database records.
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="primary"
+            leftIcon={<GitMerge size={14} />}
+            onClick={() => {
+              setMergeInitialTicketA(detectedDuplicateTickets[0].ticketA);
+              setMergeInitialTicketB(detectedDuplicateTickets[0].ticketB);
+              setIsMergeRepairsOpen(true);
+            }}
+          >
+            Resolve Duplicates ({detectedDuplicateTickets.length})
+          </Button>
+        </div>
+      )}
 
       {/* Interactive KPI Summary Cards */}
       <div className={styles.overviewGrid}>
@@ -1125,6 +1381,252 @@ export const RepairsPage = () => {
         </>
       )}
 
+      {/* COMPLETED REPAIRS VAULT VIEW */}
+      {viewMode === 'completed' && (
+        <div className={styles.completedVaultContainer}>
+          {/* Header & Metrics Bar */}
+          <div className={styles.completedVaultHeader}>
+            <div className={styles.completedMetricsGrid}>
+              <div className={styles.completedMetricCard}>
+                <div className={styles.completedMetricIcon} style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#059669' }}>
+                  <CheckCircle2 size={20} />
+                </div>
+                <div className={styles.completedMetricContent}>
+                  <span className={styles.completedMetricValue}>{completedMetrics.totalCount}</span>
+                  <span className={styles.completedMetricLabel}>Total Completed Repairs</span>
+                </div>
+              </div>
+
+              <div className={styles.completedMetricCard}>
+                <div className={styles.completedMetricIcon} style={{ background: 'rgba(79, 70, 229, 0.1)', color: 'var(--color-primary, #4f46e5)' }}>
+                  <Archive size={20} />
+                </div>
+                <div className={styles.completedMetricContent}>
+                  <span className={styles.completedMetricValue}>{formatCurrency(completedMetrics.totalRevenue)}</span>
+                  <span className={styles.completedMetricLabel}>Total Settled Value</span>
+                </div>
+              </div>
+
+              <div className={styles.completedMetricCard}>
+                <div className={styles.completedMetricIcon} style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#2563eb' }}>
+                  <Clock size={20} />
+                </div>
+                <div className={styles.completedMetricContent}>
+                  <span className={styles.completedMetricValue}>{completedMetrics.todayCount}</span>
+                  <span className={styles.completedMetricLabel}>Settled Today</span>
+                </div>
+              </div>
+
+              <div className={styles.completedMetricCard}>
+                <div className={styles.completedMetricIcon} style={{ background: 'rgba(245, 158, 11, 0.1)', color: '#d97706' }}>
+                  <User size={20} />
+                </div>
+                <div className={styles.completedMetricContent}>
+                  <span className={styles.completedMetricValue}>{completedMetrics.walkInCount}</span>
+                  <span className={styles.completedMetricLabel}>Walk-in (No Account)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Dedicated Search Bar & Quick Filter Pills */}
+            <div className={styles.completedToolbar}>
+              <div className={styles.completedSearchWrapper}>
+                <SearchInput
+                  placeholder="Search past repairs by client name, phone model, problem, technician, ticket #..."
+                  value={completedSearchQuery}
+                  onChange={setCompletedSearchQuery}
+                />
+              </div>
+
+              <div className={styles.completedFilterPills}>
+                <button
+                  type="button"
+                  className={[styles.filterPill, completedFilterTag === 'all' && styles.filterPillActive].filter(Boolean).join(' ')}
+                  onClick={() => setCompletedFilterTag('all')}
+                >
+                  All ({completedMetrics.totalCount})
+                </button>
+                <button
+                  type="button"
+                  className={[styles.filterPill, completedFilterTag === 'walkin' && styles.filterPillActive].filter(Boolean).join(' ')}
+                  onClick={() => setCompletedFilterTag('walkin')}
+                  title="Repairs registered without customer phone/account"
+                >
+                  Walk-in Only ({completedMetrics.walkInCount})
+                </button>
+                <button
+                  type="button"
+                  className={[styles.filterPill, completedFilterTag === 'account' && styles.filterPillActive].filter(Boolean).join(' ')}
+                  onClick={() => setCompletedFilterTag('account')}
+                  title="Repairs linked to customer accounts"
+                >
+                  With Account ({completedMetrics.accountCount})
+                </button>
+                <button
+                  type="button"
+                  className={[styles.filterPill, completedFilterTag === 'today' && styles.filterPillActive].filter(Boolean).join(' ')}
+                  onClick={() => setCompletedFilterTag('today')}
+                >
+                  Today ({completedMetrics.todayCount})
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Completed Repairs Table List */}
+          <div className={styles.historyTableWrapper}>
+            <table className={styles.historyTable}>
+              <thead>
+                <tr>
+                  <th style={{ width: '110px' }}>Ticket #</th>
+                  <th>Device</th>
+                  <th>Issue / Problem</th>
+                  <th>Client Name</th>
+                  <th>Contact</th>
+                  <th>Settled Total</th>
+                  <th>Technician</th>
+                  <th>Settled Date</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {completedTicketsList.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--color-on-surface-variant)' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '28px' }}>📦</span>
+                        <span style={{ fontWeight: 700, fontSize: '15px' }}>
+                          {completedSearchQuery.trim() ? `No past repairs matching "${completedSearchQuery}"` : 'No completed repairs found in this filter'}
+                        </span>
+                        <span style={{ fontSize: '12px', opacity: 0.75 }}>
+                          {completedSearchQuery.trim() ? 'Try checking spelling or search by phone model, problem or technician.' : 'Repairs marked as completed and settled will be archived here.'}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  completedTicketsList.map(ticket => {
+                    const issue = detectIssueTag(ticket.issueDescription);
+                    const brandIcon = getBrandIcon(ticket.deviceBrand);
+                    const hasPhone = Boolean(ticket.customerPhone && ticket.customerPhone.trim().length >= 7);
+                    const hasAccount = Boolean(ticket.customerId || hasPhone);
+                    const finalCost = ticket.actualCost ?? ticket.estimatedCost ?? 0;
+                    const settledDate = ticket.completedAt || ticket.updatedAt || ticket.createdAt;
+
+                    return (
+                      <tr
+                        key={ticket.id}
+                        className={styles.historyTableRow}
+                        onClick={() => setSelectedTicket(ticket)}
+                      >
+                        <td>
+                          <span className={styles.cardTicketBadge}>{ticket.ticketNumber}</span>
+                        </td>
+                        <td>
+                          <span style={{ fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                            {brandIcon} {ticket.deviceBrand} {ticket.deviceModel}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={styles.cardProblemTag}>
+                            <span>{issue.icon}</span>
+                            <span>{issue.label}</span>
+                          </span>
+                        </td>
+                        <td>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap' }}>
+                            {hasAccount ? (
+                              <button
+                                type="button"
+                                onClick={(e) => handleOpenCustomerProfile(e, ticket)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  padding: 0,
+                                  color: 'inherit',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  fontWeight: 600,
+                                }}
+                                title="Open Customer Profile & History"
+                              >
+                                <User size={12} style={{ color: 'var(--color-primary)' }} />
+                                <span style={{ textDecoration: 'underline' }}>{ticket.customerName}</span>
+                              </button>
+                            ) : (
+                              <span style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                <User size={12} style={{ opacity: 0.5 }} />
+                                <span>{ticket.customerName}</span>
+                              </span>
+                            )}
+                            {!hasAccount && (
+                              <span className={styles.walkinBadge} title="Registered without customer phone/account">
+                                Walk-in
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          {ticket.customerPhone ? (
+                            <span style={{ fontWeight: 500 }}>{ticket.customerPhone}</span>
+                          ) : (
+                            <span style={{ color: 'var(--color-on-surface-variant)', opacity: 0.5, fontStyle: 'italic', fontSize: '11.5px' }}>
+                              — No Phone
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <strong style={{ fontSize: '13px' }}>{formatCurrency(finalCost)}</strong>
+                            <span style={{ fontSize: '10px', color: '#059669', fontWeight: 700 }}>✓ Settled</span>
+                          </div>
+                        </td>
+                        <td>
+                          {ticket.assignedTechnician ? (
+                            <span className={styles.cardTech}>
+                              <span className={styles.techAvatarCircle}>{ticket.assignedTechnician[0]}</span>
+                              {ticket.assignedTechnician}
+                            </span>
+                          ) : (
+                            <span style={{ opacity: 0.4 }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ fontSize: '11.5px', color: 'var(--color-on-surface-variant)' }}>
+                          <div>{new Date(settledDate).toLocaleDateString()}</div>
+                          <div style={{ fontSize: '10px', opacity: 0.7 }}>{formatTimeAgo(settledDate)}</div>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }} onClick={e => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              className={styles.cardPrintBtn}
+                              onClick={() => handlePrintTicket(ticket)}
+                              title="Print thermal device sticker / receipt"
+                            >
+                              <Printer size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.cardPrintBtn}
+                              onClick={() => setSelectedTicket(ticket)}
+                              title="View full ticket details"
+                            >
+                              <Eye size={12} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* HISTORY TABLE VIEW */}
       {viewMode === 'history' && (
         <div className={styles.historyTableWrapper}>
@@ -1383,6 +1885,9 @@ export const RepairsPage = () => {
       {viewMode === 'settlements' && (
         <TechnicianSettlementsTab />
       )}
+        </>
+      )}
     </div>
   );
 };
+

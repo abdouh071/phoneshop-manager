@@ -1,6 +1,7 @@
 import React from 'react';
 import { Calculator, TrendingUp, AlertCircle, Sparkles, Package } from 'lucide-react';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { usePrivacyStore } from '../../store/privacyStore';
 import styles from './ProfitMarginCalculator.module.css';
 
 interface ProfitMarginCalculatorProps {
@@ -16,6 +17,7 @@ export const ProfitMarginCalculator: React.FC<ProfitMarginCalculatorProps> = ({
   stock,
   onApplySellPrice,
 }) => {
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
   const cost = Number(costPrice) || 0;
   const price = Number(sellPrice) || 0;
   const stockQty = Number(stock) || 0;
@@ -28,6 +30,9 @@ export const ProfitMarginCalculator: React.FC<ProfitMarginCalculatorProps> = ({
   const isProfitable = profit >= 0;
 
   const getHealthBadge = () => {
+    if (isPrivacyActive) {
+      return <span data-privacy-cost className={[styles.healthBadge, 'privacy-cost'].join(' ')}>🛡️ Masked</span>;
+    }
     if (profit < 0) {
       return <span className={[styles.healthBadge, styles.badgeLoss].join(' ')}>🚨 Loss</span>;
     }
@@ -50,7 +55,7 @@ export const ProfitMarginCalculator: React.FC<ProfitMarginCalculatorProps> = ({
   };
 
   return (
-    <div className={[styles.calcCard, isProfitable ? styles.calcCardProfit : styles.calcCardLoss].join(' ')}>
+    <div data-privacy-cost className={[styles.calcCard, isProfitable ? styles.calcCardProfit : styles.calcCardLoss, isPrivacyActive && 'privacy-cost'].filter(Boolean).join(' ')}>
       {/* Header */}
       <div className={styles.calcHeader}>
         <div className={styles.headerTitle}>
@@ -65,21 +70,21 @@ export const ProfitMarginCalculator: React.FC<ProfitMarginCalculatorProps> = ({
         <div className={styles.metricItem}>
           <span className={styles.metricLabel}>Net Profit / Unit</span>
           <span className={[styles.metricValue, isProfitable ? styles.valueProfit : styles.valueLoss].join(' ')}>
-            {isProfitable ? '+' : ''}{formatCurrency(profit)}
+            {isPrivacyActive ? '•••••' : `${isProfitable ? '+' : ''}${formatCurrency(profit)}`}
           </span>
         </div>
 
         <div className={styles.metricItem}>
           <span className={styles.metricLabel}>Profit Margin</span>
           <span className={[styles.metricValue, isProfitable ? styles.valueProfit : styles.valueLoss].join(' ')}>
-            {marginPercent.toFixed(1)}%
+            {isPrivacyActive ? '••%' : `${marginPercent.toFixed(1)}%`}
           </span>
         </div>
 
         <div className={styles.metricItem}>
           <span className={styles.metricLabel}>Markup on Cost</span>
           <span className={styles.metricValue} style={{ color: '#4338ca' }}>
-            {markupPercent >= 0 ? '+' : ''}{markupPercent.toFixed(0)}%
+            {isPrivacyActive ? '••%' : `${markupPercent >= 0 ? '+' : ''}${markupPercent.toFixed(0)}%`}
           </span>
         </div>
       </div>
@@ -90,7 +95,7 @@ export const ProfitMarginCalculator: React.FC<ProfitMarginCalculatorProps> = ({
           <span>📦 Batch ({stockQty} units):</span>
           <span>Revenue: {formatCurrency(price * stockQty)}</span>
           <span style={{ color: profit >= 0 ? '#059669' : '#dc2626' }}>
-            Total Net: {profit >= 0 ? '+' : ''}{formatCurrency(profit * stockQty)}
+            Total Net: {isPrivacyActive ? '•••••' : `${profit >= 0 ? '+' : ''}${formatCurrency(profit * stockQty)}`}
           </span>
         </div>
       )}

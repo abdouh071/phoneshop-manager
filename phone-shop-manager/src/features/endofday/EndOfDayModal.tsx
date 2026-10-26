@@ -5,8 +5,10 @@ import {
   ChevronUp, Clock, Package, Edit3
 } from 'lucide-react';
 import { useEndOfDayStore } from '../../store/endOfDayStore';
+import { usePrivacyStore } from '../../store/privacyStore';
 import type { EndOfDayRecord } from '../../services/endOfDayService';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { PrivacyCurtainButton } from '../../components/layout/PrivacyCurtainButton';
 import styles from './EndOfDayModal.module.css';
 
 interface Props {
@@ -17,6 +19,7 @@ interface Props {
 }
 
 export const EndOfDayModal: React.FC<Props> = ({ isOpen, onClose, viewRecord }) => {
+  const isPrivacyActive = usePrivacyStore((s) => s.isPrivacyActive);
   const { buildPreview, closeDay, todayRecord, isSaving, updateNotes } = useEndOfDayStore();
 
   const [preview, setPreview] = useState<Omit<EndOfDayRecord, 'id'> | null>(null);
@@ -123,6 +126,7 @@ export const EndOfDayModal: React.FC<Props> = ({ isOpen, onClose, viewRecord }) 
             </div>
           </div>
           <div className={styles.headerActions}>
+            <PrivacyCurtainButton variant="icon" />
             <button type="button" className={styles.printBtn} onClick={handlePrint} title="Print Report">
               <Printer size={15} /> Print
             </button>
@@ -147,17 +151,17 @@ export const EndOfDayModal: React.FC<Props> = ({ isOpen, onClose, viewRecord }) 
             <div className={styles.heroCard}>
               <DollarSign size={20} className={styles.heroIcon} />
               <span className={styles.heroLabel}>Total Revenue</span>
-              <span className={styles.heroValue}>{formatCurrency(data.totalRevenue)}</span>
+              <span className={styles.heroValue}>{formatPrivateCurrency(data.totalRevenue)}</span>
             </div>
             <div className={[styles.heroCard, styles.heroCardGreen].join(' ')}>
               <TrendingUp size={20} className={styles.heroIcon} />
               <span className={styles.heroLabel}>Net Profit</span>
-              <span className={styles.heroValue}>{formatCurrency(data.totalNetProfit)}</span>
+              <span className={styles.heroValue}>{formatPrivateCurrency(data.totalNetProfit)}</span>
             </div>
             <div className={[styles.heroCard, styles.heroCardBlue].join(' ')}>
               <CreditCard size={20} className={styles.heroIcon} />
               <span className={styles.heroLabel}>Cash in Drawer</span>
-              <span className={styles.heroValue}>{formatCurrency(data.totalCash)}</span>
+              <span className={styles.heroValue}>{formatPrivateCurrency(data.totalCash)}</span>
             </div>
           </div>
 
@@ -165,20 +169,20 @@ export const EndOfDayModal: React.FC<Props> = ({ isOpen, onClose, viewRecord }) 
           <div className={styles.paymentRow}>
             <div className={styles.paymentItem}>
               <span>💵 Cash</span>
-              <strong>{formatCurrency(data.totalCash)}</strong>
+              <strong>{formatPrivateCurrency(data.totalCash)}</strong>
             </div>
             <div className={styles.paymentItem}>
               <span>💳 Card</span>
-              <strong>{formatCurrency(data.totalCard)}</strong>
+              <strong>{formatPrivateCurrency(data.totalCard)}</strong>
             </div>
             <div className={styles.paymentItem}>
               <span>📱 Mobile</span>
-              <strong>{formatCurrency(data.totalMobile)}</strong>
+              <strong>{formatPrivateCurrency(data.totalMobile)}</strong>
             </div>
             {data.salesDebt > 0 && (
               <div className={[styles.paymentItem, styles.paymentItemDebt].join(' ')}>
                 <span>⚠️ On Credit</span>
-                <strong>{formatCurrency(data.salesDebt + data.repairsDebt)}</strong>
+                <strong>{formatPrivateCurrency(data.salesDebt + data.repairsDebt)}</strong>
               </div>
             )}
           </div>
@@ -193,14 +197,14 @@ export const EndOfDayModal: React.FC<Props> = ({ isOpen, onClose, viewRecord }) 
           />
           {expandSales && (
             <div className={styles.section}>
-              <Row label="Gross Revenue"      value={formatCurrency(data.salesTotalRevenue)} bold />
-              <Row label="Cost of Goods"      value={`- ${formatCurrency(data.salesCogs)}`} highlight="red" small />
-              <Row label="Net Profit (Sales)" value={formatCurrency(data.salesNetProfit)} bold highlight="green" />
+              <Row label="Gross Revenue"      value={formatPrivateCurrency(data.salesTotalRevenue)} bold />
+              <Row label="Cost of Goods"      value={`- ${formatPrivateCurrency(data.salesCogs)}`} highlight="red" small />
+              <Row label="Net Profit (Sales)" value={formatPrivateCurrency(data.salesNetProfit)} bold highlight="green" />
               <div className={styles.divider} />
-              <Row label="💵 Cash Sales"   value={formatCurrency(data.salesCash)} small />
-              <Row label="💳 Card Sales"   value={formatCurrency(data.salesCard)} small />
-              <Row label="📱 Mobile Pay"   value={formatCurrency(data.salesMobile)} small />
-              {data.salesDebt > 0 && <Row label="⚠️ Charged to Account" value={formatCurrency(data.salesDebt)} small highlight="red" />}
+              <Row label="💵 Cash Sales"   value={formatPrivateCurrency(data.salesCash)} small />
+              <Row label="💳 Card Sales"   value={formatPrivateCurrency(data.salesCard)} small />
+              <Row label="📱 Mobile Pay"   value={formatPrivateCurrency(data.salesMobile)} small />
+              {data.salesDebt > 0 && <Row label="⚠️ Charged to Account" value={formatPrivateCurrency(data.salesDebt)} small highlight="red" />}
             </div>
           )}
 
@@ -214,18 +218,18 @@ export const EndOfDayModal: React.FC<Props> = ({ isOpen, onClose, viewRecord }) 
           />
           {expandRepairs && (
             <div className={styles.section}>
-              <Row label="Repair Revenue"      value={formatCurrency(data.repairsTotalRevenue)} bold />
-              <Row label="Parts Cost"          value={`- ${formatCurrency(data.repairsPartsCost)}`} highlight="red" small />
-              <Row label="Net Profit (Repairs)" value={formatCurrency(data.repairsNetProfit)} bold highlight="green" />
+              <Row label="Repair Revenue"      value={formatPrivateCurrency(data.repairsTotalRevenue)} bold />
+              <Row label="Parts Cost"          value={`- ${formatPrivateCurrency(data.repairsPartsCost)}`} highlight="red" small />
+              <Row label="Net Profit (Repairs)" value={formatPrivateCurrency(data.repairsNetProfit)} bold highlight="green" />
               <div className={styles.divider} />
-              <Row label="💵 Total Repair Cash" value={formatCurrency(data.repairsCash)} bold small />
+              <Row label="💵 Total Repair Cash" value={formatPrivateCurrency(data.repairsCash)} bold small />
               {Boolean(data.repairHandoversCash && data.repairHandoversCash > 0) && (
-                <Row label="↳ Handover Settlements" value={formatCurrency(data.repairHandoversCash!)} small />
+                <Row label="↳ Handover Settlements" value={formatPrivateCurrency(data.repairHandoversCash!)} small />
               )}
               {Boolean(data.repairDepositsCash && data.repairDepositsCash > 0) && (
-                <Row label="↳ Intake Deposits" value={formatCurrency(data.repairDepositsCash!)} small />
+                <Row label="↳ Intake Deposits" value={formatPrivateCurrency(data.repairDepositsCash!)} small />
               )}
-              {data.repairsDebt > 0 && <Row label="⚠️ Unpaid / Debt" value={formatCurrency(data.repairsDebt)} small highlight="red" />}
+              {data.repairsDebt > 0 && <Row label="⚠️ Unpaid / Debt" value={formatPrivateCurrency(data.repairsDebt)} small highlight="red" />}
             </div>
           )}
 
@@ -238,7 +242,7 @@ export const EndOfDayModal: React.FC<Props> = ({ isOpen, onClose, viewRecord }) 
                 </span>
               </div>
               <div className={styles.section}>
-                <Row label="💵 Cash Debt Repayments" value={formatCurrency(data.debtCollectedCash!)} bold highlight="green" />
+                <Row label="💵 Cash Debt Repayments" value={formatPrivateCurrency(data.debtCollectedCash!)} bold highlight="green" />
               </div>
             </>
           )}
@@ -252,7 +256,7 @@ export const EndOfDayModal: React.FC<Props> = ({ isOpen, onClose, viewRecord }) 
                 </span>
               </div>
               <div className={styles.section}>
-                <Row label="B2B Parts Revenue" value={formatCurrency(data.partsSalesRevenue)} bold />
+                <Row label="B2B Parts Revenue" value={formatPrivateCurrency(data.partsSalesRevenue)} bold />
               </div>
             </>
           )}

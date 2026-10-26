@@ -5,6 +5,7 @@ export interface ProductGroup {
   name: string;
   model: string;
   category: PhoneModel['category'];
+  accessorySubCategory?: PhoneModel['accessorySubCategory'];
   totalStock: number;
   stockStatus: PhoneModel['stockStatus'];
   minPrice: number;
@@ -27,6 +28,7 @@ export function groupProductsByBaseModel(products: PhoneModel[]): ProductGroup[]
         name: p.name,
         model: p.model,
         category: p.category,
+        accessorySubCategory: p.accessorySubCategory,
         totalStock: 0,
         stockStatus: 'out_of_stock',
         minPrice: p.price,
@@ -38,6 +40,9 @@ export function groupProductsByBaseModel(products: PhoneModel[]): ProductGroup[]
     }
 
     const group = groups.get(groupId)!;
+    if (!group.accessorySubCategory && p.accessorySubCategory) {
+      group.accessorySubCategory = p.accessorySubCategory;
+    }
     group.variants.push(p);
     group.totalStock += p.stock;
     if (p.price < group.minPrice) group.minPrice = p.price;

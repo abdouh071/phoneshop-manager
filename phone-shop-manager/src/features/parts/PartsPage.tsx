@@ -16,7 +16,8 @@ import { usePartsCartStore } from '../../store/partsCartStore';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { usePrivacyStore } from '../../store/privacyStore';
 import { groupProductsByBaseModel } from '../../utils/productGrouping';
 import type { ProductGroup } from '../../utils/productGrouping';
 import type { PhoneModel, PaymentMethod, StockStatus, SuspendedCart } from '../../types';
@@ -130,6 +131,7 @@ export const PartsPage = () => {
   const [showDiscountUnlock, setShowDiscountUnlock] = useState(false);
 
   const canViewCosts = user?.role === 'admin' || (permissions.inventory_edit && permissions.reports);
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
 
   const location = useLocation();
   const [activeTab, setActiveTab] = useState<'inventory' | 'pos' | 'invoices'>('inventory');
@@ -638,7 +640,7 @@ export const PartsPage = () => {
                   <span className={styles.summaryLabel}>Cost Valuation</span>
                   <div className={[styles.summaryIconWrap, styles.iconValuation].join(' ')}><DollarSign size={16} /></div>
                 </div>
-                <p className={styles.summaryValue}>{formatCurrency(totalInventoryValue)}</p>
+                <p className={styles.summaryValue}>{formatPrivateCurrency(totalInventoryValue)}</p>
               </div>
             )}
 
@@ -754,12 +756,14 @@ export const PartsPage = () => {
                           </td>
                           <td className={styles.td}>{isSingle ? single.location || '-' : '-'}</td>
                           {canViewCosts && (
-                            <td className={styles.td}>
-                              {isSingle
-                                ? formatCurrency(single.costPrice)
-                                : group.minCost === group.maxCost
-                                  ? formatCurrency(group.minCost)
-                                  : `${formatCurrency(group.minCost)} - ${formatCurrency(group.maxCost)}`}
+                            <td className={styles.td} data-col="cost">
+                              <span data-privacy-cost className="privacy-cost">
+                                {isSingle
+                                  ? formatPrivateCurrency(single.costPrice)
+                                  : group.minCost === group.maxCost
+                                    ? formatPrivateCurrency(group.minCost)
+                                    : (isPrivacyActive ? '•••••' : `${formatCurrency(group.minCost)} - ${formatCurrency(group.maxCost)}`)}
+                              </span>
                             </td>
                           )}
                           <td className={styles.td} style={{ fontWeight: 600 }}>
@@ -773,10 +777,10 @@ export const PartsPage = () => {
                             <strong>{group.totalStock}</strong> units
                           </td>
                           {canViewCosts && (
-                            <td className={styles.td}>
+                            <td className={styles.td} data-col="margin">
                               {singleMargin !== null ? (
-                                <span className={singleMargin >= 20 ? styles.marginGood : singleMargin >= 10 ? styles.marginOk : styles.marginBad}>
-                                  {singleMargin.toFixed(1)}%
+                                <span data-privacy-cost className={[singleMargin >= 20 ? styles.marginGood : singleMargin >= 10 ? styles.marginOk : styles.marginBad, 'privacy-cost'].join(' ')}>
+                                  {isPrivacyActive ? '••%' : `${singleMargin.toFixed(1)}%`}
                                 </span>
                               ) : '-'}
                             </td>
@@ -841,14 +845,18 @@ export const PartsPage = () => {
                               <td className={styles.td}><code className={styles.sku}>{product.sku}</code></td>
                               <td className={styles.td}>{product.location || '-'}</td>
                               {canViewCosts && (
-                                <td className={styles.td}>{formatCurrency(product.costPrice)}</td>
+                                <td className={styles.td} data-col="cost">
+                                  <span data-privacy-cost className="privacy-cost">
+                                    {formatPrivateCurrency(product.costPrice)}
+                                  </span>
+                                </td>
                               )}
                               <td className={styles.td} style={{ fontWeight: 600 }}>{formatCurrency(product.price)}</td>
                               <td className={styles.td}>{product.stock} units</td>
                               {canViewCosts && (
-                                <td className={styles.td}>
-                                  <span className={vMargin >= 20 ? styles.marginGood : vMargin >= 10 ? styles.marginOk : styles.marginBad}>
-                                    {vMargin.toFixed(1)}%
+                                <td className={styles.td} data-col="margin">
+                                  <span data-privacy-cost className={[vMargin >= 20 ? styles.marginGood : vMargin >= 10 ? styles.marginOk : styles.marginBad, 'privacy-cost'].join(' ')}>
+                                    {isPrivacyActive ? '••%' : `${vMargin.toFixed(1)}%`}
                                   </span>
                                 </td>
                               )}
@@ -1009,7 +1017,7 @@ export const PartsPage = () => {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}>
                   <span style={{ color: '#64748b' }}>Current Account Debt:</span>
                   <strong style={{ color: (getCustomerDebtTotal(selectedB2BCustomer.id) || selectedB2BCustomer.totalDebt || 0) > 0 ? '#dc2626' : '#16a34a' }}>
-                    {formatCurrency(getCustomerDebtTotal(selectedB2BCustomer.id) || selectedB2BCustomer.totalDebt || 0)}
+                    {formatPrivateCurrency(getCustomerDebtTotal(selectedB2BCustomer.id) || selectedB2BCustomer.totalDebt || 0)}
                   </strong>
                 </div>
 
@@ -1183,6 +1191,10 @@ export const PartsPage = () => {
                         setCustomerName(name);
                         if (cust) {
                           setSelectedB2BCustomer(cust);
+                          if (cust.wholesaleDiscountPercent && cust.wholesaleDiscountPercent > 0) {
+                            setDiscount({ type: 'percent', value: cust.wholesaleDiscountPercent });
+                            toast.success('Wholesale Discount Applied', `${cust.wholesaleDiscountPercent}% discount applied for ${cust.shopName || cust.name}.`);
+                          }
                         } else if (!name.trim()) {
                           setSelectedB2BCustomer(null);
                         }

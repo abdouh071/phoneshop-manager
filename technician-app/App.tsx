@@ -3,10 +3,13 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Provider as PaperProvider, DefaultTheme } from 'react-native-paper';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, View, StyleSheet } from 'react-native';
 
 import { useAuthStore } from './src/store/authStore';
 import { useSettingsStore } from './src/store/settingsStore';
+import { offlineSyncService } from './src/services/offlineSyncService';
+import { OfflineBanner } from './src/components/OfflineBanner';
+
 import { LoginScreen } from './src/screens/LoginScreen';
 import { WorkbenchScreen } from './src/screens/WorkbenchScreen';
 import { NewTicketScreen } from './src/screens/NewTicketScreen';
@@ -14,6 +17,8 @@ import { TicketDetailScreen } from './src/screens/TicketDetailScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { ReportsScreen } from './src/screens/ReportsScreen';
 import { ScannerScreen } from './src/screens/ScannerScreen';
+import { POSScreen } from './src/screens/POSScreen';
+import { AdminDashboardScreen } from './src/screens/AdminDashboardScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -33,9 +38,17 @@ const theme = {
 };
 
 export default function App() {
-  const { isAuthenticated, isInitializing } = useAuthStore();
+  const { user, isAuthenticated, isInitializing } = useAuthStore();
   const { subscribeToSettings } = useSettingsStore();
   const [ready, setReady] = useState(false);
+
+  // Initialize offline sync runner (periodic check & push to Firestore)
+  useEffect(() => {
+    const unsubSync = offlineSyncService.init();
+    return () => {
+      unsubSync();
+    };
+  }, []);
 
   useEffect(() => {
     let unsubscribeSettings: (() => void) | undefined;
@@ -56,64 +69,106 @@ export default function App() {
 
   if (!ready) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#4f46e5" />
       </View>
     );
   }
 
+  // Determine initial route based on user role
+  const getInitialRouteName = () => {
+    if (user?.role === 'admin') return 'AdminDashboard';
+    if (user?.role === 'sales_agent') return 'POS';
+    return 'Workbench';
+  };
+
   return (
     <PaperProvider theme={theme}>
-      <NavigationContainer>
-        <Stack.Navigator
-          screenOptions={{
-            headerStyle: { backgroundColor: '#4f46e5' },
-            headerTintColor: '#fff',
-            headerTitleStyle: { fontWeight: 'bold' },
-          }}
-        >
-          {!isAuthenticated ? (
-            <Stack.Screen 
-              name="Login" 
-              component={LoginScreen} 
-              options={{ headerShown: false }}
-            />
-          ) : (
-            <>
+      <View style={styles.appContainer}>
+        {/* Universal Offline / Syncing Banner */}
+        <OfflineBanner />
+
+        <NavigationContainer>
+          <Stack.Navigator
+            initialRouteName={!isAuthenticated ? 'Login' : getInitialRouteName()}
+            screenOptions={{
+              headerStyle: { backgroundColor: '#4f46e5' },
+              headerTintColor: '#fff',
+              headerTitleStyle: { fontWeight: 'bold' },
+            }}
+          >
+            {!isAuthenticated ? (
               <Stack.Screen 
-                name="Workbench" 
-                component={WorkbenchScreen} 
+                name="Login" 
+                component={LoginScreen} 
                 options={{ headerShown: false }}
               />
-              <Stack.Screen 
-                name="NewTicket" 
-                component={NewTicketScreen} 
-                options={{ title: 'Add Phone' }}
-              />
-              <Stack.Screen 
-                name="TicketDetail" 
-                component={TicketDetailScreen} 
-                options={{ title: 'Ticket Details' }}
-              />
-              <Stack.Screen 
-                name="Settings" 
-                component={SettingsScreen} 
-                options={{ title: 'Settings' }}
-              />
-              <Stack.Screen 
-                name="Reports" 
-                component={ReportsScreen} 
-                options={{ title: 'Daily Report' }}
-              />
-              <Stack.Screen 
-                name="Scanner" 
-                component={ScannerScreen} 
-                options={{ headerShown: false, presentation: 'modal' }}
-              />
-            </>
-          )}
-        </Stack.Navigator>
-      </NavigationContainer>
+            ) : (
+              <>
+                {/* Admin Mobile Dashboard */}
+                <Stack.Screen 
+                  name="AdminDashboard" 
+                  component={AdminDashboardScreen} 
+                  options={{ headerShown: false }}
+                />
+
+                {/* Sales POS Screen */}
+                <Stack.Screen 
+                  name="POS" 
+                  component={POSScreen} 
+                  options={{ headerShown: false }}
+                />
+
+                {/* Repair Workbench Screen */}
+                <Stack.Screen 
+                  name="Workbench" 
+                  component={WorkbenchScreen} 
+                  options={{ headerShown: false }}
+                />
+
+                {/* Ticket Management Screens */}
+                <Stack.Screen 
+                  name="NewTicket" 
+                  component={NewTicketScreen} 
+                  options={{ title: 'Add Phone' }}
+                />
+                <Stack.Screen 
+                  name="TicketDetail" 
+                  component={TicketDetailScreen} 
+                  options={{ title: 'Ticket Details' }}
+                />
+                <Stack.Screen 
+                  name="Settings" 
+                  component={SettingsScreen} 
+                  options={{ title: 'Settings' }}
+                />
+                <Stack.Screen 
+                  name="Reports" 
+                  component={ReportsScreen} 
+                  options={{ title: 'Daily Report' }}
+                />
+                <Stack.Screen 
+                  name="Scanner" 
+                  component={ScannerScreen} 
+                  options={{ headerShown: false, presentation: 'modal' }}
+                />
+              </>
+            )}
+          </Stack.Navigator>
+        </NavigationContainer>
+      </View>
     </PaperProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  appContainer: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});

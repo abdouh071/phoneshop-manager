@@ -1,3 +1,4 @@
+import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -18,6 +19,9 @@ import { useAuthStore } from '../../store/authStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PrinterStatusPill } from './PrinterStatusPill';
+import { PrivacyCurtainButton } from './PrivacyCurtainButton';
+import { ApprovalsNotificationButton } from '../../features/approvals/ApprovalsNotificationButton';
+import { LogoutConfirmModal } from './LogoutConfirmModal';
 import { useTranslation } from 'react-i18next';
 import styles from './Sidebar.module.css';
 
@@ -28,7 +32,8 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const { t } = useTranslation();
-  const { user, logout } = useAuthStore();
+  const { user } = useAuthStore();
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const permissions = usePermissions();
   const { storeName } = useSettingsStore();
 
@@ -96,9 +101,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           })}
         </nav>
 
-        {/* Hardware Status */}
-        <div style={{ padding: '8px 16px', display: 'flex', justifyContent: 'center' }}>
-          <PrinterStatusPill />
+        {/* Quick Tools & Hardware Status */}
+        <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <ApprovalsNotificationButton variant="sidebar" />
+          <PrivacyCurtainButton variant="sidebar" />
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <PrinterStatusPill />
+          </div>
         </div>
 
         {/* Footer */}
@@ -112,11 +121,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
               </span>
             </div>
           </div>
-          <button className={styles.logoutBtn} onClick={logout} aria-label={t('sidebar.logout', 'Log Out')}>
+          <button className={styles.logoutBtn} onClick={() => setIsLogoutModalOpen(true)} aria-label={t('sidebar.logout', 'Log Out')}>
             <LogOut size={16} />
           </button>
         </div>
       </aside>
+
+      <LogoutConfirmModal
+        isOpen={isLogoutModalOpen}
+        onClose={() => setIsLogoutModalOpen(false)}
+      />
     </>
   );
 };

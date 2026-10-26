@@ -6,14 +6,37 @@ import { formatCurrency, formatCurrencyWith } from './formatCurrency';
 import { useSettingsStore } from '../store/settingsStore';
 import { QRCodeSVG } from 'qrcode.react';
 import i18n from '../i18n';
+import { printFormattedReport } from './exportUtils';
 
 // ============================================================
 // ESC/POS Direct Printing via Local Print Server
 // ============================================================
 
-const PRINT_SERVER_URL = typeof window !== 'undefined' && window.location.hostname
-  ? `http://${window.location.hostname}:3355`
-  : 'http://localhost:3355';
+// Detect Electron desktop app (preload.cjs exposes window.electronAPI)
+const electronAPI = typeof window !== 'undefined' ? (window as any).electronAPI : undefined;
+
+// Helper to safely call Electron IPC with a 12-second timeout safeguard so buttons never hang indefinitely
+function callElectronPrint<T>(fn: () => Promise<T>, timeoutMs = 12000): Promise<T> {
+  return Promise.race([
+    fn(),
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('Print IPC timeout safeguard exceeded')), timeoutMs)
+    ),
+  ]);
+}
+
+// Priority: Electron embedded server > env var > local hostname > fallback to localhost
+const PRINT_SERVER_URL = (() => {
+  if (electronAPI?.printServerUrl) return electronAPI.printServerUrl;
+  if (import.meta.env.VITE_PRINT_SERVER_URL) return import.meta.env.VITE_PRINT_SERVER_URL;
+  if (typeof window !== 'undefined' && window.location.hostname) {
+    const h = window.location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1' || h.startsWith('192.168.') || h.startsWith('10.') || h.startsWith('172.')) {
+      return `http://${h}:3355`;
+    }
+  }
+  return 'http://localhost:3355';
+})();
 
 function getTranslations() {
   const t = i18n.t.bind(i18n);
@@ -84,10 +107,21 @@ export async function checkPrintServer(): Promise<{
   hasCutter?: boolean;
   error?: string;
 }> {
+  // ── IPC path (Electron desktop) ──
+  if (electronAPI?.checkStatus) {
+    try {
+      const data = await electronAPI.checkStatus();
+      if (data) return { ...data, ok: true, connected: true };
+    } catch (e) {
+      console.warn('[checkPrintServer] IPC failed, trying HTTP:', e);
+    }
+  }
+  // ── HTTP path (web browser) ──
   try {
-    const res = await fetch(`${PRINT_SERVER_URL}/status`, {
-      signal: AbortSignal.timeout(2000),
-    });
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch(`${PRINT_SERVER_URL}/status`, { signal: controller.signal });
+    clearTimeout(t);
     return await res.json();
   } catch {
     return { ok: false, connected: false, error: 'Print server not reachable' };
@@ -127,27 +161,42 @@ export async function printReceiptDirect(
   const headerMessage = options?.headerMessage ?? settingsState.receiptHeader;
   const footerMessage = options?.footerMessage ?? settingsState.receiptFooter;
 
+  const payload = {
+    storeName,
+    currency,
+    transaction,
+    headerMessage,
+    footerMessage,
+    logo: logo || undefined,
+    translations: getTranslations(),
+  };
+
+  // ── IPC path (Electron desktop) ──
+  if (electronAPI?.printReceipt) {
+    try {
+      const data = await callElectronPrint(() => electronAPI.printReceipt(payload));
+      if (data?.ok) return { method: 'direct' as const };
+      console.warn('[Print] IPC receipt error:', data?.error);
+      return { method: 'direct' as const, error: data?.error };
+    } catch (e: any) {
+      console.warn('[Print] IPC receipt failed:', e);
+      return { method: 'direct' as const, error: e?.message || 'Print failed' };
+    }
+  }
+
+  // ── HTTP path (web browser) ──
   try {
     const res = await fetch(`${PRINT_SERVER_URL}/print-receipt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({
-        storeName,
-        currency,
-        transaction,
-        headerMessage,
-        footerMessage,
-        logo: logo || undefined,
-        translations: getTranslations(),
-      }),
+      body: JSON.stringify(payload),
     });
 
     const data = await res.json();
     if (data.ok) {
       return { method: 'direct' };
     }
-    // Server responded but printing failed — fall back
     console.warn('[Print] Server error, falling back to browser:', data.error);
   } catch (err) {
     console.warn('[Print] Server not reachable, falling back to browser:', err);
@@ -177,12 +226,28 @@ export async function printRepairLabelDirect(
   storeName: string,
   copies: number = 1
 ): Promise<{ method: 'direct' | 'browser'; error?: string }> {
+  const payload = { storeName, ticket, copies, translations: getTranslations() };
+
+  // ── IPC path (Electron desktop) ──
+  if (electronAPI?.printRepairLabel) {
+    try {
+      const data = await callElectronPrint(() => electronAPI.printRepairLabel(payload));
+      if (data?.ok) return { method: 'direct' as const };
+      console.warn('[Print] IPC label error:', data?.error);
+      return { method: 'direct' as const, error: data?.error };
+    } catch (e: any) {
+      console.warn('[Print] IPC label failed:', e);
+      return { method: 'direct' as const, error: e?.message || 'Print failed' };
+    }
+  }
+
+  // ── HTTP path (web browser) ──
   try {
     const res = await fetch(`${PRINT_SERVER_URL}/print-repair-label`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(5000),
-      body: JSON.stringify({ storeName, ticket, copies, translations: getTranslations() }),
+      body: JSON.stringify(payload),
     });
 
     const data = await res.json();
@@ -209,14 +274,30 @@ export async function printRepairIntakeTicketDirect(
   const settingsState = useSettingsStore.getState();
   const logo = settingsState.logoUrl || '';
 
+  const pinSnippet = ticket.trackingPin || ticket.customerPhone?.slice(-4) || '';
+  const trackingUrl = `${settingsState.trackingBaseUrl || `${window.location.origin}/track`}/${(ticket.ticketNumber || '').trim()}?pin=${pinSnippet}`;
+  const payload = { storeName, currency, ticket: { ...ticket, trackingUrl }, logo: logo || undefined, translations: getTranslations() };
+
+  // ── IPC path (Electron desktop) ──
+  if (electronAPI?.printRepairTicket) {
+    try {
+      const data = await callElectronPrint(() => electronAPI.printRepairTicket(payload));
+      if (data?.ok) return { method: 'direct' as const };
+      console.warn('[Print] IPC repair ticket error:', data?.error);
+      return { method: 'direct' as const, error: data?.error };
+    } catch (e: any) {
+      console.warn('[Print] IPC repair ticket failed:', e);
+      return { method: 'direct' as const, error: e?.message || 'Print failed' };
+    }
+  }
+
+  // ── HTTP path (web browser) ──
   try {
-    const pinSnippet = ticket.trackingPin || ticket.customerPhone?.slice(-4) || '';
-    const trackingUrl = `${settingsState.trackingBaseUrl || `${window.location.origin}/track`}/${(ticket.ticketNumber || '').trim()}?pin=${pinSnippet}`;
     const res = await fetch(`${PRINT_SERVER_URL}/print-repair-ticket`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({ storeName, currency, ticket: { ...ticket, trackingUrl }, logo: logo || undefined, translations: getTranslations() }),
+      body: JSON.stringify(payload),
     });
 
     const data = await res.json();
@@ -261,12 +342,28 @@ export async function printBarcodeDirect(
   storeName: string,
   currency: string
 ): Promise<{ method: 'direct' | 'browser'; error?: string }> {
+  const payload = { storeName, currency, products };
+
+  // ── IPC path (Electron desktop) ──
+  if (electronAPI?.printBarcode) {
+    try {
+      const data = await callElectronPrint(() => electronAPI.printBarcode(payload));
+      if (data?.ok) return { method: 'direct' as const };
+      console.warn('[Print] IPC barcode error:', data?.error);
+      return { method: 'direct' as const, error: data?.error };
+    } catch (e: any) {
+      console.warn('[Print] IPC barcode failed:', e);
+      return { method: 'direct' as const, error: e?.message || 'Print failed' };
+    }
+  }
+
+  // ── HTTP path (web browser) ──
   try {
     const res = await fetch(`${PRINT_SERVER_URL}/print-barcode`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(5000),
-      body: JSON.stringify({ storeName, currency, products }),
+      body: JSON.stringify(payload),
     });
 
     const data = await res.json();
@@ -369,90 +466,172 @@ export function buildReceiptHTML(transaction: {
   id: string;
   date: string;
   customerName?: string;
-  items: { product: { name: string; model: string; price: number }; quantity: number }[];
+  processedByName?: string;
+  items: {
+    product: { name: string; model: string; price: number };
+    quantity: number;
+    isReturn?: boolean;
+    customReturnPrice?: number;
+  }[];
   subtotal: number;
+  discount?: { type: 'percent' | 'flat'; value: number };
   total: number;
   payments: { method: string; amount: number }[];
+  status?: string;
+  exchangeSummary?: {
+    purchasedTotal: number;
+    returnedTotal: number;
+    netDifference: number;
+  };
 }, storeName: string, receiptHeader?: string, receiptFooter?: string) {
-    const { receiptHeader: defaultHeader, receiptFooter: defaultFooter } = useSettingsStore.getState();
-    const activeHeader = receiptHeader || defaultHeader;
-    const activeFooter = receiptFooter || defaultFooter || 'Thank you for your purchase!';
+  const { receiptHeader: defaultHeader, receiptFooter: defaultFooter } = useSettingsStore.getState();
+  const activeHeader = receiptHeader || defaultHeader;
+  const activeFooter = receiptFooter || defaultFooter || 'Thank you for your purchase!';
 
-    const formatDate = (iso: string) =>
+  const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString('en-US', {
       month: 'short', day: 'numeric', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
+
+  const discount = transaction.discount;
+  let discountAmount = 0;
+  if (discount && Number(discount.value) > 0) {
+    const base = transaction.exchangeSummary?.purchasedTotal ?? transaction.subtotal;
+    discountAmount =
+      discount.type === 'percent'
+        ? (base * Number(discount.value)) / 100
+        : Number(discount.value);
+  } else if (!transaction.exchangeSummary && transaction.subtotal > transaction.total && transaction.total >= 0) {
+    discountAmount = transaction.subtotal - transaction.total;
+  }
 
   const itemsHTML = transaction.items.map(item => {
     const isReturn = Boolean(item.isReturn);
     const unitPrice = item.customReturnPrice ?? item.product.price;
     const lineTotal = unitPrice * item.quantity;
     return `
-      <div style="display:flex;justify-content:space-between;padding:3px 0;">
-        <span style="max-width:70%;">${isReturn ? '<strong style="color:#b45309;">[RETURN] </strong>' : ''}${item.quantity}x ${item.product.name} ${item.product.model}</span>
-        <span style="${isReturn ? 'color:#dc2626;font-weight:600;' : ''}">${isReturn ? '-' : ''}${formatCurrency(lineTotal)}</span>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;font-size:12px;line-height:1.35;">
+        <span style="flex:1;padding-right:8px;color:#111827;">
+          ${isReturn ? '<span style="display:inline-block;background:#fee2e2;color:#b91c1c;font-size:9.5px;font-weight:700;padding:0 3px;border-radius:2px;margin-right:3px;">RETURN</span>' : ''}
+          <strong style="color:#374151;">${item.quantity}×</strong> ${item.product.name} ${item.product.model || ''}
+        </span>
+        <span style="white-space:nowrap;font-variant-numeric:tabular-nums;${isReturn ? 'color:#b91c1c;font-weight:600;' : 'color:#111827;'}">
+          ${isReturn ? '−' : ''}${formatCurrency(Math.abs(lineTotal))}
+        </span>
       </div>
     `;
   }).join('');
 
   const formatMethodName = (m: string) => {
     switch (m) {
-      case 'debt': return 'CREDIT TAB (DETTE)';
-      case 'store_credit': return 'STORE CREDIT (AVOIR)';
-      case 'cash': return 'CASH';
-      case 'card': return 'CARD';
-      case 'mobile': return 'MOBILE';
-      default: return m.toUpperCase();
+      case 'debt': return 'Credit Tab (Dette)';
+      case 'store_credit': return 'Store Credit (Avoir)';
+      case 'cash': return 'Cash';
+      case 'card': return 'Card';
+      case 'mobile': return 'BaridiMob';
+      case 'transfer': return 'Transfer';
+      default: return m.charAt(0).toUpperCase() + m.slice(1);
     }
   };
-
-  const paymentsText = transaction.payments
-    .map(p => `${formatMethodName(p.method)} ${formatCurrency(p.amount)}`)
-    .join(' + ');
 
   const logoDataUrl = useSettingsStore.getState().logoUrl || '';
 
   return `
-    <div style="max-width:100%;margin:0 auto;">
-      <div style="text-align:center;margin-bottom:16px;">
-        ${logoDataUrl ? `<div style="text-align:center;margin-bottom:8px;"><img src="${logoDataUrl}" alt="Logo" style="max-width:200px;max-height:80px;object-fit:contain;" /></div>` : ''}
-        <h2 style="font-size:20px;font-weight:700;margin-bottom:4px;">${storeName || 'PhoneShop'}</h2>
-        ${activeHeader ? `<p style="font-size:12px;color:#666;margin:2px 0;">${activeHeader}</p>` : ''}
-        <div style="border-top:1px dashed #999;margin:8px 0;"></div>
-        <p style="font-size:12px;color:#666;">${formatDate(transaction.date)}</p>
-        <p style="font-size:11px;color:#999;">Order: ${transaction.id}</p>
+    <div style="max-width:74mm;margin:0 auto;padding:8px 4px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;font-size:12px;line-height:1.45;background:#ffffff;">
+      <!-- Store Header -->
+      <div style="text-align:center;margin-bottom:8px;">
+        ${logoDataUrl ? `<div style="text-align:center;margin-bottom:6px;"><img src="${logoDataUrl}" alt="Logo" style="max-width:140px;max-height:50px;object-fit:contain;" /></div>` : ''}
+        <h2 style="font-size:15px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;margin:0 0 2px 0;color:#111827;">${storeName || 'PhoneShop'}</h2>
+        ${activeHeader ? `<p style="font-size:11px;color:#6b7280;margin:2px 0;">${activeHeader}</p>` : ''}
+        <div style="border-top:1px dashed #d1d5db;margin:8px 0;"></div>
+        <p style="font-size:11px;color:#6b7280;margin:0;">${formatDate(transaction.date)}</p>
+        <p style="font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:10.5px;color:#4b5563;font-weight:600;margin:2px 0 0 0;">#${transaction.id}</p>
       </div>
-      
-      <div style="border-top:1px dashed #999;margin:8px 0;"></div>
-      
-      ${transaction.customerName ? `
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;">
-          <span>${i18n.t('ticket.customer', 'Customer:')}</span><span>${transaction.customerName}</span>
+
+      <!-- Customer & Cashier Metadata -->
+      ${(transaction.customerName || transaction.processedByName) ? `
+        <div style="border-top:1px dashed #d1d5db;margin:8px 0;"></div>
+        <div style="font-size:11.5px;line-height:1.4;">
+          ${transaction.customerName ? `
+            <div style="display:flex;justify-content:space-between;padding:1px 0;">
+              <span style="color:#6b7280;">Customer</span><span style="font-weight:600;color:#1f2937;">${transaction.customerName}</span>
+            </div>
+          ` : ''}
+          ${transaction.processedByName ? `
+            <div style="display:flex;justify-content:space-between;padding:1px 0;">
+              <span style="color:#6b7280;">Cashier</span><span style="font-weight:600;color:#1f2937;">${transaction.processedByName}</span>
+            </div>
+          ` : ''}
         </div>
       ` : ''}
-      
-      <div style="border-top:1px dashed #999;margin:8px 0;"></div>
-      
-      <div style="font-size:12px;font-weight:700;display:flex;justify-content:space-between;padding:4px 0;">
-        <span>${i18n.t('ticket.item', 'Item')}</span><span>${i18n.t('ticket.price', 'Price')}</span>
+
+      <!-- Status Badge -->
+      ${transaction.status === 'refunded' ? `
+        <div style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;padding:3px;text-align:center;font-size:10px;font-weight:700;letter-spacing:0.06em;border-radius:4px;margin:8px 0;">
+          FULLY REFUNDED
+        </div>
+      ` : ''}
+      ${transaction.status === 'partially_refunded' ? `
+        <div style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:3px;text-align:center;font-size:10px;font-weight:700;letter-spacing:0.06em;border-radius:4px;margin:8px 0;">
+          PARTIALLY REFUNDED
+        </div>
+      ` : ''}
+
+      <!-- Item Table -->
+      <div style="border-top:1px dashed #d1d5db;margin:8px 0;"></div>
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#9ca3af;display:flex;justify-content:space-between;padding-bottom:3px;border-bottom:1px solid #f3f4f6;">
+        <span>Item</span><span>Price</span>
       </div>
-      ${itemsHTML}
-      
-      <div style="border-top:1px dashed #999;margin:8px 0;"></div>
-      
-      <div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;">
-        <span>${i18n.t('common.subtotal', 'Subtotal')}</span><span>${formatCurrency(transaction.subtotal)}</span>
+      <div style="padding:4px 0;">
+        ${itemsHTML}
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:18px;font-weight:700;padding:8px 0;border-top:1px dashed #999;margin-top:4px;">
-        <span>${i18n.t('common.total', 'Total')}</span><span>${formatCurrency(transaction.total)}</span>
+
+      <!-- Totals & Discount -->
+      <div style="border-top:1px dashed #d1d5db;margin:6px 0;"></div>
+      <div style="font-size:12px;font-variant-numeric:tabular-nums;">
+        <div style="display:flex;justify-content:space-between;padding:2px 0;color:#4b5563;">
+          <span>Subtotal</span><span>${formatCurrency(transaction.subtotal)}</span>
+        </div>
+
+        ${discountAmount > 0 ? `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 6px;margin:3px 0;background:#ecfdf5;border:1px dashed #a7f3d0;border-radius:4px;color:#047857;font-weight:600;">
+            <span>
+              Discount
+              ${discount?.type === 'percent' ? `<span style="background:#059669;color:#fff;font-size:9.5px;font-weight:700;padding:1px 4px;border-radius:2px;margin-left:3px;">${discount.value}%</span>` : ''}
+            </span>
+            <span>−${formatCurrency(discountAmount)}</span>
+          </div>
+        ` : ''}
+
+        ${transaction.exchangeSummary ? `
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:#6b7280;font-style:italic;padding:1px 0;">
+            <span>Exchange adj.</span>
+            <span>${formatCurrency(transaction.exchangeSummary.purchasedTotal - transaction.exchangeSummary.returnedTotal)}</span>
+          </div>
+        ` : ''}
+
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:15px;font-weight:800;padding:7px 0 3px 0;border-top:1.5px solid #111827;margin-top:5px;color:#111827;">
+          <span>${transaction.total < 0 ? 'REFUND DUE' : 'TOTAL'}</span>
+          <span>${transaction.total < 0 ? `−${formatCurrency(Math.abs(transaction.total))}` : formatCurrency(transaction.total)}</span>
+        </div>
       </div>
-      
-      <div style="border-top:1px dashed #999;margin:8px 0;"></div>
-      
-      <div style="text-align:center;font-size:12px;color:#666;">
-        <p>${i18n.t('pos.payment', 'Payment:')} ${paymentsText}</p>
-        <p style="margin-top:8px;font-weight:600;">${activeFooter}</p>
+
+      <!-- Payment Breakdown -->
+      <div style="border-top:1px dashed #d1d5db;margin:8px 0;"></div>
+      <div style="font-size:11.5px;color:#4b5563;font-variant-numeric:tabular-nums;">
+        ${transaction.payments.map(p => `
+          <div style="display:flex;justify-content:space-between;padding:1px 0;">
+            <span>${p.method === 'cash' && p.amount < 0 ? 'Cash Refund' : formatMethodName(p.method)}</span>
+            <span style="${p.amount < 0 ? 'color:#b91c1c;font-weight:600;' : ''}">${p.amount < 0 ? '−' : ''}${formatCurrency(Math.abs(p.amount))}</span>
+          </div>
+        `).join('')}
+      </div>
+
+      <!-- Footer Policy -->
+      <div style="border-top:1px dashed #d1d5db;margin:10px 0 8px 0;"></div>
+      <div style="text-align:center;font-size:11px;color:#6b7280;line-height:1.4;">
+        <p style="margin:0;">${activeFooter}</p>
       </div>
     </div>
   `;
@@ -629,19 +808,35 @@ export async function printZReportDirect(
   storeName: string,
   currency: string = 'USD'
 ): Promise<{ method: 'direct' | 'browser'; error?: string }> {
+  const payload = {
+    storeName,
+    currency,
+    date: data.date,
+    generatedBy: data.generatedBy,
+    summary: data.summary,
+    translations: getTranslations(),
+  };
+
+  // ── IPC path (Electron desktop) ──
+  if (electronAPI?.printZReport) {
+    try {
+      const resData = await callElectronPrint(() => electronAPI.printZReport(payload));
+      if (resData?.ok) return { method: 'direct' as const };
+      console.warn('[Print] IPC Z-Report error:', resData?.error);
+      return { method: 'direct' as const, error: resData?.error };
+    } catch (e: any) {
+      console.warn('[Print] IPC Z-Report failed:', e);
+      return { method: 'direct' as const, error: e?.message || 'Print failed' };
+    }
+  }
+
+  // ── HTTP path (web browser) ──
   try {
     const res = await fetch(`${PRINT_SERVER_URL}/print-z-report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(5000),
-      body: JSON.stringify({
-        storeName,
-        currency,
-        date: data.date,
-        generatedBy: data.generatedBy,
-        summary: data.summary,
-        translations: getTranslations(),
-      }),
+      body: JSON.stringify(payload),
     });
 
     const resData = await res.json();
@@ -1080,80 +1275,130 @@ export function buildRepairReceiptHTML(ticket: {
           background: #f1f5f9;
           display: flex;
           justify-content: center;
-          font-family: 'Courier New', Courier, monospace;
-          color: #000;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+          color: #111827;
+          font-size: 12px;
+          line-height: 1.55;
         }
         .slip-container {
           width: 78mm;
           background: #ffffff;
-          padding: 12px;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-          border: 1px solid #cbd5e1;
-          border-radius: 4px;
+          padding: 18px 16px;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+          border: 1px solid #e5e7eb;
+          border-radius: 8px;
         }
         .center { text-align: center; }
-        .dashed { border-top: 1px dashed #000; margin: 8px 0; }
-        .row { display: flex; justify-content: space-between; font-size: 11.5px; margin: 3px 0; }
-        .bold { font-weight: bold; }
+        .rule { border: none; border-top: 1px solid #e5e7eb; margin: 12px 0; }
+        .rule-dashed { border: none; border-top: 1px dashed #d1d5db; margin: 10px 0; }
+        .section-label { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #9ca3af; margin-bottom: 6px; }
+        .row { display: flex; justify-content: space-between; align-items: flex-start; margin: 5px 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+        .row-label { color: #6b7280; flex-shrink: 0; padding-right: 8px; }
+        .row-value { color: #111827; font-weight: 600; text-align: right; }
+        .issue-block { background: #f9fafb; border-radius: 5px; padding: 8px 10px; margin: 4px 0; }
+        .issue-title { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af; margin-bottom: 4px; }
+        .issue-text { font-size: 11.5px; color: #1f2937; line-height: 1.45; }
+        .fin-row { display: flex; justify-content: space-between; font-size: 11.5px; color: #4b5563; padding: 4px 0; font-variant-numeric: tabular-nums; }
+        .balance-row { display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 800; color: #111827; padding-top: 8px; margin-top: 4px; border-top: 2px solid #111827; font-variant-numeric: tabular-nums; }
+        .paid-badge { font-size: 11px; font-weight: 700; background: #dcfce7; color: #15803d; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.04em; }
+        .store-name { font-size: 16px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #111827; }
+        .header-msg { font-size: 10.5px; color: #6b7280; margin-top: 2px; }
+        .ticket-label { font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280; margin: 10px 0 4px 0; }
+        .ticket-num { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 15px; font-weight: 800; letter-spacing: 0.05em; color: #111827; background: #f3f4f6; padding: 3px 12px; border-radius: 5px; display: inline-block; }
+        .pin-row { font-size: 11px; color: #374151; font-weight: 600; margin-top: 4px; }
+        .date-row { font-size: 10.5px; color: #6b7280; margin-top: 3px; }
+        .qr-caption { font-size: 9.5px; font-weight: 600; letter-spacing: 0.06em; color: #6b7280; text-transform: uppercase; margin-top: 5px; }
+        .qr-id { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10px; color: #9ca3af; margin-top: 2px; letter-spacing: 0.04em; }
+        .footer-msg { text-align: center; font-size: 10px; color: #9ca3af; font-style: italic; line-height: 1.45; margin-top: 4px; }
         @media print {
-          body { background: #fff; padding: 0; }
-          .slip-container { border: none; box-shadow: none; width: 100%; padding: 4px; }
-          @page { size: 80mm auto; margin: 0; }
+          body { background: #fff; padding: 0; display: block; }
+          .slip-container { border: none; box-shadow: none; width: 100%; padding: 6px 4px; border-radius: 0; }
+          @page { size: 80mm auto; margin: 2mm; }
         }
       </style>
     </head>
     <body>
       <div class="slip-container">
+
+        <!-- Header -->
         <div class="center">
-          <h2 style="font-size:16px;font-weight:bold;text-transform:uppercase;">${activeStoreName}</h2>
-          ${receiptHeader ? `<div style="font-size:11px;color:#444;margin-top:2px;">${receiptHeader}</div>` : ''}
-          <div style="font-size:13px;font-weight:bold;margin:6px 0 2px 0;">${i18n.t('ticket.repairTicket', '*** REPAIR INTAKE TICKET ***')}</div>
-          <div style="font-size:14px;font-weight:bold;letter-spacing:1px;">${ticketNum}</div>
-          ${pinSnippet ? `<div style="font-size:12px;color:#333;margin-top:2px;font-weight:bold;">${i18n.t('ticket.pin', 'PIN:')} ${pinSnippet}</div>` : ''}
-          <div style="font-size:10.5px;color:#555;margin-top:2px;">${formattedDate}</div>
+          <div class="store-name">${activeStoreName}</div>
+          ${receiptHeader ? `<div class="header-msg">${receiptHeader}</div>` : ''}
+          <div class="ticket-label">${i18n.t('ticket.repairTicket', 'Repair Intake Ticket')}</div>
+          <div><span class="ticket-num">${ticketNum}</span></div>
+          ${pinSnippet ? `<div class="pin-row">${i18n.t('ticket.pin', 'PIN:')} ${pinSnippet}</div>` : ''}
+          <div class="date-row">${formattedDate}</div>
         </div>
 
-        <div class="dashed"></div>
+        <div class="rule"></div>
 
-        <div class="row"><span class="bold">${i18n.t('ticket.customer', 'Customer')}&nbsp;:&nbsp;</span><span>${ticket.customerName}</span></div>
-        ${ticket.customerPhone ? `<div class="row"><span class="bold">${i18n.t('common.phone', 'Phone')}&nbsp;:&nbsp;</span><span>${ticket.customerPhone}</span></div>` : ''}
+        <!-- Customer -->
+        <div class="section-label">${i18n.t('ticket.customerInfo', 'Customer')}</div>
+        <div class="row">
+          <span class="row-label">${i18n.t('ticket.customer', 'Name')}</span>
+          <span class="row-value">${ticket.customerName}</span>
+        </div>
+        ${ticket.customerPhone ? `<div class="row"><span class="row-label">${i18n.t('common.phone', 'Phone')}</span><span class="row-value">${ticket.customerPhone}</span></div>` : ''}
 
-        <div class="dashed"></div>
+        <div class="rule"></div>
 
-        <div class="row"><span class="bold">${i18n.t('ticket.device', 'Device')}&nbsp;:&nbsp;</span><span>${ticket.deviceBrand} ${ticket.deviceModel}</span></div>
-        <div class="row"><span class="bold">${i18n.t('ticket.security', 'Security')}&nbsp;:&nbsp;</span><span>${lockSnippet}</span></div>
-        ${ticket.assignedTechnician ? `<div class="row"><span class="bold">${i18n.t('ticket.assignedTo', 'Technician')}&nbsp;:&nbsp;</span><span>${ticket.assignedTechnician}</span></div>` : ''}
-        ${ticket.createdByName ? `<div class="row"><span class="bold">${i18n.t('ticket.intakeBy', 'Intake By')}&nbsp;:&nbsp;</span><span>${ticket.createdByName}</span></div>` : ''}
+        <!-- Device -->
+        <div class="section-label">${i18n.t('ticket.deviceInfo', 'Device')}</div>
+        <div class="row">
+          <span class="row-label">${i18n.t('ticket.device', 'Model')}</span>
+          <span class="row-value">${ticket.deviceBrand} ${ticket.deviceModel}</span>
+        </div>
+        <div class="row">
+          <span class="row-label">${i18n.t('ticket.security', 'Security')}</span>
+          <span class="row-value">${lockSnippet}</span>
+        </div>
+        ${ticket.assignedTechnician ? `<div class="row"><span class="row-label">${i18n.t('ticket.assignedTo', 'Technician')}</span><span class="row-value">${ticket.assignedTechnician}</span></div>` : ''}
+        ${ticket.createdByName ? `<div class="row"><span class="row-label">${i18n.t('ticket.intakeBy', 'Intake By')}</span><span class="row-value">${ticket.createdByName}</span></div>` : ''}
+        ${ticket.estimatedCompletionDate ? `<div class="row"><span class="row-label">${i18n.t('ticket.estReady', 'Est. Ready')}</span><span class="row-value">${new Date(ticket.estimatedCompletionDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>` : ''}
 
-        <div class="dashed"></div>
+        <div class="rule"></div>
 
-        <div style="font-size:11.5px;margin:4px 0;">
-          <div class="bold" style="margin-bottom:2px;">${i18n.t('ticket.issueDescription', 'Reported Problem:')}</div>
-          <div style="font-style:italic;padding-left:4px;color:#222;">${ticket.issueDescription || i18n.t('ticket.diagnostic', 'Diagnostic required')}</div>
+        <!-- Issue -->
+        <div class="issue-block">
+          <div class="issue-title">${i18n.t('ticket.issueDescription', 'Reported Problem')}</div>
+          <div class="issue-text">${ticket.issueDescription || i18n.t('ticket.diagnostic', 'Diagnostic required')}</div>
         </div>
 
-        <div class="dashed"></div>
+        <div class="rule"></div>
 
-        <div class="row"><span>${i18n.t('ticket.estimatedCost', 'Estimated Cost')}&nbsp;:&nbsp;</span><span>${formatCurrencyWith(totalCost, currency, false)}</span></div>
-        <div class="row"><span>${i18n.t('ticket.depositAmount', 'Deposit Paid')}&nbsp;:&nbsp;</span><span>${formatCurrencyWith(deposit, currency, false)}</span></div>
-        <div class="row bold" style="font-size:13px;margin-top:4px;padding-top:4px;border-top:1px dashed #444;">
-          <span>${i18n.t('ticket.balanceDue', 'BALANCE DUE')}&nbsp;:&nbsp;</span>
-          <span>${balanceDue <= 0 ? i18n.t('ticket.paidInFull', 'PAID IN FULL') : formatCurrencyWith(balanceDue, currency, false)}</span>
+        <!-- Financials -->
+        <div class="section-label">${i18n.t('ticket.financial', 'Financial Summary')}</div>
+        <div class="fin-row">
+          <span>${i18n.t('ticket.estimatedCost', 'Estimated Cost')}</span>
+          <span>${formatCurrencyWith(totalCost, currency, false)}</span>
+        </div>
+        <div class="fin-row">
+          <span>${i18n.t('ticket.depositAmount', 'Deposit Paid')}</span>
+          <span>${formatCurrencyWith(deposit, currency, false)}</span>
+        </div>
+        <div class="balance-row">
+          <span>${i18n.t('ticket.balanceDue', 'Balance Due')}</span>
+          ${balanceDue <= 0
+            ? `<span class="paid-badge">${i18n.t('ticket.paidInFull', 'PAID IN FULL')}</span>`
+            : `<span>${formatCurrencyWith(balanceDue, currency, false)}</span>`}
         </div>
 
-        <div class="dashed"></div>
+        <div class="rule"></div>
 
-        <div class="center" style="margin:8px 0 4px 0;">
-          <div style="display:flex;justify-content:center;margin-bottom:4px;">${qrCodeSvg}</div>
-          <div style="font-size:10px;font-weight:bold;letter-spacing:1px;margin-bottom:2px;">${i18n.t('ticket.scanTrack', 'Scan to track repair online')}</div>
-          <div style="font-size:10px;letter-spacing:1px;color:#555;">${ticketNum}</div>
+        <!-- QR -->
+        <div class="center" style="margin:4px 0;">
+          <div style="display:flex;justify-content:center;">${qrCodeSvg}</div>
+          <div class="qr-caption">${i18n.t('ticket.scanTrack', 'Scan to track repair online')}</div>
+          <div class="qr-id">${ticketNum}</div>
         </div>
 
-        <div class="dashed"></div>
+        <div class="rule-dashed"></div>
 
-        <div class="center" style="font-size:9.5px;color:#444;line-height:1.3;margin-top:6px;">
+        <!-- Footer -->
+        <div class="footer-msg">
           ${receiptFooter || i18n.t('ticket.presentTicket', 'Please present this ticket when picking up your device.')}
         </div>
+
       </div>
     </body>
     </html>
@@ -1172,19 +1417,34 @@ export async function printCustomTicketDirect(
   storeAddress?: string,
   storePhone?: string
 ): Promise<{ success: boolean; error?: string }> {
+  const payload = {
+    storeName,
+    currency,
+    storeAddress,
+    storePhone,
+    ticketData,
+    copies: ticketData.copies || 1,
+  };
+
+  // ── IPC path (Electron desktop) ──
+  if (electronAPI?.printCustomTicket) {
+    try {
+      const data = await callElectronPrint(() => electronAPI.printCustomTicket(payload));
+      if (data?.ok) return { success: true };
+      return { success: false, error: data?.error || 'IPC print returned an error.' };
+    } catch (e: any) {
+      console.warn('[Print] IPC custom ticket failed:', e);
+      return { success: false, error: e?.message || 'Print failed' };
+    }
+  }
+
+  // ── HTTP path (web browser) ──
   try {
     const res = await fetch(`${PRINT_SERVER_URL}/print-custom-ticket`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({
-        storeName,
-        currency,
-        storeAddress,
-        storePhone,
-        ticketData,
-        copies: ticketData.copies || 1,
-      }),
+      body: JSON.stringify(payload),
     });
 
     const data = await res.json();
@@ -1206,6 +1466,19 @@ export async function printCustomTicketDirect(
  * Synchronizes the printer's mechanical feed with the physical label gap.
  */
 export async function calibrateLabelPrinter(): Promise<{ success: boolean; message?: string; error?: string }> {
+  // ── IPC path (Electron desktop) ──
+  if (electronAPI?.calibrateLabels) {
+    try {
+      const data = await callElectronPrint(() => electronAPI.calibrateLabels({}));
+      if (data?.ok) return { success: true, message: data.message };
+      return { success: false, error: data?.error || 'IPC calibration returned an error.' };
+    } catch (e: any) {
+      console.warn('[Print] IPC calibrate failed:', e);
+      return { success: false, error: e?.message || 'Calibration failed' };
+    }
+  }
+
+  // ── HTTP path (web browser) ──
   try {
     const res = await fetch(`${PRINT_SERVER_URL}/calibrate-labels`, {
       method: 'POST',
@@ -1225,3 +1498,432 @@ export async function calibrateLabelPrinter(): Promise<{ success: boolean; messa
   }
 }
 
+export interface LowStockReportPrintPayload {
+  storeName?: string;
+  currency?: string;
+  category?: string;
+  subCategory?: string;
+  totalUnitsNeeded?: number;
+  totalRestockCost?: number;
+  canViewCosts?: boolean;
+  products: Array<{
+    name: string;
+    model: string;
+    category?: string;
+    accessorySubCategory?: string;
+    sku?: string;
+    stock: number;
+    lowStockThreshold?: number;
+    supplier?: string;
+    costPrice?: number;
+    price?: number;
+  }>;
+}
+
+function formatTwoCol(left: string, right: string, width = 42): string {
+  const space = width - left.length - right.length;
+  if (space > 0) {
+    return left + ' '.repeat(space) + right;
+  }
+  return `${left} ${right}`.substring(0, width);
+}
+
+function getCategoryGroupHeader(p: LowStockProductItem): string {
+  const cat = (p.category || 'other').toLowerCase();
+  if (cat === 'smartphone') return '📱 SMARTPHONES';
+  if (cat === 'tablet') return '📟 TABLETS';
+  if (cat === 'wearable') return '⌚ WEARABLES';
+  if (cat === 'accessory') {
+    const sub = p.accessorySubCategory || 'other';
+    const subLabels: Record<string, string> = {
+      case: 'CASES & COVERS',
+      glass: 'SCREEN PROTECTORS',
+      cable: 'CABLES',
+      charger: 'CHARGERS',
+      earphone: 'EARPHONES',
+      powerbank: 'POWER BANKS',
+      holder: 'HOLDERS & MOUNTS',
+      other: 'OTHER ACCESSORIES',
+    };
+    const subText = subLabels[sub] || sub.toUpperCase();
+    return `🎧 ACCESSORIES: ${subText}`;
+  }
+  return `📦 ${(p.category || 'OTHER').toUpperCase()}`;
+}
+
+function sortLowStockProducts(products: LowStockProductItem[]): LowStockProductItem[] {
+  const catRank: Record<string, number> = {
+    smartphone: 1,
+    tablet: 2,
+    wearable: 3,
+    accessory: 4,
+  };
+
+  return [...products].sort((a, b) => {
+    const rankA = catRank[(a.category || '').toLowerCase()] || 99;
+    const rankB = catRank[(b.category || '').toLowerCase()] || 99;
+    if (rankA !== rankB) return rankA - rankB;
+
+    if ((a.category || '').toLowerCase() === 'accessory' && (b.category || '').toLowerCase() === 'accessory') {
+      const subA = a.accessorySubCategory || 'other';
+      const subB = b.accessorySubCategory || 'other';
+      if (subA !== subB) return subA.localeCompare(subB);
+    }
+
+    const nameA = `${a.name || ''} ${a.model || ''}`.toLowerCase();
+    const nameB = `${b.name || ''} ${b.model || ''}`.toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+}
+
+function buildLowStockThermalSlipText(payload: LowStockReportPrintPayload): string {
+  const width = 42;
+  const line = '-'.repeat(width);
+  const doubleLine = '='.repeat(width);
+  const {
+    currency = 'DZD',
+    category = 'all',
+    subCategory = 'all',
+    totalUnitsNeeded = 0,
+    totalRestockCost = 0,
+    canViewCosts = true,
+    products = [],
+  } = payload;
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString();
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  let scope = category === 'all' ? 'ALL CATEGORIES' : category.toUpperCase();
+  if (category === 'accessory' && subCategory !== 'all') {
+    scope += ` (${subCategory.toUpperCase()})`;
+  }
+
+  const out: string[] = [];
+  out.push(doubleLine);
+  out.push('*** LOW STOCK REPLENISHMENT ***');
+  out.push(`Date: ${dateStr} ${timeStr}`);
+  out.push(`Scope: ${scope}`);
+  out.push(line);
+  out.push('REPLENISHMENT SUMMARY');
+  out.push(formatTwoCol('Products Below Min:', `${products.length} items`, width));
+  out.push(formatTwoCol('Total Units to Order:', `+${totalUnitsNeeded} pcs`, width));
+  if (canViewCosts && totalRestockCost > 0) {
+    out.push(formatTwoCol('Est. Restock Budget:', `${totalRestockCost.toLocaleString()} ${currency}`, width));
+  }
+  out.push(line);
+  out.push('ITEMIZED ORDER LIST (BY CATEGORY)');
+  out.push(line);
+
+  const sorted = sortLowStockProducts(products);
+  let currentGroup = '';
+
+  sorted.forEach((p, idx) => {
+    const groupName = getCategoryGroupHeader(p);
+    if (groupName !== currentGroup) {
+      currentGroup = groupName;
+      out.push('');
+      out.push(`[ ${groupName} ]`);
+      out.push(line);
+    }
+
+    const threshold = p.lowStockThreshold || 1;
+    const deficit = Math.max(1, threshold - (p.stock || 0));
+    const title = `${idx + 1}. ${p.name} ${p.model}`.trim().substring(0, width);
+    out.push(title);
+
+    let meta = p.category || '';
+    if (p.accessorySubCategory) meta += ` (${p.accessorySubCategory})`;
+    if (p.sku) meta += ` | ${p.sku}`;
+    out.push(meta.substring(0, width));
+
+    out.push(`Stock: ${p.stock}/${threshold}  --> REORDER: +${deficit}`);
+    if (p.supplier) {
+      out.push(`Supplier: ${p.supplier}`.substring(0, width));
+    }
+    if (canViewCosts && p.costPrice) {
+      const unitStr = `Unit: ${(p.costPrice).toLocaleString()} ${currency}`;
+      const subStr = `Sub: ${(p.costPrice * deficit).toLocaleString()} ${currency}`;
+      out.push(formatTwoCol(unitStr, subStr, width));
+    }
+    if (idx < sorted.length - 1) {
+      out.push(line);
+    }
+  });
+
+  out.push(doubleLine);
+  out.push('*** END OF REPORT ***');
+
+  return out.join('\n');
+}
+
+function buildLowStockReportHTML(payload: LowStockReportPrintPayload): string {
+  const {
+    storeName = 'PhoneShop Pro',
+    currency = 'DZD',
+    category = 'all',
+    subCategory = 'all',
+    totalUnitsNeeded = 0,
+    totalRestockCost = 0,
+    canViewCosts = true,
+    products = [],
+  } = payload;
+
+  const dateStr = new Date().toLocaleDateString();
+  const catLabel = category === 'all' ? 'All Inventory Categories' : category.toUpperCase();
+  const subLabel = category === 'accessory' && subCategory !== 'all' ? ` (${subCategory})` : '';
+
+  const sorted = sortLowStockProducts(products);
+  let lastGroup = '';
+  const rowsHtml = sorted
+    .map((p, idx) => {
+      const groupName = getCategoryGroupHeader(p);
+      let groupHeaderHtml = '';
+      if (groupName !== lastGroup) {
+        lastGroup = groupName;
+        groupHeaderHtml = `
+          <tr style="background-color: #f1f5f9; font-weight: bold;">
+            <td colspan="${canViewCosts ? 11 : 9}" style="padding: 8px 12px; font-size: 13px; color: #1e293b; border-top: 2px solid #cbd5e1;">
+              ${groupName}
+            </td>
+          </tr>
+        `;
+      }
+      const threshold = p.lowStockThreshold || 1;
+      const deficit = Math.max(1, threshold - (p.stock || 0));
+      const subMeta = p.accessorySubCategory || '-';
+      return `
+        ${groupHeaderHtml}
+        <tr>
+          <td>${idx + 1}</td>
+          <td><strong>${p.name} ${p.model}</strong></td>
+          <td>${p.category || ''} ${subMeta !== '-' ? `(${subMeta})` : ''}</td>
+          <td class="font-mono">${p.sku || '-'}</td>
+          <td class="text-danger" style="font-weight: bold;">${p.stock}</td>
+          <td>${threshold}</td>
+          <td style="font-weight: bold; color: #b91c1c;">+${deficit}</td>
+          ${canViewCosts ? `<td>${(p.costPrice || 0).toLocaleString()} ${currency}</td><td>${((p.costPrice || 0) * deficit).toLocaleString()} ${currency}</td>` : ''}
+          <td>${p.supplier || '-'}</td>
+          <td>[ &nbsp; &nbsp; &nbsp; ]</td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  return `
+    <div class="report-header">
+      <div>
+        <div class="shop-name">${storeName}</div>
+        <div class="report-title">Low Stock Replenishment & Reorder Sheet</div>
+        <div style="font-size: 12px; color: #64748b; margin-top: 2px;">
+          Filter Scope: <strong>${catLabel}${subLabel}</strong>
+        </div>
+      </div>
+      <div class="meta-info">
+        <div><strong>Date:</strong> ${dateStr}</div>
+        <div><strong>Products Below Min:</strong> ${products.length}</div>
+        <div><strong>Units to Reorder:</strong> ${totalUnitsNeeded}</div>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Deficit Products</div>
+        <div class="kpi-value">${products.length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Units Needed</div>
+        <div class="kpi-value text-danger">${totalUnitsNeeded}</div>
+      </div>
+      ${
+        canViewCosts
+          ? `
+        <div class="kpi-card">
+          <div class="kpi-label">Est. Restock Budget</div>
+          <div class="kpi-value">${totalRestockCost.toLocaleString()} ${currency}</div>
+        </div>
+      `
+          : ''
+      }
+    </div>
+
+    <div class="section-title">Itemized Replenishment List (Grouped by Category)</div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 30px;">#</th>
+          <th>Product & Model</th>
+          <th>Category & Sub</th>
+          <th>SKU</th>
+          <th>Stock</th>
+          <th>Min</th>
+          <th>Order Qty</th>
+          ${canViewCosts ? '<th>Unit Cost</th><th>Est. Cost</th>' : ''}
+          <th>Supplier</th>
+          <th>Received</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowsHtml}
+      </tbody>
+    </table>
+
+    <div class="signature-box" style="margin-top: 32px;">
+      <div>
+        <div class="sig-line">Prepared By</div>
+      </div>
+      <div>
+        <div class="sig-line">Manager Approval</div>
+      </div>
+      <div>
+        <div class="sig-line">Supplier Order Confirmation</div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Sends a low stock replenishment report to the thermal print server.
+ * Uses 4 tiers — each returns immediately on success, NO browser fallback:
+ *   1. Electron native IPC dedicated (print:low-stock-report)
+ *   2. Electron native IPC receipt engine (print:receipt) — 100% active on all desktop app versions
+ *   3. HTTP POST /print-low-stock-report (dedicated endpoint for web browsers)
+ *   4. HTTP POST /print-custom-ticket (free text endpoint for web browsers)
+ */
+export async function printLowStockReportDirect(
+  payload: LowStockReportPrintPayload
+): Promise<{ method: 'direct' | 'browser'; error?: string }> {
+  const sortedProducts = sortLowStockProducts(payload.products);
+  const sortedPayload = { ...payload, products: sortedProducts };
+
+  // ── Tier 1: Electron IPC Dedicated Path (Desktop app with new build) ──
+  if (electronAPI?.printLowStockReport) {
+    try {
+      const res = await callElectronPrint(() => electronAPI.printLowStockReport(sortedPayload));
+      if (res?.ok) return { method: 'direct' };
+      console.warn('[Print] IPC Low Stock Report error:', res?.error);
+    } catch (err) {
+      console.warn('[Print] IPC Low Stock Report failed:', err);
+    }
+  }
+
+  // ── Tier 2: Electron IPC Universal Fallback (Desktop app running current/existing build) ──
+  // If running inside the macOS desktop app, use the built-in IPC receipt engine which
+  // is guaranteed to be running in-process and connected to the 80mm thermal printer.
+  if (electronAPI?.printReceipt) {
+    try {
+      const now = new Date();
+      const catLabel =
+        (payload.category === 'all' ? 'ALL CATEGORIES' : payload.category.toUpperCase()) +
+        (payload.category === 'accessory' && payload.subCategory !== 'all' ? ` (${payload.subCategory.toUpperCase()})` : '');
+
+      let lastGroup = '';
+      const receiptItems = sortedProducts.map((p, idx) => {
+        const currentGroup = getCategoryGroupHeader(p);
+        const isNewGroup = currentGroup !== lastGroup;
+        lastGroup = currentGroup;
+
+        const threshold = p.lowStockThreshold || 1;
+        const deficit = Math.max(1, threshold - (p.stock || 0));
+        const sub = p.accessorySubCategory ? ` [${p.accessorySubCategory}]` : '';
+        const sku = p.sku ? ` (${p.sku})` : '';
+        const supplier = p.supplier ? ` • ${p.supplier}` : '';
+
+        return {
+          quantity: deficit,
+          product: {
+            name: `${isNewGroup ? `\n[ ${currentGroup} ]\n` : ''}${idx + 1}. ${p.name} ${p.model}${sub}${sku}`,
+            model: `[Stock: ${p.stock}/${threshold}${supplier}]`,
+            price: payload.canViewCosts ? (p.costPrice || 0) : 0,
+          },
+        };
+      });
+
+      const lowStockTransaction = {
+        id: `LOW-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`,
+        date: now.toISOString(),
+        customerName: `Scope: ${catLabel}`,
+        processedByName: `Reorder List (${sortedProducts.length} items)`,
+        items: receiptItems,
+        subtotal: payload.canViewCosts ? payload.totalRestockCost : 0,
+        total: payload.canViewCosts ? payload.totalRestockCost : 0,
+        payments: [
+          {
+            method: `REORDER DEFICIT: +${payload.totalUnitsNeeded} PCS`,
+            amount: payload.canViewCosts ? payload.totalRestockCost : 0,
+          },
+        ],
+      };
+
+      const receiptPayload = {
+        storeName: payload.storeName || 'PhoneShop Pro',
+        currency: payload.currency || 'DZD',
+        transaction: lowStockTransaction,
+        headerMessage: '*** LOW STOCK REPLENISHMENT ***',
+        footerMessage: '*** END OF REPORT ***',
+        translations: getTranslations(),
+      };
+
+      const res = await callElectronPrint(() => electronAPI.printReceipt(receiptPayload));
+      if (res?.ok) return { method: 'direct' };
+      console.warn('[Print] IPC Receipt fallback error:', res?.error);
+    } catch (err) {
+      console.warn('[Print] IPC Receipt fallback failed:', err);
+    }
+  }
+
+  // ── Tier 3: HTTP /print-low-stock-report (for web browser clients connected to print server) ──
+  try {
+    const res = await fetch(`${PRINT_SERVER_URL}/print-low-stock-report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+      body: JSON.stringify(sortedPayload),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok) return { method: 'direct' };
+      console.warn('[Print] /print-low-stock-report returned error:', data.error);
+    } else {
+      console.warn(`[Print] /print-low-stock-report returned ${res.status}, trying /print-custom-ticket...`);
+    }
+  } catch (err) {
+    console.warn('[Print] /print-low-stock-report failed, trying /print-custom-ticket:', err);
+  }
+
+  // ── Tier 4: HTTP /print-custom-ticket (HTTP fallback for web browsers) ──
+  try {
+    const customPayload = {
+      storeName: payload.storeName || 'PhoneShop Pro',
+      currency: payload.currency || 'DZD',
+      ticketData: {
+        title: '*** LOW STOCK REPLENISHMENT ***',
+        format: '80mm',
+        mode: 'free_text',
+        freeText: buildLowStockThermalSlipText(sortedPayload),
+        showStoreNameOnSticker: true,
+        textAlign: 'left',
+        isBold: false,
+        fontSize: 'normal',
+        copies: 1,
+      },
+    };
+
+    const res = await fetch(`${PRINT_SERVER_URL}/print-custom-ticket`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+      body: JSON.stringify(customPayload),
+    });
+
+    const data = await res.json();
+    if (data.ok) return { method: 'direct' };
+    console.warn('[Print] /print-custom-ticket returned error:', data.error);
+  } catch (err) {
+    console.warn('[Print] /print-custom-ticket also failed:', err);
+  }
+
+  // If both IPC and HTTP failed, notify user with error toast — NEVER open browser dialog
+  throw new Error('Print server unreachable. Please ensure the print server or desktop app is active.');
+}

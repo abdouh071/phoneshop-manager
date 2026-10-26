@@ -12,13 +12,27 @@
  */
 
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+const fs = require('fs');
+const os = require('os');
+
+// Resolve .env across all possible paths (direct, parent, resources)
+const candidateEnvPaths = [
+  process.env.DOTENV_CONFIG_PATH,
+  path.join(__dirname, '.env'),
+  path.join(__dirname, '..', 'print-server', '.env'),
+  path.join(process.resourcesPath || '', 'print-server', '.env'),
+  path.join(process.resourcesPath || '', '.env'),
+];
+for (const p of candidateEnvPaths) {
+  if (p && fs.existsSync(p)) {
+    require('dotenv').config({ path: p });
+    break;
+  }
+}
 
 const express = require('express');
 const cors = require('cors');
 const { execFile } = require('child_process');
-const fs = require('fs');
-const os = require('os');
 const { ThermalPrinter, PrinterTypes, CharacterSet } = require('node-thermal-printer');
 const { PNG } = require('pngjs');
 
@@ -33,13 +47,28 @@ function removeAccents(str) {
 
 const app = express();
 const PORT = process.env.PORT || 3355;
-const PRINTER_NAME = process.env.PRINTER_NAME || 'XP_T80Q';
-const LABEL_PRINTER_NAME = process.env.LABEL_PRINTER_NAME || PRINTER_NAME;
+const PRINTER_NAME = process.env.PRINTER_NAME || 'Printer_POS_80';
+const LABEL_PRINTER_NAME = process.env.LABEL_PRINTER_NAME || 'Xprinter_XP_420B';
 const HAS_CUTTER = process.env.HAS_CUTTER !== 'false'; // default true
 const LABEL_OFFSET_X = parseInt(process.env.LABEL_OFFSET_X || '12', 10); // dots to shift left to compensate for printer's built-in left margin
 
-// --- Middleware ---
-app.use(cors());
+// --- Middleware (Supports Web Private Network Access for Chrome / Safari) ---
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Access-Control-Request-Private-Network');
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(express.json({ limit: '2mb' }));
 
 // --- Printer Instance ---
@@ -238,7 +267,208 @@ function printLogoFromBase64(printer, base64DataUri, options = {}) {
   }
 }
 
-// --- Execute Print via LPR (macOS/Linux) using execFile (No shell injection risk) ---
+// --- Execute Print — Cross-platform (macOS/Linux: lpr, Windows: copy /b + winspool.drv fallback) ---
+
+// Read embedded print-raw.ps1 script content to guarantee physical extraction if inside app.asar
+let EMBEDDED_RAW_PRINT_SCRIPT = '';
+try {
+  const localPs1 = path.join(__dirname, 'print-raw.ps1');
+  if (fs.existsSync(localPs1)) {
+    EMBEDDED_RAW_PRINT_SCRIPT = fs.readFileSync(localPs1, 'utf8');
+  }
+} catch (_) {}
+
+function getPhysicalScriptPath() {
+  // 1. If running unpacked outside asar, use local file directly
+  if (!__dirname.includes('app.asar')) {
+    const local = path.join(__dirname, 'print-raw.ps1');
+    if (fs.existsSync(local)) return local;
+  }
+
+  // 2. Check extraResources scripts folder (created by electron-builder)
+  if (process.resourcesPath) {
+    const resScript = path.join(process.resourcesPath, 'scripts', 'print-raw.ps1');
+    if (fs.existsSync(resScript)) return resScript;
+
+    const resPs = path.join(process.resourcesPath, 'print-server', 'print-raw.ps1');
+    if (fs.existsSync(resPs)) return resPs;
+
+    const resUnpacked = path.join(process.resourcesPath, 'app.asar.unpacked', 'electron', 'print-raw.ps1');
+    if (fs.existsSync(resUnpacked)) return resUnpacked;
+  }
+
+  // 3. Check unpacked asar path
+  if (__dirname.includes('app.asar')) {
+    const unpacked = path.join(__dirname.replace('app.asar', 'app.asar.unpacked'), 'print-raw.ps1');
+    if (fs.existsSync(unpacked)) return unpacked;
+  }
+
+  // 4. Guaranteed physical fallback: write to temp directory so external powershell.exe can read it
+  const tempScript = path.join(os.tmpdir(), 'phoneshop_print_raw.ps1');
+  try {
+    if (EMBEDDED_RAW_PRINT_SCRIPT) {
+      fs.writeFileSync(tempScript, EMBEDDED_RAW_PRINT_SCRIPT, 'utf8');
+      return tempScript;
+    }
+  } catch (err) {
+    console.error('[PrintServer] Failed to write temp PowerShell script:', err.message);
+  }
+  return null;
+}
+
+function sendRawToWindowsPrinter(tmpFilePath, targetPrinter) {
+  return new Promise((resolve, reject) => {
+    const psScriptPath = getPhysicalScriptPath();
+
+    if (psScriptPath) {
+      // Primary: Use native winspool.drv via physical PowerShell script (instant, works for all USB & network printers)
+      const safeScript = psScriptPath.replace(/'/g, "''");
+      const safePrinter = (targetPrinter || '').replace(/'/g, "''");
+      const safeFile = tmpFilePath.replace(/'/g, "''");
+      const psCommand = `& '${safeScript}' -PrinterName '${safePrinter}' -FilePath '${safeFile}'; exit $LASTEXITCODE`;
+
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psCommand],
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: 10000,
+          windowsHide: true,
+        },
+        (psErr, stdout, stderr) => {
+          if (!psErr) {
+            try { fs.unlinkSync(tmpFilePath); } catch (e) {}
+            console.log(`[PrintServer] ${stdout.trim() || 'Windows print completed'}`);
+            return resolve();
+          }
+
+          // Fallback: Copy to shared printer if PowerShell failed
+          execFile(
+            'cmd.exe',
+            ['/c', 'copy', '/b', tmpFilePath, `\\\\%COMPUTERNAME%\\${targetPrinter}`],
+            { shell: false, windowsHide: true, timeout: 3000 },
+            (copyErr) => {
+              try { fs.unlinkSync(tmpFilePath); } catch (e) {}
+              if (!copyErr) {
+                return resolve();
+              }
+              const errMsg = stderr || stdout || psErr.message;
+              reject(new Error(`Windows print error on '${targetPrinter}': ${errMsg.trim()}`));
+            }
+          );
+        }
+      );
+    } else {
+      // Fallback: Copy to shared printer if script not found
+      execFile(
+        'cmd.exe',
+        ['/c', 'copy', '/b', tmpFilePath, `\\\\%COMPUTERNAME%\\${targetPrinter}`],
+        { shell: false, windowsHide: true, timeout: 3000 },
+        (copyErr) => {
+          try { fs.unlinkSync(tmpFilePath); } catch (e) {}
+          if (!copyErr) return resolve();
+          reject(new Error(`Windows print error: Could not copy to '\\\\%COMPUTERNAME%\\${targetPrinter}' (${copyErr.message}) and print-raw.ps1 physical script could not be located.`));
+        }
+      );
+    }
+  });
+}
+
+function sendRawToMacPrinter(tmpFilePath, targetPrinter) {
+  return new Promise((resolve, reject) => {
+    // 1. Try exact target printer
+    execFile('lpr', ['-P', targetPrinter, '-o', 'raw', tmpFilePath], (error) => {
+      if (!error) {
+        try { fs.unlinkSync(tmpFilePath); } catch (e) {}
+        return resolve();
+      }
+
+      console.warn(`[macOS Print] Printing to '${targetPrinter}' failed: ${error.message}. Checking for available CUPS printers...`);
+
+      // 2. Query CUPS destinations for matching thermal/receipt printer
+      execFile('lpstat', ['-e'], (lpErr, lpOut) => {
+        if (!lpErr && lpOut) {
+          const printers = lpOut.split('\n').map((s) => s.trim()).filter(Boolean);
+          const cleanTarget = (targetPrinter || '').replace(/[-_ ]/g, '').toLowerCase();
+          const match = printers.find((p) => {
+            const cp = p.replace(/[-_ ]/g, '').toLowerCase();
+            return cp.includes(cleanTarget) || cleanTarget.includes(cp) || cp.includes('pos80') || cp.includes('80');
+          });
+
+          if (match && match !== targetPrinter) {
+            console.log(`[macOS Print] Retrying on detected printer '${match}'...`);
+            return execFile('lpr', ['-P', match, '-o', 'raw', tmpFilePath], (mErr) => {
+              if (!mErr) {
+                try { fs.unlinkSync(tmpFilePath); } catch (e) {}
+                return resolve();
+              }
+              // Try final default destination
+              execFile('lpr', ['-o', 'raw', tmpFilePath], (defErr) => {
+                try { fs.unlinkSync(tmpFilePath); } catch (e) {}
+                if (!defErr) return resolve();
+                reject(new Error(`macOS print error: ${error.message}`));
+              });
+            });
+          }
+        }
+
+        // 3. Fallback to default CUPS destination
+        execFile('lpr', ['-o', 'raw', tmpFilePath], (defErr) => {
+          try { fs.unlinkSync(tmpFilePath); } catch (e) {}
+          if (!defErr) {
+            console.log('[macOS Print] Printed successfully to macOS default printer.');
+            return resolve();
+          }
+          reject(new Error(`macOS print error on '${targetPrinter}': ${error.message} (Default printer fallback failed: ${defErr.message})`));
+        });
+      });
+    });
+  });
+}
+
+function sendRawTSPLToMacPrinter(tmpFilePath, targetPrinter) {
+  return new Promise((resolve, reject) => {
+    // 1. Try exact label printer
+    execFile('lpr', ['-P', targetPrinter, '-o', 'raw', tmpFilePath], (error) => {
+      if (!error) {
+        try { fs.unlinkSync(tmpFilePath); } catch (e) {}
+        return resolve();
+      }
+
+      console.warn(`[macOS TSPL Print] Printing to '${targetPrinter}' failed: ${error.message}. Checking available label printers...`);
+
+      // 2. Find label printer from lpstat
+      execFile('lpstat', ['-e'], (lpErr, lpOut) => {
+        if (!lpErr && lpOut) {
+          const printers = lpOut.split('\n').map((s) => s.trim()).filter(Boolean);
+          const labelMatch = printers.find((p) => isLabelPrinter(p));
+          if (labelMatch && labelMatch !== targetPrinter) {
+            console.log(`[macOS TSPL Print] Found label printer '${labelMatch}'. Retrying...`);
+            return execFile('lpr', ['-P', labelMatch, '-o', 'raw', tmpFilePath], (mErr) => {
+              if (!mErr) {
+                try { fs.unlinkSync(tmpFilePath); } catch (e) {}
+                return resolve();
+              }
+              execFile('lpr', ['-o', 'raw', tmpFilePath], (defErr) => {
+                try { fs.unlinkSync(tmpFilePath); } catch (e) {}
+                if (!defErr) return resolve();
+                reject(new Error(`macOS TSPL print error: ${error.message}`));
+              });
+            });
+          }
+        }
+
+        // 3. Fallback to default destination
+        execFile('lpr', ['-o', 'raw', tmpFilePath], (defErr) => {
+          try { fs.unlinkSync(tmpFilePath); } catch (e) {}
+          if (!defErr) return resolve();
+          reject(new Error(`macOS TSPL print error on '${targetPrinter}': ${error.message} (Default printer fallback failed: ${defErr.message})`));
+        });
+      });
+    });
+  });
+}
+
 function executePrint(printer, targetPrinter = PRINTER_NAME) {
   return new Promise((resolve, reject) => {
     try {
@@ -246,24 +476,19 @@ function executePrint(printer, targetPrinter = PRINTER_NAME) {
       const randomSuffix = Math.random().toString(36).substring(2, 8);
       const tmpFilePath = path.join(os.tmpdir(), `receipt_${Date.now()}_${randomSuffix}.bin`);
       fs.writeFileSync(tmpFilePath, buffer);
-      
-      execFile('lpr', ['-P', targetPrinter, '-o', 'raw', tmpFilePath], (error, stdout, stderr) => {
-        // Clean up temp file
-        try { fs.unlinkSync(tmpFilePath); } catch (e) {}
-        
-        if (error) {
-          reject(new Error(`lpr error: ${error.message}`));
-          return;
-        }
-        resolve();
-      });
+
+      if (os.platform() === 'win32') {
+        sendRawToWindowsPrinter(tmpFilePath, targetPrinter).then(resolve).catch(reject);
+      } else {
+        sendRawToMacPrinter(tmpFilePath, targetPrinter).then(resolve).catch(reject);
+      }
     } catch (err) {
       reject(err);
     }
   });
 }
 
-// --- Execute TSPL Print (for Xprinter XP-420B / TSC label printers) ---
+// --- Execute TSPL Print — Cross-platform (for Xprinter XP-420B / TSC label printers) ---
 function executeTSPLPrint(tsplCommands, targetPrinter = LABEL_PRINTER_NAME) {
   return new Promise((resolve, reject) => {
     try {
@@ -272,15 +497,12 @@ function executeTSPLPrint(tsplCommands, targetPrinter = LABEL_PRINTER_NAME) {
       const randomSuffix = Math.random().toString(36).substring(2, 8);
       const tmpFilePath = path.join(os.tmpdir(), `label_${Date.now()}_${randomSuffix}.bin`);
       fs.writeFileSync(tmpFilePath, Buffer.from(cleanCommands, 'utf-8'));
-      
-      execFile('lpr', ['-P', targetPrinter, '-o', 'raw', tmpFilePath], (error, stdout, stderr) => {
-        try { fs.unlinkSync(tmpFilePath); } catch (e) {}
-        if (error) {
-          reject(new Error(`lpr error: ${error.message}`));
-          return;
-        }
-        resolve();
-      });
+
+      if (os.platform() === 'win32') {
+        sendRawToWindowsPrinter(tmpFilePath, targetPrinter).then(resolve).catch(reject);
+      } else {
+        sendRawTSPLToMacPrinter(tmpFilePath, targetPrinter).then(resolve).catch(reject);
+      }
     } catch (err) {
       reject(err);
     }
@@ -427,25 +649,18 @@ function twoColumnRow(left, right, totalWidth = 42) {
 /**
  * GET /status — Health check
  */
+function handleStatus() {
+  return {
+    ok: true,
+    printer: PRINTER_NAME,
+    labelPrinter: LABEL_PRINTER_NAME,
+    connected: true,
+    hasCutter: HAS_CUTTER,
+  };
+}
+
 app.get('/status', async (_req, res) => {
-  try {
-    res.json({
-      ok: true,
-      printer: PRINTER_NAME,
-      labelPrinter: LABEL_PRINTER_NAME,
-      connected: true,
-      hasCutter: HAS_CUTTER,
-    });
-  } catch (err) {
-    res.json({
-      ok: true,
-      printer: PRINTER_NAME,
-      labelPrinter: LABEL_PRINTER_NAME,
-      connected: false,
-      hasCutter: HAS_CUTTER,
-      error: err.message,
-    });
-  }
+  res.json(handleStatus());
 });
 
 /**
@@ -471,13 +686,13 @@ app.get('/status', async (_req, res) => {
  *   footerMessage?: string,
  * }
  */
-app.post('/print-receipt', async (req, res) => {
+async function handlePrintReceipt(body) {
   try {
-    const { storeName, currency, transaction, headerMessage, footerMessage, logo, translations = {} } = req.body;
+    const { storeName, currency, transaction, headerMessage, footerMessage, logo, translations = {} } = body || {};
     const t = (key, defaultText) => translations[key] || defaultText;
 
     if (!transaction || !transaction.items) {
-      return res.status(400).json({ ok: false, error: 'Missing transaction data' });
+      return { ok: false, error: 'Missing transaction data' };
     }
 
     const printer = createPrinter();
@@ -529,8 +744,11 @@ app.post('/print-receipt', async (req, res) => {
 
     // ---- Items ----
     for (const item of transaction.items) {
-      const name = `${item.quantity}x ${item.product.name} ${item.product.model}`;
-      const price = fmt(item.product.price * item.quantity);
+      const isReturn = Boolean(item.isReturn);
+      const unitPrice = item.customReturnPrice !== undefined ? item.customReturnPrice : item.product.price;
+      const name = `${isReturn ? '[RETURN] ' : ''}${item.quantity}x ${item.product.name} ${item.product.model || ''}`.trim();
+      const lineTotal = unitPrice * item.quantity;
+      const price = isReturn ? `-${fmt(Math.abs(lineTotal))}` : fmt(lineTotal);
       printer.println(twoColumnRow(name, price));
     }
 
@@ -541,13 +759,21 @@ app.post('/print-receipt', async (req, res) => {
     printer.println(twoColumnRow(t('subtotal', 'Subtotal'), fmt(transaction.subtotal)));
 
     // ---- Discount ----
-    if (transaction.discount && transaction.discount.value > 0) {
-      const discountLabel = transaction.discount.type === 'percent'
+    let discountAmount = 0;
+    let discountLabel = t('discount', 'Discount');
+    if (transaction.discount && Number(transaction.discount.value) > 0) {
+      discountLabel = transaction.discount.type === 'percent'
         ? `${t('discount', 'Discount')} (${transaction.discount.value}%)`
         : t('discount', 'Discount');
-      const discountAmount = transaction.discount.type === 'percent'
-        ? transaction.subtotal * (transaction.discount.value / 100)
-        : transaction.discount.value;
+      const base = transaction.exchangeSummary?.purchasedTotal ?? transaction.subtotal;
+      discountAmount = transaction.discount.type === 'percent'
+        ? base * (Number(transaction.discount.value) / 100)
+        : Number(transaction.discount.value);
+    } else if (!transaction.exchangeSummary && transaction.subtotal > transaction.total && transaction.total >= 0) {
+      discountAmount = transaction.subtotal - transaction.total;
+    }
+
+    if (discountAmount > 0) {
       printer.println(twoColumnRow(discountLabel, `-${fmt(discountAmount)}`));
     }
 
@@ -606,11 +832,16 @@ app.post('/print-receipt', async (req, res) => {
     await executePrint(printer);
     console.log(`[✓] Receipt printed — Order ${transaction.id}`);
 
-    res.json({ ok: true, message: 'Receipt printed successfully' });
+    return { ok: true, message: 'Receipt printed successfully' };
   } catch (err) {
     console.error('[✗] Print failed:', err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    return { ok: false, error: err.message };
   }
+}
+
+app.post('/print-receipt', async (req, res) => {
+  const result = await handlePrintReceipt(req.body);
+  res.status(result.ok ? 200 : (result.status || 500)).json(result);
 });
 
 /**
@@ -628,14 +859,14 @@ app.post('/print-receipt', async (req, res) => {
  *   }
  * }
  */
-app.post('/print-repair-label', async (req, res) => {
+async function handlePrintRepairLabel(body) {
   try {
-    const { storeName, currency = 'DZD', ticket, copies = 1, translations = {} } = req.body;
+    const { storeName, currency = 'DZD', ticket, copies = 1, translations = {} } = body || {};
     const t = (key, defaultText) => removeAccents(translations[key] || defaultText);
     const copiesCount = Math.max(1, parseInt(copies || 1, 10));
 
     if (!ticket || !ticket.ticketNumber) {
-      return res.status(400).json({ ok: false, error: 'Missing ticket data' });
+      return { ok: false, error: 'Missing ticket data' };
     }
 
     const fmt = (v) => formatCurrency(v, currency);
@@ -687,7 +918,7 @@ app.post('/print-repair-label', async (req, res) => {
 
       await executeTSPLPrint(tspl, LABEL_PRINTER_NAME);
       console.log(`[✓] Repair back label printed via TSPL (${copiesCount} copies) — ${ticket.ticketNumber} on ${LABEL_PRINTER_NAME}`);
-      return res.json({ ok: true, message: 'Repair label printed successfully' });
+      return { ok: true, message: 'Repair label printed successfully' };
     }
 
     const printer = createPrinter();
@@ -730,23 +961,28 @@ app.post('/print-repair-label', async (req, res) => {
     }
     console.log(`[✓] Repair back label printed (${copiesCount} copies) — ${ticket.ticketNumber} on ${LABEL_PRINTER_NAME}`);
 
-    res.json({ ok: true, message: 'Repair label printed successfully' });
+    return { ok: true, message: 'Repair label printed successfully' };
   } catch (err) {
     console.error('[✗] Label print failed:', err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    return { ok: false, error: err.message };
   }
+}
+
+app.post('/print-repair-label', async (req, res) => {
+  const result = await handlePrintRepairLabel(req.body);
+  res.status(result.ok ? 200 : (result.status || 500)).json(result);
 });
 
 /**
  * POST /print-repair-ticket — Print standard 80mm customer drop-off ticket on receipt printer
  */
-app.post('/print-repair-ticket', async (req, res) => {
+async function handlePrintRepairTicket(body) {
   try {
-    const { storeName, currency = 'DZD', ticket, headerMessage, footerMessage, logo, translations = {} } = req.body;
+    const { storeName, currency = 'DZD', ticket, headerMessage, footerMessage, logo, translations = {} } = body || {};
     const t = (key, defaultText) => removeAccents(translations[key] || defaultText);
 
     if (!ticket || !ticket.ticketNumber) {
-      return res.status(400).json({ ok: false, error: 'Missing ticket data' });
+      return { ok: false, error: 'Missing ticket data' };
     }
 
     const printer = createPrinter();
@@ -856,11 +1092,16 @@ app.post('/print-repair-ticket', async (req, res) => {
     await executePrint(printer, PRINTER_NAME);
     console.log(`[✓] Repair intake ticket printed on 80mm — ${ticket.ticketNumber} on ${PRINTER_NAME}`);
 
-    res.json({ ok: true, message: 'Repair intake ticket printed successfully' });
+    return { ok: true, message: 'Repair intake ticket printed successfully' };
   } catch (err) {
     console.error('[✗] Repair ticket print failed:', err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    return { ok: false, error: err.message };
   }
+}
+
+app.post('/print-repair-ticket', async (req, res) => {
+  const result = await handlePrintRepairTicket(req.body);
+  res.status(result.ok ? 200 : (result.status || 500)).json(result);
 });
 
 /**
@@ -885,13 +1126,13 @@ app.post('/print-repair-ticket', async (req, res) => {
  *   }
  * }
  */
-app.post('/print-z-report', async (req, res) => {
+async function handlePrintZReport(body) {
   try {
-    const { storeName, currency, date, generatedBy, summary, translations = {} } = req.body;
+    const { storeName, currency, date, generatedBy, summary, translations = {} } = body || {};
     const t = (key, defaultText) => translations[key] || defaultText;
 
     if (!summary) {
-      return res.status(400).json({ ok: false, error: 'Missing summary data' });
+      return { ok: false, error: 'Missing summary data' };
     }
 
     const printer = createPrinter();
@@ -981,11 +1222,180 @@ app.post('/print-z-report', async (req, res) => {
     await executePrint(printer, PRINTER_NAME);
     console.log(`[✓] Z-Report printed on ${PRINTER_NAME}`);
 
-    res.json({ ok: true, message: 'Z-Report printed successfully' });
+    return { ok: true, message: 'Z-Report printed successfully' };
   } catch (err) {
     console.error('[✗] Z-Report print failed:', err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    return { ok: false, error: err.message };
   }
+}
+
+app.post('/print-z-report', async (req, res) => {
+  const result = await handlePrintZReport(req.body);
+  res.status(result.ok ? 200 : (result.status || 500)).json(result);
+});
+
+/**
+ * POST /print-low-stock-report — Print Low Stock Replenishment Sheet on ESC/POS thermal printer
+ */
+async function handlePrintLowStockReport(body) {
+  try {
+    const {
+      storeName,
+      currency,
+      category = 'all',
+      subCategory = 'all',
+      totalUnitsNeeded = 0,
+      totalRestockCost = 0,
+      canViewCosts = true,
+      products = [],
+    } = body || {};
+
+    if (!Array.isArray(products) || products.length === 0) {
+      return { ok: false, error: 'No products to print' };
+    }
+
+    const printer = createPrinter();
+    const fmt = (v) => formatCurrency(v, currency);
+
+    // ---- Store Header ----
+    printer.alignCenter();
+    printer.bold(true);
+    printer.setTextSize(1, 1);
+    printer.println(removeAccents(storeName || 'PhoneShop Pro'));
+    printer.bold(false);
+    printer.setTextNormal();
+
+    printer.drawLine();
+    printer.bold(true);
+    printer.println('*** LOW STOCK REPLENISHMENT ***');
+    printer.bold(false);
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-US');
+    const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    printer.println(`Date: ${dateStr} ${timeStr}`);
+
+    let scopeLabel = category === 'all' ? 'All Categories' : category.toUpperCase();
+    if (category === 'accessory' && subCategory !== 'all') {
+      scopeLabel += ` (${subCategory.toUpperCase()})`;
+    }
+    printer.println(`Scope: ${scopeLabel}`);
+    printer.drawLine();
+
+    // ---- Summary Metrics ----
+    printer.alignLeft();
+    printer.bold(true);
+    printer.println('REPLENISHMENT SUMMARY');
+    printer.bold(false);
+    printer.println(twoColumnRow('Products Below Min:', `${products.length} items`));
+    printer.println(twoColumnRow('Total Units to Order:', `+${totalUnitsNeeded} pcs`));
+    if (canViewCosts && totalRestockCost > 0) {
+      printer.println(twoColumnRow('Est. Restock Budget:', fmt(totalRestockCost)));
+    }
+    printer.drawLine();
+
+    // ---- Itemized List (Grouped by Category) ----
+    printer.bold(true);
+    printer.println('ITEMIZED ORDER LIST (BY CATEGORY)');
+    printer.bold(false);
+    printer.drawLine();
+
+    const catRank = { smartphone: 1, tablet: 2, wearable: 3, accessory: 4 };
+    const sortedProducts = [...products].sort((a, b) => {
+      const rankA = catRank[(a.category || '').toLowerCase()] || 99;
+      const rankB = catRank[(b.category || '').toLowerCase()] || 99;
+      if (rankA !== rankB) return rankA - rankB;
+
+      if ((a.category || '').toLowerCase() === 'accessory' && (b.category || '').toLowerCase() === 'accessory') {
+        const subA = a.accessorySubCategory || 'other';
+        const subB = b.accessorySubCategory || 'other';
+        if (subA !== subB) return subA.localeCompare(subB);
+      }
+
+      const nameA = `${a.name || ''} ${a.model || ''}`.toLowerCase();
+      const nameB = `${b.name || ''} ${b.model || ''}`.toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    let currentGroup = '';
+
+    for (let i = 0; i < sortedProducts.length; i++) {
+      const p = sortedProducts[i];
+      let groupName = (p.category || 'other').toUpperCase();
+      if (groupName === 'SMARTPHONE') groupName = 'SMARTPHONES';
+      else if (groupName === 'TABLET') groupName = 'TABLETS';
+      else if (groupName === 'WEARABLE') groupName = 'WEARABLES';
+      else if (groupName === 'ACCESSORY') {
+        const sub = p.accessorySubCategory ? ` - ${p.accessorySubCategory.toUpperCase()}` : '';
+        groupName = `ACCESSORIES${sub}`;
+      }
+
+      if (groupName !== currentGroup) {
+        currentGroup = groupName;
+        printer.newLine();
+        printer.bold(true);
+        printer.println(`[ ${currentGroup} ]`);
+        printer.bold(false);
+        printer.drawLine();
+      }
+
+      const threshold = p.lowStockThreshold || 1;
+      const deficit = Math.max(1, threshold - (p.stock || 0));
+      const fullTitle = `${i + 1}. ${removeAccents(p.name || '')} ${removeAccents(p.model || '')}`.trim();
+
+      printer.bold(true);
+      printer.println(fullTitle.substring(0, 42));
+      printer.bold(false);
+
+      let catSub = p.category || '';
+      if (p.accessorySubCategory) catSub += ` (${p.accessorySubCategory})`;
+      if (p.sku) catSub += ` | ${p.sku}`;
+      printer.println(catSub.substring(0, 42));
+
+      const stockLine = `Stock: ${p.stock}/${threshold}  --> REORDER: +${deficit}`;
+      printer.bold(true);
+      printer.println(stockLine);
+      printer.bold(false);
+
+      if (p.supplier) {
+        printer.println(`Supplier: ${removeAccents(p.supplier).substring(0, 30)}`);
+      }
+      if (canViewCosts && p.costPrice) {
+        printer.println(twoColumnRow(`Unit: ${fmt(p.costPrice)}`, `Subtotal: ${fmt(p.costPrice * deficit)}`));
+      }
+
+      if (i < sortedProducts.length - 1) {
+        printer.drawLine();
+      }
+    }
+
+    printer.drawLine();
+    printer.alignCenter();
+    printer.println('*** END OF REPORT ***');
+    printer.newLine();
+    printer.newLine();
+    printer.newLine();
+
+    if (HAS_CUTTER) {
+      printer.cut();
+    } else {
+      printer.newLine();
+      printer.newLine();
+    }
+
+    await executePrint(printer, PRINTER_NAME);
+    console.log(`[✓] Low Stock Report printed on ${PRINTER_NAME}`);
+
+    return { ok: true, message: 'Low Stock Report printed successfully' };
+  } catch (err) {
+    console.error('[✗] Low Stock Report print failed:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+app.post('/print-low-stock-report', async (req, res) => {
+  const result = await handlePrintLowStockReport(req.body);
+  res.status(result.ok ? 200 : (result.status || 500)).json(result);
 });
 
 /**
@@ -1006,12 +1416,12 @@ app.post('/print-z-report', async (req, res) => {
  *   }]
  * }
  */
-app.post('/print-barcode', async (req, res) => {
+async function handlePrintBarcode(body) {
   try {
-    const { storeName, currency, products } = req.body;
+    const { storeName, currency, products } = body || {};
 
     if (!products || !Array.isArray(products) || products.length === 0) {
-      return res.status(400).json({ ok: false, error: 'Missing products data' });
+      return { ok: false, error: 'Missing products data' };
     }
 
     const fmt = (v) => formatCurrency(v, currency);
@@ -1111,7 +1521,7 @@ app.post('/print-barcode', async (req, res) => {
 
       await executeTSPLPrint(fullTspl, LABEL_PRINTER_NAME);
       console.log(`[✓] Printed ${products.length} barcode label(s) via TSPL on ${LABEL_PRINTER_NAME}`);
-      return res.json({ ok: true, message: 'Barcodes printed successfully' });
+      return { ok: true, message: 'Barcodes printed successfully' };
     }
 
     const printer = createPrinter();
@@ -1178,22 +1588,27 @@ app.post('/print-barcode', async (req, res) => {
     await executePrint(printer, LABEL_PRINTER_NAME);
     console.log(`[✓] Printed ${products.length} barcode label(s) on ${LABEL_PRINTER_NAME}`);
 
-    res.json({ ok: true, message: 'Barcodes printed successfully' });
+    return { ok: true, message: 'Barcodes printed successfully' };
   } catch (err) {
     console.error('[✗] Barcode print failed:', err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    return { ok: false, error: err.message };
   }
+}
+
+app.post('/print-barcode', async (req, res) => {
+  const result = await handlePrintBarcode(req.body);
+  res.status(result.ok ? 200 : (result.status || 500)).json(result);
 });
 
 // ============================================================
 // Print Custom Ticket / Phone Specs Slip (Fully Isolated)
 // ============================================================
-app.post('/print-custom-ticket', async (req, res) => {
+async function handlePrintCustomTicket(body) {
   try {
-    const { storeName, currency = 'DZD', storeAddress, storePhone, ticketData, copies = 1 } = req.body;
+    const { storeName, currency = 'DZD', storeAddress, storePhone, ticketData, copies = 1 } = body || {};
 
     if (!ticketData) {
-      return res.status(400).json({ ok: false, error: 'Missing ticket data' });
+      return { ok: false, error: 'Missing ticket data' };
     }
 
     const numCopies = Math.max(1, Math.min(parseInt(copies || 1, 10), 50));
@@ -1335,7 +1750,7 @@ app.post('/print-custom-ticket', async (req, res) => {
 
         await executeTSPLPrint(tspl, LABEL_PRINTER_NAME);
         console.log(`[✓] Free-text sticker printed (${numCopies} copies, ${labelMm}mm) on ${LABEL_PRINTER_NAME}`);
-        return res.json({ ok: true, message: `Printed ${numCopies} sticker(s) on ${LABEL_PRINTER_NAME}` });
+        return { ok: true, message: `Printed ${numCopies} sticker(s) on ${LABEL_PRINTER_NAME}` };
       }
 
       // ─── Spec-List Sticker (Mirroring Inventory Label Geometry) ──────────
@@ -1474,7 +1889,7 @@ app.post('/print-custom-ticket', async (req, res) => {
 
       await executeTSPLPrint(tspl, LABEL_PRINTER_NAME);
       console.log(`[✓] Custom spec sticker printed (${numCopies} copies, ${labelMm}mm) on ${LABEL_PRINTER_NAME}`);
-      return res.json({ ok: true, message: `Printed ${numCopies} sticker(s) on ${LABEL_PRINTER_NAME}` });
+      return { ok: true, message: `Printed ${numCopies} sticker(s) on ${LABEL_PRINTER_NAME}` };
     }
 
 
@@ -1542,27 +1957,9 @@ app.post('/print-custom-ticket', async (req, res) => {
           printer.newLine();
         }
 
-        await new Promise((resolve, reject) => {
-          try {
-            const buffer = printer.getBuffer();
-            const randomSuffix = Math.random().toString(36).substring(2, 8);
-            const tmpFilePath = path.join(os.tmpdir(), `custom_ticket_free_${Date.now()}_${randomSuffix}.bin`);
-            fs.writeFileSync(tmpFilePath, buffer);
-
-            execFile('lpr', ['-P', PRINTER_NAME, '-o', 'raw', tmpFilePath], (error) => {
-              try { fs.unlinkSync(tmpFilePath); } catch (_e) {}
-              if (error) {
-                reject(new Error(`lpr error: ${error.message}`));
-                return;
-              }
-              resolve();
-            });
-          } catch (err) {
-            reject(err);
-          }
-        });
+        await executePrint(printer, PRINTER_NAME);
       }
-      return res.json({ ok: true, message: `Printed ${numCopies} slip(s) on ${PRINTER_NAME}` });
+      return { ok: true, message: `Printed ${numCopies} slip(s) on ${PRINTER_NAME}` };
     }
 
     for (let c = 0; c < numCopies; c++) {
@@ -1686,69 +2083,99 @@ app.post('/print-custom-ticket', async (req, res) => {
         printer.newLine();
       }
 
-      // Dedicated isolated execution (custom_ticket_ file prefix)
-      await new Promise((resolve, reject) => {
-        try {
-          const buffer = printer.getBuffer();
-          const randomSuffix = Math.random().toString(36).substring(2, 8);
-          const tmpFilePath = path.join(os.tmpdir(), `custom_ticket_${Date.now()}_${randomSuffix}.bin`);
-          fs.writeFileSync(tmpFilePath, buffer);
-
-          execFile('lpr', ['-P', targetPrinter, '-o', 'raw', tmpFilePath], (error) => {
-            try { fs.unlinkSync(tmpFilePath); } catch (_e) {}
-            if (error) {
-              reject(new Error(`lpr error: ${error.message}`));
-              return;
-            }
-            resolve();
-          });
-        } catch (err) {
-          reject(err);
-        }
-      });
+      // Dedicated cross-platform execution (supports Windows raw print and macOS lpr)
+      await executePrint(printer, targetPrinter);
     }
 
     console.log(`[✓] Custom ticket printed (${numCopies} cop${numCopies > 1 ? 'ies' : 'y'}) on ${targetPrinter}`);
-    return res.json({ ok: true, message: `Custom ticket printed successfully on ${targetPrinter}` });
+    return { ok: true, message: `Custom ticket printed successfully on ${targetPrinter}` };
   } catch (err) {
     console.error('[✗] Custom ticket print failed:', err.message);
-    return res.status(500).json({ ok: false, error: err.message });
+    return { ok: false, error: err.message };
   }
+}
+
+app.post('/print-custom-ticket', async (req, res) => {
+  const result = await handlePrintCustomTicket(req.body);
+  res.status(result.ok ? 200 : (result.status || 500)).json(result);
 });
 
 /**
  * POST /calibrate-labels — Recalibrate the label printer's gap sensor
  * Sends TSPL GAPDETECT command to detect label pitch, followed by FORMFEED to sync at the gap.
  */
-app.post('/calibrate-labels', async (req, res) => {
+async function handleCalibrateLabels() {
   try {
     if (!isLabelPrinter(LABEL_PRINTER_NAME)) {
-      return res.status(400).json({ ok: false, error: `Configured printer "${LABEL_PRINTER_NAME}" is not a label printer.` });
+      return { ok: false, status: 400, error: `Configured printer "${LABEL_PRINTER_NAME}" is not a label printer.` };
     }
     // GAPDETECT calibrates the gap sensor; FORMFEED aligns right to the tear/gap line
     const tspl = 'GAPDETECT\r\nFORMFEED\r\n';
     await executeTSPLPrint(tspl, LABEL_PRINTER_NAME);
     console.log(`[✓] Gap sensor calibrated successfully on ${LABEL_PRINTER_NAME}`);
-    return res.json({ ok: true, message: 'Label printer gap sensor calibrated and aligned successfully.' });
+    return { ok: true, message: 'Label printer gap sensor calibrated and aligned successfully.' };
   } catch (err) {
     console.error('[✗] Label calibration failed:', err.message);
-    return res.status(500).json({ ok: false, error: err.message });
+    return { ok: false, error: err.message };
   }
+}
+
+app.post('/calibrate-labels', async (_req, res) => {
+  const result = await handleCalibrateLabels();
+  res.status(result.ok ? 200 : (result.status || 500)).json(result);
 });
 
 // ============================================================
-// Start
+// Start (only when run directly; skip when required by Electron)
 // ============================================================
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log('');
-  console.log('  ┌──────────────────────────────────────────┐');
-  console.log(`  │  🖨️  Print Server running on port ${PORT}     │`);
-  console.log(`  │  Receipt: ${padRight(PRINTER_NAME, 30)}│`);
-  console.log(`  │  Labels:  ${padRight(LABEL_PRINTER_NAME, 30)}│`);
-  console.log(`  │  Cutter:  ${padRight(HAS_CUTTER ? 'Yes' : 'No', 30)}│`);
-  console.log('  │                                          │');
-  console.log(`  │  Health:  http://0.0.0.0:${PORT}/status     │`);
-  console.log('  └──────────────────────────────────────────┘');
-  console.log('');
-});
+function startServer(port) {
+  const listenPort = port || PORT;
+  return new Promise((resolve, reject) => {
+    const server = app.listen(listenPort, '0.0.0.0', () => {
+      console.log('');
+      console.log('  ┌──────────────────────────────────────────┐');
+      console.log(`  │  🖨️  Print Server running on port ${listenPort}     │`);
+      console.log(`  │  Receipt: ${padRight(PRINTER_NAME, 30)}│`);
+      console.log(`  │  Labels:  ${padRight(LABEL_PRINTER_NAME, 30)}│`);
+      console.log(`  │  Cutter:  ${padRight(HAS_CUTTER ? 'Yes' : 'No', 30)}│`);
+      console.log(`  │  Platform: ${padRight(os.platform(), 29)}│`);
+      console.log('  │                                          │');
+      console.log(`  │  Health:  http://0.0.0.0:${listenPort}/status     │`);
+      console.log('  └──────────────────────────────────────────┘');
+      console.log('');
+      resolve(server);
+    });
+
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.log(`[Print Server] Port ${listenPort} is already in use — using existing instance.`);
+        resolve(null);
+      } else {
+        console.warn(`[Print Server] Notice on port ${listenPort}: ${err.message}`);
+        resolve(null);
+      }
+    });
+  });
+}
+
+// Auto-start only when run directly (node server.js), not when require()'d by Electron
+if (require.main === module) {
+  startServer();
+}
+
+// Export for embedding in Electron main process
+module.exports = {
+  app,
+  startServer,
+  PORT,
+  handleStatus,
+  handlePrintReceipt,
+  handlePrintRepairLabel,
+  handlePrintRepairTicket,
+  handlePrintZReport,
+  handlePrintBarcode,
+  handlePrintCustomTicket,
+  handleCalibrateLabels,
+  handlePrintLowStockReport,
+};

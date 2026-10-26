@@ -17,9 +17,12 @@ import {
 } from 'lucide-react';
 import { useRepairStore } from '../../store/repairStore';
 import { useCustomerStore } from '../../store/customerStore';
+import { usePrivacyStore } from '../../store/privacyStore';
 import type { RepairTicket, Customer } from '../../types';
 import styles from './CustomerHistoryWidget.module.css';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { isPhoneMatch, normalizePhoneDigits } from '../../utils/phoneUtils';
+import { isTicketActiveReturnPending } from '../../utils/phoneLifecycle';
 
 interface CustomerHistoryWidgetProps {
   customerId?: string;
@@ -49,11 +52,12 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
   onViewTicket,
   defaultOpen = false,
 }) => {
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
   const { tickets } = useRepairStore();
   const { customers, debts } = useCustomerStore();
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
-  const cleanPhone = (customerPhone || '').replace(/\D/g, '');
+  const cleanPhone = normalizePhoneDigits(customerPhone);
   const cleanName = (customerName || '').trim().toLowerCase();
 
   // 1. Detect matching customer account
@@ -64,26 +68,20 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
       if (found) return found;
     }
 
-    // B. Match by phone if phone has at least 8 digits
-    if (cleanPhone.length >= 8) {
-      const found = customers.find(c => {
-        const cPhone = (c.phone || '').replace(/\D/g, '');
-        return (
-          cPhone &&
-          (cPhone === cleanPhone ||
-            cPhone.endsWith(cleanPhone) ||
-            cleanPhone.endsWith(cPhone))
-        );
-      });
+    // B. Match by phone if phone has at least 7 digits (Single Source of Truth)
+    if (cleanPhone.length >= 7) {
+      const found = customers.find(c =>
+        isPhoneMatch(c.phone, customerPhone) ||
+        (c.normalizedPhone && isPhoneMatch(c.normalizedPhone, customerPhone))
+      );
       if (found) return found;
     }
 
     // C. Match by name and partial phone (>= 6 digits)
     if (cleanName.length >= 2 && cleanPhone.length >= 6) {
       const found = customers.find(c => {
-        const cPhone = (c.phone || '').replace(/\D/g, '');
         const cName = (c.name || '').trim().toLowerCase();
-        const pMatch = cPhone && (cPhone.includes(cleanPhone) || cleanPhone.includes(cPhone));
+        const pMatch = isPhoneMatch(c.phone, customerPhone) || (c.normalizedPhone && isPhoneMatch(c.normalizedPhone, customerPhone));
         const nMatch = cName === cleanName || cName.includes(cleanName) || cleanName.includes(cName);
         return pMatch && nMatch;
       });
@@ -97,22 +95,21 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
     }
 
     return null;
-  }, [customers, customerId, cleanPhone, cleanName]);
+  }, [customers, customerId, customerPhone, cleanPhone, cleanName]);
 
   // 2. Detect matching debts for this customer / phone
   const matchedDebts = useMemo(() => {
-    if (!matchedCustomer && cleanPhone.length < 8 && cleanName.length < 3) return [];
+    if (!matchedCustomer && cleanPhone.length < 7 && cleanName.length < 3) return [];
 
     return debts
       .filter(d => {
         if (matchedCustomer && d.customerId === matchedCustomer.id) return true;
-        const dPhone = (d.customerPhone || '').replace(/\D/g, '');
-        if (cleanPhone.length >= 8 && dPhone && (dPhone === cleanPhone || dPhone.endsWith(cleanPhone))) return true;
+        if (cleanPhone.length >= 7 && isPhoneMatch(d.customerPhone, customerPhone)) return true;
         if (cleanName.length >= 3 && d.customerName.trim().toLowerCase() === cleanName) return true;
         return false;
       })
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [debts, matchedCustomer, cleanPhone, cleanName]);
+  }, [debts, matchedCustomer, customerPhone, cleanPhone, cleanName]);
 
   const activeDebts = useMemo(() => {
     return matchedDebts.filter(d => d.status !== 'paid' && d.remainingBalance > 0);
@@ -121,37 +118,21 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
   // 3. Detect past repair tickets
   const matchedTickets = useMemo(() => {
     if (matchedCustomer) {
-      const custPhone = (matchedCustomer.phone || '').replace(/\D/g, '');
-      const custName = matchedCustomer.name.trim().toLowerCase();
-
       return tickets
         .filter(t => {
           if (currentTicketId && t.id === currentTicketId) return false;
           if (t.customerId && t.customerId === matchedCustomer.id) return true;
-          const tPhone = (t.customerPhone || '').replace(/\D/g, '');
-          const tName = (t.customerName || '').trim().toLowerCase();
-          if (
-            custPhone.length >= 8 &&
-            tPhone &&
-            (tPhone === custPhone || tPhone.endsWith(custPhone) || custPhone.endsWith(tPhone))
-          ) {
-            return true;
-          }
-          if (tName === custName && cleanPhone.length >= 6 && tPhone && tPhone.includes(cleanPhone)) {
-            return true;
-          }
+          if (isPhoneMatch(t.customerPhone, matchedCustomer.phone)) return true;
           return false;
         })
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
 
-    // Otherwise require at least 8 digits phone OR name (>=2) + phone (>=6)
-    if (cleanPhone.length >= 8) {
+    if (cleanPhone.length >= 7) {
       return tickets
         .filter(t => {
           if (currentTicketId && t.id === currentTicketId) return false;
-          const tPhone = (t.customerPhone || '').replace(/\D/g, '');
-          return tPhone && (tPhone === cleanPhone || tPhone.endsWith(cleanPhone) || cleanPhone.endsWith(tPhone));
+          return isPhoneMatch(t.customerPhone, customerPhone);
         })
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
@@ -160,9 +141,8 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
       return tickets
         .filter(t => {
           if (currentTicketId && t.id === currentTicketId) return false;
-          const tPhone = (t.customerPhone || '').replace(/\D/g, '');
           const tName = (t.customerName || '').trim().toLowerCase();
-          const pMatch = tPhone && (tPhone.includes(cleanPhone) || cleanPhone.includes(tPhone));
+          const pMatch = isPhoneMatch(t.customerPhone, customerPhone);
           const nMatch = tName === cleanName || tName.includes(cleanName) || cleanName.includes(tName);
           return pMatch && nMatch;
         })
@@ -170,7 +150,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
     }
 
     return [];
-  }, [tickets, matchedCustomer, cleanPhone, cleanName, currentTicketId]);
+  }, [tickets, matchedCustomer, customerPhone, cleanPhone, cleanName, currentTicketId]);
 
   // 4. Exact status & financial calculation per ticket:
   //    - 'dept': Handed over / taken with unpaid debt
@@ -234,10 +214,12 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
     let exactStatus: TicketComputedStatus['exactStatus'];
     let statusLabel = '';
 
+    const isActivelyReturned = isTicketActiveReturnPending(t, tickets);
+
     if (isDebt && debtAmount > 0) {
       exactStatus = 'dept';
       statusLabel = 'Dept';
-    } else if (t.status === 'completed') {
+    } else if (t.status === 'completed' || (t.status === 'returned' && !isActivelyReturned)) {
       exactStatus = 'taken';
       statusLabel = 'Taken';
     } else if (t.status === 'ready') {
@@ -306,10 +288,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
     });
 
     if (matchedCustomer) {
-      const rawCustomerSpent = matchedCustomer.totalSpent || 0;
-      // Deduct customer debt from raw sales spent so debt is NEVER counted in spent
-      const netPaidPurchases = Math.max(0, rawCustomerSpent - (matchedCustomer.totalDebt || 0));
-      return Math.max(netPaidPurchases, repairsPaid);
+      return matchedCustomer.totalSpent !== undefined ? matchedCustomer.totalSpent : repairsPaid;
     }
 
     return repairsPaid;
@@ -358,13 +337,13 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
 
           {totalSpentAmount > 0 && (
             <span className={styles.headerSpentStat}>
-              · Total Spent: <strong>{formatCurrency(totalSpentAmount)}</strong>
+              · Total Spent: <strong>{formatPrivateCurrency(totalSpentAmount)}</strong>
             </span>
           )}
 
           {hasDebt && (
             <span className={styles.headerDebtStat}>
-              ⚠️ Dept: <strong>{formatCurrency(totalActiveDebt)}</strong>
+              ⚠️ Dept: <strong>{formatPrivateCurrency(totalActiveDebt)}</strong>
             </span>
           )}
         </div>
@@ -407,14 +386,14 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
               <div className={styles.accountRight}>
                 <div className={styles.accountPillSuccess}>
                   <span>Total Spent:</span>
-                  <strong>{formatCurrency(totalSpentAmount)}</strong>
+                  <strong>{formatPrivateCurrency(totalSpentAmount)}</strong>
                 </div>
 
                 {hasDebt ? (
                   <div className={styles.accountPillDebt}>
                     <AlertCircle size={12} />
                     <span>Dept:</span>
-                    <strong>{formatCurrency(totalActiveDebt)}</strong>
+                    <strong>{formatPrivateCurrency(totalActiveDebt)}</strong>
                   </div>
                 ) : (
                   <div className={styles.accountPillGoodStanding}>
@@ -426,7 +405,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
                 {Boolean(matchedCustomer.storeCredit && matchedCustomer.storeCredit > 0) && (
                   <div className={styles.accountPillCredit}>
                     <CreditCard size={12} />
-                    <span>Credit: {formatCurrency(matchedCustomer.storeCredit)}</span>
+                    <span>Credit: {formatPrivateCurrency(matchedCustomer.storeCredit)}</span>
                   </div>
                 )}
               </div>
@@ -440,7 +419,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
                 <AlertTriangle size={13} color="#b91c1c" />
                 <span>Active Depts ({activeDebts.length})</span>
                 <span className={styles.debtsTotalDue}>
-                  Total: {formatCurrency(totalActiveDebt)}
+                  Total: {formatPrivateCurrency(totalActiveDebt)}
                 </span>
               </div>
 
@@ -453,8 +432,46 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
                     </div>
                     <div className={styles.debtItemRight}>
                       <span className={styles.debtDueLabel}>Remaining:</span>
-                      <span className={styles.debtDueValue}>{formatCurrency(d.remainingBalance)}</span>
+                      <span className={styles.debtDueValue}>{formatPrivateCurrency(d.remainingBalance)}</span>
                     </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Customer Registered Devices Vault */}
+          {matchedCustomer?.registeredDevices && matchedCustomer.registeredDevices.length > 0 && (
+            <div className={styles.vaultSection}>
+              <div className={styles.sectionHeaderLabel}>
+                <Sparkles size={12} color="#4f46e5" />
+                <span>Registered Devices Vault ({matchedCustomer.registeredDevices.length})</span>
+              </div>
+
+              <div className={styles.vaultGrid}>
+                {matchedCustomer.registeredDevices.map(dev => (
+                  <div key={dev.id} className={styles.vaultCard}>
+                    <div className={styles.vaultCardLeft}>
+                      <Smartphone size={14} color="#4f46e5" />
+                      <div className={styles.vaultCardDetails}>
+                        <span className={styles.vaultCardName}>
+                          {dev.brand} {dev.model}
+                        </span>
+                        {dev.imei && <span className={styles.vaultCardSub}>IMEI: {dev.imei}</span>}
+                        {dev.notes && <span className={styles.vaultCardNotes}>📝 {dev.notes}</span>}
+                      </div>
+                    </div>
+
+                    {onSelectDevice && (
+                      <button
+                        type="button"
+                        className={styles.repeatBtn}
+                        onClick={() => onSelectDevice(dev.brand, dev.model)}
+                        title={`Select ${dev.brand} ${dev.model} for this ticket`}
+                      >
+                        <span>⚡ Use Device</span>
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -508,7 +525,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
                         {fin.exactStatus === 'returned' && <RotateCcw size={10} />}
                         <span>
                           {fin.exactStatus === 'dept'
-                            ? `Dept: ${formatCurrency(fin.debtAmount)}`
+                            ? `Dept: ${formatPrivateCurrency(fin.debtAmount)}`
                             : fin.exactStatus === 'taken'
                             ? 'Taken (Paid)'
                             : fin.exactStatus === 'completed'
@@ -523,26 +540,60 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
                         🔧 {t.issueDescription}
                       </span>
 
+                      {/* Return and Re-repair notes */}
+                      {t.status === 'returned' && !isActivelyReturned && (
+                        <div style={{
+                          fontSize: '11px',
+                          color: '#15803d',
+                          background: '#f0fdf4',
+                          border: '1px solid #bbf7d0',
+                          padding: '3px 7px',
+                          borderRadius: '4px',
+                          marginTop: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontWeight: 600,
+                        }}>
+                          <CheckCircle2 size={11} /> Return re-repaired & completed
+                        </div>
+                      )}
+
+                      {t.returnReason && (
+                        <div style={{
+                          fontSize: '11px',
+                          color: '#9a3412',
+                          background: '#fff7ed',
+                          border: '1px solid #ffedd5',
+                          padding: '3px 7px',
+                          borderRadius: '4px',
+                          marginTop: '4px',
+                          fontStyle: 'italic',
+                        }}>
+                          <strong>Return Reason:</strong> "{t.returnReason}"
+                        </div>
+                      )}
+
                       {/* Financial Detail for Ticket */}
                       <div className={styles.itemFinancials}>
                         {fin.isDebt ? (
                           <span className={styles.debtCostBreakdown}>
-                            <span className={styles.costTotalText}>Total: {formatCurrency(fin.totalCost)}</span>
+                            <span className={styles.costTotalText}>Total: {formatPrivateCurrency(fin.totalCost)}</span>
                             {fin.paidAmount > 0 && (
-                              <span className={styles.costPaidText}>Paid: {formatCurrency(fin.paidAmount)}</span>
+                              <span className={styles.costPaidText}>Paid: {formatPrivateCurrency(fin.paidAmount)}</span>
                             )}
-                            <span className={styles.costDebtText}>Dept: {formatCurrency(fin.debtAmount)}</span>
+                            <span className={styles.costDebtText}>Dept: {formatPrivateCurrency(fin.debtAmount)}</span>
                           </span>
                         ) : fin.exactStatus === 'taken' ? (
                           <span className={styles.itemCostPaid}>
-                            Paid: {formatCurrency(fin.totalCost)}
+                            Paid: {formatPrivateCurrency(fin.totalCost)}
                           </span>
                         ) : (
                           <span className={styles.itemCost}>
-                            {formatCurrency(fin.totalCost)}
+                            {formatPrivateCurrency(fin.totalCost)}
                             {Boolean(t.depositAmount && t.depositAmount > 0) && (
                               <span className={styles.depositNote}>
-                                {' '}(Deposit: {formatCurrency(t.depositAmount)})
+                                {' '}(Deposit: {formatPrivateCurrency(t.depositAmount)})
                               </span>
                             )}
                           </span>
@@ -588,7 +639,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
                 );
               })}
             </div>
-          ) : matchedCustomer && activeDebts.length === 0 ? (
+          ) : matchedCustomer && activeDebts.length === 0 && (!matchedCustomer.registeredDevices || matchedCustomer.registeredDevices.length === 0) ? (
             <div className={styles.noRepairsNotice}>
               <span>Existing customer account detected. No past repair tickets recorded yet.</span>
             </div>

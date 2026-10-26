@@ -15,7 +15,7 @@ interface PurchasingState {
   fetchData: () => Promise<void>;
   setSearchQuery: (query: string) => void;
   
-  addSupplier: (supplier: Omit<Supplier, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
+  addSupplier: (supplier: Omit<Supplier, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Supplier>;
   updateSupplier: (id: string, updates: Partial<Omit<Supplier, 'id'>>) => Promise<void>;
   deleteSupplier: (id: string) => Promise<void>;
 
@@ -56,6 +56,7 @@ export const usePurchasingStore = create<PurchasingState>((set, get) => ({
       set(state => ({ suppliers: [...state.suppliers, newSupplier] }));
       const user = useAuthStore.getState().user;
       useActivityStore.getState().logActivity('inventory', `Added supplier: ${supplier.name}`, newSupplier.id, user?.id);
+      return newSupplier;
     } catch (error) {
       set({ error: 'Failed to add supplier' });
       throw error;

@@ -12,7 +12,8 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { useAuthStore } from '../../store/authStore';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { useToast } from '../../components/ui/Toast';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { usePrivacyStore } from '../../store/privacyStore';
 import { exportToCSV } from '../../utils/exportUtils';
 import type { PhoneModel, POItem } from '../../types';
 import styles from './RestockAssistant.module.css';
@@ -41,6 +42,7 @@ export const RestockAssistantModal: React.FC<RestockAssistantModalProps> = ({
   const isAdmin = user?.role === 'admin';
   const settings = useSettingsStore();
   const toast = useToast();
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
 
   const [filterType, setFilterType] = useState<'all_needed' | 'out_only' | 'low_only' | 'all'>('all_needed');
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
@@ -353,7 +355,7 @@ Please check stock availability and confirm estimated dispatch time. Thank you!`
         <div className={styles.footerBar} style={{ width: '100%' }}>
           <div className={styles.selectionSummary}>
             <span>Selected: <strong>{metrics.selectedCount}</strong> parts ({metrics.totalUnitsToOrder} units)</span>
-            <span>Estimated Cost: <strong className={styles.summaryTotalVal}>{formatCurrency(metrics.totalEstimatedCost)}</strong></span>
+            <span>Estimated Cost: <strong data-privacy-cost className={[styles.summaryTotalVal, 'privacy-cost'].join(' ')}>{formatPrivateCurrency(metrics.totalEstimatedCost)}</strong></span>
           </div>
 
           <div className={styles.actionButtonsGroup}>
@@ -575,18 +577,19 @@ Please check stock availability and confirm estimated dispatch time. Thank you!`
                           className={styles.numInput}
                         />
                       </td>
-                      <td style={{ textAlign: 'center' }}>
+                      <td style={{ textAlign: 'center' }} data-col="cost">
                         <input
+                          data-privacy-cost
                           type="number"
                           min="0"
                           step="0.5"
                           value={r.unitCost}
                           onChange={e => handleUpdateCost(p.id, parseFloat(e.target.value) || 0)}
-                          className={styles.numInput}
+                          className={[styles.numInput, 'privacy-cost-input'].join(' ')}
                         />
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
-                        {formatCurrency(lineTotal)}
+                      <td data-col="cost" style={{ textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
+                        <span data-privacy-cost className="privacy-cost">{formatPrivateCurrency(lineTotal)}</span>
                       </td>
                     </tr>
                   );

@@ -9,10 +9,53 @@ import {
   where,
   limit
 } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../lib/firebase';
 import type { Customer, CustomerDebtEntry } from '../types';
 
+const CACHED_CUSTOMERS_KEY = '@cached_customers';
+
 export const customerService = {
+  /**
+   * Cache customers locally in AsyncStorage
+   */
+  cacheCustomers: async (customers: Customer[]): Promise<void> => {
+    try {
+      await AsyncStorage.setItem(CACHED_CUSTOMERS_KEY, JSON.stringify(customers));
+    } catch (e) {
+      console.warn('[CustomerService] Failed to cache customers:', e);
+    }
+  },
+
+  /**
+   * Get cached customers from AsyncStorage
+   */
+  getCachedCustomers: async (): Promise<Customer[]> => {
+    try {
+      const raw = await AsyncStorage.getItem(CACHED_CUSTOMERS_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Fetch all customers (from Firestore or local cache)
+   */
+  getAll: async (): Promise<Customer[]> => {
+    try {
+      const snap = await getDocs(query(collection(db, 'customers'), limit(200)));
+      const list: Customer[] = [];
+      snap.forEach(d => {
+        list.push({ id: d.id, ...d.data() } as Customer);
+      });
+      await customerService.cacheCustomers(list);
+      return list;
+    } catch (err) {
+      console.warn('[CustomerService] Failed to fetch customers from server, using local cache:', err);
+      return customerService.getCachedCustomers();
+    }
+  },
   /**
    * Look up a customer by phone number (exact or digit suffix match)
    */
@@ -79,8 +122,20 @@ export const customerService = {
       joinDate: now,
     };
 
-    const docRef = await addDoc(collection(db, 'customers'), newCustomerData);
-    return { id: docRef.id, ...newCustomerData };
+    try {
+      const docRef = await addDoc(collection(db, 'customers'), newCustomerData);
+      const createdCustomer = { id: docRef.id, ...newCustomerData };
+      const cached = await customerService.getCachedCustomers();
+      await customerService.cacheCustomers([createdCustomer, ...cached.filter(c => c.id !== createdCustomer.id)]);
+      return createdCustomer;
+    } catch (createErr) {
+      console.warn('[CustomerService] Offline fallback: creating local customer profile:', createErr);
+      const offlineId = `offline_cust_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const offlineCustomer: Customer = { id: offlineId, ...newCustomerData };
+      const cached = await customerService.getCachedCustomers();
+      await customerService.cacheCustomers([offlineCustomer, ...cached]);
+      return offlineCustomer;
+    }
   },
 
   /**

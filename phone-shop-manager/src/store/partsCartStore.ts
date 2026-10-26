@@ -436,13 +436,9 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
 
       const saved = await transactionService.save(txData);
 
-      // Problem 3 fix: Update retail customer spending statistics
-      if (matchedCust && total > 0) {
-        await customerStore.updateCustomer(matchedCust.id, {
-          totalPurchases: (matchedCust.totalPurchases || 0) + 1,
-          totalSpent: (matchedCust.totalSpent || 0) + total,
-          lastVisitDate: now,
-        }).catch(console.error);
+      // Authoritative update of customer statistics
+      if (matchedCust) {
+        customerStore.recalculateCustomer(matchedCust.id).catch(console.error);
       }
 
       // Immediate stock deduction in Inventory
@@ -563,13 +559,9 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
 
       const saved = await transactionService.save(txData);
 
-      // 3. Update customer purchase stats (totalPurchases, totalSpent, lastVisitDate)
+      // 3. Update customer purchase stats (Authoritative recalculation)
       try {
-        await useCustomerStore.getState().updateCustomer(customer.id, {
-          totalPurchases: (customer.totalPurchases || 0) + 1,
-          totalSpent: (customer.totalSpent || 0) + total,
-          lastVisitDate: now,
-        });
+        useCustomerStore.getState().recalculateCustomer(customer.id).catch(console.error);
       } catch (err) {
         console.error('Failed to update customer purchase stats:', err);
       }

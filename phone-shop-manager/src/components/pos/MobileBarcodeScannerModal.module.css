@@ -1,0 +1,114 @@
+.modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.viewfinderContainer {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  max-height: 340px;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.targetBox {
+  width: 70%;
+  height: 55%;
+  border: 2px solid var(--color-primary, #6366f1);
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  position: relative;
+}
+
+.scanLine {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--color-primary, #6366f1);
+  box-shadow: 0 0 8px var(--color-primary, #6366f1);
+  animation: scanAnim 2s infinite ease-in-out alternate;
+}
+
+@keyframes scanAnim {
+  0% { top: 4%; }
+  100% { top: 96%; }
+}
+
+.successOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(16, 185, 129, 0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  gap: 8px;
+  padding: 16px;
+  text-align: center;
+  z-index: 10;
+  animation: fadeIn 0.2s ease;
+}
+
+.successTitle {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.successProduct {
+  font-size: 13px;
+  opacity: 0.95;
+}
+
+.manualRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.manualInput {
+  flex: 1;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-on-surface);
+  font-size: 14px;
+}
+
+.errorBanner {
+  background: var(--color-error-container, #fee2e2);
+  color: var(--color-error, #b91c1c);
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

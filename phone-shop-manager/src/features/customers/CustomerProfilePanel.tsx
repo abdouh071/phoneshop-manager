@@ -34,10 +34,13 @@ import { MergeCustomersModal } from './MergeCustomersModal';
 import { NewTicketModal } from '../repairs/NewTicketModal';
 import { PrintRepairTicketModal } from '../repairs/PrintRepairTicketModal';
 import styles from './CustomerProfile.module.css';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { usePrivacyStore } from '../../store/privacyStore';
 import { Customer360Timeline } from './Customer360Timeline';
 import { CustomerActivityLogList } from './CustomerActivityLogList';
 import { isDebtOverdue, getDaysOverdue, buildWhatsAppDebtReminderUrl } from '../../utils/debtAlerts';
+import { calculateCustomerFinancials } from '../../utils/customerFinancials';
+import { isTicketActiveReturnPending } from '../../utils/phoneLifecycle';
 
 interface CustomerProfilePanelProps {
   customer: Customer | null;
@@ -54,6 +57,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
   onClose,
   onNewRepair,
 }) => {
+  const isPrivacyActive = usePrivacyStore((s) => s.isPrivacyActive);
   const { transactions, setCustomerName } = useCartStore();
   const { invoices, fetchInvoices } = usePartsCartStore();
   const { tickets, deleteTicket, deleteDeviceFromCustomer, updateDeviceForCustomer } = useRepairStore();
@@ -408,6 +412,12 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
   const totalDebtBalance = customer ? getCustomerDebtTotal(customer.id) : 0;
   const customerLogs = customer ? getCustomerLogs(customer.id) : [];
 
+  // Authoritative real-time customer financials
+  const customerFinancials = useMemo(() => {
+    if (!customer) return { totalSpent: 0, totalPurchases: 0, totalDebt: 0, ticketsCount: 0 };
+    return calculateCustomerFinancials(customer, customerTickets, customerTxs, customerDebts);
+  }, [customer, customerTickets, customerTxs, customerDebts]);
+
   // Device Fleet calculation (combines repair tickets + registered devices)
   const deviceStats = useMemo(() => {
     if (!customer) return [];
@@ -467,14 +477,24 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
 
   const handleStartSale = () => {
     setCustomerName(customer.name);
-    toast.success('Customer Attached', `${customer.name} attached to the active cart.`);
+    if (customer.wholesaleDiscountPercent && customer.wholesaleDiscountPercent > 0) {
+      useCartStore.getState().setDiscount(customer.wholesaleDiscountPercent);
+      toast.success('B2B Discount Applied', `${customer.name} attached with ${customer.wholesaleDiscountPercent}% wholesale discount.`);
+    } else {
+      toast.success('Customer Attached', `${customer.name} attached to the active cart.`);
+    }
     onClose();
     navigate('/pos');
   };
 
   const handleStartPartsOrder = () => {
     usePartsCartStore.getState().setSelectedCustomer(customer);
-    toast.success('B2B Account Attached', `${customer.shopName || customer.name} attached for parts order.`);
+    if (customer.wholesaleDiscountPercent && customer.wholesaleDiscountPercent > 0) {
+      usePartsCartStore.getState().setDiscount(customer.wholesaleDiscountPercent);
+      toast.success('B2B Discount Applied', `${customer.shopName || customer.name} attached with ${customer.wholesaleDiscountPercent}% wholesale discount.`);
+    } else {
+      toast.success('B2B Account Attached', `${customer.shopName || customer.name} attached for parts order.`);
+    }
     onClose();
     navigate(`/parts?b2bCustomer=${customer.id}`);
   };
@@ -491,131 +511,160 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         isOpen={isOpen}
         onClose={onClose}
         title="Customer Profile"
-        width="md"
+        width="xl"
       >
         <div className={styles.container}>
           {/* Header Card with Quick Actions */}
           <div className={styles.header}>
-            <div className={styles.headerLeft}>
-              <div className={styles.avatar} style={customer.shopName ? { background: '#eff6ff', color: '#2563eb' } : undefined}>
-                {customer.shopName ? <Store size={22} /> : customer.name[0]}
-              </div>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <h2 className={styles.name}>{customer.shopName ? customer.shopName : customer.name}</h2>
-                  {customer.shopName && (
-                    <span style={{
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      background: '#dbeafe',
-                      color: '#1e40af',
-                      padding: '2px 8px',
-                      borderRadius: '6px',
-                    }}>
-                      B2B Shop
-                    </span>
-                  )}
+            <div className={styles.headerTop}>
+              <div className={styles.headerLeft}>
+                <div className={styles.avatar} style={customer.shopName ? { background: '#eff6ff', color: '#2563eb' } : undefined}>
+                  {customer.shopName ? <Store size={22} /> : customer.name[0]}
                 </div>
-                {customer.shopName && (
-                  <p style={{ fontSize: '12.5px', color: '#64748b', margin: '2px 0 4px 0' }}>
-                    Contact: <strong>{customer.name}</strong>
-                  </p>
-                )}
-                <div className={styles.contactRow}>
-                  <a href={`tel:${customer.phone}`} className={styles.contactItem}>
-                    <Phone size={13} /> {customer.phone}
-                  </a>
-                  {customer.email && (
-                    <a href={`mailto:${customer.email}`} className={styles.contactItem}>
-                      <Mail size={13} /> {customer.email}
-                    </a>
-                  )}
-                </div>
-                {customer.creditLimit && customer.creditLimit > 0 && (
-                  <div style={{ fontSize: '11.5px', color: '#475569', marginTop: '3px' }}>
-                    Credit Limit: <strong>{formatCurrency(customer.creditLimit)}</strong>
+                <div className={styles.headerInfo}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <h2 className={styles.name}>{customer.shopName ? customer.shopName : customer.name}</h2>
+                    {customer.shopName && (
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        background: '#dbeafe',
+                        color: '#1e40af',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                      }}>
+                        B2B Shop
+                      </span>
+                    )}
+                    {customer.wholesaleDiscountPercent && customer.wholesaleDiscountPercent > 0 && (
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        background: '#dcfce7',
+                        color: '#15803d',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                      }} title={`Automatic ${customer.wholesaleDiscountPercent}% wholesale discount applied in POS and Parts`}>
+                        🏷️ {customer.wholesaleDiscountPercent}% Wholesale
+                      </span>
+                    )}
+                    {customer.id.startsWith('offline_') && (
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        background: '#fef3c7',
+                        color: '#b45309',
+                        border: '1px solid #fde68a',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }} title="Created offline. Queued to sync to Firestore automatically.">
+                        ☁️ Offline (Queued)
+                      </span>
+                    )}
                   </div>
-                )}
+                  {customer.shopName && (
+                    <p style={{ fontSize: '12.5px', color: '#64748b', margin: '2px 0 4px 0' }}>
+                      Contact: <strong>{customer.name}</strong>
+                    </p>
+                  )}
+                  <div className={styles.contactRow}>
+                    <a href={`tel:${customer.phone}`} className={styles.contactItem}>
+                      <Phone size={13} /> {customer.phone}
+                    </a>
+                    {customer.email && (
+                      <a href={`mailto:${customer.email}`} className={styles.contactItem}>
+                        <Mail size={13} /> {customer.email}
+                      </a>
+                    )}
+                  </div>
+                  {customer.creditLimit && customer.creditLimit > 0 && (
+                    <div style={{ fontSize: '11.5px', color: '#475569', marginTop: '3px' }}>
+                      Credit Limit: <strong style={{ color: '#2563eb' }}>{formatPrivateCurrency(customer.creditLimit)}</strong>
+                    </div>
+                  )}
+                  {(customer.rc || customer.nif || customer.nis || customer.art) && (
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {customer.rc && <span>RC: <strong style={{ color: '#334155' }}>{customer.rc}</strong></span>}
+                      {customer.nif && <span>NIF: <strong style={{ color: '#334155' }}>{customer.nif}</strong></span>}
+                      {customer.nis && <span>NIS: <strong style={{ color: '#334155' }}>{customer.nis}</strong></span>}
+                      {customer.art && <span>Art: <strong style={{ color: '#334155' }}>{customer.art}</strong></span>}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
 
-            <div className={styles.headerActions}>
-              <a
-                href={`https://wa.me/${custPhone}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={[styles.actionBtn, styles.actionBtnWa].join(' ')}
-                title="Message on WhatsApp"
-              >
-                <MessageCircle size={14} /> WA
-              </a>
-              <button
-                type="button"
-                className={styles.actionBtn}
-                onClick={() => setIsStatementOpen(true)}
-                style={{ background: '#f8fafc', color: '#0f172a', borderColor: '#cbd5e1' }}
-                title="Generate Account Statement (Relevé de Compte / Ledger)"
-              >
-                <FileText size={14} /> Statement
-              </button>
-              {permissions.repairs && (
-                <button
-                  type="button"
-                  className={[styles.actionBtn, styles.actionBtnPrimary].join(' ')}
-                  onClick={handleStartRepair}
-                  title="New Repair Ticket"
+              <div className={styles.headerActions}>
+                <a
+                  href={`https://wa.me/${custPhone}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={[styles.actionBtn, styles.actionBtnWa].join(' ')}
+                  title="Message on WhatsApp"
                 >
-                  <Wrench size={14} /> Repair
-                </button>
-              )}
-              {permissions.inventory_parts && (
+                  <MessageCircle size={14} /> WA
+                </a>
                 <button
                   type="button"
                   className={styles.actionBtn}
-                  onClick={handleStartPartsOrder}
-                  style={{ background: '#eff6ff', color: '#1d4ed8', borderColor: '#bfdbfe' }}
-                  title="New Parts Order"
+                  onClick={() => setIsStatementOpen(true)}
+                  style={{ background: '#f8fafc', color: '#0f172a', borderColor: '#cbd5e1' }}
+                  title="Generate Account Statement (Relevé de Compte / Ledger)"
                 >
-                  <Store size={14} /> Parts
+                  <FileText size={14} /> Statement
                 </button>
-              )}
-              <button
-                type="button"
-                className={styles.actionBtn}
-                onClick={handleStartSale}
-                title="New POS Sale"
-              >
-                <ShoppingCart size={14} /> POS
-              </button>
-              <button
-                type="button"
-                className={styles.actionBtn}
-                onClick={() => {
-                  setNewPhoneBrand('');
-                  setNewPhoneModel('');
-                  setNewPhoneImei('');
-                  setNewPhoneNotes('');
-                  setCreateTicketForNewPhone(false);
-                  setIsAddPhoneOpen(true);
-                }}
-                style={{ background: '#f5f3ff', color: '#6d28d9', borderColor: '#ddd6fe' }}
-                title="Register New Phone to Customer Account"
-              >
-                <Smartphone size={14} /> + Phone
-              </button>
+                {permissions.repairs && (
+                  <button
+                    type="button"
+                    className={[styles.actionBtn, styles.actionBtnPrimary].join(' ')}
+                    onClick={handleStartRepair}
+                    title="New Repair Ticket"
+                  >
+                    <Wrench size={14} /> Repair
+                  </button>
+                )}
+                {permissions.inventory_parts && (
+                  <button
+                    type="button"
+                    className={styles.actionBtn}
+                    onClick={handleStartPartsOrder}
+                    style={{ background: '#eff6ff', color: '#1d4ed8', borderColor: '#bfdbfe' }}
+                    title="New Parts Order"
+                  >
+                    <Store size={14} /> Parts
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={styles.actionBtn}
+                  onClick={handleStartSale}
+                  title="New POS Sale"
+                >
+                  <ShoppingCart size={14} /> POS
+                </button>
+                <button
+                  type="button"
+                  className={styles.actionBtn}
+                  onClick={() => {
+                    setNewPhoneBrand('');
+                    setNewPhoneModel('');
+                    setNewPhoneImei('');
+                    setNewPhoneNotes('');
+                    setCreateTicketForNewPhone(false);
+                    setIsAddPhoneOpen(true);
+                  }}
+                  style={{ background: '#f5f3ff', color: '#6d28d9', borderColor: '#ddd6fe' }}
+                  title="Register New Phone to Customer Account"
+                >
+                  <Smartphone size={14} /> + Phone
+                </button>
+              </div>
             </div>
 
             {/* Account Operations Toolbar */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              flexWrap: 'wrap',
-              paddingTop: '10px',
-              marginTop: '10px',
-              borderTop: '1px dashed #e2e8f0',
-              width: '100%',
-            }}>
+            <div className={styles.headerOperations}>
               <button
                 type="button"
                 onClick={() => setIsSwitchTypeOpen(true)}
@@ -689,35 +738,30 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
           </div>
 
           {/* KPI Summary (with Store Credit if available) */}
-          <div
-            className={styles.stats}
-            style={{
-              gridTemplateColumns: (customer.storeCredit || 0) > 0 ? 'repeat(5, 1fr)' : 'repeat(4, 1fr)',
-            }}
-          >
+          <div className={styles.stats}>
             <div className={styles.statBox}>
               <span className={styles.statLabel}>Total Spent</span>
-              <span className={styles.statValue}>{formatCurrency(customer.totalSpent)}</span>
+              <span className={styles.statValue}>{formatPrivateCurrency(customerFinancials.totalSpent)}</span>
             </div>
             <div className={styles.statBox}>
               <span className={styles.statLabel}>Orders</span>
-              <span className={styles.statValue}>{customer.totalPurchases}</span>
+              <span className={styles.statValue}>{customerFinancials.totalPurchases}</span>
             </div>
             <div className={styles.statBox}>
               <span className={styles.statLabel}>Repairs</span>
               <span className={styles.statValue}>{customerTickets.length}</span>
             </div>
-            <div className={styles.statBox} style={{ background: totalDebtBalance > 0 ? '#fef2f2' : undefined, borderColor: totalDebtBalance > 0 ? '#fecaca' : undefined }}>
-              <span className={styles.statLabel} style={{ color: totalDebtBalance > 0 ? '#991b1b' : undefined }}>Debt Balance</span>
-              <span className={styles.statValue} style={{ color: totalDebtBalance > 0 ? '#dc2626' : undefined }}>
-                {formatCurrency(totalDebtBalance)}
+            <div className={styles.statBox} style={{ background: customerFinancials.totalDebt > 0 ? '#fef2f2' : undefined, borderColor: customerFinancials.totalDebt > 0 ? '#fecaca' : undefined }}>
+              <span className={styles.statLabel} style={{ color: customerFinancials.totalDebt > 0 ? '#991b1b' : undefined }}>Debt Balance</span>
+              <span className={styles.statValue} style={{ color: customerFinancials.totalDebt > 0 ? '#dc2626' : undefined }}>
+                {formatPrivateCurrency(customerFinancials.totalDebt)}
               </span>
             </div>
             {(customer.storeCredit || 0) > 0 && (
               <div className={styles.statBox} style={{ background: '#ecfdf5', borderColor: '#a7f3d0' }}>
                 <span className={styles.statLabel} style={{ color: '#065f46' }}>🎟️ Store Credit (Avoir)</span>
                 <span className={styles.statValue} style={{ color: '#059669' }}>
-                  {formatCurrency(customer.storeCredit || 0)}
+                  {formatPrivateCurrency(customer.storeCredit || 0)}
                 </span>
               </div>
             )}
@@ -828,7 +872,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                     )}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed #e2e8f0', flexWrap: 'wrap', gap: '6px' }}>
                       <span className={styles.deviceSpent}>
-                        {data.totalSpent > 0 ? `Total: ${formatCurrency(data.totalSpent)}` : 'No Repair Cost'}
+                        {data.totalSpent > 0 ? `Total: ${formatPrivateCurrency(data.totalSpent)}` : 'No Repair Cost'}
                       </span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                         {permissions.repairs && (
@@ -991,7 +1035,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                 <div className={styles.debtSummaryBanner}>
                   <div className={styles.debtSummaryLeft}>
                     <span className={styles.debtSummaryLabel}>Total Outstanding Debt</span>
-                    <p className={styles.debtSummaryValue}>{formatCurrency(totalDebtBalance)}</p>
+                    <p className={styles.debtSummaryValue}>{formatPrivateCurrency(totalDebtBalance)}</p>
                   </div>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <button
@@ -1024,7 +1068,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                     const daysLate = getDaysOverdue(debt.dueDate);
 
                     return (
-                      <div key={debt.id} className={styles.debtCard} style={overdue ? { borderColor: '#fca5a5', background: '#fffafa' } : {}}>
+                      <div key={debt.id} className={styles.debtCard} data-privacy-client-financial="true" style={overdue ? { borderColor: '#fca5a5', background: '#fffafa' } : {}}>
                         {editingDebtId === debt.id ? (
                           /* ── Inline Edit Mode ── */
                           <div className={styles.debtEditForm}>
@@ -1043,7 +1087,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                               <label className={styles.debtEditLabel}>Total Amount (DH)</label>
                               <input
                                 type="number"
-                                className={styles.debtEditInput}
+                                className={`${styles.debtEditInput} privacy-cost-input`}
                                 value={editDebtAmount}
                                 onChange={e => setEditDebtAmount(e.target.value)}
                                 placeholder="0.00"
@@ -1060,10 +1104,10 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                                   const newName = editDebtName.trim();
                                   if (!newName) { toast.error('Validation', 'Item name cannot be empty.'); return; }
                                   if (isNaN(newAmount) || newAmount < 0) { toast.error('Validation', 'Amount must be a valid positive number.'); return; }
-                                  if (newAmount < debt.amountPaid) { toast.error('Validation', `Amount cannot be less than already paid (${formatCurrency(debt.amountPaid)}).`); return; }
+                                  if (newAmount < debt.amountPaid) { toast.error('Validation', `Amount cannot be less than already paid (${formatPrivateCurrency(debt.amountPaid)}).`); return; }
                                   try {
                                     await updateDebtAmount(debt.id, newAmount, newName);
-                                    toast.success('Debt Updated', `Updated to "${newName}" — ${formatCurrency(newAmount)}`);
+                                    toast.success('Debt Updated', `Updated to "${newName}" — ${formatPrivateCurrency(newAmount)}`);
                                     setEditingDebtId(null);
                                   } catch {
                                     toast.error('Error', 'Failed to update debt record.');
@@ -1102,7 +1146,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                             ) : overdue ? (
                               <span className={styles.debtBadgeOverdue}>🔴 OVERDUE ({daysLate}d late)</span>
                             ) : debt.status === 'partially_paid' ? (
-                              <span className={styles.debtBadgePartial}>🟡 Partial ({formatCurrency(debt.remainingBalance)} left)</span>
+                              <span className={styles.debtBadgePartial}>🟡 Partial ({formatPrivateCurrency(debt.remainingBalance)} left)</span>
                             ) : (
                               <span className={styles.debtBadgeUnpaid}>🚨 Unpaid</span>
                             )}
@@ -1119,9 +1163,9 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                             <div className={styles.debtProgressBar} style={{ width: `${pct}%`, background: overdue ? '#dc2626' : '#16a34a' }} />
                           </div>
                           <div className={styles.debtNumbersRow} style={{ marginTop: '4px' }}>
-                            <span>Paid: {formatCurrency(debt.amountPaid)} ({Math.round(pct)}%)</span>
+                            <span>Paid: {formatPrivateCurrency(debt.amountPaid)} ({Math.round(pct)}%)</span>
                             <span style={{ fontWeight: 700, color: debt.remainingBalance > 0 ? '#dc2626' : '#16a34a' }}>
-                              Balance Owed: {formatCurrency(debt.remainingBalance)}
+                              Balance Owed: {formatPrivateCurrency(debt.remainingBalance)}
                             </span>
                           </div>
                         </div>
@@ -1131,9 +1175,9 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           <div className={styles.paymentHistoryList}>
                             <p className={styles.paymentHistoryTitle}>Payment History ({debt.payments.length})</p>
                             {debt.payments.map(pay => (
-                              <div key={pay.id} className={styles.paymentHistoryRow}>
+                              <div key={pay.id} className={styles.paymentHistoryRow} data-privacy-client-financial="true">
                                 <span>{formatDate(pay.date)} · {pay.method.toUpperCase()} {pay.note ? `(${pay.note})` : ''}</span>
-                                <strong style={{ color: '#16a34a' }}>+{formatCurrency(pay.amount)}</strong>
+                                <strong style={{ color: '#16a34a' }}>+{formatPrivateCurrency(pay.amount)}</strong>
                               </div>
                             ))}
                           </div>
@@ -1141,7 +1185,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
 
                         <div className={styles.debtActionsRow}>
                           <span style={{ fontSize: '11.5px', color: '#64748b' }}>
-                            Total: {formatCurrency(debt.totalAmount)}
+                            Total: {formatPrivateCurrency(debt.totalAmount)}
                           </span>
 
                           <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
@@ -1259,7 +1303,15 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                     No repair tickets logged for this customer yet.
                   </div>
                 ) : (
-                  customerTickets.map(tk => (
+                  customerTickets.map(tk => {
+                    const isActivelyReturned = isTicketActiveReturnPending(tk, tickets);
+                    const effectiveStatus = (tk.status === 'returned' && !isActivelyReturned) ? 'completed' : tk.status;
+                    const totalCost = tk.actualCost ?? tk.estimatedCost ?? 0;
+                    const deposit = tk.depositAmount || 0;
+                    const paid = tk.paidAmount ?? deposit;
+                    const debt = Math.max(0, totalCost - paid);
+
+                    return (
                     <div
                       key={tk.id}
                       className={styles.ticketCard}
@@ -1271,9 +1323,21 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                       title="Click to view full repair ticket details on Workshop Board"
                     >
                       <div className={styles.ticketCardHeader}>
-                        <span className={styles.ticketNumber}>#{tk.ticketNumber}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span className={styles.ticketNumber}>#{tk.ticketNumber}</span>
+                          {tk.isReturn && (
+                            <span style={{ background: '#fef08a', color: '#854d0e', fontSize: '10px', padding: '2px 5px', borderRadius: '4px', fontWeight: 600 }}>
+                              🔁 RETURN
+                            </span>
+                          )}
+                          {tk.status === 'returned' && !isActivelyReturned && (
+                            <span style={{ background: '#dcfce7', color: '#166534', fontSize: '10px', padding: '2px 5px', borderRadius: '4px', fontWeight: 600 }}>
+                              ✅ RETURN RESOLVED
+                            </span>
+                          )}
+                        </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                          <RepairStatusBadge status={tk.status} />
+                          <RepairStatusBadge status={effectiveStatus} />
                           <button
                             type="button"
                             onClick={(e) => {
@@ -1342,11 +1406,47 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                       </div>
                       <p className={styles.ticketDevice}>{tk.deviceBrand} {tk.deviceModel}</p>
                       <p className={styles.ticketIssue}>{tk.issueDescription}</p>
+
+                      {/* Return reason banner if returned */}
+                      {tk.returnReason && (
+                        <div style={{
+                          fontSize: '11.5px',
+                          color: '#9a3412',
+                          background: '#fff7ed',
+                          border: '1px solid #ffedd5',
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          margin: '4px 0',
+                          fontStyle: 'italic',
+                        }}>
+                          <strong>Return Reason:</strong> "{tk.returnReason}"
+                        </div>
+                      )}
+
                       <div className={styles.ticketFooter}>
-                        <span className={styles.ticketDate}>{formatDate(tk.createdAt)}</span>
-                        <span className={styles.ticketCost}>
-                          {tk.actualCost ? formatCurrency(tk.actualCost) : `Est. ${formatCurrency(tk.estimatedCost)}`}
+                        <span className={styles.ticketDate}>
+                          Brought: {formatDate(tk.createdAt)}
+                          {tk.completedAt && (
+                            <span style={{ color: '#059669', marginLeft: '5px' }}>
+                              · Taken: {formatDate(tk.completedAt)}
+                            </span>
+                          )}
                         </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                          <span className={styles.ticketCost}>
+                            {tk.actualCost ? formatPrivateCurrency(tk.actualCost) : `Est. ${formatPrivateCurrency(tk.estimatedCost)}`}
+                          </span>
+                          {deposit > 0 && (
+                            <span style={{ fontSize: '10.5px', color: '#16a34a' }}>
+                              Deposit: {formatPrivateCurrency(deposit)}
+                            </span>
+                          )}
+                          {debt > 0 && (
+                            <span style={{ fontSize: '10.5px', color: '#dc2626', fontWeight: 600 }}>
+                              ⚠️ Dept: {formatPrivateCurrency(debt)}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div style={{
                         marginTop: '8px',
@@ -1364,7 +1464,8 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                         </span>
                       </div>
                     </div>
-                  ))
+                  );
+                })
                 )}
               </>
             )}
@@ -1412,7 +1513,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                       {tx.items.map((item, idx) => (
                         <div key={idx} className={styles.saleItemRow}>
                           <span>{item.quantity}x {item.product.name} {item.product.model}</span>
-                          <span>{formatCurrency(item.product.price * item.quantity)}</span>
+                          <span>{formatPrivateCurrency(item.product.price * item.quantity)}</span>
                         </div>
                       ))}
                     </div>
@@ -1432,7 +1533,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                       </div>
 
                       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <span className={styles.ticketCost} style={{ fontWeight: 800 }}>{formatCurrency(tx.total)}</span>
+                        <span className={styles.ticketCost} style={{ fontWeight: 800 }}>{formatPrivateCurrency(tx.total)}</span>
 
                         <button
                           type="button"
@@ -1555,7 +1656,18 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         isOpen={!!txRequiringUnlock}
         onClose={() => setTxRequiringUnlock(null)}
         onSuccess={handleUnlockSuccess}
-        actionName={txRequiringUnlock?.purpose === 'edit' ? 'edit a past invoice/receipt' : 'refund a past invoice/receipt'}
+        actionName={txRequiringUnlock?.purpose === 'edit'
+          ? `Edit past receipt #${txRequiringUnlock.tx.invoiceNumber || txRequiringUnlock.tx.id.slice(0, 8)} for ${customer.name}`
+          : `Refund past receipt #${txRequiringUnlock?.tx.invoiceNumber || txRequiringUnlock?.tx.id.slice(0, 8)} for ${customer.name}`}
+        actionType={txRequiringUnlock?.purpose === 'edit' ? 'pos_edit_receipt' : 'pos_refund_transaction'}
+        targetId={txRequiringUnlock?.tx.id}
+        actionData={txRequiringUnlock ? {
+          itemType: 'transaction',
+          customerName: customer.name,
+          invoiceNumber: txRequiringUnlock.tx.invoiceNumber || txRequiringUnlock.tx.id.slice(0, 8),
+          total: txRequiringUnlock.tx.total,
+          itemCount: txRequiringUnlock.tx.items?.length || 0,
+        } : undefined}
       />
 
       {/* Admin Unlock Modal for Debt Deletion */}
@@ -1569,7 +1681,15 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
             setDebtRequiringUnlock(null);
           }
         }}
-        actionName="delete customer debt record"
+        actionName={`Delete debt record for ${customer.name} ("${debtRequiringUnlock?.productOrService || 'Debt'}")`}
+        actionType="customer_delete_debt"
+        targetId={debtRequiringUnlock?.id}
+        actionData={debtRequiringUnlock ? {
+          customerName: customer.name,
+          itemName: debtRequiringUnlock.productOrService,
+          price: debtRequiringUnlock.remainingBalance,
+          totalAmount: debtRequiringUnlock.totalAmount,
+        } : undefined}
       />
 
       {/* Problem 2 fix: Admin Unlock Modal for Adding Debt */}
@@ -1580,7 +1700,14 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
           setDebtAddRequiringUnlock(false);
           setIsAddDebtOpen(true);
         }}
-        actionName="add a debt record to customer account"
+        actionName={`Add debt record to ${customer.name}'s account`}
+        actionType="customer_add_debt"
+        targetId={customer.id}
+        actionData={{
+          customerName: customer.name,
+          currentDebt: customer.debt,
+          creditLimit: customer.creditLimit,
+        }}
       />
 
       {/* Problem 2 fix: Admin Unlock Modal for Recording Payment */}
@@ -1593,7 +1720,15 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
           }
           setDebtPaymentRequiringUnlock(null);
         }}
-        actionName="record a payment on customer debt"
+        actionName={`Record payment on ${customer.name}'s debt ("${debtPaymentRequiringUnlock?.productOrService || 'Debt'}")`}
+        actionType="customer_record_payment"
+        targetId={debtPaymentRequiringUnlock?.id}
+        actionData={debtPaymentRequiringUnlock ? {
+          customerName: customer.name,
+          itemName: debtPaymentRequiringUnlock.productOrService,
+          price: debtPaymentRequiringUnlock.remainingBalance,
+          totalAmount: debtPaymentRequiringUnlock.totalAmount,
+        } : undefined}
       />
 
       {/* Problem 2 fix: Admin Unlock Modal for Editing Debt */}
@@ -1608,7 +1743,15 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
           }
           setDebtEditRequiringUnlock(null);
         }}
-        actionName="edit a debt record amount"
+        actionName={`Edit debt record for ${customer.name} ("${debtEditRequiringUnlock?.productOrService || 'Debt'}")`}
+        actionType="customer_edit_debt"
+        targetId={debtEditRequiringUnlock?.id}
+        actionData={debtEditRequiringUnlock ? {
+          customerName: customer.name,
+          itemName: debtEditRequiringUnlock.productOrService,
+          price: debtEditRequiringUnlock.totalAmount,
+          remainingBalance: debtEditRequiringUnlock.remainingBalance,
+        } : undefined}
       />
 
       {/* B2B Account Statement & Ledger Modal */}
@@ -1645,7 +1788,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
             </p>
             {totalDebtBalance > 0 && (
               <p style={{ margin: 0, color: '#dc2626', fontWeight: 700, fontSize: '13px' }}>
-                ⚠️ Warning: This customer currently has an unpaid debt of {formatCurrency(totalDebtBalance)}. Deleting the account will also remove all associated debt records.
+                ⚠️ Warning: This customer currently has an unpaid debt of {formatPrivateCurrency(totalDebtBalance)}. Deleting the account will also remove all associated debt records.
               </p>
             )}
           </div>

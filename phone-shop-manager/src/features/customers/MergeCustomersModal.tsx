@@ -9,7 +9,6 @@ import {
   ArrowRight,
   AlertTriangle,
   CheckCircle2,
-  Trash2,
   Phone,
   Wrench,
   DollarSign,
@@ -38,7 +37,9 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
   initialAccountB,
   initialReason,
 }) => {
-  const { customers, debts, mergeCustomers, findDuplicates } = useCustomerStore();
+  const { customers, debts, mergeCustomers, findDuplicates, autoResolveAllDuplicates } = useCustomerStore();
+  // Only show active (non-merged) customers in the selectors
+  const activeCustomers = useMemo(() => customers.filter(c => !c.mergedIntoId), [customers]);
   const { tickets } = useRepairStore();
   const toast = useToast();
 
@@ -71,7 +72,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
       if (match) {
         setAccountBId(match.retail.id === initialAccountA.id ? match.shop.id : match.retail.id);
       } else {
-        const other = customers.find(c => c.id !== initialAccountA.id);
+        const other = activeCustomers.find(c => c.id !== initialAccountA.id);
         setAccountBId(other ? other.id : '');
       }
     } else if (detectedDuplicates.length > 0) {
@@ -79,20 +80,20 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
       setAccountAId(detectedDuplicates[0].retail.id);
       setAccountBId(detectedDuplicates[0].shop.id);
     } else {
-      const retails = customers.filter(isRetailCustomer);
-      const shops = customers.filter(isShopCustomer);
+      const retails = activeCustomers.filter(isRetailCustomer);
+      const shops = activeCustomers.filter(isShopCustomer);
       if (retails.length > 0 && shops.length > 0) {
         setAccountAId(retails[0].id);
         setAccountBId(shops[0].id);
-      } else if (customers.length >= 2) {
-        setAccountAId(customers[0].id);
-        setAccountBId(customers[1].id);
+      } else if (activeCustomers.length >= 2) {
+        setAccountAId(activeCustomers[0].id);
+        setAccountBId(activeCustomers[1].id);
       }
     }
-  }, [isOpen, initialAccountA, initialAccountB, detectedDuplicates, customers]);
+  }, [isOpen, initialAccountA, initialAccountB, detectedDuplicates, activeCustomers]);
 
-  const accountA = useMemo(() => customers.find(c => c.id === accountAId), [customers, accountAId]);
-  const accountB = useMemo(() => customers.find(c => c.id === accountBId), [customers, accountBId]);
+  const accountA = useMemo(() => activeCustomers.find(c => c.id === accountAId), [activeCustomers, accountAId]);
+  const accountB = useMemo(() => activeCustomers.find(c => c.id === accountBId), [activeCustomers, accountBId]);
 
   // Adjust default destination & final values when selected accounts change
   useEffect(() => {
@@ -192,18 +193,38 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
         customName: finalName.trim(),
         customPhone: finalPhone.trim(),
         customShopName: keepAs === 'shop_repairer' ? finalShopName.trim() : undefined,
+        deleteSecondaryDoc: true,
       });
 
       toast.success(
         'Accounts Merged Successfully',
         `Merged "${secondaryAccount.name}" into "${finalName.trim()}" (Kept as ${
           keepAs === 'shop_repairer' ? 'B2B Shop' : 'Retail Client'
-        }). All debts and repair phones combined.`
+        }). All debts, repairs, and orders combined into primary account; duplicate customer profile deleted.`
       );
       onClose();
     } catch (err) {
       console.error(err);
       toast.error('Merge Failed', 'Could not complete the account merge.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleMergeAll = async () => {
+    if (detectedDuplicates.length === 0) return;
+    setIsSubmitting(true);
+    try {
+      const { mergedCount, deletedCount } = await autoResolveAllDuplicates({ deleteSecondary: true });
+
+      toast.success(
+        'Batch Safe Fusion Completed',
+        `Successfully merged ${mergedCount} duplicate accounts. Cleaned up ${deletedCount} duplicate accounts from database. All debts, repair history, and orders safely consolidated into single accounts.`
+      );
+      onClose();
+    } catch (err) {
+      console.error('Batch merge error:', err);
+      toast.error('Batch Merge Incomplete', 'An error occurred during batch account fusion.');
     } finally {
       setIsSubmitting(false);
     }
@@ -216,19 +237,39 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
       title="Merge & Deduplicate Customer Accounts"
       size="md"
       footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={handleConfirmMerge}
-            isLoading={isSubmitting}
-            leftIcon={<GitMerge size={16} />}
-          >
-            Declare as One & Merge
-          </Button>
-        </>
+        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+          <div>
+            {detectedDuplicates.length > 1 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleMergeAll}
+                isLoading={isSubmitting}
+                style={{
+                  borderColor: '#ca8a04',
+                  color: '#854d0e',
+                  background: '#fefce8',
+                  fontWeight: 600,
+                }}
+              >
+                ⚡ Safe Fusion All ({detectedDuplicates.length})
+              </Button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleConfirmMerge}
+              isLoading={isSubmitting}
+              leftIcon={<GitMerge size={16} />}
+            >
+              Declare as One & Merge
+            </Button>
+          </div>
+        </div>
       }
     >
       <div className={styles.container}>
@@ -237,7 +278,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
           <GitMerge size={22} className={styles.bannerIcon} />
           <p className={styles.bannerText}>
             Declare two accounts as the same entity. All debts, purchases, and repair phones will be
-            safely consolidated into one account. The absorbed duplicate will be deleted.
+            safely consolidated into the primary account. Redundant duplicate customer accounts are deleted from the database.
           </p>
         </div>
 
@@ -245,8 +286,26 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
         {detectedDuplicates.length > 0 && (
           <div className={styles.duplicateSelectorBar}>
             <div className={styles.duplicateBarHeader}>
-              <span>⚡ Detected Duplicate Accounts ({detectedDuplicates.length})</span>
-              <span style={{ fontSize: '11px', color: '#a16207' }}>Match: Name or Phone Number</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontWeight: 600 }}>⚡ Detected Duplicate Accounts ({detectedDuplicates.length})</span>
+                <span style={{ fontSize: '11px', color: '#a16207' }}>Match: Name or Phone Number</span>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleMergeAll}
+                isLoading={isSubmitting}
+                style={{
+                  fontSize: '11px',
+                  padding: '4px 10px',
+                  borderColor: '#ca8a04',
+                  color: '#854d0e',
+                  background: '#fefce8',
+                  fontWeight: 600,
+                }}
+              >
+                ⚡ Safe Fusion All ({detectedDuplicates.length})
+              </Button>
             </div>
             <select
               className={styles.duplicateSelect}
@@ -256,7 +315,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
               <option value={-1}>-- Choose a detected duplicate or select manually below --</option>
               {detectedDuplicates.map((dup, idx) => (
                 <option key={`${dup.retail.id}_${dup.shop.id}`} value={idx}>
-                  👤 {dup.retail.name} ({dup.retail.phone}) ➔ 🏪 {dup.shop.shopName || dup.shop.name} ({dup.shop.phone}) — [{dup.reason}]
+                  {isShopCustomer(dup.retail) ? '🏪' : '👤'} {dup.retail.shopName ? `${dup.retail.shopName} (${dup.retail.name})` : dup.retail.name} ({dup.retail.phone || 'No phone'}) ➔ {isShopCustomer(dup.shop) ? '🏪' : '👤'} {dup.shop.shopName ? `${dup.shop.shopName} (${dup.shop.name})` : dup.shop.name} ({dup.shop.phone || 'No phone'}) — [{dup.reason}]
                 </option>
               ))}
             </select>
@@ -284,7 +343,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
                   setSelectedPairIndex(-1);
                 }}
               >
-                {customers.map(c => (
+                {activeCustomers.map(c => (
                   <option key={c.id} value={c.id} disabled={c.id === accountBId}>
                     {isShopCustomer(c) ? '🏪 [Shop] ' : '👤 [Retail] '}
                     {c.shopName ? `${c.shopName} (${c.name})` : c.name} — {c.phone}
@@ -372,7 +431,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
                   setSelectedPairIndex(-1);
                 }}
               >
-                {customers.map(c => (
+                {activeCustomers.map(c => (
                   <option key={c.id} value={c.id} disabled={c.id === accountAId}>
                     {isShopCustomer(c) ? '🏪 [Shop] ' : '👤 [Retail] '}
                     {c.shopName ? `${c.shopName} (${c.name})` : c.name} — {c.phone}
@@ -537,9 +596,9 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
             </div>
           </div>
           {secondaryAccount && (
-            <p style={{ margin: 0, fontSize: '12px', color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Trash2 size={13} />
-              Account <strong>"{secondaryAccount.shopName || secondaryAccount.name}"</strong> will be removed after merging all records into <strong>"{finalName}"</strong>.
+            <p style={{ margin: 0, fontSize: '12px', color: '#92400e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <AlertTriangle size={13} />
+              Duplicate account <strong>"{secondaryAccount.shopName || secondaryAccount.name}"</strong> will be deleted from the database after merging all records into <strong>"{finalName}"</strong>.
             </p>
           )}
         </div>

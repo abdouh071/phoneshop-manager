@@ -7,7 +7,8 @@ import { useInventoryStore } from '../../store/inventoryStore';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
-import type { PhoneModel } from '../../types';
+import type { PhoneModel, AccessorySubCategory } from '../../types';
+import { ACCESSORY_SUB_CATEGORY_OPTIONS } from '../../utils/accessorySubCategories';
 import styles from './ProductForm.module.css';
 import { useSettingsStore } from '../../store/settingsStore';
 import { printBarcodeDirect, openPrintWindow, buildLabelsHTML } from '../../utils/printWindow';
@@ -115,7 +116,7 @@ export const resolveUniqueSKU = (
 type FormData = {
   name: string; model: string; storage: string; color: string;
   price: string; costPrice: string; stock: string; sku: string;
-  category: string; supplier: string; location: string;
+  category: string; accessorySubCategory?: AccessorySubCategory; supplier: string; location: string;
   lowStockThreshold: string; notes: string;
 };
 
@@ -269,6 +270,7 @@ const VariantCard: React.FC<VariantCardProps> = ({
       {/* Pricing */}
       <div className={styles.row}>
         <Input
+          className="privacy-cost-input"
           label={
             isCostSynced ? (
               <>Cost ({symbol}) * <span className={styles.syncedBadge} title="Matches Model 1 (editable)">Same as Model 1</span></>
@@ -355,7 +357,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
   const INITIAL: FormData = {
     name: '', model: '', storage: '128GB', color: '',
     price: '', costPrice: '', stock: '', sku: '',
-    category: defaultCategory, supplier: '', location: '',
+    category: defaultCategory, accessorySubCategory: 'other', supplier: '', location: '',
     lowStockThreshold: '1', notes: '',
   };
 
@@ -396,6 +398,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
       if (key === 'category' && value === 'accessory') {
         next.storage = 'N/A';
         next.color = '';
+        if (!next.accessorySubCategory) next.accessorySubCategory = 'other';
       }
       if (['name', 'model', 'storage', 'color'].includes(key)) {
         const rawSku = generateSKU(next.name, next.model, next.storage, next.color);
@@ -671,6 +674,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
         stockStatus: stock === 0 ? 'out_of_stock' : stock <= threshold ? 'low_stock' : 'in_stock',
         sku: guaranteedUniqueSku,
         category: form.category as PhoneModel['category'],
+        accessorySubCategory: form.category === 'accessory' ? ((form.accessorySubCategory as AccessorySubCategory) || 'other') : undefined,
         supplier: form.supplier.trim() || undefined,
         location: form.location.trim() || undefined,
         lowStockThreshold: threshold,
@@ -762,6 +766,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
           stockStatus: stock === 0 ? 'out_of_stock' : stock <= threshold ? 'low_stock' : 'in_stock',
           sku: guaranteedUniqueSku,
           category: form.category as PhoneModel['category'],
+          accessorySubCategory: form.category === 'accessory' ? ((form.accessorySubCategory as AccessorySubCategory) || 'other') : undefined,
           supplier: form.supplier.trim() || undefined,
           location: form.location.trim() || undefined,
           lowStockThreshold: threshold,
@@ -810,12 +815,14 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
 
   const resetForNewProduct = () => {
     const preservedCategory = form.category;
+    const preservedSubCategory = form.accessorySubCategory;
     const preservedSupplier = form.supplier;
     const preservedLocation = form.location;
 
     setForm({
       ...INITIAL,
       category: preservedCategory,
+      accessorySubCategory: preservedSubCategory,
       supplier: preservedSupplier,
       location: preservedLocation,
       storage: preservedCategory === 'accessory' ? 'N/A' : '128GB',
@@ -1013,9 +1020,20 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
               <div className={styles.row}>
                 <Select label="Category" options={CATEGORY_OPTIONS} value={form.category}
                   onChange={v => set('category', v)} />
-                <Input label="Storage Location" placeholder="e.g. Shelf A3" value={form.location}
-                  onChange={e => set('location', e.target.value)} />
+                {form.category === 'accessory' ? (
+                  <Select label="Accessory Type *" options={ACCESSORY_SUB_CATEGORY_OPTIONS} value={form.accessorySubCategory || 'other'}
+                    onChange={v => set('accessorySubCategory', v)} />
+                ) : (
+                  <Input label="Storage Location" placeholder="e.g. Shelf A3" value={form.location}
+                    onChange={e => set('location', e.target.value)} />
+                )}
               </div>
+              {form.category === 'accessory' && (
+                <div className={styles.row}>
+                  <Input label="Storage Location" placeholder="e.g. Shelf A3" value={form.location}
+                    onChange={e => set('location', e.target.value)} />
+                </div>
+              )}
 
               {/* Storage and color — hidden for accessories */}
               {form.category !== 'accessory' && (
@@ -1030,7 +1048,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
               {/* Pricing */}
               <p className={styles.sectionLabel}>Pricing</p>
               <div className={styles.row}>
-                <Input label={`Buy Price / Cost (${symbol}) *`} type="number" placeholder="0.00" value={form.costPrice}
+                <Input className="privacy-cost-input" label={`Buy Price / Cost (${symbol}) *`} type="number" placeholder="0.00" value={form.costPrice}
                   onChange={e => set('costPrice', e.target.value)} error={errors.costPrice} />
                 <Input label={`Sell Price (${symbol}) *`} type="number" placeholder="0.00" value={form.price}
                   onChange={e => set('price', e.target.value)} error={errors.price} />
@@ -1079,6 +1097,12 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
                 <Select label="Category" options={CATEGORY_OPTIONS} value={form.category}
                   onChange={v => set('category', v)} />
               </div>
+              {form.category === 'accessory' && (
+                <div className={styles.row}>
+                  <Select label="Accessory Type *" options={ACCESSORY_SUB_CATEGORY_OPTIONS} value={form.accessorySubCategory || 'other'}
+                    onChange={v => set('accessorySubCategory', v)} />
+                </div>
+              )}
               <div className={styles.row}>
                 <Input label="Storage Location" placeholder="e.g. Shelf A3" value={form.location}
                   onChange={e => set('location', e.target.value)} />

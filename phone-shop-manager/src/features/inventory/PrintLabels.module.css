@@ -47,6 +47,42 @@
   background: var(--color-surface-container-lowest);
 }
 
+/* Category Filter Bar */
+.categoryFilterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.categoryFilterPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border-radius: var(--radius-full, 999px);
+  border: 1.5px solid var(--color-outline-variant);
+  background: var(--color-surface-container);
+  color: var(--color-on-surface-variant);
+  font-size: var(--text-label-md-size, 13px);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.categoryFilterPill:hover {
+  background: var(--color-surface-container-high);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.categoryFilterPillActive {
+  background: var(--color-primary-container);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary-container);
+  font-weight: 600;
+}
+
 /* Search Section */
 .searchSection {
   position: relative;

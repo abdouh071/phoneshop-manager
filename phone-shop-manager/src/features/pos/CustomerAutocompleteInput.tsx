@@ -5,6 +5,8 @@ import { useToast } from '../../components/ui/Toast';
 import type { Customer } from '../../types';
 import { isShopCustomer, isRetailCustomer } from '../../types';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { isPhoneMatch, formatStandardPhone, normalizePhoneDigits } from '../../utils/phoneUtils';
+import { CustomerDuplicatePromptCard } from '../../components/customers/CustomerDuplicatePromptCard';
 import styles from './CustomerAutocomplete.module.css';
 
 interface CustomerAutocompleteInputProps {
@@ -36,9 +38,11 @@ const QuickCreateCustomerModal: React.FC<QuickCreateModalProps> = ({
   const [phone, setPhone] = useState('');
   const [shopName, setShopName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isUpdatingExisting, setIsUpdatingExisting] = useState(false);
+  const [allowSeparateContact, setAllowSeparateContact] = useState(false);
   const [error, setError] = useState('');
   const phoneRef = useRef<HTMLInputElement>(null);
-  const { findOrCreateCustomer, customers } = useCustomerStore();
+  const { findOrCreateCustomer, addCustomer, updateCustomer, customers } = useCustomerStore();
   const toast = useToast();
 
   // Reset form when modal opens with new name
@@ -49,36 +53,33 @@ const QuickCreateCustomerModal: React.FC<QuickCreateModalProps> = ({
       setShopName('');
       setError('');
       setIsSaving(false);
+      setIsUpdatingExisting(false);
+      setAllowSeparateContact(false);
       // Focus phone input after a short delay
       setTimeout(() => phoneRef.current?.focus(), 100);
     }
   }, [isOpen, initialName]);
 
-  const normalizeDigits = (p: string) => p.replace(/\D/g, '');
-
-  // Real-time match: requires BOTH name AND phone number to match an existing customer
+  // Real-time match: exact name AND matching phone
   const existingMatch = useMemo(() => {
-    const cleanPhone = normalizeDigits(phone);
     const cleanName = name.trim().toLowerCase();
-    if (!cleanPhone || cleanPhone.length < 4 || !cleanName) return null;
+    if (!phone.trim() || !cleanName) return null;
     return customers.find(c => {
-      const cPhone = normalizeDigits(c.phone || '');
       const cName = c.name.trim().toLowerCase();
-      const phoneMatches = cPhone === cleanPhone || (cleanPhone.length >= 8 && cPhone.endsWith(cleanPhone)) || (cPhone.length >= 8 && cleanPhone.endsWith(cPhone));
+      const phoneMatches = isPhoneMatch(c.phone, phone) || (c.normalizedPhone && isPhoneMatch(c.normalizedPhone, phone));
       return phoneMatches && cName === cleanName;
     }) || null;
   }, [name, phone, customers]);
 
-  // Secondary notice: phone is used by someone with a different name
+  // Secondary notice: phone belongs to an existing customer (even if name spelling is different)
   const phoneOnlyMatch = useMemo(() => {
-    if (existingMatch) return null;
-    const cleanPhone = normalizeDigits(phone);
-    if (!cleanPhone || cleanPhone.length < 5) return null;
-    return customers.find(c => {
-      const cPhone = normalizeDigits(c.phone || '');
-      return cPhone === cleanPhone || (cleanPhone.length >= 8 && cPhone.endsWith(cleanPhone));
-    }) || null;
-  }, [phone, customers, existingMatch]);
+    if (existingMatch || allowSeparateContact) return null;
+    if (!phone.trim()) return null;
+    return customers.find(c =>
+      isPhoneMatch(c.phone, phone) ||
+      (c.normalizedPhone && isPhoneMatch(c.normalizedPhone, phone))
+    ) || null;
+  }, [phone, customers, existingMatch, allowSeparateContact]);
 
   if (!isOpen) return null;
 
@@ -99,16 +100,37 @@ const QuickCreateCustomerModal: React.FC<QuickCreateModalProps> = ({
       return;
     }
 
+    // If phone matches existing customer under different name and staff hasn't chosen an action
+    if (phoneOnlyMatch && !allowSeparateContact) {
+      setError('An existing customer was found with this phone number. Please choose an option above.');
+      return;
+    }
+
     setIsSaving(true);
     setError('');
 
     try {
-      const created = await findOrCreateCustomer({
-        name: name.trim(),
-        phone: phone.trim(),
-        accountType: accountType || 'retail',
-        shopName: accountType === 'shop_repairer' ? (shopName.trim() || name.trim()) : undefined,
-      });
+      const formattedPhone = formatStandardPhone(phone.trim()) || phone.trim();
+      let created: Customer;
+
+      if (allowSeparateContact) {
+        // Staff explicitly chose to create a separate contact with the same phone
+        created = await addCustomer({
+          name: name.trim(),
+          phone: formattedPhone,
+          accountType: accountType || 'retail',
+          shopName: accountType === 'shop_repairer' ? (shopName.trim() || name.trim()) : undefined,
+        });
+        toast.success('Separate Contact Created', `${created.name} registered.`);
+      } else {
+        created = await findOrCreateCustomer({
+          name: name.trim(),
+          phone: formattedPhone,
+          accountType: accountType || 'retail',
+          shopName: accountType === 'shop_repairer' ? (shopName.trim() || name.trim()) : undefined,
+        });
+      }
+
       onCreated(created);
     } catch (err) {
       console.error('Failed to create customer:', err);
@@ -255,8 +277,13 @@ const QuickCreateCustomerModal: React.FC<QuickCreateModalProps> = ({
                   transition: 'border-color 0.15s',
                 }}
                 onFocus={e => e.target.style.borderColor = '#3b82f6'}
-                onBlur={e => e.target.style.borderColor = '#e2e8f0'}
-                placeholder="e.g. 06 12 34 56 78"
+                onBlur={e => {
+                  e.target.style.borderColor = '#e2e8f0';
+                  if (phone.trim()) {
+                    setPhone(formatStandardPhone(phone));
+                  }
+                }}
+                placeholder="e.g. 0550 12 34 56"
               />
             </div>
           </div>
@@ -327,23 +354,59 @@ const QuickCreateCustomerModal: React.FC<QuickCreateModalProps> = ({
             </div>
           )}
 
-          {/* Phone used by another contact notice */}
-          {phoneOnlyMatch && (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '8px 12px',
-              background: '#f8fafc',
-              border: '1px solid #e2e8f0',
-              borderRadius: '8px',
-              marginTop: '2px',
-              fontSize: '12px',
-              color: '#64748b',
-            }}>
-              <AlertCircle size={14} style={{ color: '#3b82f6', flexShrink: 0 }} />
-              <span>Phone number is also registered to <strong>{phoneOnlyMatch.name}</strong>.</span>
-            </div>
+          {/* Intelligent Deduplication & Use Existing / Merge Prompt */}
+          {phoneOnlyMatch && !allowSeparateContact && (
+            <CustomerDuplicatePromptCard
+              existingCustomer={phoneOnlyMatch}
+              enteredName={name}
+              isUpdating={isUpdatingExisting || isSaving}
+              onUseExisting={async () => {
+                let targetCustomer = phoneOnlyMatch;
+                if (isShop && shopName.trim() && !phoneOnlyMatch.shopName) {
+                  try {
+                    targetCustomer = await updateCustomer(phoneOnlyMatch.id, {
+                      shopName: shopName.trim(),
+                      accountType: 'shop_repairer',
+                    });
+                    toast.success('Profile Enriched', `Saved shop name "${shopName.trim()}" to ${targetCustomer.name}'s profile.`);
+                  } catch (e) {
+                    console.warn('Could not auto-enrich shop name:', e);
+                  }
+                }
+                toast.info('Account Selected', `Existing customer ${targetCustomer.name} (${targetCustomer.phone}) selected.`);
+                onCreated(targetCustomer);
+              }}
+              onUpdateToNewName={async () => {
+                if (!name.trim()) {
+                  setError('Customer name is required');
+                  return;
+                }
+                setIsUpdatingExisting(true);
+                try {
+                  const formattedPhone = formatStandardPhone(phone.trim()) || phoneOnlyMatch.phone;
+                  await updateCustomer(phoneOnlyMatch.id, {
+                    name: name.trim(),
+                    phone: formattedPhone,
+                    shopName: isShop ? (shopName.trim() || name.trim()) : phoneOnlyMatch.shopName,
+                  });
+                  toast.success('Customer Profile Updated', `Renamed profile to "${name.trim()}".`);
+                  onCreated({
+                    ...phoneOnlyMatch,
+                    name: name.trim(),
+                    phone: formattedPhone,
+                    shopName: isShop ? (shopName.trim() || name.trim()) : phoneOnlyMatch.shopName,
+                  });
+                } catch (err) {
+                  setError('Failed to update customer account.');
+                } finally {
+                  setIsUpdatingExisting(false);
+                }
+              }}
+              onSaveAsSeparate={() => {
+                setAllowSeparateContact(true);
+                toast.info('Separate Contact Allowed', `You can now save "${name.trim() || 'this contact'}" as a separate customer sharing this phone number.`);
+              }}
+            />
           )}
 
           {/* Error */}
@@ -461,13 +524,21 @@ export const CustomerAutocompleteInput: React.FC<CustomerAutocompleteInputProps>
         .slice(0, 8);
     }
     const q = value.toLowerCase().trim();
-    const digits = value.replace(/\D/g, '');
+    const cleanDigits = normalizePhoneDigits(value);
+    const rawDigits = value.replace(/\D/g, '');
 
     return pool.filter(c =>
       c.name.toLowerCase().includes(q) ||
       (c.shopName && c.shopName.toLowerCase().includes(q)) ||
-      (digits.length >= 2 && c.phone.replace(/\D/g, '').includes(digits)) ||
-      (c.email && c.email.toLowerCase().includes(q))
+      (c.email && c.email.toLowerCase().includes(q)) ||
+      c.phone.toLowerCase().includes(q) ||
+      (c.normalizedPhone && c.normalizedPhone.includes(q)) ||
+      (cleanDigits.length >= 2 && (
+        (c.normalizedPhone && c.normalizedPhone.includes(cleanDigits)) ||
+        normalizePhoneDigits(c.phone).includes(cleanDigits) ||
+        isPhoneMatch(c.phone, value)
+      )) ||
+      (rawDigits.length >= 2 && c.phone.replace(/\D/g, '').includes(rawDigits))
     ).slice(0, 10);
   }, [customers, value, accountType]);
 

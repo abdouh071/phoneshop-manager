@@ -5,8 +5,9 @@ import { Button } from '../../components/ui/Button';
 import type { SaleTransaction, CustomerDebtEntry } from '../../types';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useCustomerStore } from '../../store/customerStore';
+import { usePrivacyStore } from '../../store/privacyStore';
 import { useToast } from '../../components/ui/Toast';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import styles from './B2BParts.module.css';
 
 interface PartsInvoiceModalProps {
@@ -31,6 +32,7 @@ export const PartsInvoiceModal: React.FC<PartsInvoiceModalProps> = ({
 }) => {
   const settings = useSettingsStore();
   const { customers, getCustomerDebtTotal } = useCustomerStore();
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
   const toast = useToast();
   const [isPrinting, setIsPrinting] = useState(false);
 
@@ -94,6 +96,15 @@ export const PartsInvoiceModal: React.FC<PartsInvoiceModalProps> = ({
               <div className={partyStyle.detail}>Contact: {customer.name}</div>
             )}
             {customer?.phone && <div className={partyStyle.detail}>Phone: {customer.phone}</div>}
+            {customer?.address && <div className={partyStyle.detail}>Address: {customer.address}</div>}
+            {(customer?.rc || customer?.nif || customer?.nis || customer?.art) && (
+              <div style={{ marginTop: '5px', paddingTop: '4px', borderTop: '1px dashed #cbd5e1', fontSize: '11px', color: '#475569', lineHeight: 1.45 }}>
+                {customer?.rc && <div>RC: <strong style={{ color: '#0f172a' }}>{customer.rc}</strong></div>}
+                {customer?.nif && <div>NIF: <strong style={{ color: '#0f172a' }}>{customer.nif}</strong></div>}
+                {customer?.nis && <div>NIS: <strong style={{ color: '#0f172a' }}>{customer.nis}</strong></div>}
+                {customer?.art && <div>Art: <strong style={{ color: '#0f172a' }}>{customer.art}</strong></div>}
+              </div>
+            )}
           </div>
 
           <div>
@@ -166,12 +177,12 @@ export const PartsInvoiceModal: React.FC<PartsInvoiceModalProps> = ({
             <>
               <div className={styles.summaryPaidLine}>
                 <span>Paid Now ({transaction.payments[0]?.method?.toUpperCase() || 'CASH'}):</span>
-                <span>{formatCurrency(settlement.paidAmount)}</span>
+                <span>{formatPrivateCurrency(settlement.paidAmount)}</span>
               </div>
 
               <div className={styles.summaryChargedLine}>
                 <span>Charged to Account:</span>
-                <span>+ {formatCurrency(settlement.chargedAmount)}</span>
+                <span>+ {formatPrivateCurrency(settlement.chargedAmount)}</span>
               </div>
             </>
           ) : (
@@ -195,7 +206,7 @@ export const PartsInvoiceModal: React.FC<PartsInvoiceModalProps> = ({
               }}
             >
               <span>Total Account Balance:</span>
-              <span>{formatCurrency(currentDebtTotal)}</span>
+              <span>{formatPrivateCurrency(currentDebtTotal)}</span>
             </div>
           )}
         </div>

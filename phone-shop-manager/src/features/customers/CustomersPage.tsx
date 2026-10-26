@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   Download, Plus, Users, RefreshCw, DollarSign, TrendingUp,
   ChevronDown, ChevronUp, Phone, Eye, Edit, MessageCircle, Wrench, ShoppingCart, UserPlus,
-  BookOpen, AlertCircle, AlertTriangle, Send, FileText, Store, User, GitMerge, Trash2, ArrowRightLeft
+  BookOpen, AlertCircle, AlertTriangle, Send, FileText, Store, User, GitMerge, Trash2, ArrowRightLeft,
+  Printer, CheckCircle2, Clock
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { SearchInput } from '../../components/ui/Input';
@@ -11,6 +12,7 @@ import { SkeletonTableRows } from '../../components/ui/Skeleton';
 import { Pagination } from '../../components/ui/Pagination';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { RepairStatusBadge } from '../../components/ui/Badge';
 import { useCustomerStore } from '../../store/customerStore';
 import { useCartStore } from '../../store/cartStore';
 import { useRepairStore } from '../../store/repairStore';
@@ -18,28 +20,52 @@ import { useToast } from '../../components/ui/Toast';
 import { CustomerProfilePanel } from './CustomerProfilePanel';
 import { AddCustomerModal } from './AddCustomerModal';
 import { NewTicketModal } from '../repairs/NewTicketModal';
+import { TicketDetailPanel } from '../repairs/TicketDetailPanel';
+import { PrintRepairTicketModal } from '../repairs/PrintRepairTicketModal';
+import { detectIssueTag, getBrandIcon } from '../repairs/repairConstants';
 import { AccountStatementModal } from './AccountStatementModal';
 import { SwitchAccountTypeModal } from './SwitchAccountTypeModal';
 import { MergeCustomersModal } from './MergeCustomersModal';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { useAuthStore } from '../../store/authStore';
+import { usePrivacyStore } from '../../store/privacyStore';
 import { usePermissions } from '../../hooks/usePermissions';
 import type { Customer, RepairTicket } from '../../types';
 import { isShopCustomer, isRetailCustomer } from '../../types';
 import styles from './Customers.module.css';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { getCustomerOverdueInfo, buildWhatsAppDebtReminderUrl, getOverdueDebts } from '../../utils/debtAlerts';
+import { offlineCustomerSyncService } from '../../services/offlineCustomerSyncService';
+import { isPhoneMatch, normalizePhoneDigits, isDummyPhone } from '../../utils/phoneUtils';
 
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+const formatTimeAgo = (dateStr?: string) => {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 5) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+};
 
 type CustomerFilter = 'all' | 'overdue' | 'debt' | 'repeat' | 'new' | 'recent' | 'b2b';
 type SortKey = 'name' | 'totalPurchases' | 'totalSpent' | 'totalDebt' | 'lastVisitDate' | 'joinDate';
 
 export const CustomersPage = () => {
-  const { fetchCustomers, searchQuery, setSearchQuery, isLoading, customers, debts, deleteCustomer, findDuplicates } = useCustomerStore();
+  const isPrivacyActive = usePrivacyStore((s) => s.isPrivacyActive);
+  const { fetchCustomers, searchQuery, setSearchQuery, isLoading, customers, debts, deleteCustomer, findDuplicates, autoResolveAllDuplicates } = useCustomerStore();
   const { setCustomerName } = useCartStore();
-  const { tickets } = useRepairStore();
+  const { tickets, fetchTickets } = useRepairStore();
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
@@ -49,6 +75,25 @@ export const CustomersPage = () => {
 
   // Duplication detection
   const detectedDuplicates = useMemo(() => findDuplicates(), [customers, findDuplicates]);
+  const [isAutoResolving, setIsAutoResolving] = useState(false);
+
+  const handleAutoResolveAll = async () => {
+    if (detectedDuplicates.length === 0) return;
+    setIsAutoResolving(true);
+    toast.info('Auto-Resolving Duplicates', `Consolidating ${detectedDuplicates.length} duplicate pairs... Preserving all debts, repair tickets, and orders.`);
+    try {
+      const { mergedCount, deletedCount } = await autoResolveAllDuplicates({ deleteSecondary: true });
+      toast.success(
+        'Duplicates Cleanly Resolved',
+        `Successfully consolidated ${mergedCount} duplicate pairs. Cleaned up ${deletedCount} duplicate accounts from database while preserving all records (debts, repairs, sales).`
+      );
+    } catch (err) {
+      console.error('Failed to auto-resolve duplicates:', err);
+      toast.error('Auto-Resolve Failed', 'An error occurred while merging duplicate accounts.');
+    } finally {
+      setIsAutoResolving(false);
+    }
+  };
 
   // Merge modal state
   const [isMergeOpen, setIsMergeOpen] = useState(false);
@@ -63,6 +108,16 @@ export const CustomersPage = () => {
   const [isDeletingLoading, setIsDeletingLoading] = useState(false);
   // Problem 1 fix: Non-admin needs unlock before delete
   const [deleteRequiringUnlock, setDeleteRequiringUnlock] = useState<Customer | null>(null);
+
+  // Offline sync queue counter
+  const [pendingSyncCount, setPendingSyncCount] = useState<number>(offlineCustomerSyncService.getPendingCount());
+
+  useEffect(() => {
+    const unsub = offlineCustomerSyncService.subscribe(() => {
+      setPendingSyncCount(offlineCustomerSyncService.getPendingCount());
+    });
+    return unsub;
+  }, []);
 
   const handleDeleteCustomerClick = (customer: Customer) => {
     if (user?.role === 'admin') {
@@ -134,7 +189,43 @@ export const CustomersPage = () => {
   const [ticketToEdit, setTicketToEdit] = useState<RepairTicket | null>(null);
   const itemsPerPage = 10;
 
-  useEffect(() => { fetchCustomers(); }, [fetchCustomers]);
+  // ── Primary Page Tab State: Customer Accounts vs Walk-in Customers ───
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [pageTab, setPageTabState] = useState<'accounts' | 'walkin'>(() => {
+    return searchParams.get('tab') === 'walkin' ? 'walkin' : 'accounts';
+  });
+
+  const handleTabChange = useCallback((newTab: 'accounts' | 'walkin') => {
+    setPageTabState(newTab);
+    const nextParams = new URLSearchParams(searchParams);
+    if (newTab === 'walkin') {
+      nextParams.set('tab', 'walkin');
+    } else {
+      nextParams.delete('tab');
+    }
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'walkin' && pageTab !== 'walkin') {
+      setPageTabState('walkin');
+    } else if (!tabParam && pageTab === 'walkin') {
+      setPageTabState('accounts');
+    }
+  }, [searchParams, pageTab]);
+
+  // Walk-in tab filtering, search & detail state
+  const [walkInSearch, setWalkInSearch] = useState('');
+  const [walkInStatusFilter, setWalkInStatusFilter] = useState<'all' | 'active' | 'completed' | 'pending' | 'in_progress' | 'ready'>('all');
+  const [walkInPage, setWalkInPage] = useState(1);
+  const [selectedWalkInTicket, setSelectedWalkInTicket] = useState<RepairTicket | null>(null);
+  const [printingWalkInTicket, setPrintingWalkInTicket] = useState<RepairTicket | null>(null);
+
+  useEffect(() => {
+    fetchCustomers();
+    fetchTickets();
+  }, [fetchCustomers, fetchTickets]);
 
   // ── Account Scope & Role Isolation ──────────────────────────────────
   const [adminScope, setAdminScope] = useState<'all' | 'retail' | 'shop'>('all');
@@ -144,16 +235,34 @@ export const CustomersPage = () => {
     if (user?.role === 'repair_agent') return 'shop';
     return adminScope;
   }, [user?.role, adminScope]);
+  // Helper: does this customer have a valid phone for account-level display?
+  const hasValidAccountPhone = useCallback((c: Customer) => {
+    if (!c.phone || !c.phone.trim()) return false;
+    if (isDummyPhone(c.phone)) return false;
+    return normalizePhoneDigits(c.phone).length >= 7;
+  }, []);
+
+  // Customers without a valid phone are considered walk-in legacy accounts
+  // and should only appear via the Walk-in Customers tab (through their repair tickets).
+  // No data is deleted — they're just hidden from the accounts list.
+  const accountCustomers = useMemo(() => {
+    return customers.filter(c => !c.mergedIntoId && hasValidAccountPhone(c));
+  }, [customers, hasValidAccountPhone]);
+
+  // Walk-in legacy customer accounts (missing phone) — used for tab count
+  const walkInLegacyCustomers = useMemo(() => {
+    return customers.filter(c => !c.mergedIntoId && !hasValidAccountPhone(c));
+  }, [customers, hasValidAccountPhone]);
 
   const scopedCustomers = useMemo(() => {
     if (effectiveScope === 'retail') {
-      return customers.filter(isRetailCustomer);
+      return accountCustomers.filter(isRetailCustomer);
     }
     if (effectiveScope === 'shop') {
-      return customers.filter(isShopCustomer);
+      return accountCustomers.filter(isShopCustomer);
     }
-    return customers;
-  }, [customers, effectiveScope]);
+    return accountCustomers;
+  }, [accountCustomers, effectiveScope]);
 
   const lockedAccountType = useMemo<'retail' | 'shop_repairer' | undefined>(() => {
     if (user?.role === 'sales_agent') return 'retail';
@@ -218,6 +327,94 @@ export const CustomersPage = () => {
     };
   }, [scopedCustomers, debts]);
 
+  // ── Walk-in Repairs (Tickets with missing or invalid phone number OR linked to legacy phoneless accounts) ────
+  const walkInTickets = useMemo(() => {
+    const legacyPhonelessCustomerIds = new Set(walkInLegacyCustomers.map(c => c.id));
+    return tickets.filter((t) => {
+      const phoneDigits = t.customerPhone ? normalizePhoneDigits(t.customerPhone) : '';
+      if (!t.customerPhone || !t.customerPhone.trim() || phoneDigits.length < 7) {
+        return true;
+      }
+      if (t.customerId && legacyPhonelessCustomerIds.has(t.customerId)) {
+        return true;
+      }
+      return false;
+    });
+  }, [tickets, walkInLegacyCustomers]);
+
+  const walkInMetrics = useMemo(() => {
+    let active = 0;
+    let completed = 0;
+    let ready = 0;
+    let inProgress = 0;
+    let pending = 0;
+    let totalBilled = 0;
+    let totalPaid = 0;
+
+    for (const t of walkInTickets) {
+      if (t.status === 'completed') completed++;
+      else if (t.status === 'cancelled') { /* ignore */ }
+      else active++;
+
+      if (t.status === 'ready') ready++;
+      if (t.status === 'in_progress') inProgress++;
+      if (t.status === 'pending') pending++;
+
+      const cost = t.actualCost != null && t.actualCost > 0 ? t.actualCost : (t.estimatedCost || 0);
+      totalBilled += cost;
+      totalPaid += (t.paidAmount || 0);
+    }
+
+    return {
+      total: walkInTickets.length,
+      active,
+      completed,
+      ready,
+      inProgress,
+      pending,
+      totalBilled,
+      totalPaid,
+      unpaidBalance: Math.max(0, totalBilled - totalPaid),
+    };
+  }, [walkInTickets]);
+
+  const filteredWalkInTickets = useMemo(() => {
+    const q = walkInSearch.trim().toLowerCase();
+    return walkInTickets.filter((t) => {
+      if (walkInStatusFilter === 'active') {
+        if (t.status === 'completed' || t.status === 'cancelled') return false;
+      } else if (walkInStatusFilter === 'completed') {
+        if (t.status !== 'completed') return false;
+      } else if (walkInStatusFilter !== 'all') {
+        if (t.status !== walkInStatusFilter) return false;
+      }
+
+      if (!q) return true;
+      const matchName = t.customerName?.toLowerCase().includes(q);
+      const matchDevice = (t.deviceModel || t.deviceName || '')?.toLowerCase().includes(q);
+      const matchIssue = (t.issueDescription || t.problem || '')?.toLowerCase().includes(q);
+      const matchTech = t.assignedTechnician?.toLowerCase().includes(q);
+      const matchTicket = t.ticketNumber?.toLowerCase().includes(q);
+      const matchSerial = (t.serialNumber || t.imei || '')?.toLowerCase().includes(q);
+      return Boolean(matchName || matchDevice || matchIssue || matchTech || matchTicket || matchSerial);
+    });
+  }, [walkInTickets, walkInSearch, walkInStatusFilter]);
+
+  const sortedWalkInTickets = useMemo(() => {
+    return [...filteredWalkInTickets].sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+  }, [filteredWalkInTickets]);
+
+  const walkInItemsPerPage = 10;
+  const totalWalkInPages = Math.max(1, Math.ceil(sortedWalkInTickets.length / walkInItemsPerPage));
+  const pagedWalkInTickets = useMemo(() => {
+    const start = (walkInPage - 1) * walkInItemsPerPage;
+    return sortedWalkInTickets.slice(start, start + walkInItemsPerPage);
+  }, [sortedWalkInTickets, walkInPage, walkInItemsPerPage]);
+
   // ── Filtering ───────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     const now = Date.now();
@@ -225,14 +422,24 @@ export const CustomersPage = () => {
 
     let list = scopedCustomers;
 
-    // Text search
+    // Text search (supports name, email, shop, and ANY formatted/unformatted phone variation)
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+      const q = searchQuery.toLowerCase().trim();
+      const cleanQueryDigits = normalizePhoneDigits(searchQuery);
+      const rawQueryDigits = searchQuery.replace(/\D/g, '');
+
       list = list.filter(c =>
         c.name.toLowerCase().includes(q) ||
         c.phone.toLowerCase().includes(q) ||
+        (c.normalizedPhone && c.normalizedPhone.includes(q)) ||
         (c.email && c.email.toLowerCase().includes(q)) ||
-        (c.shopName && c.shopName.toLowerCase().includes(q))
+        (c.shopName && c.shopName.toLowerCase().includes(q)) ||
+        (cleanQueryDigits.length >= 2 && (
+          (c.normalizedPhone && c.normalizedPhone.includes(cleanQueryDigits)) ||
+          normalizePhoneDigits(c.phone).includes(cleanQueryDigits) ||
+          isPhoneMatch(c.phone, searchQuery)
+        )) ||
+        (rawQueryDigits.length >= 2 && c.phone.replace(/\D/g, '').includes(rawQueryDigits))
       );
     }
 
@@ -378,8 +585,8 @@ export const CustomersPage = () => {
             <span className={styles.titleBadge}>{scopedCustomers.length} total</span>
           </h1>
           <p className={styles.subtitle}>
-            {formatCurrency(metrics.totalLtv)} total lifetime value · {metrics.repeat} repeat buyers
-            {permissions.customers_debt && metrics.totalDebt > 0 && ` · ${formatCurrency(metrics.totalDebt)} active credit balance`}
+            {formatPrivateCurrency(metrics.totalLtv)} total lifetime value · {metrics.repeat} repeat buyers
+            {permissions.customers_debt && metrics.totalDebt > 0 && ` · ${formatPrivateCurrency(metrics.totalDebt)} active credit balance`}
           </p>
         </div>
         <div className={styles.headerActions}>
@@ -394,19 +601,46 @@ export const CustomersPage = () => {
           >
             Merge Accounts
           </Button>
+          {pendingSyncCount > 0 && (
+            <Button
+              variant="secondary"
+              leftIcon={<RefreshCw size={15} />}
+              style={{ background: '#fef3c7', color: '#b45309', borderColor: '#fde68a', fontWeight: 600 }}
+              onClick={() => {
+                toast.info('Syncing Offline Queue', 'Sending offline customer profiles to cloud...');
+                offlineCustomerSyncService.syncPendingCustomers();
+              }}
+              title="Offline customers are waiting in queue. Click to trigger cloud sync immediately."
+            >
+              Sync Queue ({pendingSyncCount})
+            </Button>
+          )}
           <Button variant="secondary" leftIcon={<Download size={16} />} onClick={handleExportCSV}>
             Export CSV
           </Button>
-          <Button
-            leftIcon={effectiveScope === 'shop' ? <Store size={16} /> : <Plus size={16} />}
-            onClick={() => { setCustomerToEdit(null); setIsAddOpen(true); }}
-          >
-            {effectiveScope === 'shop'
-              ? 'Add Shop / Client'
-              : effectiveScope === 'retail'
-              ? 'Add Retail Customer'
-              : 'Add Customer'}
-          </Button>
+          {pageTab === 'walkin' ? (
+            <Button
+              leftIcon={<Plus size={16} />}
+              onClick={() => {
+                setRepairPrefill(null);
+                setTicketToEdit(null);
+                setIsNewTicketOpen(true);
+              }}
+            >
+              New Repair Ticket
+            </Button>
+          ) : (
+            <Button
+              leftIcon={effectiveScope === 'shop' ? <Store size={16} /> : <Plus size={16} />}
+              onClick={() => { setCustomerToEdit(null); setIsAddOpen(true); }}
+            >
+              {effectiveScope === 'shop'
+                ? 'Add Shop / Client'
+                : effectiveScope === 'retail'
+                ? 'Add Retail Customer'
+                : 'Add Customer'}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -441,30 +675,94 @@ export const CustomersPage = () => {
             </div>
             <div>
               <h4 style={{ margin: '0 0 2px 0', fontSize: '13.5px', fontWeight: 700, color: '#854d0e' }}>
-                {detectedDuplicates.length} Duplicate Account{detectedDuplicates.length !== 1 ? 's' : ''} Detected Between Clients & Shops
+                {detectedDuplicates.length} Duplicate Account{detectedDuplicates.length !== 1 ? 's' : ''} Detected
               </h4>
               <p style={{ margin: 0, fontSize: '12px', color: '#a16207' }}>
-                Accounts exist in both Retail Clients and B2B Shops with matching contact info. You can declare them as one and choose where to keep them.
+                Matching customer accounts detected (including walk-ins & phoneless records). Click Auto Resolve to safely consolidate all debts, repairs, and orders into primary accounts and delete duplicate customer records.
               </p>
             </div>
           </div>
-          <Button
-            size="sm"
-            variant="primary"
-            leftIcon={<GitMerge size={14} />}
-            onClick={() => {
-              setMergeInitialA(detectedDuplicates[0].retail);
-              setMergeInitialB(detectedDuplicates[0].shop);
-              setIsMergeOpen(true);
-            }}
-          >
-            Resolve Duplicates ({detectedDuplicates.length})
-          </Button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setMergeInitialA(detectedDuplicates[0].retail);
+                setMergeInitialB(detectedDuplicates[0].shop);
+                setIsMergeOpen(true);
+              }}
+              disabled={isAutoResolving}
+              style={{ background: '#ffffff', borderColor: '#ca8a04', color: '#854d0e' }}
+            >
+              Review Individually
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              leftIcon={<GitMerge size={14} />}
+              onClick={handleAutoResolveAll}
+              isLoading={isAutoResolving}
+              style={{
+                background: '#ca8a04',
+                borderColor: '#a16207',
+                color: '#ffffff',
+                fontWeight: 700,
+              }}
+            >
+              ⚡ Auto Resolve All ({detectedDuplicates.length})
+            </Button>
+          </div>
         </div>
       )}
 
-      {/* Admin Scope Selector: All | Retail | Shops */}
-      {user?.role === 'admin' && (
+      {/* Primary Navigation Tabs */}
+      <div className={styles.primaryTabs}>
+        <button
+          type="button"
+          className={[
+            styles.primaryTabBtn,
+            pageTab === 'accounts' ? styles.primaryTabBtnActiveAccounts : '',
+          ].filter(Boolean).join(' ')}
+          onClick={() => handleTabChange('accounts')}
+        >
+          <Users size={17} />
+          <span>Customer Accounts</span>
+          <span className={[
+            styles.primaryTabCount,
+            pageTab === 'accounts' ? styles.primaryTabCountActiveAccounts : '',
+          ].filter(Boolean).join(' ')}>
+            {accountCustomers.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          className={[
+            styles.primaryTabBtn,
+            pageTab === 'walkin' ? styles.primaryTabBtnActiveWalkIn : '',
+          ].filter(Boolean).join(' ')}
+          onClick={() => handleTabChange('walkin')}
+        >
+          <Wrench size={17} />
+          <span>Walk-in Customers</span>
+          <span className={[
+            styles.primaryTabCount,
+            pageTab === 'walkin' ? styles.primaryTabCountActiveWalkIn : '',
+          ].filter(Boolean).join(' ')}>
+            {walkInTickets.length}
+          </span>
+          {walkInTickets.length > 0 && (
+            <span className={styles.walkinTag}>
+              No Phone Registered
+            </span>
+          )}
+        </button>
+      </div>
+
+      {pageTab === 'accounts' && (
+        <>
+          {/* Admin Scope Selector: All | Retail | Shops */}
+          {user?.role === 'admin' && (
         <div style={{
           display: 'inline-flex',
           background: '#f1f5f9',
@@ -495,7 +793,7 @@ export const CustomersPage = () => {
             onClick={() => { setAdminScope('all'); setCurrentPage(1); }}
           >
             <Users size={14} />
-            <span>All Accounts ({customers.length})</span>
+            <span>All Accounts ({accountCustomers.length})</span>
           </button>
 
           <button
@@ -518,7 +816,7 @@ export const CustomersPage = () => {
             onClick={() => { setAdminScope('retail'); setCurrentPage(1); }}
           >
             <User size={14} />
-            <span>👤 Retail Customers ({customers.filter(isRetailCustomer).length})</span>
+            <span>👤 Retail Customers ({accountCustomers.filter(isRetailCustomer).length})</span>
           </button>
 
           <button
@@ -541,7 +839,7 @@ export const CustomersPage = () => {
             onClick={() => { setAdminScope('shop'); setCurrentPage(1); }}
           >
             <Store size={14} />
-            <span>🏪 Shops & Parts Buyers ({customers.filter(isShopCustomer).length})</span>
+            <span>🏪 Shops & Parts Buyers ({accountCustomers.filter(isShopCustomer).length})</span>
           </button>
         </div>
       )}
@@ -587,7 +885,7 @@ export const CustomersPage = () => {
               <div className={[styles.summaryIconWrap, styles.iconOverdue].join(' ')}><AlertTriangle size={16} /></div>
             </div>
             <p className={styles.summaryValue} style={{ color: metrics.overdueCount > 0 ? '#dc2626' : '#64748b' }}>
-              {formatCurrency(metrics.overdueTotalAmount)}
+              {formatPrivateCurrency(metrics.overdueTotalAmount)}
             </p>
             <p className={styles.summarySub} style={{ color: metrics.overdueCount > 0 ? '#b91c1c' : '#64748b', fontWeight: 600 }}>
               {metrics.overdueCount} customer{metrics.overdueCount !== 1 ? 's' : ''} ({metrics.totalOverdueDebtsCount} record{metrics.totalOverdueDebtsCount !== 1 ? 's' : ''})
@@ -609,7 +907,7 @@ export const CustomersPage = () => {
               <div className={[styles.summaryIconWrap, styles.iconDebt].join(' ')}><BookOpen size={16} /></div>
             </div>
             <p className={styles.summaryValue} style={{ color: metrics.totalDebt > 0 ? '#d97706' : '#64748b' }}>
-              {formatCurrency(metrics.totalDebt)}
+              {formatPrivateCurrency(metrics.totalDebt)}
             </p>
             <p className={styles.summarySub}>
               {metrics.withDebt} customer{metrics.withDebt !== 1 ? 's' : ''} with active tab
@@ -635,8 +933,8 @@ export const CustomersPage = () => {
             <span className={styles.summaryLabel}>Lifetime Value</span>
             <div className={[styles.summaryIconWrap, styles.iconLtv].join(' ')}><DollarSign size={16} /></div>
           </div>
-          <p className={styles.summaryValue}>{formatCurrency(metrics.totalLtv)}</p>
-          <p className={styles.summarySub}>Avg {formatCurrency(metrics.avgRevenue)} / client</p>
+          <p className={styles.summaryValue}>{formatPrivateCurrency(metrics.totalLtv)}</p>
+          <p className={styles.summarySub}>Avg {formatPrivateCurrency(metrics.avgRevenue)} / client</p>
         </div>
       </div>
 
@@ -765,6 +1063,25 @@ export const CustomersPage = () => {
                               {customer.shopName && (
                                 <span className={styles.customerB2BTag}>B2B</span>
                               )}
+                              {customer.id.startsWith('offline_') && (
+                                <span
+                                  style={{
+                                    fontSize: '11px',
+                                    background: '#fef3c7',
+                                    color: '#b45309',
+                                    border: '1px solid #fde68a',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    fontWeight: 600,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                  }}
+                                  title="Created offline. Queued to sync to Firestore automatically when online."
+                                >
+                                  ☁️ Offline (Queued)
+                                </span>
+                              )}
                             </div>
                             {customer.shopName && (
                               <span className={styles.customerContactSub}>Contact: {customer.name}</span>
@@ -775,13 +1092,13 @@ export const CustomersPage = () => {
                             {permissions.customers_debt && (overdueInfo.hasOverdue ? (
                               <div>
                                 <span className={styles.overdueBadgeTag}>
-                                  🔴 OVERDUE: {formatCurrency(overdueInfo.totalOverdueAmount)} ({overdueInfo.maxDaysOverdue}d late)
+                                  🔴 OVERDUE: {formatPrivateCurrency(overdueInfo.totalOverdueAmount)} ({overdueInfo.maxDaysOverdue}d late)
                                 </span>
                               </div>
                             ) : debt > 0 ? (
                               <div>
                                 <span className={styles.debtBadgeTag}>
-                                  🚨 Debt: {formatCurrency(debt)}
+                                  🚨 Debt: {formatPrivateCurrency(debt)}
                                 </span>
                               </div>
                             ) : null)}
@@ -815,15 +1132,15 @@ export const CustomersPage = () => {
                       <td className={styles.td} style={{ textAlign: 'center' }}>
                         <span className={styles.ordersCount}>{customer.totalPurchases}</span>
                       </td>
-                      <td className={styles.td}>
-                        <span className={styles.spentValue}>{formatCurrency(customer.totalSpent)}</span>
+                      <td className={styles.td} data-col="spent">
+                        <span className={styles.spentValue}>{formatPrivateCurrency(customer.totalSpent)}</span>
                       </td>
                       {permissions.customers_debt && (
-                        <td className={styles.td}>
+                        <td className={styles.td} data-col="debt">
                           {overdueInfo.hasOverdue ? (
                             <div>
                               <span style={{ fontWeight: 800, color: '#dc2626', display: 'block', fontSize: '13.5px' }}>
-                                {formatCurrency(debt)}
+                                {formatPrivateCurrency(debt)}
                               </span>
                               <span style={{ fontSize: '11px', color: '#b91c1c', fontWeight: 700 }}>
                                 🔴 {overdueInfo.count} Overdue ({overdueInfo.maxDaysOverdue}d)
@@ -832,7 +1149,7 @@ export const CustomersPage = () => {
                           ) : debt > 0 ? (
                             <div>
                               <span style={{ fontWeight: 800, color: '#d97706', display: 'block', fontSize: '13.5px' }}>
-                                {formatCurrency(debt)}
+                                {formatPrivateCurrency(debt)}
                               </span>
                               <span style={{ fontSize: '11px', color: '#b45309', fontWeight: 600 }}>
                                 Active Tab
@@ -845,7 +1162,7 @@ export const CustomersPage = () => {
                           )}
                           {(customer.storeCredit || 0) > 0 && (
                             <span style={{ fontSize: '10.5px', color: '#047857', fontWeight: 700, background: '#d1fae5', border: '1px solid #a7f3d0', borderRadius: '4px', padding: '1px 5px', display: 'inline-block', marginTop: '3px' }}>
-                              🎟️ Avoir: {formatCurrency(customer.storeCredit || 0)}
+                              🎟️ Avoir: {formatPrivateCurrency(customer.storeCredit || 0)}
                             </span>
                           )}
                         </td>
@@ -1040,6 +1357,346 @@ export const CustomersPage = () => {
           </div>
         )}
       </div>
+        </>
+      )}
+
+      {pageTab === 'walkin' && (
+        <>
+          {/* Walk-in Repairs KPI Summary Grid */}
+          <div className={styles.summaryGrid}>
+            <div
+              className={[
+                styles.summaryCard,
+                walkInStatusFilter === 'all' && styles.summaryCardActive
+              ].filter(Boolean).join(' ')}
+              onClick={() => { setWalkInStatusFilter('all'); setWalkInPage(1); }}
+              title="Click to view all walk-in repairs"
+              style={{ cursor: 'pointer' }}
+            >
+              <div className={styles.summaryCardTop}>
+                <span className={styles.summaryLabel}>Total Walk-in Repairs</span>
+                <div className={[styles.summaryIconWrap, styles.iconTotal].join(' ')}>
+                  <Wrench size={16} />
+                </div>
+              </div>
+              <p className={styles.summaryValue}>{walkInMetrics.total}</p>
+              <p className={styles.summarySub}>Repairs without phone number</p>
+            </div>
+
+            <div
+              className={[
+                styles.summaryCard,
+                walkInStatusFilter === 'active' && styles.summaryCardActive
+              ].filter(Boolean).join(' ')}
+              onClick={() => { setWalkInStatusFilter('active'); setWalkInPage(1); }}
+              title="Click to filter active repairs in workshop"
+              style={{ cursor: 'pointer' }}
+            >
+              <div className={styles.summaryCardTop}>
+                <span className={styles.summaryLabel}>Active in Workshop</span>
+                <div className={[styles.summaryIconWrap, styles.iconRepeat].join(' ')}>
+                  <Clock size={16} />
+                </div>
+              </div>
+              <p className={styles.summaryValue}>{walkInMetrics.active}</p>
+              <p className={styles.summarySub}>
+                {walkInMetrics.inProgress} in progress · {walkInMetrics.ready} ready
+              </p>
+            </div>
+
+            <div
+              className={[
+                styles.summaryCard,
+                walkInStatusFilter === 'completed' && styles.summaryCardActive
+              ].filter(Boolean).join(' ')}
+              onClick={() => { setWalkInStatusFilter('completed'); setWalkInPage(1); }}
+              title="Click to filter completed repairs"
+              style={{ cursor: 'pointer' }}
+            >
+              <div className={styles.summaryCardTop}>
+                <span className={styles.summaryLabel}>Completed & Picked Up</span>
+                <div className={[styles.summaryIconWrap, styles.iconNew].join(' ')}>
+                  <CheckCircle2 size={16} />
+                </div>
+              </div>
+              <p className={styles.summaryValue}>{walkInMetrics.completed}</p>
+              <p className={styles.summarySub}>Picked up by walk-in clients</p>
+            </div>
+
+            <div className={styles.summaryCard} style={{ cursor: 'default' }}>
+              <div className={styles.summaryCardTop}>
+                <span className={styles.summaryLabel}>Total Billed</span>
+                <div className={[styles.summaryIconWrap, styles.iconLtv].join(' ')}>
+                  <DollarSign size={16} />
+                </div>
+              </div>
+              <p className={styles.summaryValue}>
+                {formatPrivateCurrency(walkInMetrics.totalBilled)}
+              </p>
+              <p className={styles.summarySub}>
+                {formatPrivateCurrency(walkInMetrics.totalPaid)} collected
+                {walkInMetrics.unpaidBalance > 0 && ` · ${formatPrivateCurrency(walkInMetrics.unpaidBalance)} due`}
+              </p>
+            </div>
+          </div>
+
+          {/* Walk-in Status Quick Filter Pills */}
+          <div className={styles.filterPills}>
+            {[
+              { label: 'All Walk-in Repairs', value: 'all', count: walkInTickets.length },
+              { label: 'Active in Workshop', value: 'active', count: walkInMetrics.active },
+              { label: 'Pending Intake', value: 'pending', count: walkInMetrics.pending },
+              { label: 'In Progress', value: 'in_progress', count: walkInMetrics.inProgress },
+              { label: 'Ready for Pickup', value: 'ready', count: walkInMetrics.ready },
+              { label: 'Completed', value: 'completed', count: walkInMetrics.completed },
+            ].map((pill) => (
+              <button
+                key={pill.value}
+                type="button"
+                className={[
+                  styles.filterPill,
+                  walkInStatusFilter === pill.value ? styles.filterPillActive : ''
+                ].filter(Boolean).join(' ')}
+                onClick={() => {
+                  setWalkInStatusFilter(pill.value as any);
+                  setWalkInPage(1);
+                }}
+              >
+                <span>{pill.label}</span>
+                <span className={styles.pillCount}>{pill.count}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Walk-in Repair Records Table Card */}
+          <div className={styles.catalogCard}>
+            <div className={styles.tableHeader}>
+              <div className={styles.headerLeft}>
+                <h2 className={styles.tableTitle}>Walk-in Repair Directory</h2>
+                <span className={styles.itemCountBadge}>
+                  {sortedWalkInTickets.length} {sortedWalkInTickets.length === 1 ? 'repair' : 'repairs'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <SearchInput
+                  value={walkInSearch}
+                  onChange={(v) => { setWalkInSearch(v); setWalkInPage(1); }}
+                  placeholder="Search by client, device, problem, technician, ticket #…"
+                  className={styles.search}
+                />
+                {walkInSearch && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setWalkInSearch(''); setWalkInPage(1); }}
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            <div className={styles.tableWrapper}>
+              {sortedWalkInTickets.length === 0 ? (
+                <div style={{ padding: '48px 20px' }}>
+                  <EmptyState
+                    title={walkInSearch ? 'No matching walk-in repairs' : 'No walk-in repairs found'}
+                    description={
+                      walkInSearch
+                        ? `No walk-in repairs matched "${walkInSearch}". Try searching with a different term.`
+                        : 'All repair tickets have registered customer accounts with phone numbers. When a repair is created without a phone number, it will automatically appear here as a walk-in record.'
+                    }
+                    action={
+                      walkInSearch ? (
+                        <Button variant="secondary" size="sm" onClick={() => setWalkInSearch('')}>
+                          Clear Search
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                </div>
+              ) : (
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th className={styles.th}>Ticket / Date</th>
+                      <th className={styles.th}>Walk-in Client</th>
+                      <th className={styles.th}>Device & Problem</th>
+                      <th className={styles.th}>Status & Tech</th>
+                      <th className={styles.th}>Cost & Balance</th>
+                      <th className={styles.th} style={{ textAlign: 'right', minWidth: '180px' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedWalkInTickets.map((ticket) => {
+                      const issueTag = detectIssueTag(ticket.issueDescription || '');
+                      const brandIcon = getBrandIcon(ticket.deviceModel || '');
+                      const cost = ticket.actualCost != null && ticket.actualCost > 0 ? ticket.actualCost : (ticket.estimatedCost || 0);
+                      const paid = ticket.paidAmount || 0;
+                      const balance = Math.max(0, cost - paid);
+
+                      return (
+                        <tr
+                          key={ticket.id}
+                          className={styles.tr}
+                          onClick={() => setSelectedWalkInTicket(ticket)}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <td className={styles.td}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <span className={styles.ticketBadge}>
+                                {ticket.ticketNumber || `#${ticket.id.slice(-6)}`}
+                              </span>
+                              <span style={{ fontSize: '11px', color: '#64748b' }}>
+                                {ticket.createdAt ? formatDate(ticket.createdAt) : '—'}
+                              </span>
+                              {ticket.createdAt && (
+                                <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>
+                                  {formatTimeAgo(ticket.createdAt)}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          <td className={styles.td}>
+                            <div className={styles.customerCell}>
+                              <div
+                                className={styles.customerAvatar}
+                                style={{ background: '#fef3c7', color: '#b45309', borderColor: '#fde68a' }}
+                              >
+                                {ticket.customerName ? ticket.customerName.charAt(0).toUpperCase() : '?'}
+                              </div>
+                              <div className={styles.customerInfoGroup}>
+                                <div className={styles.customerNameRow}>
+                                  <p className={styles.customerName}>{ticket.customerName || 'Anonymous Walk-in'}</p>
+                                  <span className={styles.walkinTag}>Walk-in</span>
+                                </div>
+                                <span style={{ fontSize: '11px', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '3px', marginTop: '2px' }}>
+                                  <AlertTriangle size={11} /> No phone registered
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className={styles.td}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxWidth: '260px' }}>
+                              <div style={{ fontWeight: 700, fontSize: '13px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                <span>{brandIcon}</span>
+                                <span>{ticket.deviceModel || 'Unknown Device'}</span>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                <span style={{
+                                  fontSize: '11px',
+                                  background: '#f1f5f9',
+                                  color: '#475569',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px'
+                                }}>
+                                  <span>{issueTag.icon}</span>
+                                  <span>{issueTag.label}</span>
+                                </span>
+                                {ticket.issueDescription && (
+                                  <span
+                                    style={{
+                                      fontSize: '11.5px',
+                                      color: '#64748b',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                      maxWidth: '170px'
+                                    }}
+                                    title={ticket.issueDescription}
+                                  >
+                                    {ticket.issueDescription}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className={styles.td}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                              <RepairStatusBadge status={ticket.status} />
+                              <span style={{ fontSize: '11.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <User size={12} />
+                                {ticket.assignedTechnician || 'Unassigned'}
+                              </span>
+                            </div>
+                          </td>
+
+                          <td className={styles.td}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                              <span className={styles.spentValue}>
+                                {formatPrivateCurrency(cost)}
+                              </span>
+                              {balance > 0 ? (
+                                <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: 700 }}>
+                                  Due: {formatPrivateCurrency(balance)}
+                                </span>
+                              ) : (
+                                <span className={styles.settledBadge}>
+                                  <CheckCircle2 size={11} /> Settled
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          <td className={styles.td}>
+                            <div className={styles.actionButtons} onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                className={styles.quickActionBtn}
+                                title="Print Ticket Label / Receipt"
+                                onClick={() => setPrintingWalkInTicket(ticket)}
+                              >
+                                <Printer size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                className={styles.quickActionBtn}
+                                title="Edit Repair / Add Phone Number (Converts to Account)"
+                                onClick={() => {
+                                  setTicketToEdit(ticket);
+                                  setIsNewTicketOpen(true);
+                                }}
+                              >
+                                <Edit size={14} />
+                              </button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => setSelectedWalkInTicket(ticket)}
+                                title="Open Sidebar Details Widget"
+                              >
+                                <Eye size={14} /> Details
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {sortedWalkInTickets.length > 0 && (
+              <div style={{ padding: '12px 16px', borderTop: '1px solid #e2e8f0' }}>
+                <Pagination
+                  currentPage={walkInPage}
+                  totalPages={totalWalkInPages}
+                  onPageChange={setWalkInPage}
+                  itemsPerPage={walkInItemsPerPage}
+                  totalItems={sortedWalkInTickets.length}
+                />
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       {/* New or Edit Repair Ticket Modal */}
       <NewTicketModal
@@ -1071,7 +1728,15 @@ export const CustomersPage = () => {
           }
           setCustomerRequiringUnlock(null);
         }}
-        actionName="edit customer information"
+        actionName={`Edit customer: ${customerRequiringUnlock?.name || 'Customer'}`}
+        actionType="customer_edit"
+        targetId={customerRequiringUnlock?.id}
+        actionData={customerRequiringUnlock ? {
+          customerName: customerRequiringUnlock.name,
+          phone: customerRequiringUnlock.phone,
+          debt: customerRequiringUnlock.debt,
+          creditLimit: customerRequiringUnlock.creditLimit,
+        } : undefined}
       />
 
       {/* Problem 1 fix: Admin Unlock Modal for deleting customer */}
@@ -1084,7 +1749,14 @@ export const CustomersPage = () => {
           }
           setDeleteRequiringUnlock(null);
         }}
-        actionName="delete a customer account"
+        actionName={`Delete customer: ${deleteRequiringUnlock?.name || 'Customer'}`}
+        actionType="customer_delete"
+        targetId={deleteRequiringUnlock?.id}
+        actionData={deleteRequiringUnlock ? {
+          customerName: deleteRequiringUnlock.name,
+          phone: deleteRequiringUnlock.phone,
+          debt: deleteRequiringUnlock.debt,
+        } : undefined}
       />
 
       {/* Switch Account Type Modal */}
@@ -1119,7 +1791,7 @@ export const CustomersPage = () => {
             </p>
             {(customerToDelete?.totalDebt || 0) > 0 && (
               <p style={{ margin: 0, color: '#dc2626', fontWeight: 700, fontSize: '13px' }}>
-                ⚠️ Warning: This customer currently has an unpaid debt of {formatCurrency(customerToDelete?.totalDebt || 0)}. Deleting the account will also remove all associated debt records.
+                ⚠️ Warning: This customer currently has an unpaid debt of {formatPrivateCurrency(customerToDelete?.totalDebt || 0)}. Deleting the account will also remove all associated debt records.
               </p>
             )}
           </div>
@@ -1127,6 +1799,31 @@ export const CustomersPage = () => {
         confirmLabel="Delete Customer"
         variant="danger"
         isLoading={isDeletingLoading}
+      />
+
+      {/* Sidebar Widget for Walk-in Ticket Details */}
+      <TicketDetailPanel
+        ticket={selectedWalkInTicket}
+        onClose={() => setSelectedWalkInTicket(null)}
+        onEdit={() => {
+          if (selectedWalkInTicket) {
+            setTicketToEdit(selectedWalkInTicket);
+            setIsNewTicketOpen(true);
+            setSelectedWalkInTicket(null);
+          }
+        }}
+        onViewCustomerProfile={(cust) => {
+          setSelectedWalkInTicket(null);
+          setSelectedCustomer(cust);
+          handleTabChange('accounts');
+        }}
+      />
+
+      {/* Direct Ticket Label / Receipt Print Modal */}
+      <PrintRepairTicketModal
+        ticket={printingWalkInTicket}
+        isOpen={!!printingWalkInTicket}
+        onClose={() => setPrintingWalkInTicket(null)}
       />
     </div>
   );

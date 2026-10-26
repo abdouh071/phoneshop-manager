@@ -25,6 +25,10 @@ dist-electron/
 print-server/.env
 print-server/node_modules/
 
+# Large APK binaries (distribute via GitHub Releases)
+*.apk
+public/downloads/*.apk
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -5,7 +5,8 @@ import {
 } from 'lucide-react';
 import { RepairStatusBadge } from '../../components/ui/Badge';
 import type { SaleTransaction, CustomerDebtEntry } from '../../types';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { usePrivacyStore } from '../../store/privacyStore';
 import { isDebtOverdue, getDaysOverdue } from '../../utils/debtAlerts';
 import styles from './Timeline.module.css';
 
@@ -49,7 +50,7 @@ const SaleCard: React.FC<{ event: SaleEvent; onViewReceipt?: (tx: SaleTransactio
           <span className={styles.cardMeta}>{tx.items.length} item{tx.items.length !== 1 ? 's' : ''}</span>
         </div>
         <div className={styles.cardRight}>
-          <span className={styles.amount}>{formatCurrency(tx.total)}</span>
+          <span className={styles.amount}>{formatPrivateCurrency(tx.total)}</span>
           <button type="button" className={styles.expandBtn} onClick={() => setOpen(v => !v)}>
             {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
@@ -61,7 +62,7 @@ const SaleCard: React.FC<{ event: SaleEvent; onViewReceipt?: (tx: SaleTransactio
             {tx.items.map((item: { quantity: number; product: { name: string; model: string; price: number } }, i: number) => (
               <div key={i} className={styles.itemRow}>
                 <span>{item.quantity}× {item.product.name} {item.product.model}</span>
-                <span>{formatCurrency(item.product.price * item.quantity)}</span>
+                <span>{formatPrivateCurrency(item.product.price * item.quantity)}</span>
               </div>
             ))}
           </div>
@@ -104,7 +105,7 @@ const RepairCard: React.FC<{ event: RepairEvent }> = ({ event }) => {
           {tk.issueDescription && <p className={styles.issueText}>{tk.issueDescription}</p>}
           <div className={styles.cardFooter}>
             <span className={styles.methodTag}>
-              {tk.actualCost ? `Charged: ${formatCurrency(tk.actualCost)}` : `Est: ${formatCurrency(tk.estimatedCost)}`}
+              {tk.actualCost ? `Charged: ${formatPrivateCurrency(tk.actualCost)}` : `Est: ${formatPrivateCurrency(tk.estimatedCost)}`}
             </span>
             {tk.assignedTechnician && (
               <span className={styles.methodTag}>👨‍🔧 {tk.assignedTechnician}</span>
@@ -127,7 +128,7 @@ const DebtOpenCard: React.FC<{ event: DebtOpenEvent }> = ({ event }) => {
           <span className={styles.cardMeta}>{debt.productOrService}</span>
         </div>
         <div className={styles.cardRight}>
-          <span className={`${styles.amount} ${styles.amountDebt}`}>{formatCurrency(debt.totalAmount)}</span>
+          <span className={`${styles.amount} ${styles.amountDebt}`}>{formatPrivateCurrency(debt.totalAmount)}</span>
           <button type="button" className={styles.expandBtn} onClick={() => setOpen(v => !v)}>
             {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
@@ -138,7 +139,7 @@ const DebtOpenCard: React.FC<{ event: DebtOpenEvent }> = ({ event }) => {
           <div className={styles.debtRow}>
             <span>Balance Owed</span>
             <span style={{ fontWeight: 700, color: debt.remainingBalance > 0 ? '#dc2626' : '#16a34a' }}>
-              {formatCurrency(debt.remainingBalance)}
+              {formatPrivateCurrency(debt.remainingBalance)}
             </span>
           </div>
           {debt.dueDate && (
@@ -176,7 +177,7 @@ const DebtPayCard: React.FC<{ event: DebtPayEvent }> = ({ event }) => {
           Debt Payment
           <span className={styles.cardMeta}>{event.data.productOrService}</span>
         </div>
-        <span className={`${styles.amount} ${styles.amountPaid}`}>+{formatCurrency(payment.amount)}</span>
+        <span className={`${styles.amount} ${styles.amountPaid}`}>+{formatPrivateCurrency(payment.amount)}</span>
       </div>
       <div className={styles.cardBody}>
         <div className={styles.debtRow}>
@@ -194,6 +195,7 @@ const DebtPayCard: React.FC<{ event: DebtPayEvent }> = ({ event }) => {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export const Customer360Timeline: React.FC<Props> = ({ transactions, tickets, debts, onViewReceipt }) => {
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
   const [filter, setFilter] = useState<FilterKind>('all');
 
   const allEvents = useMemo<TimelineEvent[]>(() => {

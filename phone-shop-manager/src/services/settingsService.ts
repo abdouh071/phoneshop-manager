@@ -1,8 +1,11 @@
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
+export type ColorThemeKey = 'default' | 'cyan' | 'emerald' | 'purple' | 'amber';
+
 export interface StoreSettings {
   theme: 'light' | 'dark' | 'system';
+  colorTheme?: ColorThemeKey;
   currency: string;
   enableNotifications: boolean;
   storeName: string;
@@ -16,6 +19,8 @@ export interface StoreSettings {
   storeAddress?: string;
   // Technician profit percentage
   technicianProfitPercentage?: number;
+  // Per-technician customized commission percentages: { [technicianName]: percentage }
+  technicianRates?: Record<string, number>;
   // What day does the week start? (0 = Sunday, 1 = Monday, ... 5 = Friday, 6 = Saturday)
   weekStartDay?: number;
   // Hardware printer configuration

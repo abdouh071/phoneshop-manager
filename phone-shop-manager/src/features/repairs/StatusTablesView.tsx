@@ -17,6 +17,7 @@ import {
 import type { RepairTicket } from '../../types';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { detectIssueTag, getBrandIcon } from './repairConstants';
+import { isTicketActiveReturnPending } from '../../utils/phoneLifecycle';
 import styles from './StatusTables.module.css';
 
 interface StatusTablesViewProps {
@@ -60,19 +61,21 @@ export const StatusTablesView: React.FC<StatusTablesViewProps> = ({
     setCollapsed(prev => ({ ...prev, [status]: !prev[status] }));
   };
 
-  // Segregate tickets by status - returned phones go to Section 1 (Pending Intake) with priority
+  // Segregate tickets by status - active returned phones go to Section 1 (Pending Intake) with priority
   const pendingTickets = useMemo(() => {
     return tickets
-      .filter(t => t.status === 'pending' || t.status === 'returned')
+      .filter(t => t.status === 'pending' || isTicketActiveReturnPending(t, tickets))
       .sort((a, b) => {
-        if (a.status === 'returned' && b.status !== 'returned') return -1;
-        if (b.status === 'returned' && a.status !== 'returned') return 1;
+        const aRet = isTicketActiveReturnPending(a, tickets);
+        const bRet = isTicketActiveReturnPending(b, tickets);
+        if (aRet && !bRet) return -1;
+        if (bRet && !aRet) return 1;
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
   }, [tickets]);
   const inProgressTickets = useMemo(() => tickets.filter(t => t.status === 'in_progress'), [tickets]);
   const readyTickets = useMemo(() => tickets.filter(t => t.status === 'ready'), [tickets]);
-  const completedTickets = useMemo(() => tickets.filter(t => t.status === 'completed'), [tickets]);
+  const completedTickets = useMemo(() => tickets.filter(t => t.status === 'completed' || (t.status === 'returned' && !isTicketActiveReturnPending(t, tickets))), [tickets]);
 
   // Section metrics
   const pendingTotalValue = useMemo(() => 
@@ -150,9 +153,9 @@ export const StatusTablesView: React.FC<StatusTablesViewProps> = ({
                 <span className={`${styles.countBadge} ${styles.countPending}`}>
                   {pendingTickets.length} Ticket{pendingTickets.length === 1 ? '' : 's'}
                 </span>
-                {pendingTickets.some(t => t.status === 'returned') && (
+                {pendingTickets.some(t => isTicketActiveReturnPending(t, tickets)) && (
                   <span className={styles.returnedCountPill} title="Repairs returned under warranty or callback">
-                    <AlertTriangle size={11} /> {pendingTickets.filter(t => t.status === 'returned').length} Returned
+                    <AlertTriangle size={11} /> {pendingTickets.filter(t => isTicketActiveReturnPending(t, tickets)).length} Returned
                   </span>
                 )}
               </div>
@@ -199,7 +202,7 @@ export const StatusTablesView: React.FC<StatusTablesViewProps> = ({
                     const issue = detectIssueTag(ticket.issueDescription);
                     const brandIcon = getBrandIcon(ticket.deviceBrand);
                     const isOverdue = ticket.estimatedCompletionDate && new Date(ticket.estimatedCompletionDate) < new Date();
-                    const isReturned = ticket.status === 'returned';
+                    const isReturned = isTicketActiveReturnPending(ticket, tickets);
 
                     return (
                       <tr 

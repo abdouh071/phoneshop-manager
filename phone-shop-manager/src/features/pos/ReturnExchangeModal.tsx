@@ -268,7 +268,18 @@ export const ReturnExchangeModal: React.FC<ReturnExchangeModalProps> = ({ isOpen
           setShowAdminUnlock(false);
           executeConfirmReturn();
         }}
-        actionName="authorize high return credit above catalog price"
+        actionName={`Authorize high return credit for ${selectedProduct?.name || 'item'}`}
+        actionType="pos_high_return_credit"
+        actionData={selectedProduct ? {
+          itemType: 'return_exchange',
+          productName: selectedProduct.name,
+          sku: selectedProduct.sku,
+          catalogPrice: selectedProduct.price,
+          customReturnPrice: customPrice ?? selectedProduct.price,
+          totalReturnCredit,
+          quantity,
+          returnReason: reason || undefined,
+        } : undefined}
       />
     </Modal>
   );

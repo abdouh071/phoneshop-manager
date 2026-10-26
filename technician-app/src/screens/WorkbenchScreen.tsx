@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { View, StyleSheet, FlatList, TouchableOpacity, Alert, ScrollView, RefreshControl } from 'react-native';
+import { View, StyleSheet, FlatList, TouchableOpacity, Alert, ScrollView, RefreshControl, Linking, Vibration } from 'react-native';
 import { Appbar, Card, Title, Text, FAB, useTheme, ActivityIndicator, Searchbar, Chip } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRepairStore } from '../store/repairStore';
 import { useAuthStore } from '../store/authStore';
 import { useTranslation } from 'react-i18next';
+import { RoleBottomNav } from '../components/RoleBottomNav';
 
 const getTimeAgo = (dateStr: string): string => {
   const now = new Date();
@@ -24,7 +25,7 @@ const getTimeAgo = (dateStr: string): string => {
 };
 
 export const WorkbenchScreen = ({ navigation }: any) => {
-  const { tickets, isLoading, error, subscribeToTickets } = useRepairStore();
+  const { tickets, isLoading, error, subscribeToTickets, updateTicketStatus } = useRepairStore();
   const { user, logout } = useAuthStore();
   const theme = useTheme();
   const { t } = useTranslation();
@@ -65,6 +66,7 @@ export const WorkbenchScreen = ({ navigation }: any) => {
     const counts: Record<string, number> = { all: tickets.length };
     const statuses = ['pending', 'in_progress', 'ready', 'completed', 'returned', 'cancelled'];
     statuses.forEach(s => { counts[s] = tickets.filter(t => t.status === s).length; });
+    counts['today'] = tickets.filter(t => t.createdAt && new Date(t.createdAt).toDateString() === new Date().toDateString()).length;
     counts['my_repairs'] = tickets.filter(t => t.assignedTechnician === user?.name).length;
     counts['others_repairs'] = tickets.filter(t => t.assignedTechnician && t.assignedTechnician !== user?.name).length;
     counts['unassigned'] = tickets.filter(t => !t.assignedTechnician).length;
@@ -73,12 +75,14 @@ export const WorkbenchScreen = ({ navigation }: any) => {
 
   const filteredTickets = useMemo(() => {
     return tickets.filter(t => {
-      // 1. Status/Assignment filter
+      if (statusFilter === 'today') {
+        return Boolean(t.createdAt && new Date(t.createdAt).toDateString() === new Date().toDateString());
+      }
       if (statusFilter === 'my_repairs' && t.assignedTechnician !== user?.name) return false;
       if (statusFilter === 'others_repairs' && (!t.assignedTechnician || t.assignedTechnician === user?.name)) return false;
       if (statusFilter === 'unassigned' && t.assignedTechnician) return false;
       
-      const isStatusString = !['all', 'my_repairs', 'others_repairs', 'unassigned'].includes(statusFilter);
+      const isStatusString = !['all', 'today', 'my_repairs', 'others_repairs', 'unassigned'].includes(statusFilter);
       if (isStatusString && t.status !== statusFilter) return false;
 
       // 2. Search query filter
@@ -160,6 +164,21 @@ export const WorkbenchScreen = ({ navigation }: any) => {
 
   const renderTicket = ({ item }: { item: any }) => {
     const cost = item.estimatedCost || item.actualCost || 0;
+    const isOffline = item.id && item.id.startsWith('offline_');
+    const canCycle = item.status === 'pending' || item.status === 'in_progress';
+    const nextStatus = item.status === 'pending' ? 'in_progress' : item.status === 'in_progress' ? 'ready' : null;
+
+    const handleCycleStatus = async (e: any) => {
+      e?.stopPropagation?.();
+      if (!nextStatus) return;
+      try {
+        Vibration.vibrate(40);
+        await updateTicketStatus(item.id, nextStatus, user?.name);
+      } catch (err) {
+        console.warn('Status cycle error:', err);
+      }
+    };
+
     return (
       <TouchableOpacity 
         activeOpacity={0.7}
@@ -169,22 +188,56 @@ export const WorkbenchScreen = ({ navigation }: any) => {
           <View style={[styles.statusStrip, { backgroundColor: getStatusColor(item.status) }]} />
           <Card.Content style={styles.cardContent}>
             <View style={styles.cardHeader}>
-              <Text style={styles.ticketNumber}>{item.ticketNumber}</Text>
-              <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '1A' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={styles.ticketNumber}>{item.ticketNumber}</Text>
+                {isOffline && (
+                  <View style={styles.offlineBadge}>
+                    <MaterialCommunityIcons name="cloud-off-outline" size={11} color="#dc2626" />
+                    <Text style={styles.offlineBadgeText}>Offline</Text>
+                  </View>
+                )}
+              </View>
+
+              <TouchableOpacity
+                activeOpacity={canCycle ? 0.6 : 1}
+                onPress={canCycle ? handleCycleStatus : undefined}
+                style={[
+                  styles.statusBadge,
+                  { backgroundColor: getStatusColor(item.status) + '1A' },
+                  canCycle && styles.statusBadgeClickable
+                ]}
+              >
                 <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
                   {String(t(`status.${item.status}`, item.status.replace('_', ' ').toUpperCase()))}
                 </Text>
-              </View>
+                {canCycle && (
+                  <MaterialCommunityIcons name="chevron-right" size={14} color={getStatusColor(item.status)} style={{ marginLeft: 2 }} />
+                )}
+              </TouchableOpacity>
             </View>
             
             <Text style={styles.deviceTitle}>{item.deviceBrand} {item.deviceModel}</Text>
             
-            {/* Customer name + time ago */}
+            {/* Customer name + Call button + time ago */}
             <View style={styles.customerRow}>
               <MaterialCommunityIcons name="account" size={14} color="#94a3b8" />
               <Text style={styles.customerText} numberOfLines={1}>
                 {item.customerName}
               </Text>
+              
+              {item.customerPhone ? (
+                <TouchableOpacity
+                  style={styles.callChip}
+                  onPress={(e) => {
+                    e?.stopPropagation?.();
+                    Linking.openURL(`tel:${item.customerPhone}`);
+                  }}
+                >
+                  <MaterialCommunityIcons name="phone" size={12} color="#16a34a" />
+                  <Text style={styles.callChipText}>{item.customerPhone}</Text>
+                </TouchableOpacity>
+              ) : null}
+
               <Text style={styles.timeAgoText}>
                 {getTimeAgo(item.createdAt)}
               </Text>
@@ -347,6 +400,8 @@ export const WorkbenchScreen = ({ navigation }: any) => {
           onPress={() => navigation.navigate('NewTicket')}
         />
       )}
+
+      <RoleBottomNav currentRoute="Workbench" navigation={navigation} />
     </View>
   );
 };
@@ -510,6 +565,39 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 12,
   },
+  statusBadgeClickable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  offlineBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    gap: 3,
+  },
+  offlineBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#dc2626',
+  },
+  callChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    gap: 4,
+    marginRight: 6,
+  },
+  callChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#16a34a',
+  },
   statusText: {
     fontSize: 11,
     fontWeight: '700',
@@ -588,7 +676,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     margin: 16,
     right: 0,
-    bottom: 0,
+    bottom: 72,
     backgroundColor: '#4f46e5',
     borderRadius: 28,
   },

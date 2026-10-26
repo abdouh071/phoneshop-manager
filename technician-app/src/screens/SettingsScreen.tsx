@@ -6,8 +6,9 @@ import { useAuthStore } from '../store/authStore';
 import { useTranslation } from 'react-i18next';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import i18next from 'i18next';
+import { RoleBottomNav } from '../components/RoleBottomNav';
 
-export const SettingsScreen = () => {
+export const SettingsScreen = ({ navigation }: any) => {
   const theme = useTheme();
   const { profitPercentage, setProfitPercentage } = useSettingsStore();
   const { user, logout } = useAuthStore();
@@ -119,6 +120,8 @@ export const SettingsScreen = () => {
           <Text style={styles.logoutText}>{t('sidebar.logout', 'Sign Out')}</Text>
         </TouchableOpacity>
       </View>
+
+      <RoleBottomNav currentRoute="Settings" navigation={navigation} />
     </KeyboardAvoidingView>
   );
 };

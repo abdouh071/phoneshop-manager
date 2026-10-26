@@ -692,3 +692,169 @@
   border: none;
   cursor: pointer;
 }
+
+/* ============================================================
+   Low Stock Category & Sub-Category Filter Bar (Section 3)
+   ============================================================ */
+.sectionFilterBar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 20px;
+  background: var(--color-surface-container-low, #f8fafc);
+  border-bottom: 1px solid var(--color-outline-variant, #e2e8f0);
+}
+
+.sectionFilterGroup,
+.sectionSubFilterGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sectionSubFilterGroup {
+  animation: fadeIn 0.2s ease;
+  padding-left: 8px;
+  border-left: 2px solid #2563eb;
+  margin-left: 2px;
+}
+
+.filterLabel {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-surface-variant, #64748b);
+  white-space: nowrap;
+}
+
+.pillGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.filterPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--color-outline-variant, #cbd5e1);
+  background: var(--color-surface-container-lowest, #ffffff);
+  color: var(--color-on-surface, #334155);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.filterPill:hover:not(.filterPillActive) {
+  background: var(--color-surface-container-high, #f1f5f9);
+  color: var(--color-on-surface, #0f172a);
+  border-color: #94a3b8;
+}
+
+.filterPillActive {
+  background: #d97706 !important;
+  color: #ffffff !important;
+  border-color: #d97706 !important;
+  box-shadow: 0 2px 6px rgba(217, 119, 6, 0.25);
+}
+
+.filterPillEmpty {
+  opacity: 0.55;
+}
+
+.filterPillBadge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.filterPillActive .filterPillBadge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.subFilterPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border: 1px solid var(--color-outline-variant, #cbd5e1);
+  background: var(--color-surface-container-lowest, #ffffff);
+  color: var(--color-on-surface-variant, #475569);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.subFilterPill:hover:not(.subFilterPillActive) {
+  background: var(--color-surface-container-high, #f1f5f9);
+  color: var(--color-on-surface, #0f172a);
+}
+
+.subFilterPillActive {
+  background: #2563eb !important;
+  color: #ffffff !important;
+  border-color: #2563eb !important;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+
+.subFilterPillActive .filterPillBadge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.resetFilterBtn {
+  margin-top: 10px;
+  padding: 6px 14px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.resetFilterBtn:hover {
+  background: #1d4ed8;
+}
+
+.sectionExportBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid #d97706;
+  background: rgba(245, 158, 11, 0.08);
+  color: #b45309;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.sectionExportBtn:hover {
+  background: #d97706;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(217, 119, 6, 0.25);
+}
+
+

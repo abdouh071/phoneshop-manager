@@ -8,7 +8,9 @@ import { useActivityStore } from '../../store/activityStore';
 import { useAuthStore } from '../../store/authStore';
 import { usePermissions } from '../../hooks/usePermissions';
 import styles from './ProductDetail.module.css';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { usePrivacyStore } from '../../store/privacyStore';
+import { getSubCategoryMeta } from '../../utils/accessorySubCategories';
 
 interface ProductDetailPanelProps {
   product: PhoneModel | null;
@@ -21,6 +23,7 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({ product,
   const { user } = useAuthStore();
   const permissions = usePermissions();
   const canViewFinancials = user?.role === 'admin' || (permissions.inventory_edit && permissions.reports);
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
   
   if (!product) return null;
 
@@ -57,6 +60,9 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({ product,
               <StockBadge status={product.stockStatus} />
               <span className={styles.categoryBadge}>
                 {product.category.charAt(0).toUpperCase() + product.category.slice(1)}
+                {product.category === 'accessory' && product.accessorySubCategory && (
+                  ` · ${getSubCategoryMeta(product.accessorySubCategory).icon} ${getSubCategoryMeta(product.accessorySubCategory).label}`
+                )}
               </span>
             </div>
           </div>
@@ -67,7 +73,9 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({ product,
           {canViewFinancials && (
             <div className={styles.priceCard}>
               <p className={styles.priceLabel}>Buy Price (Cost)</p>
-              <p className={styles.priceValue}>{formatCurrency(product.costPrice)}</p>
+              <p data-privacy-cost className={[styles.priceValue, 'privacy-cost'].join(' ')}>
+                {formatPrivateCurrency(product.costPrice)}
+              </p>
             </div>
           )}
           <div className={styles.priceCard}>
@@ -78,14 +86,14 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({ product,
             <>
               <div className={styles.priceCard}>
                 <p className={styles.priceLabel}>Profit / Unit</p>
-                <p className={[styles.priceValue, profit >= 0 ? styles.profitGood : styles.profitBad].join(' ')}>
-                  {formatCurrency(profit)}
+                <p data-privacy-cost className={[styles.priceValue, profit >= 0 ? styles.profitGood : styles.profitBad, 'privacy-cost'].join(' ')}>
+                  {formatPrivateCurrency(profit)}
                 </p>
               </div>
               <div className={styles.priceCard}>
                 <p className={styles.priceLabel}>Margin</p>
-                <p className={[styles.priceValue, margin >= 20 ? styles.profitGood : margin >= 10 ? styles.profitOk : styles.profitBad].join(' ')}>
-                  {margin.toFixed(1)}%
+                <p data-privacy-cost className={[styles.priceValue, margin >= 20 ? styles.profitGood : margin >= 10 ? styles.profitOk : styles.profitBad, 'privacy-cost'].join(' ')}>
+                  {isPrivacyActive ? '••%' : `${margin.toFixed(1)}%`}
                 </p>
               </div>
             </>
@@ -107,7 +115,9 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({ product,
             {canViewFinancials && (
               <div className={styles.detailItem}>
                 <span className={styles.detailLabel}>Stock Cost Value</span>
-                <span className={styles.detailValue}>{formatCurrency(stockValue)}</span>
+                <span data-privacy-cost className={[styles.detailValue, 'privacy-cost'].join(' ')}>
+                  {formatPrivateCurrency(stockValue)}
+                </span>
               </div>
             )}
             <div className={styles.detailItem}>

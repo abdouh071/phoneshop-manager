@@ -19,7 +19,8 @@ import { useCustomerStore } from '../../store/customerStore';
 import { useAuthStore } from '../../store/authStore';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { useToast } from '../../components/ui/Toast';
-import { formatCurrency } from '../../utils/formatCurrency';
+import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { usePrivacyStore } from '../../store/privacyStore';
 import type { Customer, PaymentMethod, SaleTransaction, CustomerDebtEntry } from '../../types';
 import styles from './B2BParts.module.css';
 
@@ -44,6 +45,7 @@ export const B2BPartsCheckoutModal: React.FC<B2BPartsCheckoutModalProps> = ({
   customer,
   onSuccess,
 }) => {
+  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
   const { getTotal, getSubtotal, getDiscountAmount, items, checkoutB2B } = usePartsCartStore();
   const { getCustomerDebtTotal } = useCustomerStore();
   const { user } = useAuthStore();
@@ -188,7 +190,7 @@ export const B2BPartsCheckoutModal: React.FC<B2BPartsCheckoutModalProps> = ({
             <div className={styles.balancePill}>
               <span className={styles.balanceLabel}>Current Debt</span>
               <span className={currentDebt > 0 ? styles.balanceValue : styles.balanceValueZero}>
-                {formatCurrency(currentDebt)}
+                {formatPrivateCurrency(currentDebt)}
               </span>
             </div>
           </div>
@@ -196,10 +198,10 @@ export const B2BPartsCheckoutModal: React.FC<B2BPartsCheckoutModalProps> = ({
           {creditLimit > 0 && (
             <div className={styles.creditLimitRow}>
               <span>
-                Authorized Credit Limit: <strong>{formatCurrency(creditLimit)}</strong>
+                Authorized Credit Limit: <strong>{formatPrivateCurrency(creditLimit)}</strong>
               </span>
               <span>
-                Available Credit: <strong>{formatCurrency(Math.max(0, creditLimit - currentDebt))}</strong>
+                Available Credit: <strong>{formatPrivateCurrency(Math.max(0, creditLimit - currentDebt))}</strong>
               </span>
             </div>
           )}
@@ -383,18 +385,18 @@ export const B2BPartsCheckoutModal: React.FC<B2BPartsCheckoutModalProps> = ({
           </div>
           <div className={styles.impactRow}>
             <span>Paid Immediately ({selectedMethod.toUpperCase()}):</span>
-            <strong style={{ color: '#16a34a' }}>- {formatCurrency(paidAmount)}</strong>
+            <strong style={{ color: '#16a34a' }}>- {formatPrivateCurrency(paidAmount)}</strong>
           </div>
           <div className={styles.impactRow}>
             <span>Amount Posted to Account Ledger:</span>
             <strong style={{ color: chargedAmount > 0 ? '#dc2626' : '#16a34a' }}>
-              + {formatCurrency(chargedAmount)}
+              + {formatPrivateCurrency(chargedAmount)}
             </strong>
           </div>
           <div className={styles.impactRowTotal}>
             <span>Shop's New Total Debt Balance:</span>
             <span style={{ fontSize: '15px', color: newProjectedDebt > 0 ? '#dc2626' : '#16a34a' }}>
-              {formatCurrency(newProjectedDebt)}
+              {formatPrivateCurrency(newProjectedDebt)}
             </span>
           </div>
         </div>
@@ -405,7 +407,7 @@ export const B2BPartsCheckoutModal: React.FC<B2BPartsCheckoutModalProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <AlertTriangle size={18} />
               <span>
-                <strong>Credit Warning:</strong> This transaction increases {customer.shopName || customer.name}'s balance to {formatCurrency(newProjectedDebt)}, exceeding their authorized credit limit of {formatCurrency(creditLimit)}.
+                <strong>Credit Warning:</strong> This transaction increases {customer.shopName || customer.name}'s balance to {formatPrivateCurrency(newProjectedDebt)}, exceeding their authorized credit limit of {formatPrivateCurrency(creditLimit)}.
               </span>
             </div>
             {creditLimitOverrideApproved ? (

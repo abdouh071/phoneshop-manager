@@ -9,7 +9,8 @@ import { useToast } from '../../components/ui/Toast';
 import { useSettingsStore } from '../../store/settingsStore';
 import { formatCurrency, getCurrencySymbol } from '../../utils/formatCurrency';
 import { ProfitMarginCalculator } from '../../components/ui/ProfitMarginCalculator';
-import type { PhoneModel } from '../../types';
+import type { PhoneModel, AccessorySubCategory } from '../../types';
+import { ACCESSORY_SUB_CATEGORY_OPTIONS } from '../../utils/accessorySubCategories';
 import styles from './ProductForm.module.css';
 
 interface EditProductPanelProps {
@@ -33,6 +34,7 @@ export const EditProductPanel: React.FC<EditProductPanelProps> = ({ product, onC
   const [costPrice, setCostPrice] = useState('');
   const [stock, setStock] = useState('');
   const [category, setCategory] = useState<PhoneModel['category']>('smartphone');
+  const [accessorySubCategory, setAccessorySubCategory] = useState<AccessorySubCategory>('other');
 
   const [supplier, setSupplier] = useState('');
   const [location, setLocation] = useState('');
@@ -53,6 +55,7 @@ export const EditProductPanel: React.FC<EditProductPanelProps> = ({ product, onC
       setCostPrice(product.costPrice.toString());
       setStock(product.stock.toString());
       setCategory(product.category);
+      setAccessorySubCategory(product.accessorySubCategory || 'other');
 
       setSupplier(product.supplier ?? '');
       setLocation(product.location ?? '');
@@ -104,10 +107,11 @@ export const EditProductPanel: React.FC<EditProductPanelProps> = ({ product, onC
       costPrice: costNum,
       stock: stockNum,
       category,
-      supplier: supplier.trim() || undefined,
-      location: location.trim() || undefined,
+      accessorySubCategory: category === 'accessory' ? (accessorySubCategory || 'other') : undefined,
+      supplier: supplier.trim(),
+      location: location.trim(),
       lowStockThreshold: threshold,
-      notes: notes.trim() || undefined,
+      notes: notes.trim(),
     });
     toast.success('Product updated', `${trimmedName} ${trimmedModel} saved successfully.`);
     setIsSubmitting(false);
@@ -161,26 +165,53 @@ export const EditProductPanel: React.FC<EditProductPanelProps> = ({ product, onC
             />
           </div>
 
-          <div className={styles.row}>
-            <Select
-              label="Category"
-              options={CATEGORY_OPTIONS}
-              value={category}
-              onChange={v => setCategory(v as PhoneModel['category'])}
-            />
-            <div className={styles.skuInput}>
-              <Input
-                label="SKU / Barcode (Permanent)"
-                value={product.sku || 'N/A'}
-                disabled
-                title="SKU barcode is permanent and cannot be changed"
+          {category === 'accessory' ? (
+            <>
+              <div className={styles.row}>
+                <Select
+                  label="Category"
+                  options={CATEGORY_OPTIONS}
+                  value={category}
+                  onChange={v => setCategory(v as PhoneModel['category'])}
+                />
+                <Select
+                  label="Accessory Type *"
+                  options={ACCESSORY_SUB_CATEGORY_OPTIONS}
+                  value={accessorySubCategory}
+                  onChange={v => setAccessorySubCategory(v as AccessorySubCategory)}
+                />
+              </div>
+              <div className={styles.skuInput} style={{ marginBottom: '12px' }}>
+                <Input
+                  label="SKU / Barcode (Permanent)"
+                  value={product.sku || 'N/A'}
+                  disabled
+                  title="SKU barcode is permanent and cannot be changed"
+                />
+              </div>
+            </>
+          ) : (
+            <div className={styles.row}>
+              <Select
+                label="Category"
+                options={CATEGORY_OPTIONS}
+                value={category}
+                onChange={v => setCategory(v as PhoneModel['category'])}
               />
+              <div className={styles.skuInput}>
+                <Input
+                  label="SKU / Barcode (Permanent)"
+                  value={product.sku || 'N/A'}
+                  disabled
+                  title="SKU barcode is permanent and cannot be changed"
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           <p className={styles.sectionLabel}>Pricing</p>
           <div className={styles.row}>
-            <Input label={`Buy Price / Cost (${symbol})`} type="number" value={costPrice}
+            <Input className="privacy-cost-input" label={`Buy Price / Cost (${symbol})`} type="number" value={costPrice}
               onChange={e => setCostPrice(e.target.value)} />
             <Input label={`Sell Price (${symbol})`} type="number" value={price}
               onChange={e => setPrice(e.target.value)} />

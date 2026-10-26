@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { useAuthStore } from '../../store/authStore';
+import { SetPinModal } from './SetPinModal';
 import { useToast } from '../../components/ui/Toast';
 import type { User } from '../../store/authStore';
 import {
@@ -36,6 +37,7 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ isOpen, onClose, m
   const [role, setRole] = useState<WorkerRole>('sales_agent');
   const [permissions, setPermissions] = useState<Permissions>({ ...SALES_AGENT_PERMISSIONS });
   const [error, setError] = useState<string | null>(null);
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
 
   useEffect(() => {
     if (member) {
@@ -137,8 +139,34 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ isOpen, onClose, m
           </div>
         )}
         {role === 'admin' && (
-          <div style={{ padding: '10px 14px', background: 'rgba(99,102,241,0.08)', borderRadius: '8px', fontSize: '13px', color: 'var(--color-primary, #6366f1)' }}>
-            ✓ Admins automatically receive full access to all features.
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ padding: '10px 14px', background: 'rgba(99,102,241,0.08)', borderRadius: '8px', fontSize: '13px', color: 'var(--color-primary, #6366f1)' }}>
+              ✓ Admins automatically receive full access to all features.
+            </div>
+            <div style={{
+              padding: '12px 14px',
+              border: '1px solid var(--color-outline, #e2e8f0)',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'var(--color-surface, #ffffff)',
+            }}>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 600 }}>Quick Approval PIN</div>
+                <div style={{ fontSize: '12px', color: 'var(--color-on-surface-variant, #64748b)' }}>
+                  {member.approvalPin ? 'PIN is currently active' : 'No PIN configured yet'}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsPinModalOpen(true)}
+              >
+                {member.approvalPin ? 'Change PIN' : 'Set PIN'}
+              </Button>
+            </div>
           </div>
         )}
 
@@ -182,6 +210,12 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ isOpen, onClose, m
           <Button type="submit" isLoading={isLoading}>Save Changes</Button>
         </div>
       </form>
+
+      <SetPinModal
+        isOpen={isPinModalOpen}
+        onClose={() => setIsPinModalOpen(false)}
+        targetUser={member}
+      />
     </Modal>
   );
 };
