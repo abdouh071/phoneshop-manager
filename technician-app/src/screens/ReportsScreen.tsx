@@ -258,8 +258,8 @@ export const ReportsScreen = ({ navigation }: any) => {
     );
   }
 
-  return (
-    <View style={styles.container}>
+  const renderHeader = () => (
+    <>
       {/* View Period Tabs: Daily vs Weekly */}
       <View style={styles.modeTabs}>
         <Button
@@ -415,11 +415,16 @@ export const ReportsScreen = ({ navigation }: any) => {
           )}
         </View>
       </View>
+    </>
+  );
 
+  return (
+    <View style={styles.container}>
       <FlatList
         data={filteredTickets}
         keyExtractor={(item) => item.id}
         renderItem={renderTicket}
+        ListHeaderComponent={renderHeader}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -456,17 +461,6 @@ export const ReportsScreen = ({ navigation }: any) => {
           </View>
         }
       />
-
-      <View style={styles.actionContainer}>
-        <Button 
-          mode="contained" 
-          onPress={handleShareReport} 
-          style={[styles.actionButton, { backgroundColor: profitType === 'taken' ? '#059669' : '#2563eb' }]} 
-          icon="share-variant"
-        >
-          Share Report
-        </Button>
-      </View>
 
       <RoleBottomNav currentRoute="Reports" navigation={navigation} />
     </View>
@@ -733,21 +727,4 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
   },
-  actionContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    padding: 16,
-    paddingBottom: 32,
-    backgroundColor: '#ffffff',
-    borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
-  },
-  actionButton: {
-    flex: 1,
-    marginHorizontal: 8,
-    borderRadius: 8,
-  }
 });

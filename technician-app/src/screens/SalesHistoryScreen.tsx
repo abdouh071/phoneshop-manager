@@ -603,14 +603,6 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
 
                   {/* Action Bar */}
                   <View style={styles.cardActionsRow}>
-                    <TouchableOpacity
-                      style={styles.actionIconBtn}
-                      onPress={() => handleShareReceipt(item)}
-                    >
-                      <MaterialCommunityIcons name="share-variant" size={18} color="#475569" />
-                      <Text style={styles.actionBtnLabel}>Receipt</Text>
-                    </TouchableOpacity>
-
                     {/* TODAY'S SALES: Direct Edit / Void Actions */}
                     {isToday && !isVoided && (
                       <>

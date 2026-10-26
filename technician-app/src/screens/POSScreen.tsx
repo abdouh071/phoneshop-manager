@@ -470,7 +470,7 @@ export const POSScreen = ({ navigation }: any) => {
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ maxHeight: 200 }}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
               {cart.map(item => (
                 <View key={item.product.id} style={styles.cartRow}>
                   <View style={{ flex: 1 }}>
@@ -494,7 +494,6 @@ export const POSScreen = ({ navigation }: any) => {
                   </View>
                 </View>
               ))}
-            </ScrollView>
 
             <View style={styles.divider} />
 
@@ -637,16 +636,17 @@ export const POSScreen = ({ navigation }: any) => {
               </View>
             </View>
 
-            <Button
-              mode="contained"
-              buttonColor="#16a34a"
-              loading={isSubmitting}
-              disabled={isSubmitting}
-              onPress={handleConfirmCheckout}
-              style={{ marginTop: 8, paddingVertical: 4 }}
-            >
-              Complete Sale ({finalTotalDue.toLocaleString()} DA)
-            </Button>
+              <Button
+                mode="contained"
+                buttonColor="#16a34a"
+                loading={isSubmitting}
+                disabled={isSubmitting}
+                onPress={handleConfirmCheckout}
+                style={{ marginTop: 8, paddingVertical: 4 }}
+              >
+                Complete Sale ({finalTotalDue.toLocaleString()} DA)
+              </Button>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -659,22 +659,17 @@ export const POSScreen = ({ navigation }: any) => {
             <Text style={styles.successTitle}>Sale Successful!</Text>
             <Text style={styles.successSub}>Invoice #{completedTx?.id.slice(-6)} · {completedTx?.total} DA</Text>
 
-            <View style={styles.shareButtonsRow}>
+            <View style={{ width: '100%', marginTop: 16 }}>
               <TouchableOpacity style={styles.whatsAppBtn} onPress={handleWhatsAppShare}>
                 <MaterialCommunityIcons name="whatsapp" size={20} color="#ffffff" />
-                <Text style={styles.shareBtnText}>WhatsApp</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.generalShareBtn} onPress={handleGeneralShare}>
-                <MaterialCommunityIcons name="share-variant" size={20} color="#ffffff" />
-                <Text style={styles.shareBtnText}>Share / SMS</Text>
+                <Text style={styles.shareBtnText}>Share via WhatsApp</Text>
               </TouchableOpacity>
             </View>
 
             <Button
               mode="outlined"
               onPress={() => setCompletedTx(null)}
-              style={{ width: '100%', marginTop: 16 }}
+              style={{ width: '100%', marginTop: 14 }}
             >
               Start New Sale
             </Button>

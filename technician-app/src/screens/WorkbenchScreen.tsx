@@ -276,22 +276,8 @@ export const WorkbenchScreen = ({ navigation }: any) => {
   const inProgressCount = statusCounts['in_progress'] || 0;
   const readyCount = statusCounts['ready'] || 0;
 
-  return (
-    <View style={styles.container}>
-      <Appbar.Header style={styles.header}>
-        <Appbar.Content 
-          title={user?.role === 'sales_agent' ? t('workbench.salesDesk', 'Sales Desk') : t('workbench.title', 'Workbench')}
-          titleStyle={styles.headerTitle}
-          subtitle={t('workbench.welcome', 'Welcome, {{name}}', { name: user?.name?.split(' ')[0] })}
-          subtitleStyle={styles.headerSubtitle}
-        />
-        <Appbar.Action icon="qrcode-scan" onPress={openScanner} color="#fff" />
-        {user?.role !== 'sales_agent' && (
-          <Appbar.Action icon="chart-bar" onPress={() => navigation.navigate('Reports')} color="#fff" />
-        )}
-        <Appbar.Action icon="cog" onPress={() => navigation.navigate('Settings')} color="#fff" />
-      </Appbar.Header>
-
+  const renderHeader = () => (
+    <>
       {/* Inline Stats Row — visible to all roles */}
       <View style={styles.statsRow}>
         <View style={styles.statItem}>
@@ -365,6 +351,24 @@ export const WorkbenchScreen = ({ navigation }: any) => {
           })}
         </ScrollView>
       </View>
+    </>
+  );
+
+  return (
+    <View style={styles.container}>
+      <Appbar.Header style={styles.header}>
+        <Appbar.Content 
+          title={user?.role === 'sales_agent' ? t('workbench.salesDesk', 'Sales Desk') : t('workbench.title', 'Workbench')}
+          titleStyle={styles.headerTitle}
+          subtitle={t('workbench.welcome', 'Welcome, {{name}}', { name: user?.name?.split(' ')[0] })}
+          subtitleStyle={styles.headerSubtitle}
+        />
+        <Appbar.Action icon="qrcode-scan" onPress={openScanner} color="#fff" />
+        {user?.role !== 'sales_agent' && (
+          <Appbar.Action icon="chart-bar" onPress={() => navigation.navigate('Reports')} color="#fff" />
+        )}
+        <Appbar.Action icon="cog" onPress={() => navigation.navigate('Settings')} color="#fff" />
+      </Appbar.Header>
 
       {isLoading && tickets.length === 0 ? (
         <View style={styles.centerContainer}>
@@ -380,6 +384,7 @@ export const WorkbenchScreen = ({ navigation }: any) => {
           data={filteredTickets}
           keyExtractor={(item) => item.id}
           renderItem={renderTicket}
+          ListHeaderComponent={renderHeader}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={

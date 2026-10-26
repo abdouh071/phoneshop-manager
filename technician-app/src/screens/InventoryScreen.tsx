@@ -405,20 +405,8 @@ export const InventoryScreen = ({ navigation }: any) => {
     );
   }
 
-  return (
-    <View style={styles.container}>
-      {/* Header */}
-      <Appbar.Header style={styles.header}>
-        <Appbar.Content
-          title="Inventory & Stock"
-          subtitle={`${metrics.totalProducts} products · ${metrics.totalItems} units`}
-          titleStyle={styles.headerTitle}
-          subtitleStyle={styles.headerSub}
-        />
-        <Appbar.Action icon="barcode-scan" color="#ffffff" onPress={handleOpenScanner} />
-        <Appbar.Action icon="plus-box" color="#ffffff" onPress={() => setIsAddModalOpen(true)} />
-      </Appbar.Header>
-
+  const renderHeader = () => (
+    <>
       {/* KPI Cards Horizontal Scroll */}
       <View style={styles.kpiContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.kpiScroll}>
@@ -479,6 +467,22 @@ export const InventoryScreen = ({ navigation }: any) => {
           })}
         </ScrollView>
       </View>
+    </>
+  );
+
+  return (
+    <View style={styles.container}>
+      {/* Header */}
+      <Appbar.Header style={styles.header}>
+        <Appbar.Content
+          title="Inventory & Stock"
+          subtitle={`${metrics.totalProducts} products · ${metrics.totalItems} units`}
+          titleStyle={styles.headerTitle}
+          subtitleStyle={styles.headerSub}
+        />
+        <Appbar.Action icon="barcode-scan" color="#ffffff" onPress={handleOpenScanner} />
+        <Appbar.Action icon="plus-box" color="#ffffff" onPress={() => setIsAddModalOpen(true)} />
+      </Appbar.Header>
 
       {/* Product List */}
       {isLoading ? (
@@ -490,6 +494,7 @@ export const InventoryScreen = ({ navigation }: any) => {
         <FlatList
           data={filteredProducts}
           keyExtractor={(item) => item.id}
+          ListHeaderComponent={renderHeader}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
             const threshold = item.lowStockThreshold ?? 1;
