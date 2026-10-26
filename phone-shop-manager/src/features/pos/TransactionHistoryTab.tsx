@@ -145,7 +145,7 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
       {/* Day Groups → Cards */}
       {sortedDays.map(day => {
         const dayTxs = groupedByDay[day];
-        const dayTotal = dayTxs.filter(t => t.status !== 'refunded').reduce((s, t) => s + t.total, 0);
+        const dayTotal = dayTxs.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval').reduce((s, t) => s + t.total, 0);
         return (
           <div key={day} className={s.dayGroup}>
             <div className={s.dayHeader}>
@@ -207,6 +207,8 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
                     )}
                     {isRefunded && <span className={s.txRefundedBadge}>⚠️ Refunded</span>}
                     {isPartial && <span className={s.txPartialBadge}>↩ Partial Return</span>}
+                    {t.status === 'voided' && <span style={{ backgroundColor: '#fee2e2', color: '#b91c1c', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>🚫 Voided</span>}
+                    {t.status === 'pending_approval' && <span style={{ backgroundColor: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>⏳ Approval Pending</span>}
                   </div>
 
                   {/* Bottom: Meta + Actions */}

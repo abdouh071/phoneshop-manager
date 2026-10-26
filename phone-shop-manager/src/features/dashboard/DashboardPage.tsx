@@ -139,7 +139,7 @@ export const DashboardPage = () => {
 
   const yesterday = useMemo(() => { const d = new Date(today); d.setDate(d.getDate()-1); return d; }, [today]);
 
-  const activeTx = useMemo(() => transactions.filter(t => t.status !== 'refunded'), [transactions]);
+  const activeTx = useMemo(() => transactions.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval'), [transactions]);
   // All phones that have been claimed AND marked as paid or partly-paid (recognized revenue)
   const completedRepairs = useMemo(() => tickets.filter(t => isClaimedAndPaidRepair(t)), [tickets]);
 

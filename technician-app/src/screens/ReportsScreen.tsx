@@ -6,6 +6,7 @@ import { useRepairStore } from '../store/repairStore';
 import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { RoleBottomNav } from '../components/RoleBottomNav';
+import { getClaimedRepairRevenue, isClaimedAndPaidRepair } from '../utils/repairFinancials';
 
 export const ReportsScreen = ({ navigation }: any) => {
   const { fetchMyCompletedTickets } = useRepairStore();
@@ -170,7 +171,9 @@ export const ReportsScreen = ({ navigation }: any) => {
     let gross = 0;
     let parts = 0;
     filteredTickets.forEach(t => {
-      const rev = parseFloat(t.actualCost ?? t.estimatedCost ?? 0) || 0;
+      const rev = profitType === 'taken'
+        ? getClaimedRepairRevenue(t)
+        : (parseFloat(t.actualCost ?? t.estimatedCost ?? 0) || 0);
       gross += rev;
       if (t.partsUsed && Array.isArray(t.partsUsed)) {
         t.partsUsed.forEach((p: any) => {
@@ -185,7 +188,7 @@ export const ReportsScreen = ({ navigation }: any) => {
     const mProfit = net * (effectiveCommission / 100);
 
     return { grossRevenue: gross, totalPartsCost: parts, netRevenue: net, myProfit: mProfit };
-  }, [filteredTickets, effectiveCommission]);
+  }, [filteredTickets, effectiveCommission, profitType]);
 
   const handleShareReport = async () => {
     const modeTitle = profitType === 'taken' 
@@ -208,7 +211,9 @@ export const ReportsScreen = ({ navigation }: any) => {
   };
 
   const renderTicket = ({ item }: { item: any }) => {
-    const rev = parseFloat(item.actualCost ?? item.estimatedCost ?? 0) || 0;
+    const rev = profitType === 'taken'
+      ? getClaimedRepairRevenue(item)
+      : (parseFloat(item.actualCost ?? item.estimatedCost ?? 0) || 0);
     let partsCost = 0;
     if (item.partsUsed && Array.isArray(item.partsUsed)) {
       item.partsUsed.forEach((p: any) => {

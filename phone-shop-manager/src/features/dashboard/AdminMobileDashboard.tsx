@@ -36,7 +36,7 @@ export const AdminMobileDashboard: React.FC = () => {
     return d.getTime() === day.getTime();
   };
 
-  const activeTx = useMemo(() => transactions.filter(t => t.status !== 'refunded'), [transactions]);
+  const activeTx = useMemo(() => transactions.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval'), [transactions]);
   const completedRepairs = useMemo(() => tickets.filter(t => isClaimedAndPaidRepair(t)), [tickets]);
 
   const todayTx = useMemo(() => activeTx.filter(t => isSameDay(t.date, today)), [activeTx, today]);

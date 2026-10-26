@@ -20,19 +20,21 @@ export const dashboardService = {
       return d.getTime() === day.getTime();
     };
 
-    const todayTx = transactions.filter(t => t.status !== 'refunded' && isSameDay(t.date, today));
-    const yesterdayTx = transactions.filter(t => t.status !== 'refunded' && isSameDay(t.date, yesterday));
+    const isEffectiveTx = (t: SaleTransaction) => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval';
+
+    const todayTx = transactions.filter(t => isEffectiveTx(t) && isSameDay(t.date, today));
+    const yesterdayTx = transactions.filter(t => isEffectiveTx(t) && isSameDay(t.date, yesterday));
 
     const dailyRevenue = todayTx.reduce((s, t) => s + t.total, 0);
     const yesterdayRevenue = yesterdayTx.reduce((s, t) => s + t.total, 0);
 
     const startOfWeek = new Date(today);
     startOfWeek.setDate(today.getDate() - today.getDay());
-    const weeklyTx = transactions.filter(t => t.status !== 'refunded' && new Date(t.date) >= startOfWeek);
+    const weeklyTx = transactions.filter(t => isEffectiveTx(t) && new Date(t.date) >= startOfWeek);
     const weeklyRevenue = weeklyTx.reduce((s, t) => s + t.total, 0);
 
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const monthlyTx = transactions.filter(t => t.status !== 'refunded' && new Date(t.date) >= startOfMonth);
+    const monthlyTx = transactions.filter(t => isEffectiveTx(t) && new Date(t.date) >= startOfMonth);
     const monthlyRevenue = monthlyTx.reduce((s, t) => s + t.total, 0);
 
     const unitsSoldToday = todayTx.reduce((s, t) => s + t.items.reduce((a, i) => a + i.quantity, 0), 0);
@@ -70,7 +72,7 @@ export const dashboardService = {
       const dayEnd = new Date(day);
       dayEnd.setHours(23, 59, 59, 999);
       const revenue = transactions
-        .filter(t => t.status !== 'refunded')
+        .filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval')
         .filter(t => {
           const d = new Date(t.date);
           return d >= day && d <= dayEnd;
@@ -83,7 +85,7 @@ export const dashboardService = {
   getRecentTransactions: async (): Promise<SaleTransaction[]> => {
     const { transactions } = useCartStore.getState();
     return transactions
-      .filter(t => t.status !== 'refunded')
+      .filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval')
       .slice(0, 8);
   },
 };

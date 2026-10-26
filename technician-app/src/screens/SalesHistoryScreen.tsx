@@ -144,6 +144,23 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
     return result;
   }, [transactions, filterTab, searchQuery]);
 
+  // Today's verified financial stats (strictly excluding voided/refunded)
+  const { todayValidTotal, todayValidCount, todayVoidedCount } = useMemo(() => {
+    let validTotal = 0;
+    let validCount = 0;
+    let voidedCount = 0;
+    transactions.forEach((tx) => {
+      if (!isSaleToday(tx.date)) return;
+      if (tx.status === 'voided' || tx.status === 'refunded' || tx.status === 'pending_approval') {
+        voidedCount++;
+      } else {
+        validTotal += (tx.total || 0);
+        validCount++;
+      }
+    });
+    return { todayValidTotal: validTotal, todayValidCount: validCount, todayVoidedCount: voidedCount };
+  }, [transactions]);
+
   // TODAY: Direct Void / Refund handler
   const handleDirectVoidToday = (tx: SaleTransaction) => {
     Alert.alert(
@@ -435,14 +452,37 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
         </TouchableOpacity>
       </View>
 
-      {/* Today Notice Banner */}
+      {/* Today Notice Banner & Financial Summary */}
       {filterTab === 'today' && (
-        <View style={styles.infoBanner}>
-          <MaterialCommunityIcons name="information-outline" size={18} color="#0369a1" />
-          <Text style={styles.infoBannerText}>
-            You have full authorization to modify or void carts completed today.
-          </Text>
-        </View>
+        <>
+          <View style={styles.todaySummaryBar}>
+            <View style={styles.todaySummaryItem}>
+              <Text style={styles.todaySummaryLabel}>Today's Revenue</Text>
+              <Text style={styles.todaySummaryAmount}>{todayValidTotal.toLocaleString()} DA</Text>
+            </View>
+            <View style={styles.todaySummaryDivider} />
+            <View style={styles.todaySummaryItem}>
+              <Text style={styles.todaySummaryLabel}>Valid Sales</Text>
+              <Text style={styles.todaySummaryCount}>{todayValidCount} completed</Text>
+            </View>
+            {todayVoidedCount > 0 && (
+              <>
+                <View style={styles.todaySummaryDivider} />
+                <View style={styles.todaySummaryItem}>
+                  <Text style={styles.todaySummaryLabel}>Voided / Excluded</Text>
+                  <Text style={[styles.todaySummaryCount, { color: '#dc2626' }]}>{todayVoidedCount} voided</Text>
+                </View>
+              </>
+            )}
+          </View>
+
+          <View style={styles.infoBanner}>
+            <MaterialCommunityIcons name="information-outline" size={18} color="#0369a1" />
+            <Text style={styles.infoBannerText}>
+              You have full authorization to modify or void carts completed today.
+            </Text>
+          </View>
+        </>
       )}
 
       {/* Past Notice Banner */}
@@ -567,7 +607,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
                     </View>
 
                     <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={styles.totalAmount}>
+                      <Text style={[styles.totalAmount, isVoided && styles.totalAmountVoided]}>
                         {item.total.toLocaleString()} DA
                       </Text>
                       <View style={styles.methodBadge}>
@@ -997,6 +1037,54 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '900',
     color: '#0f172a',
+  },
+  totalAmountVoided: {
+    textDecorationLine: 'line-through',
+    color: '#94a3b8',
+  },
+  todaySummaryBar: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 12,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    elevation: 2,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  todaySummaryItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  todaySummaryDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: '#e2e8f0',
+  },
+  todaySummaryLabel: {
+    fontSize: 10,
+    color: '#64748b',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  todaySummaryAmount: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginTop: 2,
+  },
+  todaySummaryCount: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#16a34a',
+    marginTop: 2,
   },
   methodBadge: {
     backgroundColor: '#f1f5f9',

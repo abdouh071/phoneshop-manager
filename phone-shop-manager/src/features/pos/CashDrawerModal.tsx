@@ -53,7 +53,7 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
 
   // Calculations for real exact cash & income
   const stats = useMemo(() => {
-    const completed = shiftTransactions.filter(t => t.status !== 'refunded');
+    const completed = shiftTransactions.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval');
     const refunded = shiftTransactions.filter(t => t.status === 'refunded');
 
     const grossSales = completed.reduce((sum, t) => sum + t.total, 0);

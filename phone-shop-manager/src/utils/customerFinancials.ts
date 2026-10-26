@@ -111,7 +111,7 @@ export const calculateCustomerFinancials = (
   let completedSalesCount = 0;
 
   for (const tx of matchedTxs) {
-    if (tx.status === 'refunded') {
+    if (tx.status === 'refunded' || tx.status === 'voided' || tx.status === 'pending_approval') {
       continue;
     }
 

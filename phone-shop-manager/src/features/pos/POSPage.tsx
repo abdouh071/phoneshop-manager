@@ -343,15 +343,28 @@ export const POSPage = () => {
     return (currentCustomerDebt + creditDebtToLog) > matchedCustomer.creditLimit;
   }, [paymentMode, matchedCustomer, currentCustomerDebt, creditDebtToLog]);
 
-  // Real-time Today Net Cash in Drawer
+  // Real-time Today Net Cash in Drawer (strictly cash tender, excluding voided sales)
   const todayNetCash = useMemo(() => {
     const todayStr = new Date().toISOString().split('T')[0];
     const todayTxs = transactions.filter(t => new Date(t.date).toISOString().split('T')[0] === todayStr);
-    const completed = todayTxs.filter(t => t.status !== 'refunded');
+    const completed = todayTxs.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval');
     const refunded = todayTxs.filter(t => t.status === 'refunded');
-    const gross = completed.reduce((sum, t) => sum + t.total, 0);
-    const ref = refunded.reduce((sum, t) => sum + t.total, 0);
-    return Math.max(0, gross - ref);
+
+    const grossCash = completed.reduce((sum, t) => {
+      const cashPart = (t.payments || [])
+        .filter(p => p.method === 'cash')
+        .reduce((s, p) => s + (p.amount || 0), 0);
+      return sum + cashPart;
+    }, 0);
+
+    const refCash = refunded.reduce((sum, t) => {
+      const cashPart = (t.payments || [])
+        .filter(p => p.method === 'cash')
+        .reduce((s, p) => s + (p.amount || 0), 0);
+      return sum + (cashPart > 0 ? cashPart : t.total);
+    }, 0);
+
+    return Math.max(0, grossCash - refCash);
   }, [transactions]);
 
   // Dynamic quick tender denomination presets for Cash checkout

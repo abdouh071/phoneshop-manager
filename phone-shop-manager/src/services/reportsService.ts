@@ -436,9 +436,9 @@ export const reportsService = {
       } else {
         // Unclosed day / Live Today: Compute live numbers
         const dayTx = transactions.filter(t => isSameLocalDate(t.date, dayStr));
-        const completedTx = dayTx.filter(t => t.status !== 'refunded' && t.saleType !== 'parts_b2b');
+        const completedTx = dayTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval' && t.saleType !== 'parts_b2b');
         const refundedTx = dayTx.filter(t => t.status === 'refunded');
-        const partsTx = dayTx.filter(t => t.status !== 'refunded' && t.saleType === 'parts_b2b');
+        const partsTx = dayTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval' && t.saleType === 'parts_b2b');
 
         const sumPayment = (txList: typeof transactions, method: string) =>
           txList.reduce((s, tx) => s + (tx.payments || []).filter(p => p.method === method).reduce((a, p) => a + p.amount, 0), 0);
@@ -627,7 +627,7 @@ export const reportsService = {
 
     let totalUnitsSold = 0;
     let discountsTotal = 0;
-    inRangeTx.filter(t => t.status !== 'refunded').forEach(t => {
+    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval').forEach(t => {
       t.items.forEach(i => { if (!i.isReturn) totalUnitsSold += i.quantity; });
       if (t.discount) {
         if (t.discount.type === 'flat') discountsTotal += t.discount.value;
@@ -666,7 +666,7 @@ export const reportsService = {
 
         const txs = inRangeTx.filter(t => {
           const ms = new Date(t.date).getTime();
-          return t.status !== 'refunded' && ms >= sMs && ms <= eMs;
+          return t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval' && ms >= sMs && ms <= eMs;
         });
 
         const rev = txs.reduce((sum, t) => sum + t.total, 0);
@@ -714,7 +714,7 @@ export const reportsService = {
       marginPercent: number;
     }> = {};
 
-    inRangeTx.filter(t => t.status !== 'refunded').forEach(t => {
+    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval').forEach(t => {
       t.items.forEach(item => {
         const pId = item.product.id;
         if (!productSalesMap[pId]) {
@@ -758,7 +758,7 @@ export const reportsService = {
     };
 
     const categoryMap: Record<string, { units: number; revenue: number }> = {};
-    inRangeTx.filter(t => t.status !== 'refunded').forEach(t => {
+    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval').forEach(t => {
       t.items.forEach(item => {
         const cat = item.product.category || 'other';
         if (!categoryMap[cat]) {
@@ -879,7 +879,7 @@ export const reportsService = {
       averageTicket: number;
     }> = {};
 
-    inRangeTx.filter(t => t.status !== 'refunded').forEach(t => {
+    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval').forEach(t => {
       const workerName = t.processedByName || 'Store Cashier';
       const workerId = t.processedById || workerName;
 
@@ -941,7 +941,7 @@ export const reportsService = {
       averageOrder: number;
     }> = {};
 
-    inRangeTx.filter(t => t.status !== 'refunded').forEach(t => {
+    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval').forEach(t => {
       const name = t.customerName || 'Walk-in Customer';
       if (!customerMap[name]) {
         customerMap[name] = {

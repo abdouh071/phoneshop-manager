@@ -25,6 +25,12 @@ import { useRepairStore } from '../store/repairStore';
 import { useApprovalStore } from '../store/approvalStore';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import type { ActivityLog, SaleTransaction, PhoneModel, RepairTicket } from '../types';
+import {
+  isClaimedAndPaidRepair,
+  getClaimedRepairRevenue,
+  getClaimedRepairHandoverCash,
+  getClaimedRepairPartsCost,
+} from '../utils/repairFinancials';
 
 const { width } = Dimensions.get('window');
 
@@ -139,27 +145,27 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
 
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
-    // Helper: calculate total sales from transactions in range
+    // Helper: calculate total sales from transactions in range (strictly excluding refunded, voided, pending_approval)
     const getSalesInRange = (start: number, end: number) => {
       return transactions
         .filter(t => {
-          if (t.status === 'refunded') return false;
+          if (t.status === 'refunded' || t.status === 'voided' || t.status === 'pending_approval') return false;
           const tTime = new Date(t.date).getTime();
           return tTime >= start && tTime < end;
         })
         .reduce((sum, t) => sum + (t.total || 0), 0);
     };
 
-    // Helper: calculate repair income in range
+    // Helper: calculate recognized repair income in range (claimed & paid repairs)
     const getRepairsInRange = (start: number, end: number) => {
       return tickets
         .filter(t => {
-          if (t.status !== 'completed' && t.status !== 'ready') return false;
-          const completionDate = t.completedAt || t.repairedAt || t.updatedAt || t.createdAt;
-          const cTime = new Date(completionDate).getTime();
+          if (!isClaimedAndPaidRepair(t)) return false;
+          const completionDate = t.completedAt || t.updatedAt;
+          const cTime = new Date(completionDate || 0).getTime();
           return cTime >= start && cTime < end;
         })
-        .reduce((sum, t) => sum + (t.paidAmount || t.actualCost || t.estimatedCost || 0), 0);
+        .reduce((sum, t) => sum + getClaimedRepairRevenue(t), 0);
     };
 
     const todaySales = getSalesInRange(startOfToday, endOfToday);
@@ -179,11 +185,69 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
       ? Math.round(((todayTotal - yesterdayTotal) / yesterdayTotal) * 100)
       : todayTotal > 0 ? 100 : 0;
 
-    // Today sales count
+    // Today sales count (strictly excluding voided and refunded)
     const todayTxCount = transactions.filter(t => {
+      if (t.status === 'refunded' || t.status === 'voided' || t.status === 'pending_approval') return false;
       const tTime = new Date(t.date).getTime();
       return tTime >= startOfToday && tTime < endOfToday;
     }).length;
+
+    // Physical Cash Drawer Calculation for Today
+    let todayCashSales = 0;
+    transactions
+      .filter(t => {
+        if (t.status === 'refunded' || t.status === 'voided' || t.status === 'pending_approval') return false;
+        const tTime = new Date(t.date).getTime();
+        return tTime >= startOfToday && tTime < endOfToday;
+      })
+      .forEach(t => {
+        (t.payments || []).forEach(p => {
+          if (p.method === 'cash') todayCashSales += (Number(p.amount) || 0);
+        });
+      });
+
+    const todayRepairCash = tickets
+      .filter(t => {
+        if (!isClaimedAndPaidRepair(t)) return false;
+        const cTime = new Date(t.completedAt || t.updatedAt || 0).getTime();
+        return cTime >= startOfToday && cTime < endOfToday;
+      })
+      .reduce((sum, t) => sum + getClaimedRepairHandoverCash(t), 0);
+
+    const todayIntakeDeposits = tickets
+      .filter(t => {
+        const crTime = new Date(t.createdAt || 0).getTime();
+        return crTime >= startOfToday && crTime < endOfToday;
+      })
+      .reduce((sum, t) => sum + (t.depositAmount || 0), 0);
+
+    const todayCashDrawerTotal = todayCashSales + todayRepairCash + todayIntakeDeposits;
+
+    // Today's Net Profit (Sales revenue - COGS + Repair revenue - Repair parts cost)
+    const todaySalesCOGS = transactions
+      .filter(t => {
+        if (t.status === 'refunded' || t.status === 'voided' || t.status === 'pending_approval') return false;
+        const tTime = new Date(t.date).getTime();
+        return tTime >= startOfToday && tTime < endOfToday;
+      })
+      .reduce((sum, t) => sum + (t.items || []).reduce((s, i) => s + (i.product?.costPrice || 0) * (i.quantity || 1), 0), 0);
+
+    const todayRepairsPartsCost = tickets
+      .filter(t => {
+        if (!isClaimedAndPaidRepair(t)) return false;
+        const cTime = new Date(t.completedAt || t.updatedAt || 0).getTime();
+        return cTime >= startOfToday && cTime < endOfToday;
+      })
+      .reduce((sum, t) => sum + getClaimedRepairPartsCost(t), 0);
+
+    const todayNetProfit = todayTotal - (todaySalesCOGS + todayRepairsPartsCost);
+
+    // Shelf Uncollected Pending Revenue (Ready phones waiting on shelf for pickup)
+    const shelfPendingRepairs = tickets.filter(t => t.status === 'ready');
+    const shelfPendingValue = shelfPendingRepairs.reduce(
+      (sum, t) => sum + Math.max(0, (t.actualCost ?? t.estimatedCost ?? 0) - (t.depositAmount || 0)),
+      0
+    );
 
     return {
       todayTotal,
@@ -193,6 +257,10 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
       monthTotal,
       growthPercent,
       todayTxCount,
+      todayCashDrawerTotal,
+      todayNetProfit,
+      shelfPendingValue,
+      shelfPendingCount: shelfPendingRepairs.length,
     };
   }, [transactions, tickets]);
 
@@ -353,6 +421,40 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
                   <Text style={styles.heroStatLabel}>POS / Repairs</Text>
                   <Text style={styles.heroStatValSmall}>
                     {revenueStats.todaySales.toLocaleString()} / {revenueStats.todayRepairs.toLocaleString()}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={[styles.heroDivider, { marginVertical: 10 }]} />
+
+              <View style={styles.heroStatsRow}>
+                <View style={styles.heroStatItem}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, justifyContent: 'center' }}>
+                    <MaterialCommunityIcons name="cash-multiple" size={13} color="#16a34a" />
+                    <Text style={styles.heroStatLabel}>Cash Drawer</Text>
+                  </View>
+                  <Text style={[styles.heroStatVal, { color: '#16a34a' }]}>
+                    {revenueStats.todayCashDrawerTotal.toLocaleString()} DA
+                  </Text>
+                </View>
+                <View style={styles.verticalDivider} />
+                <View style={styles.heroStatItem}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, justifyContent: 'center' }}>
+                    <MaterialCommunityIcons name="chart-line" size={13} color="#6366f1" />
+                    <Text style={styles.heroStatLabel}>Net Profit</Text>
+                  </View>
+                  <Text style={[styles.heroStatVal, { color: revenueStats.todayNetProfit >= 0 ? '#6366f1' : '#dc2626' }]}>
+                    {revenueStats.todayNetProfit.toLocaleString()} DA
+                  </Text>
+                </View>
+                <View style={styles.verticalDivider} />
+                <View style={styles.heroStatItem}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, justifyContent: 'center' }}>
+                    <MaterialCommunityIcons name="clock-outline" size={13} color="#d97706" />
+                    <Text style={styles.heroStatLabel}>Shelf Pending</Text>
+                  </View>
+                  <Text style={[styles.heroStatValSmall, { color: '#d97706' }]}>
+                    {revenueStats.shelfPendingValue.toLocaleString()} DA ({revenueStats.shelfPendingCount})
                   </Text>
                 </View>
               </View>

@@ -95,9 +95,9 @@ export const useEndOfDayStore = create<EndOfDayState>((set, get) => ({
     partsInvoices.forEach(t => txMap.set(t.id, t));
     const allTx = Array.from(txMap.values());
 
-    const todayTx = allTx.filter(t => t.status !== 'refunded' && t.saleType !== 'parts_b2b' && isSameLocalDate(t.date, targetDateStr));
+    const todayTx = allTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval' && t.saleType !== 'parts_b2b' && isSameLocalDate(t.date, targetDateStr));
     const refundedTx = allTx.filter(t => t.status === 'refunded' && isSameLocalDate(t.date, targetDateStr));
-    const partsTx = allTx.filter(t => t.status !== 'refunded' && t.saleType === 'parts_b2b' && isSameLocalDate(t.date, targetDateStr));
+    const partsTx = allTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval' && t.saleType === 'parts_b2b' && isSameLocalDate(t.date, targetDateStr));
 
     const sumPayment = (txList: typeof allTx, method: string) =>
       txList.reduce((s, tx) => s + (tx.payments || []).filter(p => p.method === method).reduce((a, p) => a + p.amount, 0), 0);
