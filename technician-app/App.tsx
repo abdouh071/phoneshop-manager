@@ -22,6 +22,7 @@ import { POSScreen } from './src/screens/POSScreen';
 import { AdminDashboardScreen } from './src/screens/AdminDashboardScreen';
 import { SalesHistoryScreen } from './src/screens/SalesHistoryScreen';
 import { InventoryScreen } from './src/screens/InventoryScreen';
+import { notificationService } from './src/services/notificationService';
 
 const Stack = createNativeStackNavigator();
 
@@ -69,6 +70,13 @@ export default function App() {
       setTimeout(() => setReady(true), 100);
     }
   }, [isInitializing]);
+
+  // Register push notifications when user logs in
+  useEffect(() => {
+    if (isAuthenticated && user?.id) {
+      notificationService.registerForPushNotificationsAsync(user.id);
+    }
+  }, [isAuthenticated, user?.id]);
 
   if (!ready) {
     return (

@@ -15,6 +15,7 @@ import { useAuthStore } from './authStore';
 import { activityLogService } from '../services/activityLogService';
 import { customerService } from '../services/customerService';
 import { offlineSyncService } from '../services/offlineSyncService';
+import { notificationService } from '../services/notificationService';
 import type { RepairTicket, RepairStatus, RepairStatusHistoryEntry } from '../types';
 
 interface SettleClaimParams {
@@ -162,6 +163,25 @@ export const useRepairStore = create<RepairState>((set, get) => ({
           userId: changerId,
         }
       );
+
+      // Trigger push notifications
+      if (status === 'ready') {
+        const deviceName = `${localTicket?.deviceBrand || ''} ${localTicket?.deviceModel || ''}`.trim();
+        notificationService.sendPushToRole(
+          'sales_agent',
+          'Repair Ready for Pickup',
+          `Ticket #${ticketNum} (${deviceName}) is repaired and ready on the shelf for customer.`,
+          { ticketId: id, screen: 'Workbench' },
+          'repairs'
+        );
+        notificationService.sendPushToRole(
+          'admin',
+          'Device Repaired',
+          `Ticket #${ticketNum} (${deviceName}) marked ready by ${actorName}.`,
+          { ticketId: id, screen: 'Workbench' },
+          'repairs'
+        );
+      }
     } catch (error) {
       console.warn('Failed to update ticket status on Firestore (offline), queuing for auto-sync:', error);
       await offlineSyncService.saveOfflineStatusUpdate(id, status, changerName, additionalUpdates);

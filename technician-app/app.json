@@ -16,6 +16,7 @@
     },
     "android": {
       "package": "com.phoneshop.technicianapp",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#4338ca"
@@ -37,6 +38,14 @@
         "expo-camera",
         {
           "cameraPermission": "Allow PhoneShop to scan barcodes and device QR codes."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#4f46e5",
+          "sounds": []
         }
       ]
     ]

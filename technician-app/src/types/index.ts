@@ -128,6 +128,8 @@ export interface User {
   role: 'admin' | 'sales_agent' | 'repair_agent';
   status?: 'active' | 'revoked';
   permissions?: Permissions;
+  pushToken?: string;
+  pushTokenUpdatedAt?: any;
 }
 
 export type StockStatus = 'in_stock' | 'low_stock' | 'out_of_stock';

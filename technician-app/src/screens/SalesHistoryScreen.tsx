@@ -39,6 +39,7 @@ import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
 import { usePosStore } from '../store/posStore';
 import { activityLogService } from '../services/activityLogService';
+import { notificationService } from '../services/notificationService';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import type { SaleTransaction, StockStatus } from '../types';
 
@@ -314,6 +315,15 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
           userName: user?.name,
           userId: user?.id,
         }
+      );
+
+      // Trigger push notification to admins
+      notificationService.sendPushToRole(
+        'admin',
+        'New Approval Request',
+        `${user?.name || 'Sales Agent'} requested approval for sale #${invNum}: ${requestReason}`,
+        { requestId: reqDoc.id, type: 'approval_request' },
+        'approvals'
       );
 
       Vibration.vibrate([0, 50, 50, 80]);
