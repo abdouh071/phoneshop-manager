@@ -6,6 +6,8 @@ import { useAuthStore } from '../store/authStore';
 import { useTranslation } from 'react-i18next';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import i18next from 'i18next';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 
 export const SettingsScreen = ({ navigation }: any) => {
@@ -28,9 +30,18 @@ export const SettingsScreen = ({ navigation }: any) => {
     Alert.alert(t('common.success', 'Success'), t('settings.saved', 'Settings saved successfully!'));
   };
 
-  const changeLanguage = (lang: string) => {
+  const changeLanguage = async (lang: string) => {
     i18next.changeLanguage(lang);
     setCurrentLang(lang);
+    if (user?.id) {
+      try {
+        await updateDoc(doc(db, 'users', user.id), {
+          preferredLanguage: lang,
+        });
+      } catch (err) {
+        console.warn('Failed to update preferredLanguage in Firestore:', err);
+      }
+    }
   };
 
   return (

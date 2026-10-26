@@ -167,20 +167,8 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       // Trigger push notifications
       if (status === 'ready') {
         const deviceName = `${localTicket?.deviceBrand || ''} ${localTicket?.deviceModel || ''}`.trim();
-        notificationService.sendPushToRole(
-          'sales_agent',
-          'Repair Ready for Pickup',
-          `Ticket #${ticketNum} (${deviceName}) is repaired and ready on the shelf for customer.`,
-          { ticketId: id, screen: 'Workbench' },
-          'repairs'
-        );
-        notificationService.sendPushToRole(
-          'admin',
-          'Device Repaired',
-          `Ticket #${ticketNum} (${deviceName}) marked ready by ${actorName}.`,
-          { ticketId: id, screen: 'Workbench' },
-          'repairs'
-        );
+        notificationService.notifyRepairReady(ticketNum, deviceName, actorName, id)
+          .catch(err => console.warn('[RepairStore] Push notify repair ready error:', err));
       }
     } catch (error) {
       console.warn('Failed to update ticket status on Firestore (offline), queuing for auto-sync:', error);
@@ -428,6 +416,14 @@ export const useRepairStore = create<RepairState>((set, get) => ({
             userId: creatorId,
           }
         );
+
+        // Send push notification to repair agents
+        const deviceName = `${ticket.deviceBrand || ''} ${ticket.deviceModel || ''}`.trim();
+        notificationService.notifyNewRepair(
+          ticketNumber,
+          deviceName,
+          ticket.issueDescription || 'Diagnostic requested'
+        ).catch(err => console.warn('[RepairStore] Push notify new repair error:', err));
       } catch (error) {
         console.warn('Failed to create ticket on Firestore (offline), storing locally for auto-sync:', error);
         const offlineId = `offline_tkt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;

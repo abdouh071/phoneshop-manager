@@ -15,12 +15,14 @@ import {
   ActivityIndicator,
   Chip,
   Button,
+  Badge,
 } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { collection, query, getDocs, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
 import { useRepairStore } from '../store/repairStore';
+import { useApprovalStore } from '../store/approvalStore';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import type { ActivityLog, SaleTransaction, PhoneModel, RepairTicket } from '../types';
 
@@ -53,6 +55,7 @@ const getTimeAgo = (dateStrOrTimestamp: any): string => {
 export const AdminDashboardScreen = ({ navigation }: any) => {
   const { user } = useAuthStore();
   const { tickets, subscribeToTickets } = useRepairStore();
+  const { pendingCount, subscribeToPending } = useApprovalStore();
   const theme = useTheme();
 
   const [isLoading, setIsLoading] = useState(true);
@@ -97,6 +100,7 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
     }
     loadDashboardData();
     const unsubTickets = subscribeToTickets();
+    const unsubApprovals = subscribeToPending();
 
     // 3. Real-time activity feed listener
     const qLogs = query(collection(db, 'activityLogs'), orderBy('timestamp', 'desc'), limit(15));
@@ -112,9 +116,10 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
 
     return () => {
       unsubTickets();
+      unsubApprovals();
       unsubLogs();
     };
-  }, [user?.role, loadDashboardData, subscribeToTickets]);
+  }, [user?.role, loadDashboardData, subscribeToTickets, subscribeToPending]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -260,6 +265,19 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
           titleStyle={styles.headerTitle}
           subtitleStyle={styles.headerSub}
         />
+        {/* Approvals Bell with Live Pending Badge */}
+        <TouchableOpacity
+          style={styles.headerApprovalsBtn}
+          onPress={() => navigation.navigate('Approvals')}
+          activeOpacity={0.8}
+        >
+          <MaterialCommunityIcons name="shield-check" size={24} color="#ffffff" />
+          {pendingCount > 0 && (
+            <Badge style={styles.headerBadge} size={18}>
+              {pendingCount}
+            </Badge>
+          )}
+        </TouchableOpacity>
         <Appbar.Action icon="refresh" color="#ffffff" onPress={onRefresh} />
         <Appbar.Action icon="cog-outline" color="#ffffff" onPress={() => navigation.navigate('Settings')} />
       </Appbar.Header>
@@ -275,6 +293,30 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
           </View>
         ) : (
           <>
+            {/* ─── Real-Time Urgent Approvals Alert Banner ─────────────────────── */}
+            {pendingCount > 0 && (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                style={styles.approvalsBanner}
+                onPress={() => navigation.navigate('Approvals')}
+              >
+                <View style={styles.approvalsBannerLeft}>
+                  <View style={styles.approvalsBannerIcon}>
+                    <MaterialCommunityIcons name="shield-alert" size={24} color="#b45309" />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.approvalsBannerTitle}>
+                      {pendingCount} Pending Approval Request{pendingCount > 1 ? 's' : ''}
+                    </Text>
+                    <Text style={styles.approvalsBannerSub}>
+                      Staff waiting for authorization (discounts/voids)
+                    </Text>
+                  </View>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={24} color="#b45309" />
+              </TouchableOpacity>
+            )}
+
             {/* ─── 1. Revenue Snapshot Hero Card ───────────────────────────── */}
             <Card style={styles.heroCard}>
               <View style={styles.heroHeader}>
@@ -763,5 +805,59 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     lineHeight: 20,
+  },
+  headerApprovalsBtn: {
+    padding: 6,
+    position: 'relative',
+    marginRight: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerBadge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    backgroundColor: '#ef4444',
+    color: '#ffffff',
+    fontWeight: 'bold',
+  },
+  approvalsBanner: {
+    backgroundColor: '#fffbeb',
+    borderColor: '#fef3c7',
+    borderWidth: 1.5,
+    borderRadius: 14,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    elevation: 3,
+    shadowColor: '#b45309',
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  approvalsBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  approvalsBannerIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#fde68a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  approvalsBannerTitle: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#92400e',
+  },
+  approvalsBannerSub: {
+    fontSize: 12,
+    color: '#b45309',
+    marginTop: 2,
   },
 });

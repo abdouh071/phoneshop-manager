@@ -22,6 +22,7 @@ import { POSScreen } from './src/screens/POSScreen';
 import { AdminDashboardScreen } from './src/screens/AdminDashboardScreen';
 import { SalesHistoryScreen } from './src/screens/SalesHistoryScreen';
 import { InventoryScreen } from './src/screens/InventoryScreen';
+import { ApprovalsScreen } from './src/screens/ApprovalsScreen';
 import { notificationService } from './src/services/notificationService';
 
 const Stack = createNativeStackNavigator();
@@ -119,11 +120,18 @@ export default function App() {
                 <>
                   {/* Admin Mobile Dashboard - only mounted for admin */}
                   {user?.role === 'admin' && (
-                    <Stack.Screen 
-                      name="AdminDashboard" 
-                      component={AdminDashboardScreen} 
-                      options={{ headerShown: false }}
-                    />
+                    <>
+                      <Stack.Screen 
+                        name="AdminDashboard" 
+                        component={AdminDashboardScreen} 
+                        options={{ headerShown: false }}
+                      />
+                      <Stack.Screen 
+                        name="Approvals" 
+                        component={ApprovalsScreen} 
+                        options={{ headerShown: false }}
+                      />
+                    </>
                   )}
 
                   {/* Sales POS Screen - strictly excluded for repair_agent */}

@@ -13,6 +13,7 @@ import { useAuthStore } from './authStore';
 import { activityLogService } from '../services/activityLogService';
 import { offlineSyncService } from '../services/offlineSyncService';
 import { customerService } from '../services/customerService';
+import { notificationService } from '../services/notificationService';
 import type { PhoneModel, CartItem, SaleTransaction, Customer, PaymentMethod, CustomerDebtEntry, StockStatus } from '../types';
 
 interface CheckoutParams {
@@ -238,6 +239,11 @@ export const usePosStore = create<PosState>((set, get) => ({
           const threshold = curData.lowStockThreshold ?? item.product.lowStockThreshold ?? 1;
           const stockStatus = newStock === 0 ? 'out_of_stock' : newStock <= threshold ? 'low_stock' : 'in_stock';
           await updateDoc(invRef, { stock: newStock, stockStatus });
+
+          if (newStock <= threshold) {
+            notificationService.notifyLowStock(item.product.name, newStock)
+              .catch(err => console.warn('[PosStore] Low stock notification error:', err));
+          }
         } else {
           const prodRef = doc(db, 'products', item.product.id);
           const prodSnap = await getDoc(prodRef);
@@ -248,6 +254,11 @@ export const usePosStore = create<PosState>((set, get) => ({
             const threshold = curData.lowStockThreshold ?? item.product.lowStockThreshold ?? 1;
             const stockStatus = newStock === 0 ? 'out_of_stock' : newStock <= threshold ? 'low_stock' : 'in_stock';
             await updateDoc(prodRef, { stock: newStock, stockStatus });
+
+            if (newStock <= threshold) {
+              notificationService.notifyLowStock(item.product.name, newStock)
+                .catch(err => console.warn('[PosStore] Low stock notification error:', err));
+            }
           }
         }
       } catch (sErr) {

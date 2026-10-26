@@ -38,6 +38,7 @@ import {
 import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
 import { usePosStore } from '../store/posStore';
+import { useApprovalStore } from '../store/approvalStore';
 import { activityLogService } from '../services/activityLogService';
 import { notificationService } from '../services/notificationService';
 import { RoleBottomNav } from '../components/RoleBottomNav';
@@ -265,7 +266,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
           ? `Request Void / Refund Sale #${invNum}`
           : `Request Edit Items / Price for #${invNum}`;
 
-      const requestData = {
+      const reqId = await useApprovalStore.getState().submitRequest({
         actionType: requestType === 'void' ? 'void_sale' : 'modify_sale',
         actionLabel,
         actionData: {
@@ -283,48 +284,14 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
           details: requestDetails.trim() || undefined,
         },
         targetId: targetTxForApproval.id,
-        requestedBy: {
-          uid: user?.id || 'sales_agent',
-          name: user?.name || 'Sales Agent',
-          email: user?.email || '',
-          role: user?.role || 'sales_agent',
-          avatar: user?.name ? user.name[0].toUpperCase() : 'S',
-        },
-        status: 'pending',
-        requestedAt: new Date().toISOString(),
         reason: requestReason.trim(),
-        createdAt: serverTimestamp(),
-      };
-
-      const reqDoc = await addDoc(collection(db, 'approvalRequests'), requestData);
+      });
 
       // Update the transaction status to show pending approval
       await updateDoc(doc(db, 'transactions', targetTxForApproval.id), {
         status: 'pending_approval',
-        approvalRequestId: reqDoc.id,
+        approvalRequestId: reqId,
       });
-
-      // Log activity
-      await activityLogService.log(
-        'system',
-        `Sales Agent ${user?.name} requested admin approval for past sale #${invNum}`,
-        {
-          entityId: reqDoc.id,
-          entityType: 'approval_request',
-          detail: `Target Sale: ${targetTxForApproval.id}`,
-          userName: user?.name,
-          userId: user?.id,
-        }
-      );
-
-      // Trigger push notification to admins
-      notificationService.sendPushToRole(
-        'admin',
-        'New Approval Request',
-        `${user?.name || 'Sales Agent'} requested approval for sale #${invNum}: ${requestReason}`,
-        { requestId: reqDoc.id, type: 'approval_request' },
-        'approvals'
-      );
 
       Vibration.vibrate([0, 50, 50, 80]);
       setIsRequestModalOpen(false);

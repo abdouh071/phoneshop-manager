@@ -130,6 +130,8 @@ export interface User {
   permissions?: Permissions;
   pushToken?: string;
   pushTokenUpdatedAt?: any;
+  preferredLanguage?: 'en' | 'fr' | 'ar';
+  approvalPin?: string;
 }
 
 export type StockStatus = 'in_stock' | 'low_stock' | 'out_of_stock';
