@@ -1163,7 +1163,9 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setDeleteDeviceRepairsToo(false);
+                            const ticketCount = data.tickets.length;
+                            // Default to deleting tickets too — otherwise the device reappears from ticket history
+                            setDeleteDeviceRepairsToo(ticketCount > 0);
                             setDeviceToDelete({
                               device,
                               brand: data.brand || device.split(' ')[0] || '',
@@ -2119,9 +2121,9 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                   onClick={e => e.stopPropagation()}
                 />
                 <label htmlFor="deleteRepairsCheck" style={{ fontSize: '12.5px', color: '#991b1b', fontWeight: 600, cursor: 'pointer' }}>
-                  Also permanently delete the {deviceToDelete.tickets.length} linked repair ticket(s)
+                  Also delete the {deviceToDelete.tickets.length} linked repair ticket(s)
                   <span style={{ display: 'block', fontWeight: 400, color: '#b91c1c', fontSize: '11.5px', marginTop: '2px' }}>
-                    ⚠️ This cannot be undone. Uncheck to keep the repair history.
+                    ⚠️ Required to fully remove the device — if unchecked, it will reappear because repair history still references it.
                   </span>
                 </label>
               </div>
@@ -2129,7 +2131,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
             <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>
               {deleteDeviceRepairsToo
                 ? `This will remove the device and delete all ${deviceToDelete?.tickets.length} repair record(s) permanently.`
-                : 'The device will be unregistered. Existing repair history will be preserved.'}
+                : '⚠️ The device will still appear in the list because it has linked repair tickets. To fully remove it, check the box above.'}
             </p>
           </div>
         }
