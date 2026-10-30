@@ -3,10 +3,12 @@ import { useTranslation } from 'react-i18next';
 import {
   Printer, Send, Download, FileText, Calendar, Store, User,
   CheckCircle2, AlertCircle, ArrowUpRight, DollarSign, X, ShieldCheck,
-  TrendingDown, TrendingUp, History, CreditCard
+  TrendingDown, TrendingUp, History, CreditCard, ChevronDown, Wrench, ShoppingBag
 } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
+import { ReceiptModal } from '../pos/ReceiptModal';
+import { PrintRepairTicketModal } from '../repairs/PrintRepairTicketModal';
 import { useCartStore } from '../../store/cartStore';
 import { usePartsCartStore } from '../../store/partsCartStore';
 import { useCustomerStore } from '../../store/customerStore';
@@ -17,7 +19,7 @@ import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrenc
 import { exportToCSV } from '../../utils/exportUtils';
 import { matchesCustomer } from '../../utils/customerFinancials';
 import { formatWhatsAppUrl } from '../../utils/phoneUtils';
-import type { Customer, SaleTransaction, CustomerDebtEntry } from '../../types';
+import type { Customer, SaleTransaction, CustomerDebtEntry, RepairTicket } from '../../types';
 import styles from './AccountStatement.module.css';
 
 interface AccountStatementModalProps {
@@ -39,6 +41,10 @@ export interface LedgerEvent {
   netChange: number;  // debit - credit
   method?: string;
   rawTimestamp: number;
+  rawTicket?: RepairTicket;
+  rawTransaction?: SaleTransaction;
+  rawDebt?: CustomerDebtEntry;
+  rawPayment?: { id: string; amount: number; date: string; method: string; note?: string };
 }
 
 export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
@@ -76,6 +82,10 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
     return d.toISOString().slice(0, 10);
   });
   const [customEnd, setCustomEnd] = useState<string>(() => new Date().toISOString().slice(0, 10));
+
+  const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
+  const [txToView, setTxToView] = useState<SaleTransaction | null>(null);
+  const [ticketToPrint, setTicketToPrint] = useState<RepairTicket | null>(null);
 
   // Determine active start/end Date objects
   const { startDate, endDate, dateRangeLabel } = useMemo(() => {
@@ -222,6 +232,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
         credit: paidUpfront,
         netChange: totalBilled - paidUpfront,
         rawTimestamp: new Date(tx.date).getTime(),
+        rawTransaction: tx,
       });
 
       // Handle Refunds
@@ -236,6 +247,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
           credit: totalBilled,
           netChange: -totalBilled,
           rawTimestamp: new Date(tx.date).getTime() + 1, // slightly after sale
+          rawTransaction: tx,
         });
       }
     });
@@ -263,6 +275,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
           credit: initialDownPayment,
           netChange: debt.totalAmount - initialDownPayment,
           rawTimestamp: new Date(debt.date || debt.createdAt).getTime(),
+          rawDebt: debt,
         });
       }
 
@@ -279,6 +292,8 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
           netChange: -pay.amount,
           method: pay.method,
           rawTimestamp: new Date(pay.date).getTime(),
+          rawDebt: debt,
+          rawPayment: pay,
         });
       });
     });
@@ -303,6 +318,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
           credit: deposit,
           netChange: -deposit,
           rawTimestamp: new Date(t.createdAt).getTime(),
+          rawTicket: t,
         });
       }
 
@@ -337,6 +353,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
           credit: handoverPaid,
           netChange: finalCost - handoverPaid,
           rawTimestamp: new Date(t.completedAt || t.updatedAt || t.createdAt).getTime(),
+          rawTicket: t,
         });
       }
     });
@@ -447,8 +464,9 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
+    <>
+      <Modal
+        isOpen={isOpen}
       onClose={onClose}
       title={`${customer.shopName || customer.name}`}
       subtitle={`${t('statementModal.simplifiedTitle', 'Relevé de compte client')} • ${dateRangeLabel}`}
@@ -640,37 +658,311 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                 ) : (
                   statementData.periodJournal.map((item, idx) => {
                     const isDebit = item.debit > 0;
+                    const isExpanded = expandedEventId === item.id;
                     return (
-                      <tr key={idx}>
-                        <td className={styles.colDate}>{formatDateStr(item.date)}</td>
-                        <td className={styles.colDesc}>
-                          <div className={styles.opMainTitle}>{item.description}</div>
-                          <div className={styles.opMetaRow}>
-                            <span className={[
-                              styles.typeBadge,
-                              item.type === 'repair' ? styles.typeRepair :
-                              item.type === 'invoice' ? styles.typeInvoice :
-                              item.type === 'payment' ? styles.typePayment :
-                              item.type === 'refund' ? styles.typeRefund : styles.typeTab
-                            ].join(' ')}>
-                              {item.type === 'repair' ? t('statementModal.repair', 'Réparation') :
-                               item.type === 'invoice' ? t('statementModal.invoice', 'Pièce') :
-                               item.type === 'payment' ? t('statementModal.payment', 'Paiement') :
-                               item.type === 'refund' ? t('statementModal.refund', 'Remboursement') :
-                               t('statementModal.creditTab', 'Dette')}
-                            </span>
-                            {item.refNumber && (
-                              <span className={styles.opRefCode}>#{item.refNumber}</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className={[styles.colAmount, isDebit ? styles.amountDebit : styles.amountCredit].join(' ')}>
-                          {isDebit ? `+${formatPrivateCurrency(item.debit)}` : `-${formatPrivateCurrency(item.credit)}`}
-                        </td>
-                        <td className={styles.colBalance}>
-                          {formatPrivateCurrency(item.runningBalance)}
-                        </td>
-                      </tr>
+                      <React.Fragment key={item.id || idx}>
+                        <tr
+                          className={[styles.clickableRow, isExpanded && styles.clickableRowActive].filter(Boolean).join(' ')}
+                          onClick={() => setExpandedEventId(prev => prev === item.id ? null : item.id)}
+                          title="Cliquez pour afficher les détails"
+                        >
+                          <td className={styles.colDate}>{formatDateStr(item.date)}</td>
+                          <td className={styles.colDesc}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                              <div className={styles.opMainTitle}>{item.description}</div>
+                              <ChevronDown size={14} className={isExpanded ? styles.chevronRotated : styles.chevron} />
+                            </div>
+                            <div className={styles.opMetaRow}>
+                              <span className={[
+                                styles.typeBadge,
+                                item.type === 'repair' ? styles.typeRepair :
+                                item.type === 'invoice' ? styles.typeInvoice :
+                                item.type === 'payment' ? styles.typePayment :
+                                item.type === 'refund' ? styles.typeRefund : styles.typeTab
+                              ].join(' ')}>
+                                {item.type === 'repair' ? t('statementModal.repair', 'Réparation') :
+                                 item.type === 'invoice' ? t('statementModal.invoice', 'Pièce') :
+                                 item.type === 'payment' ? t('statementModal.payment', 'Paiement') :
+                                 item.type === 'refund' ? t('statementModal.refund', 'Remboursement') :
+                                 t('statementModal.creditTab', 'Dette')}
+                              </span>
+                              {item.refNumber && (
+                                <span className={styles.opRefCode}>#{item.refNumber}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className={[styles.colAmount, isDebit ? styles.amountDebit : styles.amountCredit].join(' ')}>
+                            {isDebit ? `+${formatPrivateCurrency(item.debit)}` : `-${formatPrivateCurrency(item.credit)}`}
+                          </td>
+                          <td className={styles.colBalance}>
+                            {formatPrivateCurrency(item.runningBalance)}
+                          </td>
+                        </tr>
+
+                        {/* Expandable Operation Details */}
+                        {isExpanded && (
+                          <tr className={styles.expandedRow}>
+                            <td colSpan={4}>
+                              <div className={styles.detailContainer}>
+                                {/* Case 1: Repair Ticket Details */}
+                                {item.rawTicket && (
+                                  <div className={styles.detailCard}>
+                                    <div className={styles.detailCardHeader}>
+                                      <div className={styles.detailCardTitle}>
+                                        <Wrench size={16} className={styles.detailIconRepair} />
+                                        <span>Fiche Réparation #{item.rawTicket.ticketNumber || item.refNumber}</span>
+                                        <span className={styles.statusPill}>{item.rawTicket.status}</span>
+                                      </div>
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setTicketToPrint(item.rawTicket!);
+                                        }}
+                                        leftIcon={<Printer size={13} />}
+                                      >
+                                        Imprimer Reçu
+                                      </Button>
+                                    </div>
+
+                                    <div className={styles.detailGrid}>
+                                      <div>
+                                        <span className={styles.detailLabel}>Appareil</span>
+                                        <p className={styles.detailValue}>
+                                          <strong>{item.rawTicket.deviceBrand} {item.rawTicket.deviceModel}</strong>
+                                          {item.rawTicket.imei ? ` (IMEI: ${item.rawTicket.imei})` : ''}
+                                        </p>
+                                      </div>
+                                      <div>
+                                        <span className={styles.detailLabel}>Panne déclarée</span>
+                                        <p className={styles.detailValue}>{item.rawTicket.issueDescription || 'Non spécifiée'}</p>
+                                      </div>
+                                      <div>
+                                        <span className={styles.detailLabel}>Date prise en charge</span>
+                                        <p className={styles.detailValue}>{formatDateStr(item.rawTicket.createdAt)}</p>
+                                      </div>
+                                      <div>
+                                        <span className={styles.detailLabel}>Décomposition financière</span>
+                                        <p className={styles.detailValue}>
+                                          Coût : <strong>{formatPrivateCurrency(item.rawTicket.actualCost ?? item.rawTicket.estimatedCost ?? 0)}</strong>
+                                          {' • '}Acompte : {formatPrivateCurrency(item.rawTicket.depositAmount || 0)}
+                                          {' • '}Payé : {formatPrivateCurrency(item.rawTicket.paidAmount || 0)}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {item.rawTicket.partsUsed && item.rawTicket.partsUsed.length > 0 && (
+                                      <div className={styles.partsUsedBox}>
+                                        <span className={styles.detailLabel}>Pièces installées :</span>
+                                        <div className={styles.partsList}>
+                                          {item.rawTicket.partsUsed.map((p, pIdx) => (
+                                            <span key={pIdx} className={styles.partTag}>
+                                              {p.quantity}× {p.name} {p.cost ? `(${formatPrivateCurrency(p.cost)})` : ''}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {item.rawTicket.notes && (
+                                      <div className={styles.notesBox}>
+                                        <span className={styles.detailLabel}>Remarques / Diagnostic :</span>
+                                        <p className={styles.notesText}>{item.rawTicket.notes}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Case 2: POS Sale or Parts Commercial Invoice */}
+                                {item.rawTransaction && (
+                                  <div className={styles.detailCard}>
+                                    <div className={styles.detailCardHeader}>
+                                      <div className={styles.detailCardTitle}>
+                                        <ShoppingBag size={16} className={styles.detailIconInvoice} />
+                                        <span>
+                                          {item.rawTransaction.saleType === 'parts_b2b' ? 'Facture Commerciale Pièces' : 'Vente Caisse POS'} #{item.rawTransaction.invoiceNumber || item.refNumber}
+                                        </span>
+                                        <span className={styles.statusPill}>{item.rawTransaction.paymentStatus || item.rawTransaction.status}</span>
+                                      </div>
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setTxToView(item.rawTransaction!);
+                                        }}
+                                        leftIcon={<FileText size={13} />}
+                                      >
+                                        Voir Reçu
+                                      </Button>
+                                    </div>
+
+                                    <div className={styles.itemsTableWrapper}>
+                                      <table className={styles.itemsTable}>
+                                        <thead>
+                                          <tr>
+                                            <th>Article</th>
+                                            <th style={{ textAlign: 'center' }}>Qté</th>
+                                            <th style={{ textAlign: 'right' }}>Prix unitaire</th>
+                                            <th style={{ textAlign: 'right' }}>Total</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {item.rawTransaction.items.map((it, iIdx) => (
+                                            <tr key={iIdx}>
+                                              <td><strong>{it.product.name}</strong> {it.product.model || ''}</td>
+                                              <td style={{ textAlign: 'center' }}>{it.quantity}</td>
+                                              <td style={{ textAlign: 'right' }}>{formatPrivateCurrency(it.unitPrice)}</td>
+                                              <td style={{ textAlign: 'right' }}>{formatPrivateCurrency(it.totalPrice)}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+
+                                    <div className={styles.detailGrid} style={{ marginTop: 10 }}>
+                                      <div>
+                                        <span className={styles.detailLabel}>Total Vente</span>
+                                        <p className={styles.detailValue}><strong>{formatPrivateCurrency(item.rawTransaction.total)}</strong></p>
+                                      </div>
+                                      <div>
+                                        <span className={styles.detailLabel}>Règlement</span>
+                                        <p className={styles.detailValue}>
+                                          {item.rawTransaction.payments?.map(p => `${p.method.toUpperCase()} (${formatPrivateCurrency(p.amount)})`).join(' + ') || 'Comptant'}
+                                        </p>
+                                      </div>
+                                      {item.rawTransaction.notes && (
+                                        <div style={{ gridColumn: 'span 2' }}>
+                                          <span className={styles.detailLabel}>Notes</span>
+                                          <p className={styles.notesText}>{item.rawTransaction.notes}</p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Case 3: Standalone Debt Tab */}
+                                {item.rawDebt && !item.rawPayment && (
+                                  <div className={styles.detailCard}>
+                                    <div className={styles.detailCardHeader}>
+                                      <div className={styles.detailCardTitle}>
+                                        <FileText size={16} className={styles.detailIconTab} />
+                                        <span>Carnet de Dette #{item.refNumber}</span>
+                                        <span className={styles.statusPill}>{item.rawDebt.status || 'Active'}</span>
+                                      </div>
+                                    </div>
+
+                                    <div className={styles.detailGrid}>
+                                      <div>
+                                        <span className={styles.detailLabel}>Motif / Désignation</span>
+                                        <p className={styles.detailValue}><strong>{item.rawDebt.productOrService}</strong></p>
+                                      </div>
+                                      <div>
+                                        <span className={styles.detailLabel}>Date d'enregistrement</span>
+                                        <p className={styles.detailValue}>{formatDateStr(item.rawDebt.date || item.rawDebt.createdAt)}</p>
+                                      </div>
+                                      <div>
+                                        <span className={styles.detailLabel}>Montant Initial</span>
+                                        <p className={styles.detailValue}><strong>{formatPrivateCurrency(item.rawDebt.totalAmount)}</strong></p>
+                                      </div>
+                                      <div>
+                                        <span className={styles.detailLabel}>Date d'échéance</span>
+                                        <p className={styles.detailValue}>{item.rawDebt.dueDate ? formatDateStr(item.rawDebt.dueDate) : 'Non définie'}</p>
+                                      </div>
+                                    </div>
+
+                                    {item.rawDebt.payments && item.rawDebt.payments.length > 0 && (
+                                      <div className={styles.partsUsedBox}>
+                                        <span className={styles.detailLabel}>Versements enregistrés sur ce bon ({item.rawDebt.payments.length}) :</span>
+                                        <div style={{ marginTop: 4 }}>
+                                          {item.rawDebt.payments.map((p, pIdx) => (
+                                            <div key={pIdx} style={{ fontSize: 11.5, display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                                              <span>• {formatDateStr(p.date)} via <strong>{p.method.toUpperCase()}</strong> {p.note ? `(${p.note})` : ''}</span>
+                                              <strong style={{ color: '#16a34a' }}>-{formatPrivateCurrency(p.amount)}</strong>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {item.rawDebt.notes && (
+                                      <div className={styles.notesBox}>
+                                        <span className={styles.detailLabel}>Remarques :</span>
+                                        <p className={styles.notesText}>{item.rawDebt.notes}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Case 4: Debt Settlement Payment */}
+                                {item.rawPayment && (
+                                  <div className={styles.detailCard}>
+                                    <div className={styles.detailCardHeader}>
+                                      <div className={styles.detailCardTitle}>
+                                        <CreditCard size={16} className={styles.detailIconPayment} />
+                                        <span>Règlement / Versement #{item.refNumber}</span>
+                                        <span className={[styles.statusPill, styles.statusPillSuccess].join(' ')}>Encaissé</span>
+                                      </div>
+                                    </div>
+
+                                    <div className={styles.detailGrid}>
+                                      <div>
+                                        <span className={styles.detailLabel}>Montant versé</span>
+                                        <p className={styles.detailValue} style={{ color: '#16a34a', fontSize: 15 }}>
+                                          <strong>{formatPrivateCurrency(item.rawPayment.amount)}</strong>
+                                        </p>
+                                      </div>
+                                      <div>
+                                        <span className={styles.detailLabel}>Mode de paiement</span>
+                                        <p className={styles.detailValue}><strong>{item.rawPayment.method?.toUpperCase() || 'ESPÈCES'}</strong></p>
+                                      </div>
+                                      <div>
+                                        <span className={styles.detailLabel}>Date</span>
+                                        <p className={styles.detailValue}>{formatDateStr(item.rawPayment.date)}</p>
+                                      </div>
+                                      <div>
+                                        <span className={styles.detailLabel}>Affecté au dossier</span>
+                                        <p className={styles.detailValue}>{item.rawDebt?.productOrService || 'Compte client'}</p>
+                                      </div>
+                                      {item.rawPayment.note && (
+                                        <div style={{ gridColumn: 'span 2' }}>
+                                          <span className={styles.detailLabel}>Note / Observation</span>
+                                          <p className={styles.notesText}>{item.rawPayment.note}</p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Case 5: Fallback if no raw object attached */}
+                                {!item.rawTicket && !item.rawTransaction && !item.rawDebt && !item.rawPayment && (
+                                  <div className={styles.detailCard}>
+                                    <div className={styles.detailGrid}>
+                                      <div>
+                                        <span className={styles.detailLabel}>Référence</span>
+                                        <p className={styles.detailValue}><code>{item.refNumber}</code></p>
+                                      </div>
+                                      <div>
+                                        <span className={styles.detailLabel}>Description</span>
+                                        <p className={styles.detailValue}>{item.description}</p>
+                                      </div>
+                                      <div>
+                                        <span className={styles.detailLabel}>Débit / Facturé</span>
+                                        <p className={styles.detailValue}>+{formatPrivateCurrency(item.debit)}</p>
+                                      </div>
+                                      <div>
+                                        <span className={styles.detailLabel}>Crédit / Réglé</span>
+                                        <p className={styles.detailValue}>-{formatPrivateCurrency(item.credit)}</p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })
                 )}
@@ -690,5 +982,24 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
         </div>
       </div>
     </Modal>
+
+    {/* Dedicated Receipt Modal */}
+    {txToView && (
+      <ReceiptModal
+        transaction={txToView}
+        onClose={() => setTxToView(null)}
+        mode="reprint"
+      />
+    )}
+
+    {/* Dedicated Repair Print Modal */}
+    {ticketToPrint && (
+      <PrintRepairTicketModal
+        isOpen={Boolean(ticketToPrint)}
+        onClose={() => setTicketToPrint(null)}
+        ticket={ticketToPrint}
+      />
+    )}
+  </>
   );
 };
