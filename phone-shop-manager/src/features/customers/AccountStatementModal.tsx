@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Printer, Send, Download, FileText, Calendar, Store, User,
-  CheckCircle2, AlertCircle, ArrowUpRight, DollarSign, X, ShieldCheck
+  CheckCircle2, AlertCircle, ArrowUpRight, DollarSign, X, ShieldCheck,
+  TrendingDown, TrendingUp, History, CreditCard
 } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
@@ -39,20 +41,21 @@ export interface LedgerEvent {
   rawTimestamp: number;
 }
 
-const formatDateStr = (iso: string) =>
-  new Date(iso).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-
-const normalizePhone = (p?: string) => (p ? p.replace(/\D/g, '') : '');
-
 export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
   customer,
   isOpen,
   onClose,
 }) => {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language === 'ar' ? 'ar-DZ' : i18n.language === 'fr' ? 'fr-FR' : 'en-US';
+
+  const formatDateStr = (iso: string) =>
+    new Date(iso).toLocaleDateString(locale, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
   const { transactions } = useCartStore();
   const { invoices, fetchInvoices } = usePartsCartStore();
   const { debts, getCustomerDebts, getCustomerDebtTotal } = useCustomerStore();
@@ -83,29 +86,29 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
 
     if (datePreset === 'this_month') {
       start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-      label = `This Month (${start.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })})`;
+      label = `${t('statementModal.thisMonth', 'This Month')} (${start.toLocaleDateString(locale, { month: 'short', year: 'numeric' })})`;
     } else if (datePreset === 'last_month') {
       start = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
       end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-      label = `Last Month (${start.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })})`;
+      label = `${t('statementModal.lastMonth', 'Last Month')} (${start.toLocaleDateString(locale, { month: 'short', year: 'numeric' })})`;
     } else if (datePreset === 'last_30_days') {
       start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       start.setHours(0, 0, 0, 0);
-      label = `Last 30 Days (${formatDateStr(start.toISOString())} - ${formatDateStr(end.toISOString())})`;
+      label = `${t('statementModal.last30Days', 'Last 30 Days')} (${formatDateStr(start.toISOString())} - ${formatDateStr(end.toISOString())})`;
     } else if (datePreset === 'this_year') {
       start = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
-      label = `This Year (${now.getFullYear()})`;
+      label = `${t('statementModal.thisYear', 'This Year')} (${now.getFullYear()})`;
     } else if (datePreset === 'all') {
       start = null;
-      label = 'All Time History';
+      label = t('statementModal.allTime', 'All Time History');
     } else if (datePreset === 'custom') {
       start = customStart ? new Date(`${customStart}T00:00:00`) : null;
       end = customEnd ? new Date(`${customEnd}T23:59:59.999`) : end;
-      label = `Custom Period (${customStart || 'Start'} to ${customEnd || 'Present'})`;
+      label = `${t('statementModal.customRange', 'Custom Period')} (${customStart || 'Start'} - ${customEnd || 'Present'})`;
     }
 
     return { startDate: start, endDate: end, dateRangeLabel: label };
-  }, [datePreset, customStart, customEnd]);
+  }, [datePreset, customStart, customEnd, locale, t]);
 
   // Compile Unified, Deduplicated Ledger Events
   const allEvents = useMemo(() => {
@@ -448,14 +451,14 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="B2B Account Statement & Ledger"
+      title={t('statementModal.title', 'B2B Account Statement & Ledger')}
       subtitle={`${customer.shopName || customer.name} • ${dateRangeLabel}`}
       size="lg"
       footer={
         <div className={styles.actionsBar} style={{ width: '100%' }}>
           <div style={{ display: 'flex', gap: '8px' }}>
             <Button variant="secondary" onClick={handleExportCSV} leftIcon={<Download size={15} />}>
-              Export CSV
+              {t('statementModal.exportCsv', 'Export CSV')}
             </Button>
             <Button
               variant="secondary"
@@ -463,21 +466,21 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
               leftIcon={<Send size={15} />}
               style={{ background: '#25D366', color: '#ffffff', borderColor: '#22c55e' }}
             >
-              Share via WhatsApp
+              {t('statementModal.shareWhatsApp', 'Share via WhatsApp')}
             </Button>
           </div>
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             {isReconciled && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#16a34a', fontWeight: 600 }}>
-                <ShieldCheck size={14} /> 100% Reconciled
+                <ShieldCheck size={14} /> {t('statementModal.reconciled', '100% Reconciled')}
               </span>
             )}
             <Button variant="ghost" onClick={onClose}>
-              Close
+              {t('statementModal.close', 'Close')}
             </Button>
             <Button onClick={handlePrint} leftIcon={<Printer size={15} />}>
-              Print / Save PDF
+              {t('statementModal.printPdf', 'Print / Save PDF')}
             </Button>
           </div>
         </div>
@@ -492,55 +495,55 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
               className={[styles.filterPill, datePreset === 'this_month' && styles.filterPillActive].filter(Boolean).join(' ')}
               onClick={() => setDatePreset('this_month')}
             >
-              This Month
+              {t('statementModal.thisMonth', 'This Month')}
             </button>
             <button
               type="button"
               className={[styles.filterPill, datePreset === 'last_month' && styles.filterPillActive].filter(Boolean).join(' ')}
               onClick={() => setDatePreset('last_month')}
             >
-              Last Month
+              {t('statementModal.lastMonth', 'Last Month')}
             </button>
             <button
               type="button"
               className={[styles.filterPill, datePreset === 'last_30_days' && styles.filterPillActive].filter(Boolean).join(' ')}
               onClick={() => setDatePreset('last_30_days')}
             >
-              Last 30 Days
+              {t('statementModal.last30Days', 'Last 30 Days')}
             </button>
             <button
               type="button"
               className={[styles.filterPill, datePreset === 'this_year' && styles.filterPillActive].filter(Boolean).join(' ')}
               onClick={() => setDatePreset('this_year')}
             >
-              This Year
+              {t('statementModal.thisYear', 'This Year')}
             </button>
             <button
               type="button"
               className={[styles.filterPill, datePreset === 'all' && styles.filterPillActive].filter(Boolean).join(' ')}
               onClick={() => setDatePreset('all')}
             >
-              All Time
+              {t('statementModal.allTime', 'All Time')}
             </button>
             <button
               type="button"
               className={[styles.filterPill, datePreset === 'custom' && styles.filterPillActive].filter(Boolean).join(' ')}
               onClick={() => setDatePreset('custom')}
             >
-              Custom Range
+              {t('statementModal.customRange', 'Custom Range')}
             </button>
           </div>
 
           {datePreset === 'custom' && (
             <div className={styles.customDateRow}>
-              <span>From:</span>
+              <span>{t('statementModal.from', 'From:')}</span>
               <input
                 type="date"
                 value={customStart}
                 onChange={e => setCustomStart(e.target.value)}
                 className={styles.dateInput}
               />
-              <span>To:</span>
+              <span>{t('statementModal.to', 'To:')}</span>
               <input
                 type="date"
                 value={customEnd}
@@ -566,14 +569,14 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
               <span className={styles.statementBadge}>RELEVÉ DE COMPTE</span>
               <h3 className={styles.statementTitle}>ACCOUNT STATEMENT</h3>
               <p className={styles.statementDate}>Ref: <strong>{statementNumber}</strong></p>
-              <p className={styles.statementDate}>Date: <strong>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</strong></p>
+              <p className={styles.statementDate}>Date: <strong>{new Date().toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' })}</strong></p>
             </div>
           </div>
 
           {/* Client & Period Info */}
           <div className={styles.partiesGrid}>
             <div className={styles.clientCol}>
-              <h4>CLIENT ACCOUNT DETAILS</h4>
+              <h4>{t('statementModal.accountDetails', 'CLIENT ACCOUNT DETAILS')}</h4>
               <p className={styles.clientName}>{customer.shopName || customer.name}</p>
               {customer.shopName && <p className={styles.clientDetail}>Contact Person: <strong>{customer.name}</strong></p>}
               <p className={styles.clientDetail}>Phone: {customer.phone}</p>
@@ -595,29 +598,41 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
             </div>
 
             <div className={styles.accountCol}>
-              <h4>STATEMENT PERIOD</h4>
+              <h4>{t('statementModal.statementPeriod', 'STATEMENT PERIOD')}</h4>
               <p className={styles.clientName}>{dateRangeLabel}</p>
-              <p className={styles.clientDetail}>Account Type: <strong>{customer.shopName ? '🏪 Commercial / Phone Shop' : '👤 Retail Client'}</strong></p>
-              <p className={styles.clientDetail}>Live Ledger Balance: <strong style={{ color: currentTotalDebt > 0 ? '#dc2626' : '#16a34a' }}>{formatPrivateCurrency(currentTotalDebt)}</strong></p>
+              <p className={styles.clientDetail}>{t('statementModal.accountType', 'Account Type')}: <strong>{customer.shopName ? t('statementModal.commercialShop', '🏪 Commercial / Phone Shop') : t('statementModal.retailClient', '👤 Retail Client')}</strong></p>
+              <p className={styles.clientDetail}>{t('statementModal.liveLedgerBalance', 'Live Ledger Balance')}: <strong style={{ color: currentTotalDebt > 0 ? '#dc2626' : '#16a34a' }}>{formatPrivateCurrency(currentTotalDebt)}</strong></p>
             </div>
           </div>
 
           {/* 4 Financial KPI Summary Cards */}
           <div className={styles.kpiGrid}>
             <div className={styles.kpiCard}>
-              <div className={styles.kpiLabel}>1. Opening Balance</div>
+              <div className={styles.kpiLabel}>
+                <History size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 4 }} />
+                {t('statementModal.openingBalance', '1. Opening Balance')}
+              </div>
               <p className={styles.kpiValue}>{formatPrivateCurrency(statementData.openingBalance)}</p>
             </div>
             <div className={styles.kpiCard}>
-              <div className={styles.kpiLabel}>2. Billed / Invoices (+)</div>
+              <div className={styles.kpiLabel}>
+                <ArrowUpRight size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 4, color: '#2563eb' }} />
+                {t('statementModal.periodDebits', '2. Billed / Invoices (+)')}
+              </div>
               <p className={styles.kpiValue} style={{ color: '#2563eb' }}>+{formatPrivateCurrency(statementData.periodDebits)}</p>
             </div>
             <div className={styles.kpiCard}>
-              <div className={styles.kpiLabel}>3. Payments Received (-)</div>
+              <div className={styles.kpiLabel}>
+                <TrendingDown size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 4, color: '#16a34a' }} />
+                {t('statementModal.periodCredits', '3. Payments Received (-)')}
+              </div>
               <p className={[styles.kpiValue, styles.kpiValuePaid].join(' ')}>-{formatPrivateCurrency(statementData.periodCredits)}</p>
             </div>
             <div className={styles.kpiCard} style={{ background: '#fef2f2', borderColor: '#fecaca' }}>
-              <div className={styles.kpiLabel} style={{ color: '#991b1b' }}>4. Closing Balance Due</div>
+              <div className={styles.kpiLabel} style={{ color: '#991b1b' }}>
+                <DollarSign size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 4 }} />
+                {t('statementModal.closingBalance', '4. Closing Balance Due')}
+              </div>
               <p className={[styles.kpiValue, styles.kpiValueClosing].join(' ')}>{formatPrivateCurrency(statementData.closingBalance)}</p>
             </div>
           </div>
@@ -627,13 +642,13 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
             <table className={styles.statementTable}>
               <thead>
                 <tr>
-                  <th style={{ width: '105px' }}>Date</th>
-                  <th style={{ width: '125px' }}>Reference</th>
-                  <th style={{ width: '105px' }}>Type</th>
-                  <th>Description / Line Items</th>
-                  <th className={styles.numCol} style={{ width: '110px' }}>Debit (+)</th>
-                  <th className={styles.numCol} style={{ width: '110px' }}>Credit (-)</th>
-                  <th className={styles.numCol} style={{ width: '115px' }}>Balance</th>
+                  <th style={{ width: '105px' }}>{t('statementModal.date', 'Date')}</th>
+                  <th style={{ width: '125px' }}>{t('statementModal.reference', 'Reference')}</th>
+                  <th style={{ width: '105px' }}>{t('statementModal.type', 'Type')}</th>
+                  <th>{t('statementModal.description', 'Description / Line Items')}</th>
+                  <th className={styles.numCol} style={{ width: '110px' }}>{t('statementModal.debit', 'Debit (+)')}</th>
+                  <th className={styles.numCol} style={{ width: '110px' }}>{t('statementModal.credit', 'Credit (-)')}</th>
+                  <th className={styles.numCol} style={{ width: '115px' }}>{t('statementModal.balance', 'Balance')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -643,10 +658,10 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
                   <td><code>OPENING</code></td>
                   <td>
                     <span className={[styles.typeBadge, styles.typeTab].join(' ')}>
-                      Balance Fwd
+                      {t('statementModal.balanceFwd', 'Balance Fwd')}
                     </span>
                   </td>
-                  <td>Balance brought forward from prior transactions</td>
+                  <td>{t('statementModal.openingBalanceDesc', 'Balance brought forward from prior transactions')}</td>
                   <td className={styles.numCol}>-</td>
                   <td className={styles.numCol}>-</td>
                   <td className={[styles.numCol, styles.balanceText].join(' ')} data-col="balance">
@@ -657,7 +672,7 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
                 {statementData.periodJournal.length === 0 ? (
                   <tr>
                     <td colSpan={7} style={{ textAlign: 'center', padding: '24px', color: '#94a3b8' }}>
-                      No new ledger transactions or invoices recorded in this date range.
+                      {t('statementModal.noTransactions', 'No new ledger transactions or invoices recorded in this date range.')}
                     </td>
                   </tr>
                 ) : (
@@ -673,7 +688,11 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
                           item.type === 'payment' ? styles.typePayment :
                           item.type === 'refund' ? styles.typeRefund : styles.typeTab
                         ].join(' ')}>
-                          {item.type === 'repair' ? 'Repair' : item.type === 'invoice' ? 'Invoice' : item.type === 'payment' ? 'Payment' : item.type === 'refund' ? 'Refund' : 'Credit Tab'}
+                          {item.type === 'repair' ? t('statementModal.repair', 'Repair') :
+                           item.type === 'invoice' ? t('statementModal.invoice', 'Invoice') :
+                           item.type === 'payment' ? t('statementModal.payment', 'Payment') :
+                           item.type === 'refund' ? t('statementModal.refund', 'Refund') :
+                           t('statementModal.creditTab', 'Credit Tab')}
                         </span>
                       </td>
                       <td style={{ maxWidth: '280px', lineHeight: 1.3 }}>{item.description}</td>
@@ -698,19 +717,18 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
             <div className={styles.signaturesRow}>
               <div className={styles.signatureBox}>
                 <div className={styles.signatureLine}>
-                  Authorized Store Signature & Stamp
+                  {t('statementModal.authStamp', 'Authorized Store Signature & Stamp')}
                 </div>
               </div>
               <div className={styles.signatureBox}>
                 <div className={styles.signatureLine}>
-                  Client Acknowledgment & Signature
+                  {t('statementModal.clientSignature', 'Client Acknowledgment & Signature')}
                 </div>
               </div>
             </div>
 
             <p className={styles.statementNote}>
-              This document is an official accounting record of all wholesale parts invoices, credit tabs, and settlement payments.
-              Please report any discrepancies within 7 business days.
+              {t('statementModal.disclaimer', 'This document is an official accounting record of all wholesale parts invoices, credit tabs, and settlement payments. Please report any discrepancies within 7 business days.')}
             </p>
           </div>
         </div>
