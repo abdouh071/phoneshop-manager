@@ -9,6 +9,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { ReceiptModal } from '../pos/ReceiptModal';
 import { PrintRepairTicketModal } from '../repairs/PrintRepairTicketModal';
+import { printOperationReceipt } from '../../utils/statementPrint';
 import { useCartStore } from '../../store/cartStore';
 import { usePartsCartStore } from '../../store/partsCartStore';
 import { useCustomerStore } from '../../store/customerStore';
@@ -718,7 +719,11 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                         variant="secondary"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          setTicketToPrint(item.rawTicket!);
+                                          printOperationReceipt({
+                                            event: item,
+                                            customer,
+                                            currentTotalDebt,
+                                          });
                                         }}
                                         leftIcon={<Printer size={13} />}
                                       >
@@ -785,17 +790,34 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                         </span>
                                         <span className={styles.statusPill}>{item.rawTransaction.paymentStatus || item.rawTransaction.status}</span>
                                       </div>
-                                      <Button
-                                        size="sm"
-                                        variant="secondary"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setTxToView(item.rawTransaction!);
-                                        }}
-                                        leftIcon={<FileText size={13} />}
-                                      >
-                                        Voir Reçu
-                                      </Button>
+                                      <div style={{ display: 'flex', gap: 6 }}>
+                                        <Button
+                                          size="sm"
+                                          variant="secondary"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            printOperationReceipt({
+                                              event: item,
+                                              customer,
+                                              currentTotalDebt,
+                                            });
+                                          }}
+                                          leftIcon={<Printer size={13} />}
+                                        >
+                                          Imprimer Reçu
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setTxToView(item.rawTransaction!);
+                                          }}
+                                          leftIcon={<FileText size={13} />}
+                                        >
+                                          Voir Reçu
+                                        </Button>
+                                      </div>
                                     </div>
 
                                     <div className={styles.itemsTableWrapper}>
@@ -851,6 +873,21 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                         <span>Carnet de Dette #{item.refNumber}</span>
                                         <span className={styles.statusPill}>{item.rawDebt.status || 'Active'}</span>
                                       </div>
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          printOperationReceipt({
+                                            event: item,
+                                            customer,
+                                            currentTotalDebt,
+                                          });
+                                        }}
+                                        leftIcon={<Printer size={13} />}
+                                      >
+                                        Imprimer Bon
+                                      </Button>
                                     </div>
 
                                     <div className={styles.detailGrid}>
@@ -904,6 +941,21 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                         <span>Règlement / Versement #{item.refNumber}</span>
                                         <span className={[styles.statusPill, styles.statusPillSuccess].join(' ')}>Encaissé</span>
                                       </div>
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          printOperationReceipt({
+                                            event: item,
+                                            customer,
+                                            currentTotalDebt,
+                                          });
+                                        }}
+                                        leftIcon={<Printer size={13} />}
+                                      >
+                                        Imprimer Reçu
+                                      </Button>
                                     </div>
 
                                     <div className={styles.detailGrid}>
