@@ -42,9 +42,17 @@ const docToDebt = (id: string, data: Record<string, unknown>): CustomerDebtEntry
 
 export const debtService = {
   getAll: async (): Promise<CustomerDebtEntry[]> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return getLocalDebts();
+    }
+
     try {
       const q = query(collection(db, COLLECTION), orderBy('createdAt', 'desc'));
-      const snap = await getDocs(q);
+      const snapPromise = getDocs(q);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore debts fetch timeout')), 2500)
+      );
+      const snap = await Promise.race([snapPromise, timeoutPromise]);
       const items = snap.docs.map(d => docToDebt(d.id, d.data() as Record<string, unknown>));
       saveLocalDebts(items);
       return items;
@@ -55,13 +63,21 @@ export const debtService = {
   },
 
   getByCustomer: async (customerId: string): Promise<CustomerDebtEntry[]> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return getLocalDebts().filter(d => d.customerId === customerId);
+    }
+
     try {
       const q = query(
         collection(db, COLLECTION),
         where('customerId', '==', customerId),
         orderBy('createdAt', 'desc')
       );
-      const snap = await getDocs(q);
+      const snapPromise = getDocs(q);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore debts query by customer timeout')), 2500)
+      );
+      const snap = await Promise.race([snapPromise, timeoutPromise]);
       return snap.docs.map(d => docToDebt(d.id, d.data() as Record<string, unknown>));
     } catch (err) {
       console.warn('Firestore query by customer failed, filtering local cache:', err);
@@ -83,18 +99,44 @@ export const debtService = {
           ? 'partially_paid'
           : 'unpaid';
 
+    const initialPayments: CustomerDebtPayment[] = entry.payments && entry.payments.length > 0
+      ? entry.payments
+      : (entry.amountPaid && entry.amountPaid > 0
+          ? [{
+              id: `pay_down_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              date: entry.date || now,
+              amount: entry.amountPaid,
+              method: 'cash',
+              note: 'Initial down payment',
+              receivedByName: 'Staff',
+            }]
+          : []);
+
     const newDebt: Omit<CustomerDebtEntry, 'id'> = {
       ...entry,
       amountPaid: entry.amountPaid || 0,
       remainingBalance,
       status,
-      payments: entry.payments || [],
+      payments: initialPayments,
       createdAt: now,
       updatedAt: now,
     };
 
+    // If offline, store locally immediately with zero delay
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const offlineId = `offline_debt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const created = { ...newDebt, id: offlineId };
+      const local = getLocalDebts();
+      saveLocalDebts([created, ...local]);
+      return created;
+    }
+
     try {
-      const docRef = await addDoc(collection(db, COLLECTION), newDebt);
+      const addDocPromise = addDoc(collection(db, COLLECTION), newDebt);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore addDoc timeout')), 2500)
+      );
+      const docRef = await Promise.race([addDocPromise, timeoutPromise]);
       const created = { ...newDebt, id: docRef.id };
       
       const local = getLocalDebts();
@@ -121,18 +163,51 @@ export const debtService = {
       date: payment.date || now,
     };
 
+    // Fast-path: Offline or offline-generated ID
+    if (debtId.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      const local = getLocalDebts();
+      const debt = local.find(d => d.id === debtId);
+      if (!debt) throw new Error('Debt entry not found locally');
+
+      const updatedPayments = [...(debt.payments || []), paymentEntry];
+      const newAmountPaid = (debt.amountPaid || 0) + payment.amount;
+      const newRemainingBalance = Math.max(0, debt.totalAmount - newAmountPaid);
+      const newStatus: CustomerDebtEntry['status'] =
+        newRemainingBalance <= 0
+          ? 'paid'
+          : newAmountPaid > 0
+            ? 'partially_paid'
+            : 'unpaid';
+
+      const updatedDebt: CustomerDebtEntry = {
+        ...debt,
+        amountPaid: newAmountPaid,
+        remainingBalance: newRemainingBalance,
+        status: newStatus,
+        payments: updatedPayments,
+        updatedAt: now,
+      };
+
+      saveLocalDebts(local.map(d => (d.id === debtId ? updatedDebt : d)));
+      return updatedDebt;
+    }
+
     try {
+      const local = getLocalDebts();
+      const localFound = local.find(d => d.id === debtId);
       const ref = doc(db, COLLECTION, debtId);
-      const snap = await getDoc(ref);
       let debtData: CustomerDebtEntry;
 
-      if (snap.exists()) {
-        debtData = docToDebt(snap.id, snap.data() as Record<string, unknown>);
+      if (localFound) {
+        debtData = localFound;
       } else {
-        const local = getLocalDebts();
-        const found = local.find(d => d.id === debtId);
-        if (!found) throw new Error('Debt entry not found');
-        debtData = found;
+        const snapPromise = getDoc(ref);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Firestore getDoc timeout')), 1200)
+        );
+        const snap = await Promise.race([snapPromise, timeoutPromise]);
+        if (!snap.exists()) throw new Error('Debt entry not found');
+        debtData = docToDebt(snap.id, snap.data() as Record<string, unknown>);
       }
 
       const updatedPayments = [...(debtData.payments || []), paymentEntry];
@@ -153,17 +228,19 @@ export const debtService = {
         updatedAt: now,
       };
 
-      if (snap.exists()) {
-        await updateDoc(ref, updates);
-      }
+      const updatePromise = updateDoc(ref, updates);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore updateDoc timeout')), 1200)
+      );
+      await Promise.race([updatePromise, timeoutPromise]);
 
       const updatedDebt: CustomerDebtEntry = {
         ...debtData,
         ...updates,
       };
 
-      const local = getLocalDebts().map(d => (d.id === debtId ? updatedDebt : d));
-      saveLocalDebts(local);
+      const updatedLocal = getLocalDebts().map(d => (d.id === debtId ? updatedDebt : d));
+      saveLocalDebts(updatedLocal);
 
       return updatedDebt;
     } catch (err) {
@@ -202,18 +279,51 @@ export const debtService = {
     newItemsSummary?: string
   ): Promise<CustomerDebtEntry> => {
     const now = new Date().toISOString();
+
+    // Fast-path: Offline or offline-generated ID
+    if (debtId.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      const local = getLocalDebts();
+      const debt = local.find(d => d.id === debtId);
+      if (!debt) throw new Error('Debt entry not found');
+
+      const amountPaid = debt.amountPaid || 0;
+      const newRemainingBalance = Math.max(0, newTotalAmount - amountPaid);
+      const newStatus: CustomerDebtEntry['status'] =
+        newRemainingBalance <= 0
+          ? 'paid'
+          : amountPaid > 0
+            ? 'partially_paid'
+            : 'unpaid';
+
+      const updatedDebt: CustomerDebtEntry = {
+        ...debt,
+        totalAmount: newTotalAmount,
+        remainingBalance: newRemainingBalance,
+        status: newStatus,
+        updatedAt: now,
+        ...(newItemsSummary ? { itemsSummary: newItemsSummary, productOrService: newItemsSummary } : {}),
+      };
+
+      saveLocalDebts(local.map(d => (d.id === debtId ? updatedDebt : d)));
+      return updatedDebt;
+    }
+
     try {
+      const local = getLocalDebts();
+      const localFound = local.find(d => d.id === debtId);
       const ref = doc(db, COLLECTION, debtId);
-      const snap = await getDoc(ref);
       let debtData: CustomerDebtEntry;
 
-      if (snap.exists()) {
-        debtData = docToDebt(snap.id, snap.data() as Record<string, unknown>);
+      if (localFound) {
+        debtData = localFound;
       } else {
-        const local = getLocalDebts();
-        const found = local.find(d => d.id === debtId);
-        if (!found) throw new Error('Debt entry not found');
-        debtData = found;
+        const snapPromise = getDoc(ref);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Firestore getDoc timeout')), 1200)
+        );
+        const snap = await Promise.race([snapPromise, timeoutPromise]);
+        if (!snap.exists()) throw new Error('Debt entry not found');
+        debtData = docToDebt(snap.id, snap.data() as Record<string, unknown>);
       }
 
       const amountPaid = debtData.amountPaid || 0;
@@ -236,17 +346,19 @@ export const debtService = {
         updates.productOrService = newItemsSummary;
       }
 
-      if (snap.exists()) {
-        await updateDoc(ref, updates);
-      }
+      const updatePromise = updateDoc(ref, updates);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore updateDoc timeout')), 1200)
+      );
+      await Promise.race([updatePromise, timeoutPromise]);
 
       const updatedDebt: CustomerDebtEntry = {
         ...debtData,
         ...updates,
       };
 
-      const local = getLocalDebts().map(d => (d.id === debtId ? updatedDebt : d));
-      saveLocalDebts(local);
+      const updatedLocal = getLocalDebts().map(d => (d.id === debtId ? updatedDebt : d));
+      saveLocalDebts(updatedLocal);
 
       return updatedDebt;
     } catch (err) {
@@ -279,14 +391,23 @@ export const debtService = {
   },
 
   deleteDebt: async (debtId: string): Promise<void> => {
+    const local = getLocalDebts().filter(d => d.id !== debtId);
+    saveLocalDebts(local);
+
+    if (debtId.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      return;
+    }
+
     try {
       const ref = doc(db, COLLECTION, debtId);
-      await deleteDoc(ref);
+      const delPromise = deleteDoc(ref);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore deleteDoc timeout')), 1200)
+      );
+      await Promise.race([delPromise, timeoutPromise]);
     } catch (err) {
       console.warn('Firestore delete failed:', err);
     }
-    const local = getLocalDebts().filter(d => d.id !== debtId);
-    saveLocalDebts(local);
   },
 
   deleteDebtsByCustomerId: async (customerId: string): Promise<void> => {

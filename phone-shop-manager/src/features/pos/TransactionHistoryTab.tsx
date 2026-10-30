@@ -205,6 +205,11 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
                     {t.items.length > 2 && (
                       <span className={s.txMoreChip}>+{t.items.length - 2} more</span>
                     )}
+                    {t.saleType === 'parts_b2b' && (
+                      <span style={{ backgroundColor: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>
+                        📦 Parts B2B
+                      </span>
+                    )}
                     {isRefunded && <span className={s.txRefundedBadge}>⚠️ Refunded</span>}
                     {isPartial && <span className={s.txPartialBadge}>↩ Partial Return</span>}
                     {t.status === 'voided' && <span style={{ backgroundColor: '#fee2e2', color: '#b91c1c', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>🚫 Voided</span>}

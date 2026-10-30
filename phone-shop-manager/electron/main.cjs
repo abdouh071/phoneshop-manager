@@ -19,6 +19,7 @@ const { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog, ipcMain } = 
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const http = require('http');
 
 // ─── Logging to Disk ─────────────────────────────────────────────────────────
 function logToFile(msg) {
@@ -65,6 +66,8 @@ let tray = null;
 let printServerStarted = false;
 let printServerChild = null; // child process fallback
 let printServerModule = null; // in-process module reference for native IPC
+let localAppServer = null;
+let localAppPort = null;
 
 // ─── Print Server Embedding ──────────────────────────────────────────────────
 
@@ -331,6 +334,102 @@ async function startEmbeddedPrintServer() {
   }
 }
 
+// ─── Local Fast-Path App Server (Zero-Latency Offline Desktop Execution) ─────
+
+function getDistPaths() {
+  return [
+    path.join(__dirname, '..', 'dist'),
+    path.join(process.resourcesPath || '', 'app.asar', 'dist'),
+    path.join(process.resourcesPath || '', 'dist'),
+    path.join(app.getAppPath(), 'dist'),
+  ];
+}
+
+function startLocalAppServer() {
+  const mimeTypes = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.mjs': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.woff2': 'font/woff2',
+    '.woff': 'font/woff',
+    '.ttf': 'font/ttf',
+    '.webp': 'image/webp',
+  };
+
+  const distCandidates = getDistPaths();
+  let distDir = null;
+  for (const candidate of distCandidates) {
+    try {
+      if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, 'index.html'))) {
+        distDir = candidate;
+        break;
+      }
+    } catch (_) {}
+  }
+
+  if (!distDir) {
+    logToFile(`[Electron] ⚠️ No local dist folder found in candidates: ${distCandidates.join(', ')}`);
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      try {
+        let reqPath = decodeURI(req.url.split('?')[0]);
+        let filePath = path.join(distDir, reqPath);
+
+        let isFile = false;
+        try {
+          isFile = fs.existsSync(filePath) && fs.statSync(filePath).isFile();
+        } catch (_) {}
+
+        if (!isFile) {
+          filePath = path.join(distDir, 'index.html');
+        }
+
+        const ext = path.extname(filePath).toLowerCase();
+        const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+        fs.readFile(filePath, (err, content) => {
+          if (err) {
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Error loading desktop asset');
+          } else {
+            res.writeHead(200, {
+              'Content-Type': contentType,
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+            });
+            res.end(content);
+          }
+        });
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Server error');
+      }
+    });
+
+    server.listen(0, '127.0.0.1', () => {
+      localAppPort = server.address().port;
+      localAppServer = server;
+      logToFile(`[Electron] ✅ Local fast-path app server running on http://127.0.0.1:${localAppPort} (serving ${distDir})`);
+      resolve(server);
+    });
+
+    server.on('error', (err) => {
+      logToFile(`[Electron] ⚠️ Local app server error: ${err.message}`);
+      resolve(null);
+    });
+  });
+}
+
 // ─── Window Creation ─────────────────────────────────────────────────────────
 
 function createWindow() {
@@ -411,15 +510,37 @@ function createWindow() {
   }
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173').catch(() => loadDeployedSite());
+    mainWindow.loadURL('http://localhost:5173').catch(() => {
+      if (localAppPort) {
+        mainWindow.loadURL(`http://127.0.0.1:${localAppPort}`);
+      } else {
+        loadDeployedSite();
+      }
+    });
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    loadDeployedSite();
+    // In production: Prefer the local embedded fast-path server (zero latency, 100% offline).
+    // If local files are present, boot immediately from localhost; fallback to remote only if dist missing.
+    if (localAppPort) {
+      logToFile(`[Electron] 🚀 Loading app via local fast-path: http://127.0.0.1:${localAppPort}`);
+      mainWindow.loadURL(`http://127.0.0.1:${localAppPort}`).catch((err) => {
+        logToFile(`[Electron] ⚠️ Local app load failed: ${err.message}, falling back to remote`);
+        loadDeployedSite();
+      });
+    } else {
+      logToFile('[Electron] 🌐 Loading app via deployed site: ' + DEPLOYED_URL);
+      loadDeployedSite();
+    }
   }
 
   // Open external links in the default browser (keep deployed site + localhost in-app)
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http://localhost') || url.startsWith('file://') || url.startsWith(DEPLOYED_URL)) {
+    if (
+      url.startsWith('http://localhost') ||
+      url.startsWith('http://127.0.0.1') ||
+      url.startsWith('file://') ||
+      url.startsWith(DEPLOYED_URL)
+    ) {
       return { action: 'allow' };
     }
     // Security: Only open safe http/https/mailto protocols via OS shell
@@ -439,6 +560,7 @@ function createWindow() {
       const isAllowed =
         navigationUrl.startsWith('data:text/html') ||
         navigationUrl.startsWith(DEPLOYED_URL) ||
+        (localAppPort && parsed.origin === `http://127.0.0.1:${localAppPort}`) ||
         parsed.origin === 'http://localhost:5173' ||
         parsed.origin === 'http://127.0.0.1:5173';
       if (!isAllowed) {
@@ -539,6 +661,9 @@ app.on('ready', async () => {
   // Start the embedded print server first
   await startEmbeddedPrintServer();
 
+  // Start local fast-path static app server if local dist files are present
+  await startLocalAppServer();
+
   // Register IPC handlers for direct native printing (bypasses network/CORS/mixed-content)
   registerPrintIpcHandlers();
   logToFile('[Electron] ✅ Print IPC handlers registered');
@@ -569,6 +694,13 @@ app.on('before-quit', () => {
   // Allow window to actually close (bypass tray hide)
   if (mainWindow) {
     mainWindow.removeAllListeners('close');
+  }
+  // Stop local fast-path app server
+  if (localAppServer) {
+    try {
+      localAppServer.close();
+      localAppServer = null;
+    } catch (_) {}
   }
   // Kill the print server child process if it was spawned
   if (printServerChild) {

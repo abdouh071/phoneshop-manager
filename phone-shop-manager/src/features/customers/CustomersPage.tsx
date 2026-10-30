@@ -4,7 +4,7 @@ import {
   Download, Plus, Users, RefreshCw, DollarSign, TrendingUp,
   ChevronDown, ChevronUp, Phone, Eye, Edit, MessageCircle, Wrench, ShoppingCart, UserPlus,
   BookOpen, AlertCircle, AlertTriangle, Send, FileText, Store, User, GitMerge, Trash2, ArrowRightLeft,
-  Printer, CheckCircle2, Clock
+  Printer, CheckCircle2, Clock, Smartphone
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { SearchInput } from '../../components/ui/Input';
@@ -36,7 +36,8 @@ import styles from './Customers.module.css';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { getCustomerOverdueInfo, buildWhatsAppDebtReminderUrl, getOverdueDebts } from '../../utils/debtAlerts';
 import { offlineCustomerSyncService } from '../../services/offlineCustomerSyncService';
-import { isPhoneMatch, normalizePhoneDigits, isDummyPhone } from '../../utils/phoneUtils';
+import { isPhoneMatch, normalizePhoneDigits, isDummyPhone, formatWhatsAppUrl } from '../../utils/phoneUtils';
+import { matchesCustomer } from '../../utils/customerFinancials';
 
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -64,7 +65,7 @@ type SortKey = 'name' | 'totalPurchases' | 'totalSpent' | 'totalDebt' | 'lastVis
 export const CustomersPage = () => {
   const isPrivacyActive = usePrivacyStore((s) => s.isPrivacyActive);
   const { fetchCustomers, searchQuery, setSearchQuery, isLoading, customers, debts, deleteCustomer, findDuplicates, autoResolveAllDuplicates } = useCustomerStore();
-  const { setCustomerName } = useCartStore();
+  const { setCustomerName, setCustomerPhone } = useCartStore();
   const { tickets, fetchTickets } = useRepairStore();
   const navigate = useNavigate();
   const location = useLocation();
@@ -232,9 +233,9 @@ export const CustomersPage = () => {
 
   const effectiveScope: 'all' | 'retail' | 'shop' = useMemo(() => {
     if (user?.role === 'sales_agent') return 'retail';
-    if (user?.role === 'repair_agent') return 'shop';
     return adminScope;
   }, [user?.role, adminScope]);
+
   // Helper: does this customer have a valid phone for account-level display?
   const hasValidAccountPhone = useCallback((c: Customer) => {
     if (!c.phone || !c.phone.trim()) return false;
@@ -242,9 +243,14 @@ export const CustomersPage = () => {
     return normalizePhoneDigits(c.phone).length >= 7;
   }, []);
 
+  // All active customers (excluding soft-deleted / merged profiles)
+  const allActiveCustomers = useMemo(() => {
+    return customers.filter(c => !c.mergedIntoId);
+  }, [customers]);
+
   // Customers without a valid phone are considered walk-in legacy accounts
-  // and should only appear via the Walk-in Customers tab (through their repair tickets).
-  // No data is deleted — they're just hidden from the accounts list.
+  // and should only appear via the Walk-in Customers tab when browsing lists without an active search.
+  // No data is deleted — they're just hidden from the browse list.
   const accountCustomers = useMemo(() => {
     return customers.filter(c => !c.mergedIntoId && hasValidAccountPhone(c));
   }, [customers, hasValidAccountPhone]);
@@ -266,7 +272,6 @@ export const CustomersPage = () => {
 
   const lockedAccountType = useMemo<'retail' | 'shop_repairer' | undefined>(() => {
     if (user?.role === 'sales_agent') return 'retail';
-    if (user?.role === 'repair_agent') return 'shop_repairer';
     return undefined;
   }, [user?.role]);
 
@@ -274,6 +279,15 @@ export const CustomersPage = () => {
     if (effectiveScope === 'shop') return 'shop_repairer';
     return 'retail';
   }, [effectiveScope]);
+
+  // Fast lookup of tickets per customer (indexed across ALL active customers)
+  const customerTicketsMap = useMemo(() => {
+    const map = new Map<string, RepairTicket[]>();
+    for (const c of customers) {
+      map.set(c.id, tickets.filter(t => matchesCustomer(c, t)));
+    }
+    return map;
+  }, [customers, tickets]);
 
   // ── Derived metrics ─────────────────────────────────────────────────
   const metrics = useMemo(() => {
@@ -289,6 +303,8 @@ export const CustomersPage = () => {
     let withDebtCount = 0;
     let overdueCount = 0;
     let overdueTotalAmount = 0;
+    let totalRepairsCount = 0;
+    let totalPhonesTracked = 0;
 
     const overdueDebtsList = getOverdueDebts(debts);
     const overdueCustomerIds = new Set(overdueDebtsList.map(d => d.customerId));
@@ -309,6 +325,19 @@ export const CustomersPage = () => {
       if (c.totalPurchases <= 1) newCount++;
       if (new Date(c.lastVisitDate).getTime() >= thirtyDaysAgo) recentCount++;
       if (isShopCustomer(c)) b2bCount++;
+
+      const cTickets = customerTicketsMap.get(c.id) || [];
+      totalRepairsCount += cTickets.length;
+      const distinctPhones = new Set<string>();
+      (c.registeredDevices || []).forEach(d => {
+        if (d.imei) distinctPhones.add(`imei:${d.imei.toLowerCase()}`);
+        else if (d.brand || d.model) distinctPhones.add(`dev:${d.brand || ''} ${d.model || ''}`.toLowerCase().trim());
+      });
+      cTickets.forEach(t => {
+        if (t.deviceImei) distinctPhones.add(`imei:${t.deviceImei.toLowerCase()}`);
+        else if (t.deviceBrand || t.deviceModel) distinctPhones.add(`dev:${t.deviceBrand || ''} ${t.deviceModel || ''}`.toLowerCase().trim());
+      });
+      totalPhonesTracked += distinctPhones.size;
     }
 
     return {
@@ -323,9 +352,11 @@ export const CustomersPage = () => {
       overdueCount,
       overdueTotalAmount,
       totalOverdueDebtsCount: overdueDebtsList.length,
+      totalRepairsCount,
+      totalPhonesTracked,
       avgRevenue: scopedCustomers.length > 0 ? totalLtv / scopedCustomers.length : 0,
     };
-  }, [scopedCustomers, debts]);
+  }, [scopedCustomers, debts, customerTicketsMap]);
 
   // ── Walk-in Repairs (Tickets with missing or invalid phone number OR linked to legacy phoneless accounts) ────
   const walkInTickets = useMemo(() => {
@@ -410,6 +441,14 @@ export const CustomersPage = () => {
 
   const walkInItemsPerPage = 10;
   const totalWalkInPages = Math.max(1, Math.ceil(sortedWalkInTickets.length / walkInItemsPerPage));
+
+  // Auto-clamp walkInPage if search/filter shrinks the results
+  useEffect(() => {
+    if (walkInPage > totalWalkInPages) {
+      setWalkInPage(1);
+    }
+  }, [totalWalkInPages, walkInPage]);
+
   const pagedWalkInTickets = useMemo(() => {
     const start = (walkInPage - 1) * walkInItemsPerPage;
     return sortedWalkInTickets.slice(start, start + walkInItemsPerPage);
@@ -420,30 +459,94 @@ export const CustomersPage = () => {
     const now = Date.now();
     const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
 
-    let list = scopedCustomers;
-
-    // Text search (supports name, email, shop, and ANY formatted/unformatted phone variation)
+    // Text search (matches name, phone, email, shop, address, notes, registered devices, and linked repair tickets)
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       const cleanQueryDigits = normalizePhoneDigits(searchQuery);
       const rawQueryDigits = searchQuery.replace(/\D/g, '');
 
-      list = list.filter(c =>
-        c.name.toLowerCase().includes(q) ||
-        c.phone.toLowerCase().includes(q) ||
-        (c.normalizedPhone && c.normalizedPhone.includes(q)) ||
-        (c.email && c.email.toLowerCase().includes(q)) ||
-        (c.shopName && c.shopName.toLowerCase().includes(q)) ||
-        (cleanQueryDigits.length >= 2 && (
-          (c.normalizedPhone && c.normalizedPhone.includes(cleanQueryDigits)) ||
-          normalizePhoneDigits(c.phone).includes(cleanQueryDigits) ||
-          isPhoneMatch(c.phone, searchQuery)
-        )) ||
-        (rawQueryDigits.length >= 2 && c.phone.replace(/\D/g, '').includes(rawQueryDigits))
-      );
+      const matchCustomer = (c: Customer): boolean => {
+        // 1. Name & Shop Name
+        if (c.name && c.name.toLowerCase().includes(q)) return true;
+        if (c.shopName && c.shopName.toLowerCase().includes(q)) return true;
+
+        // 2. Phone matches (exact, normalized, partial digits)
+        if (c.phone && c.phone.toLowerCase().includes(q)) return true;
+        if (c.normalizedPhone && c.normalizedPhone.includes(q)) return true;
+        if (cleanQueryDigits.length >= 2) {
+          if (c.normalizedPhone && c.normalizedPhone.includes(cleanQueryDigits)) return true;
+          if (normalizePhoneDigits(c.phone).includes(cleanQueryDigits)) return true;
+          if (isPhoneMatch(c.phone, searchQuery)) return true;
+        }
+        if (rawQueryDigits.length >= 2 && c.phone && c.phone.replace(/\D/g, '').includes(rawQueryDigits)) return true;
+
+        // 3. Email, Address, Notes
+        if (c.email && c.email.toLowerCase().includes(q)) return true;
+        if (c.address && c.address.toLowerCase().includes(q)) return true;
+        if (c.notes && c.notes.toLowerCase().includes(q)) return true;
+
+        // 4. Registered Devices (brand, model, combined name, IMEI, device notes)
+        if (c.registeredDevices && c.registeredDevices.length > 0) {
+          const devMatch = c.registeredDevices.some(d =>
+            (d.brand && d.brand.toLowerCase().includes(q)) ||
+            (d.model && d.model.toLowerCase().includes(q)) ||
+            (`${d.brand || ''} ${d.model || ''}`.toLowerCase().includes(q)) ||
+            (d.imei && d.imei.toLowerCase().includes(q)) ||
+            (d.notes && d.notes.toLowerCase().includes(q))
+          );
+          if (devMatch) return true;
+        }
+
+        // 5. Linked Repair Tickets (ticket number, device brand/model/IMEI, issue description, technician)
+        const cTickets = customerTicketsMap.get(c.id) || [];
+        if (cTickets.length > 0) {
+          const tktMatch = cTickets.some(t =>
+            (t.ticketNumber && t.ticketNumber.toLowerCase().includes(q)) ||
+            (t.deviceBrand && t.deviceBrand.toLowerCase().includes(q)) ||
+            (t.deviceModel && t.deviceModel.toLowerCase().includes(q)) ||
+            (`${t.deviceBrand || ''} ${t.deviceModel || ''}`.toLowerCase().includes(q)) ||
+            (t.deviceImei && t.deviceImei.toLowerCase().includes(q)) ||
+            (t.issueDescription && t.issueDescription.toLowerCase().includes(q)) ||
+            (t.assignedTechnician && t.assignedTechnician.toLowerCase().includes(q))
+          );
+          if (tktMatch) return true;
+        }
+
+        return false;
+      };
+
+      // Search across ALL active customers in the directory
+      const allMatches = allActiveCustomers.filter(matchCustomer);
+
+      if (activeFilter !== 'all') {
+        const testSubFilter = (c: Customer): boolean => {
+          switch (activeFilter) {
+            case 'overdue':
+              return getCustomerOverdueInfo(debts, c.id).hasOverdue;
+            case 'debt':
+              return (c.totalDebt || 0) > 0;
+            case 'repeat':
+              return c.totalPurchases >= 2;
+            case 'new':
+              return c.totalPurchases <= 1;
+            case 'recent':
+              return new Date(c.lastVisitDate).getTime() >= thirtyDaysAgo;
+            case 'b2b':
+              return isShopCustomer(c);
+            default:
+              return true;
+          }
+        };
+
+        const filteredMatches = allMatches.filter(testSubFilter);
+        return filteredMatches.length > 0 ? filteredMatches : allMatches;
+      }
+
+      return allMatches;
     }
 
-    // Category filter
+    // Default when no search query: Scoped customers filtered by category
+    let list = scopedCustomers;
     switch (activeFilter) {
       case 'overdue':
         list = list.filter(c => getCustomerOverdueInfo(debts, c.id).hasOverdue);
@@ -466,25 +569,39 @@ export const CustomersPage = () => {
     }
 
     return list;
-  }, [scopedCustomers, debts, searchQuery, activeFilter]);
+  }, [allActiveCustomers, scopedCustomers, debts, searchQuery, activeFilter, customerTicketsMap]);
 
   // ── Sorting ─────────────────────────────────────────────────────────
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
-      let valA: any = a[sortKey] ?? '';
-      let valB: any = b[sortKey] ?? '';
       if (sortKey === 'lastVisitDate' || sortKey === 'joinDate') {
-        valA = new Date(valA).getTime();
-        valB = new Date(valB).getTime();
+        const timeA = a[sortKey] ? new Date(a[sortKey]).getTime() : 0;
+        const timeB = b[sortKey] ? new Date(b[sortKey]).getTime() : 0;
+        const valA = isNaN(timeA) ? 0 : timeA;
+        const valB = isNaN(timeB) ? 0 : timeB;
+        return sortDir === 'asc' ? valA - valB : valB - valA;
       }
-      if (typeof valA === 'string') { valA = valA.toLowerCase(); valB = (valB as string).toLowerCase(); }
-      if (valA < valB) return sortDir === 'asc' ? -1 : 1;
-      if (valA > valB) return sortDir === 'asc' ? 1 : -1;
-      return 0;
+      if (sortKey === 'totalPurchases' || sortKey === 'totalSpent' || sortKey === 'totalDebt') {
+        const valA = Number(a[sortKey]) || 0;
+        const valB = Number(b[sortKey]) || 0;
+        return sortDir === 'asc' ? valA - valB : valB - valA;
+      }
+      // String sorting (e.g. name)
+      const valA = (a.name || '').trim().toLowerCase();
+      const valB = (b.name || '').trim().toLowerCase();
+      return sortDir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
     });
   }, [filtered, sortKey, sortDir]);
 
-  const totalPages = Math.ceil(sorted.length / itemsPerPage);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / itemsPerPage));
+
+  // Auto-clamp currentPage if filtered/sorted results shrink
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(1);
+    }
+  }, [totalPages, currentPage]);
+
   const paginated = sorted.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const handleSort = (key: SortKey) => {
@@ -761,8 +878,8 @@ export const CustomersPage = () => {
 
       {pageTab === 'accounts' && (
         <>
-          {/* Admin Scope Selector: All | Retail | Shops */}
-          {user?.role === 'admin' && (
+          {/* Admin / Repair Scope Selector: All | Retail | Shops */}
+          {(user?.role === 'admin' || user?.role === 'repair_agent') && (
         <div style={{
           display: 'inline-flex',
           background: '#f1f5f9',
@@ -860,10 +977,10 @@ export const CustomersPage = () => {
           <p className={styles.summaryValue}>{metrics.total}</p>
           <p className={styles.summarySub}>
             {effectiveScope === 'retail'
-              ? `${metrics.repeat} repeat buyers · ${metrics.new} new`
+              ? `${metrics.repeat} repeat · ${metrics.totalRepairsCount} repairs · ${metrics.totalPhonesTracked} phones`
               : effectiveScope === 'shop'
-              ? `${metrics.repeat} active workshops · ${metrics.withDebt} on credit`
-              : `${metrics.b2b} B2B shops · ${metrics.repeat} repeat`}
+              ? `${metrics.repeat} active workshops · ${metrics.totalRepairsCount} repairs`
+              : `${metrics.b2b} B2B · ${metrics.totalRepairsCount} repairs · ${metrics.totalPhonesTracked} phones`}
           </p>
         </div>
 
@@ -989,7 +1106,7 @@ export const CustomersPage = () => {
           <SearchInput
             value={searchQuery}
             onChange={(v) => { setSearchQuery(v); setCurrentPage(1); }}
-            placeholder="Search by name, phone, email, shop…"
+            placeholder="Search by name, phone, device (e.g. iPhone, Oppo), ticket #, IMEI…"
             className={styles.search}
           />
         </div>
@@ -1036,6 +1153,19 @@ export const CustomersPage = () => {
                 {paginated.map(customer => {
                   const debt = customer.totalDebt || 0;
                   const overdueInfo = getCustomerOverdueInfo(debts, customer.id);
+                  const cTickets = customerTicketsMap.get(customer.id) || [];
+                  const cRepairsCount = cTickets.length;
+                  const distinctPhones = new Set<string>();
+                  (customer.registeredDevices || []).forEach(d => {
+                    if (d.imei) distinctPhones.add(`imei:${d.imei.toLowerCase()}`);
+                    else if (d.brand || d.model) distinctPhones.add(`dev:${d.brand || ''} ${d.model || ''}`.toLowerCase().trim());
+                  });
+                  cTickets.forEach(t => {
+                    if (t.deviceImei) distinctPhones.add(`imei:${t.deviceImei.toLowerCase()}`);
+                    else if (t.deviceBrand || t.deviceModel) distinctPhones.add(`dev:${t.deviceBrand || ''} ${t.deviceModel || ''}`.toLowerCase().trim());
+                  });
+                  const distinctPhonesCount = distinctPhones.size;
+
                   return (
                     <tr
                       key={customer.id}
@@ -1089,6 +1219,46 @@ export const CustomersPage = () => {
                             <span className={styles.customerJoinDate}>
                               Since {formatDate(customer.joinDate)}
                             </span>
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                              {distinctPhonesCount > 0 && (
+                                <span
+                                  style={{
+                                    fontSize: '11px',
+                                    background: '#e0f2fe',
+                                    color: '#0369a1',
+                                    border: '1px solid #bae6fd',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    fontWeight: 600,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                  }}
+                                  title={`${distinctPhonesCount} distinct phone(s) tracked`}
+                                >
+                                  <Smartphone size={11} /> {distinctPhonesCount} {distinctPhonesCount === 1 ? 'Phone' : 'Phones'}
+                                </span>
+                              )}
+                              {cRepairsCount > 0 && (
+                                <span
+                                  style={{
+                                    fontSize: '11px',
+                                    background: '#f3e8ff',
+                                    color: '#7e22ce',
+                                    border: '1px solid #e9d5ff',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    fontWeight: 600,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                  }}
+                                  title={`${cRepairsCount} repair ticket(s) recorded`}
+                                >
+                                  🛠️ {cRepairsCount} {cRepairsCount === 1 ? 'Repair' : 'Repairs'}
+                                </span>
+                              )}
+                            </div>
                             {permissions.customers_debt && (overdueInfo.hasOverdue ? (
                               <div>
                                 <span className={styles.overdueBadgeTag}>
@@ -1107,13 +1277,17 @@ export const CustomersPage = () => {
                       </td>
                       <td className={styles.td}>
                         <div className={styles.contactInfo}>
-                          <a
-                            href={`tel:${customer.phone}`}
-                            className={styles.contactPhone}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <Phone size={12} /> {customer.phone}
-                          </a>
+                          {customer.phone ? (
+                            <a
+                              href={`tel:${customer.phone}`}
+                              className={styles.contactPhone}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Phone size={12} /> {customer.phone}
+                            </a>
+                          ) : (
+                            <span style={{ fontSize: '12px', color: '#94a3b8', fontStyle: 'italic' }}>No phone</span>
+                          )}
                           {customer.email && (
                             <a
                               href={`mailto:${customer.email}`}
@@ -1131,6 +1305,11 @@ export const CustomersPage = () => {
                       </td>
                       <td className={styles.td} style={{ textAlign: 'center' }}>
                         <span className={styles.ordersCount}>{customer.totalPurchases}</span>
+                        {cRepairsCount > 0 && (
+                          <span style={{ display: 'block', fontSize: '10.5px', color: '#6b7280', fontWeight: 600, marginTop: '2px' }}>
+                            + {cRepairsCount} {cRepairsCount === 1 ? 'repair' : 'repairs'}
+                          </span>
+                        )}
                       </td>
                       <td className={styles.td} data-col="spent">
                         <span className={styles.spentValue}>{formatPrivateCurrency(customer.totalSpent)}</span>
@@ -1173,59 +1352,95 @@ export const CustomersPage = () => {
                       <td className={styles.td} style={{ textAlign: 'right' }}>
                         <div className={styles.actionButtons}>
                           {/* WhatsApp Reminder (Pre-filled Debt Notice) */}
-                          {permissions.customers_debt && debt > 0 && (
+                          {permissions.customers_debt && debt > 0 && (() => {
+                            const reminderUrl = buildWhatsAppDebtReminderUrl({
+                              customerName: customer.name,
+                              customerPhone: customer.phone,
+                              amountOwed: debt,
+                              dueDate: overdueInfo.oldestDueDate,
+                              daysOverdue: overdueInfo.maxDaysOverdue,
+                            });
+                            return reminderUrl ? (
+                              <a
+                                href={reminderUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={`${styles.quickActionBtn} ${styles.reminderBtn}`}
+                                title={overdueInfo.hasOverdue ? `Send WhatsApp Overdue Reminder (${overdueInfo.maxDaysOverdue}d late)` : 'Send WhatsApp Debt Balance Reminder'}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Send size={13} />
+                              </a>
+                            ) : null;
+                          })()}
+                          {/* 1-Click Regular WhatsApp */}
+                          {(() => {
+                            const waUrl = formatWhatsAppUrl(customer.phone);
+                            return waUrl ? (
+                              <a
+                                href={waUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={`${styles.quickActionBtn} ${styles.whatsappBtn}`}
+                                title="WhatsApp Chat"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MessageCircle size={14} />
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled
+                                className={`${styles.quickActionBtn} ${styles.disabledActionBtn}`}
+                                title="No phone number registered"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MessageCircle size={14} />
+                              </button>
+                            );
+                          })()}
+                          {/* 1-Click Call */}
+                          {customer.phone && normalizePhoneDigits(customer.phone).length >= 7 ? (
                             <a
-                              href={buildWhatsAppDebtReminderUrl({
-                                customerName: customer.name,
-                                customerPhone: customer.phone,
-                                amountOwed: debt,
-                                dueDate: overdueInfo.oldestDueDate,
-                                daysOverdue: overdueInfo.maxDaysOverdue,
-                              })}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={`${styles.quickActionBtn} ${styles.reminderBtn}`}
-                              title={overdueInfo.hasOverdue ? `Send WhatsApp Overdue Reminder (${overdueInfo.maxDaysOverdue}d late)` : 'Send WhatsApp Debt Balance Reminder'}
+                              href={`tel:${customer.phone.replace(/\s+/g, '')}`}
+                              className={`${styles.quickActionBtn} ${styles.phoneBtn}`}
+                              title={`Call ${customer.phone}`}
                               onClick={(e) => e.stopPropagation()}
                             >
-                              <Send size={13} />
+                              <Phone size={14} />
                             </a>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled
+                              className={`${styles.quickActionBtn} ${styles.disabledActionBtn}`}
+                              title="No phone number registered"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Phone size={14} />
+                            </button>
                           )}
-                          {/* 1-Click Regular WhatsApp */}
-                          <a
-                            href={`https://wa.me/${customer.phone.replace(/\D/g, '')}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={`${styles.quickActionBtn} ${styles.whatsappBtn}`}
-                            title="WhatsApp Chat"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <MessageCircle size={14} />
-                          </a>
-                          {/* 1-Click Call */}
-                          <a
-                            href={`tel:${customer.phone}`}
-                            className={`${styles.quickActionBtn} ${styles.phoneBtn}`}
-                            title="Call Customer"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <Phone size={14} />
-                          </a>
                           {/* New Repair Quick Action */}
                           {permissions.repairs && (
                             <button
                               type="button"
                               className={`${styles.quickActionBtn} ${styles.repairBtn}`}
                               title="New Repair Ticket"
-                              onClick={() => {
-                                const custTickets = tickets.filter(
-                                  tk => tk.customerPhone?.replace(/\D/g, '') === customer.phone.replace(/\D/g, '')
-                                    || tk.customerName.toLowerCase().trim() === customer.name.toLowerCase().trim()
-                                );
-                                const lastDevice = custTickets.length > 0
-                                  ? `${custTickets[0].deviceBrand} ${custTickets[0].deviceModel}`
-                                  : undefined;
-                                setRepairPrefill({ name: customer.name, phone: customer.phone, lastDevice });
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const cTickets = customerTicketsMap.get(customer.id) || [];
+                                let lastDevice: string | undefined;
+                                if (customer.registeredDevices && customer.registeredDevices.length > 0) {
+                                  const d = customer.registeredDevices[0];
+                                  lastDevice = `${d.brand} ${d.model}`.trim();
+                                } else if (cTickets.length > 0) {
+                                  const sortedTickets = [...cTickets].sort(
+                                    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+                                  );
+                                  lastDevice = `${sortedTickets[0].deviceBrand || ''} ${sortedTickets[0].deviceModel || ''}`.trim() || undefined;
+                                }
+                                setRepairPrefill({ name: customer.name, phone: customer.phone || '', lastDevice });
+                                setTicketToEdit(null);
                                 setIsNewTicketOpen(true);
                               }}
                             >
@@ -1237,9 +1452,11 @@ export const CustomersPage = () => {
                             type="button"
                             className={`${styles.quickActionBtn} ${styles.posBtn}`}
                             title="New POS Sale"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setCustomerName(customer.name);
-                              toast.success('Customer Attached', `${customer.name} has been set as the customer for the next sale.`);
+                              setCustomerPhone(customer.phone || '');
+                              toast.success('Customer Attached', `${customer.name} attached to next POS sale.`);
                               navigate('/pos');
                             }}
                           >

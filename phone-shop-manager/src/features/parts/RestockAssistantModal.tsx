@@ -15,6 +15,7 @@ import { useToast } from '../../components/ui/Toast';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { exportToCSV } from '../../utils/exportUtils';
+import { formatWhatsAppUrl } from '../../utils/phoneUtils';
 import type { PhoneModel, POItem } from '../../types';
 import styles from './RestockAssistant.module.css';
 
@@ -262,10 +263,8 @@ ${itemsText}
 ━━━━━━━━━━━━━━━━━━━━
 Please check stock availability and confirm estimated dispatch time. Thank you!`;
 
-    const supplierPhone = suppliers.find(s => s.name === selectedSupplierName)?.phone?.replace(/\D/g, '') || '';
-    const url = supplierPhone
-      ? `https://wa.me/${supplierPhone}?text=${encodeURIComponent(text)}`
-      : `https://wa.me/?text=${encodeURIComponent(text)}`;
+    const supplierPhone = suppliers.find(s => s.name === selectedSupplierName)?.phone;
+    const url = formatWhatsAppUrl(supplierPhone, text) || `https://wa.me/?text=${encodeURIComponent(text)}`;
 
     window.open(url, '_blank');
   };

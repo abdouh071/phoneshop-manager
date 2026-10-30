@@ -88,6 +88,11 @@ export const activityLogService = {
     message: string,
     options?: LogOptions
   ): Promise<void> => {
+    // If offline, return immediately (optimistic UI log in activityStore already handles it)
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return;
+    }
+
     // Resolve actor from options or active auth session
     let userName = options?.userName ?? null;
     let userId = options?.userId ?? null;
@@ -109,33 +114,50 @@ export const activityLogService = {
 
     const severity = options?.severity || inferSeverity(message, options?.detail);
 
-    await addDoc(collection(db, COLLECTION), {
-      category,
-      message,
-      detail: options?.detail ?? null,
-      entityId: options?.entityId ?? null,
-      entityType: options?.entityType ?? null,
-      severity,
-      userName: userName ?? null,
-      userId: userId ?? null,
-      timestamp: serverTimestamp(),
-    });
+    try {
+      const addPromise = addDoc(collection(db, COLLECTION), {
+        category,
+        message,
+        detail: options?.detail ?? null,
+        entityId: options?.entityId ?? null,
+        entityType: options?.entityType ?? null,
+        severity,
+        userName: userName ?? null,
+        userId: userId ?? null,
+        timestamp: serverTimestamp(),
+      });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore activityLog timeout')), 2000)
+      );
+      await Promise.race([addPromise, timeoutPromise]);
+    } catch (err) {
+      console.warn('Failed to log activity to Firestore:', err);
+    }
   },
 
   /**
    * Fetch the most recent activity logs with configurable limit.
    */
   getAll: async (limitCount: number = 200): Promise<ActivityLog[]> => {
-    const q = query(
-      collection(db, COLLECTION),
-      orderBy('timestamp', 'desc'),
-      limit(limitCount)
-    );
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as ActivityLog[];
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return [];
+    }
+
+    try {
+      const q = query(
+        collection(db, COLLECTION),
+        orderBy('timestamp', 'desc'),
+        limit(limitCount)
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as ActivityLog[];
+    } catch (err) {
+      console.warn('Failed to fetch activity logs from Firestore:', err);
+      return [];
+    }
   },
 
   /**

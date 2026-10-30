@@ -2,7 +2,9 @@ import { create } from 'zustand';
 import { 
   collection, 
   query, 
-  where, 
+  where,
+  orderBy,
+  limit,
   onSnapshot,
   doc,
   getDoc,
@@ -17,6 +19,13 @@ import { customerService } from '../services/customerService';
 import { offlineSyncService } from '../services/offlineSyncService';
 import { notificationService } from '../services/notificationService';
 import type { RepairTicket, RepairStatus, RepairStatusHistoryEntry } from '../types';
+
+// Active statuses that must always be visible regardless of creation date
+const ACTIVE_STATUSES: RepairStatus[] = ['pending', 'in_progress', 'ready', 'returned'];
+// Closed statuses only shown for the recent retention window
+const CLOSED_STATUSES: RepairStatus[] = ['completed', 'cancelled'];
+// How many days of closed ticket history to stream to the mobile device
+const CLOSED_RETENTION_DAYS = 60;
 
 interface SettleClaimParams {
   ticketId: string;
@@ -47,7 +56,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
   error: null,
 
   subscribeToTickets: () => {
-    // Immediately display cached tickets while fetching remote changes
+    // Show cached tickets instantly while fresh data loads from Firestore
     offlineSyncService.getCachedTickets().then((cached) => {
       if (cached && cached.length > 0 && get().tickets.length === 0) {
         set({ tickets: cached, isLoading: false });
@@ -55,39 +64,96 @@ export const useRepairStore = create<RepairState>((set, get) => ({
     });
 
     set({ isLoading: get().tickets.length === 0 });
-    const q = query(collection(db, 'repairs'));
 
-    const unsubscribe = onSnapshot(
-      q,
+    // --- Bounded Query 1: All ACTIVE (open) tickets ---
+    // No date limit: a 1-year-old "in_progress" ticket must still appear on the workbench.
+    const activeQ = query(
+      collection(db, 'repairs'),
+      where('status', 'in', ACTIVE_STATUSES),
+      orderBy('createdAt', 'desc')
+    );
+
+    // --- Bounded Query 2: Recent CLOSED tickets (last CLOSED_RETENTION_DAYS days) ---
+    // Closed tickets older than the window are irrelevant to daily technician workflow
+    // and are still fully accessible from the desktop admin app (which has no limit).
+    const closedCutoff = new Date();
+    closedCutoff.setDate(closedCutoff.getDate() - CLOSED_RETENTION_DAYS);
+    const closedQ = query(
+      collection(db, 'repairs'),
+      where('status', 'in', CLOSED_STATUSES),
+      where('updatedAt', '>=', closedCutoff.toISOString()),
+      orderBy('updatedAt', 'desc'),
+      limit(100)
+    );
+
+    // Shared mutable snapshot buffers — one per listener, merged on every update
+    let activeBuffer: RepairTicket[] = [];
+    let closedBuffer: RepairTicket[] = [];
+
+    const mergeAndCommit = async () => {
+      // Deduplicate across both buffers by document ID
+      const seen = new Set<string>();
+      const combined: RepairTicket[] = [];
+      for (const t of [...activeBuffer, ...closedBuffer]) {
+        if (!seen.has(t.id)) {
+          seen.add(t.id);
+          combined.push(t);
+        }
+      }
+
+      // Sort newest-first
+      combined.sort((a, b) => {
+        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return tB - tA;
+      });
+
+      // Inject any offline-created tickets that haven't synced to the server yet
+      const cached = await offlineSyncService.getCachedTickets();
+      const offlineOnly = (cached || []).filter(t => t.id?.startsWith('offline_'));
+      const serverIds = new Set(combined.map(t => t.id));
+      const merged = [
+        ...offlineOnly.filter(t => !serverIds.has(t.id)),
+        ...combined,
+      ];
+
+      set({ tickets: merged, isLoading: false, error: null });
+      offlineSyncService.setCachedTickets(merged);
+    };
+
+    // Active tickets listener
+    const unsubActive = onSnapshot(
+      activeQ,
       (snapshot) => {
-        const tickets: RepairTicket[] = [];
-        snapshot.forEach((doc) => {
-          tickets.push({ id: doc.id, ...doc.data() } as RepairTicket);
-        });
-        tickets.sort((a, b) => {
-          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-          return timeB - timeA;
-        });
-
-        // Merge any pending offline tickets that are not yet on the server
-        offlineSyncService.getCachedTickets().then((cached) => {
-          const offlineOnes = (cached || []).filter(t => t.id && t.id.startsWith('offline_'));
-          const serverIds = new Set(tickets.map(t => t.id));
-          const merged = [...offlineOnes.filter(t => !serverIds.has(t.id)), ...tickets];
-          set({ tickets: merged, isLoading: false, error: null });
-          offlineSyncService.setCachedTickets(merged);
-        });
+        activeBuffer = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket));
+        mergeAndCommit();
       },
       (error) => {
-        console.warn('[RepairStore] Snapshot listener failed (offline), loading cache:', error);
+        console.warn('[RepairStore] Active tickets snapshot failed (offline):', error);
         offlineSyncService.getCachedTickets().then((cached) => {
           set({ tickets: cached || [], error: null, isLoading: false });
         });
       }
     );
 
-    return unsubscribe;
+    // Recent closed tickets listener (non-critical — active listener handles the must-have data)
+    const unsubClosed = onSnapshot(
+      closedQ,
+      (snapshot) => {
+        closedBuffer = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket));
+        mergeAndCommit();
+      },
+      (error) => {
+        // Non-fatal: the technician still gets all active tickets from the first listener
+        console.warn('[RepairStore] Recent closed tickets snapshot error (non-critical):', error);
+      }
+    );
+
+    // Return a combined cleanup function
+    return () => {
+      unsubActive();
+      unsubClosed();
+    };
   },
 
   updateTicketStatus: async (id: string, status: RepairStatus, changerName?: string, additionalUpdates?: any) => {
@@ -345,13 +411,17 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       const counterRef = doc(db, 'counters', 'repairs');
       let ticketNumber: string;
       try {
-        ticketNumber = await runTransaction(db, async (tx) => {
+        const txPromise = runTransaction(db, async (tx) => {
           const snap = await tx.get(counterRef);
           const current = snap.exists() ? (snap.data()?.lastNumber || 0) : 0;
           const nextNum = current + 1;
           tx.set(counterRef, { lastNumber: nextNum }, { merge: true });
           return `TKT-${String(nextNum).padStart(4, '0')}`;
         });
+        const timeoutPromise = new Promise<string>((_, reject) =>
+          setTimeout(() => reject(new Error('Counter transaction timeout')), 2000)
+        );
+        ticketNumber = await Promise.race([txPromise, timeoutPromise]);
       } catch (counterErr) {
         console.warn('Failed atomic counter transaction, using fallback ticket number:', counterErr);
         ticketNumber = 'TKT-' + Math.floor(100000 + Math.random() * 900000);
@@ -442,22 +512,18 @@ export const useRepairStore = create<RepairState>((set, get) => ({
   fetchMyCompletedTickets: async (technicianName: string) => {
     try {
       const { getDocs } = await import('firebase/firestore');
-      // Query tickets assigned to this technician that are ready OR completed
+      // Push both predicates to Firestore — uses composite index (assignedTechnician, status, createdAt)
       const q = query(
         collection(db, 'repairs'),
-        where('assignedTechnician', '==', technicianName)
+        where('assignedTechnician', '==', technicianName),
+        where('status', 'in', ['completed', 'ready']),
+        orderBy('createdAt', 'desc'),
+        limit(200)
       );
       const snapshot = await getDocs(q);
-      const myTickets: RepairTicket[] = [];
-      snapshot.forEach((doc) => {
-        const data = { id: doc.id, ...doc.data() } as RepairTicket;
-        if (data.status === 'completed' || data.status === 'ready') {
-          myTickets.push(data);
-        }
-      });
-      return myTickets;
+      return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket));
     } catch (error) {
-      console.error('Failed to fetch technician tickets:', error);
+      console.error('Failed to fetch technician completed tickets:', error);
       return [];
     }
   }

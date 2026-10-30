@@ -18,6 +18,7 @@ import type { RepairTicket } from '../../types';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { detectIssueTag, getBrandIcon } from './repairConstants';
 import { isTicketActiveReturnPending } from '../../utils/phoneLifecycle';
+import { formatWhatsAppUrl } from '../../utils/phoneUtils';
 import styles from './StatusTables.module.css';
 
 interface StatusTablesViewProps {
@@ -695,17 +696,21 @@ export const StatusTablesView: React.FC<StatusTablesViewProps> = ({
                               <div className={styles.customerPhone}>
                                 <span>{ticket.customerPhone}</span>
                                 <div className={styles.phoneActions} onClick={e => e.stopPropagation()}>
-                                  {cleanPhone && (
-                                    <a
-                                      href={`https://wa.me/${cleanPhone}?text=Hello%20${encodeURIComponent(ticket.customerName)},%20your%20${encodeURIComponent(ticket.deviceBrand + ' ' + ticket.deviceModel)}%20is%20ready%20for%20pickup!`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className={`${styles.phoneActionBtn} ${styles.whatsappBtn}`}
-                                      title="Send WhatsApp Ready message"
-                                    >
-                                      <MessageCircle size={10} /> WhatsApp
-                                    </a>
-                                  )}
+                                  {(() => {
+                                    const readyMsg = `Hello ${ticket.customerName}, your ${ticket.deviceBrand} ${ticket.deviceModel} is ready for pickup!`;
+                                    const waUrl = formatWhatsAppUrl(ticket.customerPhone, readyMsg);
+                                    return waUrl ? (
+                                      <a
+                                        href={waUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className={`${styles.phoneActionBtn} ${styles.whatsappBtn}`}
+                                        title="Send WhatsApp Ready message"
+                                      >
+                                        <MessageCircle size={10} /> WhatsApp
+                                      </a>
+                                    ) : null;
+                                  })()}
                                   <a
                                     href={`tel:${ticket.customerPhone}`}
                                     className={`${styles.phoneActionBtn} ${styles.callBtn}`}

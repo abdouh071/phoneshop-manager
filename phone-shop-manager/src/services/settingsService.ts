@@ -31,18 +31,43 @@ export interface StoreSettings {
 const COLLECTION = 'settings';
 const DOCUMENT_ID = 'general';
 
+const LOCAL_STORAGE_KEY = 'offline_store_settings';
+
+const getLocalSettings = (): StoreSettings | null => {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const saveLocalSettings = (settings: StoreSettings): void => {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(settings));
+  } catch (err) {
+    console.error('Failed to save settings to localStorage', err);
+  }
+};
+
 export const settingsService = {
   getSettings: async (): Promise<StoreSettings | null> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return getLocalSettings();
+    }
+
     try {
       const docRef = doc(db, COLLECTION, DOCUMENT_ID);
       const snap = await getDoc(docRef);
       if (snap.exists()) {
-        return snap.data() as StoreSettings;
+        const settings = snap.data() as StoreSettings;
+        saveLocalSettings(settings);
+        return settings;
       }
-      return null;
+      return getLocalSettings();
     } catch (err) {
-      console.error('Failed to fetch settings from Firestore:', err);
-      return null;
+      console.warn('Failed to fetch settings from Firestore, using local cache:', err);
+      return getLocalSettings();
     }
   },
 

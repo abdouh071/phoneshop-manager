@@ -86,10 +86,35 @@ interface AuthState {
   lockHistory: () => void;
 }
 
+const CACHED_USER_KEY = 'cached_auth_user';
+
+const getCachedUser = (): User | null => {
+  try {
+    const raw = localStorage.getItem(CACHED_USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const saveCachedUser = (user: User | null): void => {
+  try {
+    if (user) {
+      localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(CACHED_USER_KEY);
+    }
+  } catch (e) {
+    console.warn('Failed to save cached auth user:', e);
+  }
+};
+
 // Guard flag to prevent onAuthStateChanged from interfering during login/bootstrap
 let _isLoginInProgress = false;
 
 export const useAuthStore = create<AuthState>((set, get) => {
+  const initialCachedUser = getCachedUser();
+
   // Listen to Auth State globally
   onAuthStateChanged(auth, async (firebaseUser) => {
     if (firebaseUser) {
@@ -97,10 +122,42 @@ export const useAuthStore = create<AuthState>((set, get) => {
         // Skip validation if login() is currently running (it handles its own bootstrap)
         if (_isLoginInProgress) return;
 
-        const profile = await userService.getUserById(firebaseUser.uid);
+        const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+        const cached = getCachedUser();
+
+        // If offline and we have a cached user, retain session without attempting remote validation
+        if (isOffline && cached) {
+          const isSuper = cached.isSuperAdmin === true || cached.email === LEGACY_OWNER_EMAIL;
+          set({
+            user: cached,
+            isAuthenticated: true,
+            isInitializing: false,
+            isSuperAdmin: isSuper,
+            isHistoryUnlocked: cached.role === 'admin'
+          });
+          return;
+        }
+
+        let profile: User | null = null;
+        try {
+          profile = await userService.getUserById(firebaseUser.uid);
+        } catch (fetchErr) {
+          console.warn('Could not fetch user profile from Firestore, falling back to cache:', fetchErr);
+          if (cached && (cached.id === firebaseUser.uid || !cached.id)) {
+            profile = cached;
+          }
+        }
+
+        if (!profile && cached && (cached.id === firebaseUser.uid || !cached.id)) {
+          profile = cached;
+        }
+
         if (profile) {
+          saveCachedUser(profile);
+
           // Block revoked users even if their Firebase Auth token is valid
           if (profile.status === 'revoked') {
+            saveCachedUser(null);
             await signOut(auth);
             set({ 
               user: null, 
@@ -110,8 +167,8 @@ export const useAuthStore = create<AuthState>((set, get) => {
             return;
           }
 
-          // Enforce IP Lock for Workers (Sales/Repair) on auth initialization
-          if (profile.role === 'sales_agent' || profile.role === 'repair_agent') {
+          // Enforce IP Lock for Workers (Sales/Repair) only when strictly ONLINE
+          if (!isOffline && (profile.role === 'sales_agent' || profile.role === 'repair_agent')) {
             const settings = await settingsService.getSettings();
             if (settings && settings.allowedIp && settings.allowedIp.trim() !== '') {
               const allowedList = settings.allowedIp
@@ -126,6 +183,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
                   userIP = await fetchPublicIP();
                 }
                 if (!userIP || !allowedList.includes(userIP)) {
+                  saveCachedUser(null);
                   await signOut(auth);
                   set({ 
                     user: null, 
@@ -145,7 +203,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
           const isSuper = profile.isSuperAdmin === true || profile.email === LEGACY_OWNER_EMAIL;
 
           // One-time migration: attempt to set isSuperAdmin in DB asynchronously
-          if (profile.email === LEGACY_OWNER_EMAIL && profile.isSuperAdmin !== true) {
+          if (!isOffline && profile.email === LEGACY_OWNER_EMAIL && profile.isSuperAdmin !== true) {
             profile.isSuperAdmin = true;
             userService.updateUserProfile(firebaseUser.uid, { isSuperAdmin: true }).catch(console.error);
           }
@@ -167,7 +225,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
             isSuperAdmin: isSuper && !override,
             isHistoryUnlocked: profile.role === 'admin' // Admins always have unlocked history
           });
-          userService.updateLastActive(firebaseUser.uid).catch(console.error);
+          if (!isOffline) {
+            userService.updateLastActive(firebaseUser.uid).catch(console.error);
+          }
         } else {
           // No Firestore profile yet — try auto-bootstrap (first user becomes Super Admin)
           let bootstrapped = false;
@@ -202,6 +262,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
               const newProfile = await userService.getUserById(firebaseUser.uid);
               if (newProfile) {
                 bootstrapped = true;
+                saveCachedUser(newProfile);
                 set({
                   user: newProfile,
                   isAuthenticated: true,
@@ -217,8 +278,11 @@ export const useAuthStore = create<AuthState>((set, get) => {
           }
 
           if (!bootstrapped) {
-            await signOut(auth);
-            set({ user: null, isAuthenticated: false, isInitializing: false });
+            if (!isOffline) {
+              saveCachedUser(null);
+              await signOut(auth);
+              set({ user: null, isAuthenticated: false, isInitializing: false });
+            }
           }
         }
       } catch (err) {
@@ -226,19 +290,33 @@ export const useAuthStore = create<AuthState>((set, get) => {
         set({ isInitializing: false });
       }
     } else {
-      set({ user: null, isAuthenticated: false, isInitializing: false });
+      const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+      const cached = getCachedUser();
+      if (isOffline && cached) {
+        // In offline reload, keep cached user session
+        set({
+          user: cached,
+          isAuthenticated: true,
+          isInitializing: false,
+          isSuperAdmin: cached.isSuperAdmin === true || cached.email === LEGACY_OWNER_EMAIL,
+          isHistoryUnlocked: cached.role === 'admin'
+        });
+      } else {
+        saveCachedUser(null);
+        set({ user: null, isAuthenticated: false, isInitializing: false });
+      }
     }
   });
 
   return {
-    user: null,
-    isAuthenticated: false,
+    user: initialCachedUser,
+    isAuthenticated: !!initialCachedUser,
     isLoading: false,
-    isInitializing: true,
+    isInitializing: !initialCachedUser,
     error: null,
     staff: [],
-    isSuperAdmin: false,
-    isHistoryUnlocked: false,
+    isSuperAdmin: initialCachedUser?.isSuperAdmin || initialCachedUser?.email === LEGACY_OWNER_EMAIL || false,
+    isHistoryUnlocked: initialCachedUser?.role === 'admin',
 
     login: async (email, pass) => {
       set({ isLoading: true, error: null });

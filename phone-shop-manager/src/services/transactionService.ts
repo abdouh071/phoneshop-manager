@@ -40,6 +40,10 @@ const saveLocalTransactions = (txs: SaleTransaction[]) => {
 export const transactionService = {
   // Server-side query: strictly retail POS sales only
   getRetailTransactions: async (): Promise<SaleTransaction[]> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return getLocalTransactions().filter(t => t.saleType === 'retail');
+    }
+
     try {
       const q = query(
         collection(db, COLLECTION),
@@ -62,6 +66,10 @@ export const transactionService = {
 
   // Server-side query: strictly repair parts B2B invoices / sales only
   getPartsTransactions: async (): Promise<SaleTransaction[]> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return getLocalTransactions().filter(t => t.saleType === 'parts_b2b');
+    }
+
     try {
       const q = query(
         collection(db, COLLECTION),
@@ -83,6 +91,10 @@ export const transactionService = {
   },
 
   getAll: async (): Promise<SaleTransaction[]> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return getLocalTransactions();
+    }
+
     try {
       const q = query(collection(db, COLLECTION), orderBy('date', 'desc'));
       const snap = await getDocs(q);
@@ -103,6 +115,14 @@ export const transactionService = {
   },
 
   getByDateRange: async (startDate: Date, endDate: Date): Promise<SaleTransaction[]> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const local = getLocalTransactions();
+      return local.filter(l => {
+        const tMs = new Date(l.date).getTime();
+        return tMs >= startDate.getTime() && tMs <= endDate.getTime();
+      });
+    }
+
     try {
       const startIso = startDate.toISOString();
       const endIso = endDate.toISOString();
@@ -138,8 +158,21 @@ export const transactionService = {
 
   save: async (tx: Omit<SaleTransaction, 'id'>): Promise<SaleTransaction> => {
     const local = getLocalTransactions();
+
+    // If offline, store locally immediately with zero delay
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const offlineId = `offline_tx_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const created = { ...tx, id: offlineId };
+      saveLocalTransactions([created, ...local]);
+      return created;
+    }
+
     try {
-      const docRef = await addDoc(collection(db, COLLECTION), tx);
+      const addDocPromise = addDoc(collection(db, COLLECTION), tx);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore addDoc timeout')), 2500)
+      );
+      const docRef = await Promise.race([addDocPromise, timeoutPromise]);
       const created = { ...tx, id: docRef.id };
       saveLocalTransactions([created, ...local.filter(t => t.id !== created.id)]);
       return created;
@@ -156,8 +189,16 @@ export const transactionService = {
     const local = getLocalTransactions();
     saveLocalTransactions(local.map(t => t.id === id ? { ...t, status: 'refunded' } : t));
 
+    if (id.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      return;
+    }
+
     try {
-      await updateDoc(doc(db, COLLECTION, id), { status: 'refunded' });
+      const updatePromise = updateDoc(doc(db, COLLECTION, id), { status: 'refunded' });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore refund timeout')), 1200)
+      );
+      await Promise.race([updatePromise, timeoutPromise]);
     } catch (err) {
       console.warn('Failed to update refund in Firestore, updated locally:', err);
     }
@@ -167,8 +208,16 @@ export const transactionService = {
     const local = getLocalTransactions();
     saveLocalTransactions(local.map(t => t.id === id ? { ...t, ...updates } : t));
 
+    if (id.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      return;
+    }
+
     try {
-      await updateDoc(doc(db, COLLECTION, id), updates);
+      const updatePromise = updateDoc(doc(db, COLLECTION, id), updates);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore updateTransaction timeout')), 1200)
+      );
+      await Promise.race([updatePromise, timeoutPromise]);
     } catch (err) {
       console.warn('Failed to update transaction in Firestore, updated locally:', err);
     }

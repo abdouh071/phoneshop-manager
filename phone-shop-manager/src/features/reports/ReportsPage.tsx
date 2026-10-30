@@ -53,7 +53,7 @@ export const ReportsPage = () => {
   const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
   const [selectedEodRecord, setSelectedEodRecord] = useState<EndOfDayRecord | null>(null);
   const [isEodModalOpen, setIsEodModalOpen] = useState(false);
-  const [dailyCategoryFilter, setDailyCategoryFilter] = useState<'all' | 'pos' | 'repairs'>('all');
+  const [dailyCategoryFilter, setDailyCategoryFilter] = useState<'all' | 'pos' | 'repairs' | 'parts'>('all');
 
   // Filtered Ledgers (computed early so CSV exports respect active search)
   const filteredSalesLedger = useMemo(() => {
@@ -181,6 +181,8 @@ export const ReportsPage = () => {
       ['Cash Collected', formatCurrency(data.paymentBreakdown.cash)],
       ['Card Payments', formatCurrency(data.paymentBreakdown.card)],
       ['Mobile Payments', formatCurrency(data.paymentBreakdown.mobile)],
+      ['Bank Transfers', formatCurrency(data.paymentBreakdown.transfer || 0)],
+      ['Store Credit Used', formatCurrency(data.paymentBreakdown.storeCredit || 0)],
     ];
 
     exportToCSV(`financial_report_${mainTab}_${new Date().toISOString().split('T')[0]}`, summaryHeaders, summaryRows);
@@ -232,6 +234,7 @@ export const ReportsPage = () => {
       'POS Cash', 'POS Card', 'POS Mobile', 'POS Debt',
       'Repairs Completed', 'Repairs Revenue', 'Repairs Parts Cost', 'Repairs Net Profit',
       'Repairs Cash Handovers', 'Repairs Cash Deposits', 'Repairs Total Cash', 'Repairs Debt',
+      'Parts Invoices', 'Parts Revenue', 'Parts COGS', 'Parts Net Profit', 'Parts Cash',
       'Old Debt Collected (Cash)', 'Cash Refunds', 'Total Physical Cash', 'Total Daily Net Profit'
     ];
     const rows = data.dailyIncomeDetails.map(d => [
@@ -256,6 +259,11 @@ export const ReportsPage = () => {
       d.repairsCashDeposits,
       d.repairsCashTotal,
       d.repairsDebt,
+      d.partsCount || 0,
+      d.partsRevenue,
+      d.partsCOGS || 0,
+      d.partsNetProfit || 0,
+      d.partsCash || 0,
       d.debtCollectedCash,
       d.refundsCash,
       d.totalPhysicalCash,
@@ -351,6 +359,18 @@ export const ReportsPage = () => {
             <td class="text-right font-mono">${formatCurrency(data.paymentBreakdown.mobile)}</td>
             <td class="text-right">${data.paymentBreakdown.totalCollected > 0 ? Math.round((data.paymentBreakdown.mobile / data.paymentBreakdown.totalCollected) * 100) : 0}%</td>
           </tr>
+          ${(data.paymentBreakdown.transfer || 0) > 0 ? `
+          <tr>
+            <td>🏦 Bank Transfer</td>
+            <td class="text-right font-mono">${formatCurrency(data.paymentBreakdown.transfer || 0)}</td>
+            <td class="text-right">${data.paymentBreakdown.totalCollected > 0 ? Math.round(((data.paymentBreakdown.transfer || 0) / data.paymentBreakdown.totalCollected) * 100) : 0}%</td>
+          </tr>` : ''}
+          ${(data.paymentBreakdown.storeCredit || 0) > 0 ? `
+          <tr>
+            <td>🎫 Store Credit</td>
+            <td class="text-right font-mono">${formatCurrency(data.paymentBreakdown.storeCredit || 0)}</td>
+            <td class="text-right">${data.paymentBreakdown.totalCollected > 0 ? Math.round(((data.paymentBreakdown.storeCredit || 0) / data.paymentBreakdown.totalCollected) * 100) : 0}%</td>
+          </tr>` : ''}
           <tr>
             <td><strong>Total Reconciled</strong></td>
             <td class="text-right font-mono"><strong>${formatCurrency(data.paymentBreakdown.totalCollected)}</strong></td>
@@ -703,6 +723,12 @@ export const ReportsPage = () => {
                 <span>Sales: {formatPrivateCurrency(data.financialSummary.productSalesRevenue)}</span>
                 <span>•</span>
                 <span>Repairs: {formatPrivateCurrency(data.financialSummary.repairRevenue)}</span>
+                {data.financialSummary.partsSalesRevenue > 0 && (
+                  <>
+                    <span>•</span>
+                    <span>Parts: {formatPrivateCurrency(data.financialSummary.partsSalesRevenue)}</span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -729,7 +755,13 @@ export const ReportsPage = () => {
               <div className={styles.kpiSubtext}>
                 <span>Items: {formatPrivateCurrency(data.financialSummary.salesCOGS)}</span>
                 <span>•</span>
-                <span>Parts: {formatPrivateCurrency(data.financialSummary.repairsCOGS)}</span>
+                <span>Repair Parts: {formatPrivateCurrency(data.financialSummary.repairsCOGS)}</span>
+                {data.financialSummary.partsCOGS > 0 && (
+                  <>
+                    <span>•</span>
+                    <span>B2B Parts: {formatPrivateCurrency(data.financialSummary.partsCOGS)}</span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -738,11 +770,19 @@ export const ReportsPage = () => {
                 <span className={styles.kpiLabel}>Orders & Activity</span>
                 <div className={styles.kpiIcon}><ShoppingBag size={16} /></div>
               </div>
-              <div className={styles.kpiValue}>{data.financialSummary.completedSalesCount + data.financialSummary.completedRepairsCount}</div>
+              <div className={styles.kpiValue}>
+                {data.financialSummary.completedSalesCount + data.financialSummary.completedRepairsCount + (data.financialSummary.partsSalesCount || 0)}
+              </div>
               <div className={styles.kpiSubtext}>
                 <span>{data.financialSummary.totalUnitsSold} items sold</span>
                 <span>•</span>
                 <span>{data.financialSummary.completedRepairsCount} repairs</span>
+                {(data.financialSummary.partsSalesCount || 0) > 0 && (
+                  <>
+                    <span>•</span>
+                    <span>{data.financialSummary.partsSalesCount} parts inv</span>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -752,7 +792,7 @@ export const ReportsPage = () => {
             <div className={styles.cardHeaderWithAction}>
               <div>
                 <h3 className={styles.cardTitle}>
-                  <Calendar size={18} /> Detailed Daily Income (POS & Repairs)
+                  <Calendar size={18} /> Detailed Daily Income (POS, Repairs & Parts)
                 </h3>
                 <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: 'var(--color-on-surface-variant)' }}>
                   Breakdown by day respecting user End-of-Day closings & real verified cash
@@ -812,6 +852,23 @@ export const ReportsPage = () => {
                   >
                     Repairs Only
                   </button>
+                  <button
+                    type="button"
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: '11.5px',
+                      fontWeight: 600,
+                      borderRadius: '6px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: dailyCategoryFilter === 'parts' ? '#ffffff' : 'transparent',
+                      color: dailyCategoryFilter === 'parts' ? 'var(--color-primary, #4f46e5)' : 'var(--color-on-surface-variant)',
+                      boxShadow: dailyCategoryFilter === 'parts' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                    }}
+                    onClick={() => setDailyCategoryFilter('parts')}
+                  >
+                    Parts B2B Only
+                  </button>
                 </div>
 
                 <button
@@ -854,6 +911,12 @@ export const ReportsPage = () => {
                             <th className={[styles.th, styles.textRight].join(' ')}>Repair Profit</th>
                           </>
                         )}
+                        {(dailyCategoryFilter === 'all' || dailyCategoryFilter === 'parts') && (
+                          <>
+                            <th className={[styles.th, styles.textRight].join(' ')}>Parts Revenue</th>
+                            <th className={[styles.th, styles.textRight].join(' ')}>Parts Profit</th>
+                          </>
+                        )}
                         <th className={[styles.th, styles.textRight].join(' ')}>Cash in Till</th>
                         <th className={[styles.th, styles.textRight].join(' ')}>Total Net Profit</th>
                       </tr>
@@ -886,6 +949,17 @@ export const ReportsPage = () => {
                               </td>
                               <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')} style={{ color: 'var(--color-success)' }}>
                                 +{formatCurrency(m.repairsNetProfit)}
+                              </td>
+                            </>
+                          )}
+                          {(dailyCategoryFilter === 'all' || dailyCategoryFilter === 'parts') && (
+                            <>
+                              <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')}>
+                                {formatCurrency(m.partsRevenue)}
+                                <div style={{ fontSize: '10px', color: 'var(--color-on-surface-variant)' }}>{m.partsCount || 0} invoices</div>
+                              </td>
+                              <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')} style={{ color: (m.partsNetProfit || 0) >= 0 ? 'var(--color-success)' : 'var(--color-error)' }}>
+                                {(m.partsNetProfit || 0) >= 0 ? '+' : ''}{formatCurrency(m.partsNetProfit || 0)}
                               </td>
                             </>
                           )}
@@ -968,97 +1042,134 @@ export const ReportsPage = () => {
                         </div>
                       )}
 
-                      {/* 3 Detail Cards */}
+                      {/* Detail Cards (POS, Repairs, Parts B2B & Drawer) */}
                       <div className={styles.dayCardGrid}>
                         {/* 1. POS Sales Detailed */}
-                        <div className={styles.dayCard}>
-                          <div className={styles.dayCardHeader}>
-                            <span className={styles.dayCardTitle}>
-                              <ShoppingBag size={16} color="#4f46e5" /> POS Direct Sales
-                            </span>
-                            <span style={{ fontSize: '11px', fontWeight: 600, color: '#4f46e5', background: '#eef2ff', padding: '2px 7px', borderRadius: '4px' }}>
-                              {day.salesCount} sale{day.salesCount !== 1 ? 's' : ''}
-                            </span>
-                          </div>
-                          <div className={styles.dayCardRow}>
-                            <span className={styles.dayCardLabel}>Gross Sales Revenue</span>
-                            <span className={styles.dayCardValue}>{formatCurrency(day.salesGrossRevenue)}</span>
-                          </div>
-                          <div className={styles.dayCardRow}>
-                            <span className={styles.dayCardLabel}>Product COGS</span>
-                            <span className={styles.dayCardValue} style={{ color: 'var(--color-error)' }}>-{formatCurrency(day.salesCOGS)}</span>
-                          </div>
-                          <div className={styles.dayCardRow}>
-                            <span className={styles.dayCardLabel}>Net Sales Profit</span>
-                            <span className={styles.dayCardValue} style={{ color: day.salesNetProfit >= 0 ? 'var(--color-success)' : 'var(--color-error)', fontWeight: 700 }}>
-                              {day.salesNetProfit >= 0 ? '+' : ''}{formatCurrency(day.salesNetProfit)}
-                            </span>
-                          </div>
-                          <div className={styles.dayCardDivider} />
-                          <div className={styles.dayCardRow}>
-                            <span className={styles.dayCardLabel}>💵 Cash Collected</span>
-                            <span className={styles.dayCardValue}>{formatCurrency(day.salesCash)}</span>
-                          </div>
-                          <div className={styles.dayCardRow}>
-                            <span className={styles.dayCardLabel}>💳 Card Payments</span>
-                            <span className={styles.dayCardValue}>{formatCurrency(day.salesCard)}</span>
-                          </div>
-                          <div className={styles.dayCardRow}>
-                            <span className={styles.dayCardLabel}>📱 Mobile / BaridiMob</span>
-                            <span className={styles.dayCardValue}>{formatCurrency(day.salesMobile)}</span>
-                          </div>
-                          {day.salesDebt > 0 && (
-                            <div className={styles.dayCardRow}>
-                              <span className={styles.dayCardLabel} style={{ color: 'var(--color-warning)' }}>⚠️ On Credit (Dette tab)</span>
-                              <span className={styles.dayCardValue} style={{ color: 'var(--color-warning)' }}>{formatCurrency(day.salesDebt)}</span>
+                        {(dailyCategoryFilter === 'all' || dailyCategoryFilter === 'pos') && (
+                          <div className={styles.dayCard}>
+                            <div className={styles.dayCardHeader}>
+                              <span className={styles.dayCardTitle}>
+                                <ShoppingBag size={16} color="#4f46e5" /> POS Direct Sales
+                              </span>
+                              <span style={{ fontSize: '11px', fontWeight: 600, color: '#4f46e5', background: '#eef2ff', padding: '2px 7px', borderRadius: '4px' }}>
+                                {day.salesCount} sale{day.salesCount !== 1 ? 's' : ''}
+                              </span>
                             </div>
-                          )}
-                        </div>
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>Gross Sales Revenue</span>
+                              <span className={styles.dayCardValue}>{formatCurrency(day.salesGrossRevenue)}</span>
+                            </div>
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>Product COGS</span>
+                              <span className={styles.dayCardValue} style={{ color: 'var(--color-error)' }}>-{formatCurrency(day.salesCOGS)}</span>
+                            </div>
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>Net Sales Profit</span>
+                              <span className={styles.dayCardValue} style={{ color: day.salesNetProfit >= 0 ? 'var(--color-success)' : 'var(--color-error)', fontWeight: 700 }}>
+                                {day.salesNetProfit >= 0 ? '+' : ''}{formatCurrency(day.salesNetProfit)}
+                              </span>
+                            </div>
+                            <div className={styles.dayCardDivider} />
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>💵 Cash Collected</span>
+                              <span className={styles.dayCardValue}>{formatCurrency(day.salesCash)}</span>
+                            </div>
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>💳 Card Payments</span>
+                              <span className={styles.dayCardValue}>{formatCurrency(day.salesCard)}</span>
+                            </div>
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>📱 Mobile / BaridiMob</span>
+                              <span className={styles.dayCardValue}>{formatCurrency(day.salesMobile)}</span>
+                            </div>
+                            {day.salesDebt > 0 && (
+                              <div className={styles.dayCardRow}>
+                                <span className={styles.dayCardLabel} style={{ color: 'var(--color-warning)' }}>⚠️ On Credit (Dette tab)</span>
+                                <span className={styles.dayCardValue} style={{ color: 'var(--color-warning)' }}>{formatCurrency(day.salesDebt)}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {/* 2. Workshop Repairs Detailed */}
-                        <div className={styles.dayCard}>
-                          <div className={styles.dayCardHeader}>
-                            <span className={styles.dayCardTitle}>
-                              <Wrench size={16} color="#d97706" /> Workshop Repairs
-                            </span>
-                            <span style={{ fontSize: '11px', fontWeight: 600, color: '#d97706', background: '#fef3c7', padding: '2px 7px', borderRadius: '4px' }}>
-                              {day.repairsCompletedCount} completed
-                            </span>
-                          </div>
-                          <div className={styles.dayCardRow}>
-                            <span className={styles.dayCardLabel}>Repair Services Revenue</span>
-                            <span className={styles.dayCardValue}>{formatCurrency(day.repairsRevenue)}</span>
-                          </div>
-                          <div className={styles.dayCardRow}>
-                            <span className={styles.dayCardLabel}>Spare Parts Used (Cost)</span>
-                            <span className={styles.dayCardValue} style={{ color: 'var(--color-error)' }}>-{formatCurrency(day.repairsPartsCost)}</span>
-                          </div>
-                          <div className={styles.dayCardRow}>
-                            <span className={styles.dayCardLabel}>Net Repair Profit</span>
-                            <span className={styles.dayCardValue} style={{ color: day.repairsNetProfit >= 0 ? 'var(--color-success)' : 'var(--color-error)', fontWeight: 700 }}>
-                              {day.repairsNetProfit >= 0 ? '+' : ''}{formatCurrency(day.repairsNetProfit)}
-                            </span>
-                          </div>
-                          <div className={styles.dayCardDivider} />
-                          <div className={styles.dayCardRow}>
-                            <span className={styles.dayCardLabel}>💵 Handover Collections</span>
-                            <span className={styles.dayCardValue}>{formatCurrency(day.repairsCashHandovers)}</span>
-                          </div>
-                          <div className={styles.dayCardRow}>
-                            <span className={styles.dayCardLabel}>↳ Intake Phone Deposits</span>
-                            <span className={styles.dayCardValue}>{formatCurrency(day.repairsCashDeposits)}</span>
-                          </div>
-                          <div className={styles.dayCardRow}>
-                            <span className={styles.dayCardLabel}>Total Repair Cash</span>
-                            <span className={styles.dayCardValue} style={{ fontWeight: 700 }}>{formatCurrency(day.repairsCashTotal)}</span>
-                          </div>
-                          {day.repairsDebt > 0 && (
-                            <div className={styles.dayCardRow}>
-                              <span className={styles.dayCardLabel} style={{ color: 'var(--color-error)' }}>⚠️ Unpaid Repair Debt</span>
-                              <span className={styles.dayCardValue} style={{ color: 'var(--color-error)' }}>{formatCurrency(day.repairsDebt)}</span>
+                        {(dailyCategoryFilter === 'all' || dailyCategoryFilter === 'repairs') && (
+                          <div className={styles.dayCard}>
+                            <div className={styles.dayCardHeader}>
+                              <span className={styles.dayCardTitle}>
+                                <Wrench size={16} color="#d97706" /> Workshop Repairs
+                              </span>
+                              <span style={{ fontSize: '11px', fontWeight: 600, color: '#d97706', background: '#fef3c7', padding: '2px 7px', borderRadius: '4px' }}>
+                                {day.repairsCompletedCount} completed
+                              </span>
                             </div>
-                          )}
-                        </div>
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>Repair Services Revenue</span>
+                              <span className={styles.dayCardValue}>{formatCurrency(day.repairsRevenue)}</span>
+                            </div>
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>Spare Parts Used (Cost)</span>
+                              <span className={styles.dayCardValue} style={{ color: 'var(--color-error)' }}>-{formatCurrency(day.repairsPartsCost)}</span>
+                            </div>
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>Net Repair Profit</span>
+                              <span className={styles.dayCardValue} style={{ color: day.repairsNetProfit >= 0 ? 'var(--color-success)' : 'var(--color-error)', fontWeight: 700 }}>
+                                {day.repairsNetProfit >= 0 ? '+' : ''}{formatCurrency(day.repairsNetProfit)}
+                              </span>
+                            </div>
+                            <div className={styles.dayCardDivider} />
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>💵 Handover Collections</span>
+                              <span className={styles.dayCardValue}>{formatCurrency(day.repairsCashHandovers)}</span>
+                            </div>
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>↳ Intake Phone Deposits</span>
+                              <span className={styles.dayCardValue}>{formatCurrency(day.repairsCashDeposits)}</span>
+                            </div>
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>Total Repair Cash</span>
+                              <span className={styles.dayCardValue} style={{ fontWeight: 700 }}>{formatCurrency(day.repairsCashTotal)}</span>
+                            </div>
+                            {day.repairsDebt > 0 && (
+                              <div className={styles.dayCardRow}>
+                                <span className={styles.dayCardLabel} style={{ color: 'var(--color-error)' }}>⚠️ Unpaid Repair Debt</span>
+                                <span className={styles.dayCardValue} style={{ color: 'var(--color-error)' }}>{formatCurrency(day.repairsDebt)}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 2.5. Parts B2B Wholesale Detailed */}
+                        {((dailyCategoryFilter === 'all' && ((day.partsRevenue || 0) > 0 || (day.partsCount || 0) > 0)) || dailyCategoryFilter === 'parts') && (
+                          <div className={styles.dayCard}>
+                            <div className={styles.dayCardHeader}>
+                              <span className={styles.dayCardTitle}>
+                                <Package size={16} color="#0284c7" /> Parts B2B Wholesale
+                              </span>
+                              <span style={{ fontSize: '11px', fontWeight: 600, color: '#0284c7', background: '#e0f2fe', padding: '2px 7px', borderRadius: '4px' }}>
+                                {day.partsCount || 0} invoice{(day.partsCount || 0) !== 1 ? 's' : ''}
+                              </span>
+                            </div>
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>Parts Sales Revenue</span>
+                              <span className={styles.dayCardValue}>{formatCurrency(day.partsRevenue)}</span>
+                            </div>
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>Spare Parts Cost (COGS)</span>
+                              <span className={styles.dayCardValue} style={{ color: 'var(--color-error)' }}>-{formatCurrency(day.partsCOGS || 0)}</span>
+                            </div>
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>Net Parts Profit</span>
+                              <span className={styles.dayCardValue} style={{ color: (day.partsNetProfit || 0) >= 0 ? 'var(--color-success)' : 'var(--color-error)', fontWeight: 700 }}>
+                                {(day.partsNetProfit || 0) >= 0 ? '+' : ''}{formatCurrency(day.partsNetProfit || 0)}
+                              </span>
+                            </div>
+                            <div className={styles.dayCardDivider} />
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>💵 Cash Collected</span>
+                              <span className={styles.dayCardValue} style={{ fontWeight: 700 }}>{formatCurrency(day.partsCash || 0)}</span>
+                            </div>
+                          </div>
+                        )}
 
                         {/* 3. Reconciled Drawer Cash & Profit */}
                         <div className={styles.dayCard}>
@@ -1089,6 +1200,12 @@ export const ReportsPage = () => {
                             <span className={styles.dayCardLabel}>Repairs Cash in Till</span>
                             <span className={styles.dayCardValue}>{formatCurrency(day.repairsCashTotal)}</span>
                           </div>
+                          {(day.partsCash || 0) > 0 && (
+                            <div className={styles.dayCardRow}>
+                              <span className={styles.dayCardLabel}>Parts B2B Cash in Till</span>
+                              <span className={styles.dayCardValue}>{formatCurrency(day.partsCash || 0)}</span>
+                            </div>
+                          )}
                           {day.debtCollectedCash > 0 && (
                             <div className={styles.dayCardRow}>
                               <span className={styles.dayCardLabel}>Old Debt Paid in Cash</span>
@@ -1132,6 +1249,12 @@ export const ReportsPage = () => {
                           <th className={[styles.th, styles.textRight].join(' ')}>Repair Profit</th>
                         </>
                       )}
+                      {(dailyCategoryFilter === 'all' || dailyCategoryFilter === 'parts') && (
+                        <>
+                          <th className={[styles.th, styles.textRight].join(' ')}>Parts Revenue</th>
+                          <th className={[styles.th, styles.textRight].join(' ')}>Parts Profit</th>
+                        </>
+                      )}
                       <th className={[styles.th, styles.textRight].join(' ')}>Physical Cash</th>
                       <th className={[styles.th, styles.textRight].join(' ')}>Total Net Profit</th>
                       <th className={[styles.th, styles.textRight].join(' ')}>Action</th>
@@ -1140,7 +1263,7 @@ export const ReportsPage = () => {
                   <tbody>
                     {data.dailyIncomeDetails.length === 0 ? (
                       <tr>
-                        <td colSpan={8} style={{ padding: '24px', textAlign: 'center', color: 'var(--color-on-surface-variant)' }}>
+                        <td colSpan={10} style={{ padding: '24px', textAlign: 'center', color: 'var(--color-on-surface-variant)' }}>
                           No daily records in this period.
                         </td>
                       </tr>
@@ -1197,6 +1320,18 @@ export const ReportsPage = () => {
                               </td>
                               <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')} style={{ color: d.repairsNetProfit >= 0 ? 'var(--color-success)' : 'var(--color-error)' }}>
                                 {d.repairsNetProfit >= 0 ? '+' : ''}{formatCurrency(d.repairsNetProfit)}
+                              </td>
+                            </>
+                          )}
+
+                          {(dailyCategoryFilter === 'all' || dailyCategoryFilter === 'parts') && (
+                            <>
+                              <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')}>
+                                {formatCurrency(d.partsRevenue)}
+                                <div style={{ fontSize: '10.5px', color: 'var(--color-on-surface-variant)' }}>{d.partsCount || 0} invoice{(d.partsCount || 0) !== 1 ? 's' : ''}</div>
+                              </td>
+                              <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')} style={{ color: (d.partsNetProfit || 0) >= 0 ? 'var(--color-success)' : 'var(--color-error)' }}>
+                                {(d.partsNetProfit || 0) >= 0 ? '+' : ''}{formatCurrency(d.partsNetProfit || 0)}
                               </td>
                             </>
                           )}
@@ -1262,6 +1397,16 @@ export const ReportsPage = () => {
                             </td>
                             <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')} style={{ color: 'var(--color-success)' }}>
                               +{formatCurrency(data.dailyIncomeDetails.reduce((s, d) => s + d.repairsNetProfit, 0))}
+                            </td>
+                          </>
+                        )}
+                        {(dailyCategoryFilter === 'all' || dailyCategoryFilter === 'parts') && (
+                          <>
+                            <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')}>
+                              {formatCurrency(data.dailyIncomeDetails.reduce((s, d) => s + d.partsRevenue, 0))}
+                            </td>
+                            <td className={[styles.td, styles.textRight, styles.fontMono].join(' ')} style={{ color: 'var(--color-success)' }}>
+                              +{formatCurrency(data.dailyIncomeDetails.reduce((s, d) => s + (d.partsNetProfit || 0), 0))}
                             </td>
                           </>
                         )}
@@ -1332,6 +1477,18 @@ export const ReportsPage = () => {
                   <div className={styles.drawerLabel}>📱 Mobile Pay</div>
                   <div className={styles.drawerAmount}>{formatCurrency(data.paymentBreakdown.mobile)}</div>
                 </div>
+                {(data.paymentBreakdown.transfer || 0) > 0 && (
+                  <div className={styles.drawerItem}>
+                    <div className={styles.drawerLabel}>🏦 Bank Transfer</div>
+                    <div className={styles.drawerAmount}>{formatCurrency(data.paymentBreakdown.transfer || 0)}</div>
+                  </div>
+                )}
+                {(data.paymentBreakdown.storeCredit || 0) > 0 && (
+                  <div className={styles.drawerItem}>
+                    <div className={styles.drawerLabel}>🎫 Store Credit</div>
+                    <div className={styles.drawerAmount}>{formatCurrency(data.paymentBreakdown.storeCredit || 0)}</div>
+                  </div>
+                )}
                 <div className={styles.drawerItem}>
                   <div className={styles.drawerLabel}>🏷️ Discounts Given</div>
                   <div className={styles.drawerAmount} style={{ color: 'var(--color-warning)' }}>
@@ -1660,7 +1817,12 @@ export const ReportsPage = () => {
                             {tx.id.substring(0, 8)}...
                           </td>
                           <td className={styles.td}>
-                            <strong>{tx.customerName || 'Walk-in Customer'}</strong>
+                            <strong>{tx.customerName || (tx.saleType === 'parts_b2b' ? 'Wholesale Client' : 'Walk-in Customer')}</strong>
+                            {tx.saleType === 'parts_b2b' && (
+                              <span style={{ marginLeft: '6px', fontSize: '10px', background: '#e0f2fe', color: '#0369a1', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>
+                                PARTS B2B
+                              </span>
+                            )}
                           </td>
                           <td className={styles.td}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '12px' }}>

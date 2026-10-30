@@ -34,11 +34,18 @@ const docToEntry = (id: string, data: Record<string, unknown>): StockWriteOff =>
 export const writeOffService = {
   /** Save a new write-off event to Firestore. */
   log: async (entry: Omit<StockWriteOff, 'id' | 'date'>): Promise<StockWriteOff> => {
-    const docRef = await addDoc(collection(db, COLLECTION), {
-      ...entry,
-      timestamp: serverTimestamp(),
-    });
-    return { ...entry, id: docRef.id, date: new Date().toISOString() };
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return { ...entry, id: `offline_writeoff_${Date.now()}`, date: new Date().toISOString() };
+    }
+    try {
+      const docRef = await addDoc(collection(db, COLLECTION), {
+        ...entry,
+        timestamp: serverTimestamp(),
+      });
+      return { ...entry, id: docRef.id, date: new Date().toISOString() };
+    } catch {
+      return { ...entry, id: `offline_writeoff_${Date.now()}`, date: new Date().toISOString() };
+    }
   },
 
   /** Fetch all write-off logs, newest first. */

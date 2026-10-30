@@ -45,6 +45,7 @@ export interface DailyIncomeDetail {
   salesCard: number;
   salesMobile: number;
   salesTransfer: number;
+  salesStoreCredit?: number;
   salesDebt: number;
 
   // Workshop Repair Details
@@ -59,6 +60,13 @@ export interface DailyIncomeDetail {
 
   // B2B & Debt Recoveries
   partsRevenue: number;
+  partsCash?: number;
+  partsCard?: number;
+  partsMobile?: number;
+  partsTransfer?: number;
+  partsCount?: number;
+  partsCOGS?: number;
+  partsNetProfit?: number;
   debtCollectedCash: number;
   refundsCash: number;
 
@@ -108,17 +116,21 @@ export interface ReportData {
     grossRevenue: number;
     productSalesRevenue: number;
     repairRevenue: number;
+    partsSalesRevenue: number;
+    debtCollectionsTotal: number;
     discountsTotal: number;
     refundsTotal: number;
     refundsCount: number;
     netRevenue: number;
     salesCOGS: number;
     repairsCOGS: number;
+    partsCOGS: number;
     totalCOGS: number;
     grossProfit: number;
     profitMarginPercent: number;
     completedSalesCount: number;
     completedRepairsCount: number;
+    partsSalesCount: number;
     totalUnitsSold: number;
     averageOrderValue: number;
   };
@@ -128,6 +140,8 @@ export interface ReportData {
     cash: number;
     card: number;
     mobile: number;
+    transfer?: number;
+    storeCredit?: number;
     splitCount: number;
     totalCollected: number;
   };
@@ -425,29 +439,34 @@ export const reportsService = {
           repairsDebt: eod.repairsDebt,
 
           partsRevenue: eod.partsSalesRevenue || 0,
+          partsCash: (eod as any).partsSalesCash ?? (eod as any).partsCash ?? 0,
+          partsCount: (eod as any).partsSalesCount ?? (eod as any).partsCount ?? 0,
+          partsCOGS: (eod as any).partsCogs || 0,
+          partsNetProfit: (eod.partsSalesRevenue || 0) - ((eod as any).partsCogs || 0),
           debtCollectedCash: eod.debtCollectedCash || 0,
           refundsCash: eod.refundsCash || 0,
 
           totalRevenue: eod.totalRevenue,
-          totalCOGS: eod.salesCogs + eod.repairsPartsCost,
+          totalCOGS: eod.salesCogs + eod.repairsPartsCost + ((eod as any).partsCogs || 0),
           totalNetProfit: eod.totalNetProfit,
           totalPhysicalCash: eod.totalCash,
         });
       } else {
         // Unclosed day / Live Today: Compute live numbers
         const dayTx = transactions.filter(t => isSameLocalDate(t.date, dayStr));
-        const completedTx = dayTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval' && t.saleType !== 'parts_b2b');
+        const completedTx = dayTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval' && t.saleType !== 'parts_b2b');
         const refundedTx = dayTx.filter(t => t.status === 'refunded');
-        const partsTx = dayTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval' && t.saleType === 'parts_b2b');
+        const partsTx = dayTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval' && t.saleType === 'parts_b2b');
 
         const sumPayment = (txList: typeof transactions, method: string) =>
-          txList.reduce((s, tx) => s + (tx.payments || []).filter(p => p.method === method).reduce((a, p) => a + p.amount, 0), 0);
+          txList.reduce((s, tx) => s + (tx.payments || []).filter(p => String(p.method || '').toLowerCase() === method.toLowerCase()).reduce((a, p) => a + (p.amount || 0), 0), 0);
 
-        const salesCash     = sumPayment(completedTx, 'cash');
-        const salesCard     = sumPayment(completedTx, 'card');
-        const salesMobile   = sumPayment(completedTx, 'mobile');
-        const salesTransfer = sumPayment(completedTx, 'transfer');
-        const salesDebt     = sumPayment(completedTx, 'debt');
+        const salesCash        = sumPayment(completedTx, 'cash');
+        const salesCard        = sumPayment(completedTx, 'card');
+        const salesMobile      = sumPayment(completedTx, 'mobile');
+        const salesTransfer    = sumPayment(completedTx, 'transfer');
+        const salesStoreCredit = sumPayment(completedTx, 'store_credit');
+        const salesDebt        = sumPayment(completedTx, 'debt');
         const salesGrossRevenue = completedTx.reduce((s, t) => s + t.total, 0);
         const salesCOGS = completedTx.reduce(
           (s, t) => s + t.items.reduce((a, i) => a + (i.product.costPrice || 0) * i.quantity, 0), 0
@@ -483,20 +502,30 @@ export const reportsService = {
         );
 
         const partsRevenue = partsTx.reduce((s, t) => s + t.total, 0);
+        const partsCOGS = partsTx.reduce(
+          (s, t) => s + t.items.reduce((a, i) => a + (i.product.costPrice || 0) * i.quantity, 0), 0
+        );
+        const partsNetProfit = partsRevenue - partsCOGS;
+        const partsCash = sumPayment(partsTx, 'cash');
+        const partsCard = sumPayment(partsTx, 'card');
+        const partsMobile = sumPayment(partsTx, 'mobile');
+        const partsTransfer = sumPayment(partsTx, 'transfer');
+        const partsCount = partsTx.length;
 
         const todayDebtPayments = debts.flatMap(d =>
           (d.payments || []).filter(p => isSameLocalDate(p.date, dayStr))
         );
         const debtCollectedCash = todayDebtPayments
-          .filter(p => p.method === 'cash')
+          .filter(p => String(p.method || '').toLowerCase() === 'cash')
           .reduce((s, p) => s + p.amount, 0);
 
         const refundsCash = sumPayment(refundedTx, 'cash');
 
-        const totalRevenue = salesGrossRevenue + repairsRevenue + partsRevenue + debtCollectedCash;
-        const totalCOGS = salesCOGS + repairsPartsCost;
+        // Recognized earned revenue from sales, claimed repairs & parts invoices (credit recovery is cash inflow into drawer, not new revenue)
+        const totalRevenue = salesGrossRevenue + repairsRevenue + partsRevenue;
+        const totalCOGS = salesCOGS + repairsPartsCost + partsCOGS;
         const totalNetProfit = totalRevenue - totalCOGS;
-        const totalPhysicalCash = Math.max(0, (salesCash + repairsCashTotal + debtCollectedCash) - refundsCash);
+        const totalPhysicalCash = Math.max(0, salesCash + partsCash + repairsCashTotal + debtCollectedCash);
 
         dailyIncomeDetails.push({
           date: dayStr,
@@ -512,6 +541,7 @@ export const reportsService = {
           salesCard,
           salesMobile,
           salesTransfer,
+          salesStoreCredit,
           salesDebt,
 
           // repairsCompletedCount = phones claimed AND paid/partly-paid (revenue-recognized)
@@ -525,6 +555,13 @@ export const reportsService = {
           repairsDebt,
 
           partsRevenue,
+          partsCash,
+          partsCard,
+          partsMobile,
+          partsTransfer,
+          partsCount,
+          partsCOGS,
+          partsNetProfit,
           debtCollectedCash,
           refundsCash,
 
@@ -566,6 +603,10 @@ export const reportsService = {
           repairsNetProfit: 0,
           repairsCash: 0,
           partsRevenue: 0,
+          partsCash: 0,
+          partsCount: 0,
+          partsCOGS: 0,
+          partsNetProfit: 0,
           totalRevenue: 0,
           totalCOGS: 0,
           totalNetProfit: 0,
@@ -587,6 +628,10 @@ export const reportsService = {
       m.repairsNetProfit += d.repairsNetProfit;
       m.repairsCash += d.repairsCashTotal;
       m.partsRevenue += d.partsRevenue;
+      m.partsCash = (m.partsCash || 0) + (d.partsCash || 0);
+      m.partsCount = (m.partsCount || 0) + (d.partsCount || 0);
+      m.partsCOGS = (m.partsCOGS || 0) + (d.partsCOGS || 0);
+      m.partsNetProfit = (m.partsNetProfit || 0) + (d.partsNetProfit || 0);
       m.totalRevenue += d.totalRevenue;
       m.totalCOGS += d.totalCOGS;
       m.totalNetProfit += d.totalNetProfit;
@@ -612,13 +657,17 @@ export const reportsService = {
     const repairRevenue = dailyIncomeDetails.reduce((s, d) => s + d.repairsRevenue, 0);
     const repairsCOGS = dailyIncomeDetails.reduce((s, d) => s + d.repairsPartsCost, 0);
     const partsSalesRevenue = dailyIncomeDetails.reduce((s, d) => s + d.partsRevenue, 0);
+    const partsCOGS = dailyIncomeDetails.reduce((s, d) => s + (d.partsCOGS || 0), 0);
+    const partsSalesCount = dailyIncomeDetails.reduce((s, d) => s + (d.partsCount || 0), 0);
 
     const debtCollectionsTotal = dailyIncomeDetails.reduce((s, d) => s + d.debtCollectedCash, 0);
-    const grossRevenue = productSalesRevenue + repairRevenue + partsSalesRevenue + debtCollectionsTotal;
+    // Recognized Gross Revenue from sales, repairs, and parts (debt collection is drawer cash inflow, not double-counted revenue)
+    const grossRevenue = productSalesRevenue + repairRevenue + partsSalesRevenue;
     const refundsTotal = dailyIncomeDetails.reduce((s, d) => s + d.refundsCash, 0);
     const refundsCount = inRangeTx.filter(t => t.status === 'refunded').length;
-    const netRevenue = grossRevenue - refundsTotal;
-    const totalCOGS = salesCOGS + repairsCOGS;
+    // completedTx already excludes refunded transactions, so grossRevenue is already net of refunded sales
+    const netRevenue = grossRevenue;
+    const totalCOGS = salesCOGS + repairsCOGS + partsCOGS;
     const grossProfit = netRevenue - totalCOGS;
     const profitMarginPercent = netRevenue > 0 ? Math.round((grossProfit / netRevenue) * 1000) / 10 : 0;
 
@@ -627,26 +676,34 @@ export const reportsService = {
 
     let totalUnitsSold = 0;
     let discountsTotal = 0;
-    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval').forEach(t => {
-      t.items.forEach(i => { if (!i.isReturn) totalUnitsSold += i.quantity; });
+    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval').forEach(t => {
+      t.items.forEach(i => {
+        if (i.isReturn) totalUnitsSold -= i.quantity;
+        else totalUnitsSold += i.quantity;
+      });
       if (t.discount) {
         if (t.discount.type === 'flat') discountsTotal += t.discount.value;
         else discountsTotal += (t.subtotal * (t.discount.value / 100));
       }
     });
+    totalUnitsSold = Math.max(0, totalUnitsSold);
 
     const averageOrderValue = completedSalesCount > 0 ? Math.round((productSalesRevenue / completedSalesCount) * 100) / 100 : 0;
 
     const paymentCash = dailyIncomeDetails.reduce((s, d) => s + d.totalPhysicalCash, 0);
-    const paymentCard = dailyIncomeDetails.reduce((s, d) => s + d.salesCard, 0);
-    const paymentMobile = dailyIncomeDetails.reduce((s, d) => s + d.salesMobile, 0);
+    const paymentCard = dailyIncomeDetails.reduce((s, d) => s + d.salesCard + (d.partsCard || 0), 0);
+    const paymentMobile = dailyIncomeDetails.reduce((s, d) => s + d.salesMobile + (d.partsMobile || 0), 0);
+    const paymentTransfer = dailyIncomeDetails.reduce((s, d) => s + (d.salesTransfer || 0) + (d.partsTransfer || 0), 0);
+    const paymentStoreCredit = dailyIncomeDetails.reduce((s, d) => s + (d.salesStoreCredit || 0), 0);
 
     const paymentBreakdown = {
       cash: paymentCash,
       card: paymentCard,
       mobile: paymentMobile,
+      transfer: paymentTransfer,
+      storeCredit: paymentStoreCredit,
       splitCount: inRangeTx.filter(t => (t.payments || []).length > 1).length,
-      totalCollected: paymentCash + paymentCard + paymentMobile,
+      totalCollected: paymentCash + paymentCard + paymentMobile + paymentTransfer + paymentStoreCredit,
     };
 
     // 7. Dynamic Trend Chart Points
@@ -666,7 +723,7 @@ export const reportsService = {
 
         const txs = inRangeTx.filter(t => {
           const ms = new Date(t.date).getTime();
-          return t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval' && ms >= sMs && ms <= eMs;
+          return t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval' && ms >= sMs && ms <= eMs;
         });
 
         const rev = txs.reduce((sum, t) => sum + t.total, 0);
@@ -714,7 +771,7 @@ export const reportsService = {
       marginPercent: number;
     }> = {};
 
-    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval').forEach(t => {
+    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval').forEach(t => {
       t.items.forEach(item => {
         const pId = item.product.id;
         if (!productSalesMap[pId]) {
@@ -732,14 +789,22 @@ export const reportsService = {
         }
         const itemRevenue = item.product.price * item.quantity;
         const itemCost = (item.product.costPrice || 0) * item.quantity;
-        productSalesMap[pId].units += item.quantity;
-        productSalesMap[pId].revenue += itemRevenue;
-        productSalesMap[pId].cost += itemCost;
-        productSalesMap[pId].profit += (itemRevenue - itemCost);
+        if (item.isReturn) {
+          productSalesMap[pId].units -= item.quantity;
+          productSalesMap[pId].revenue -= itemRevenue;
+          productSalesMap[pId].cost -= itemCost;
+          productSalesMap[pId].profit -= (itemRevenue - itemCost);
+        } else {
+          productSalesMap[pId].units += item.quantity;
+          productSalesMap[pId].revenue += itemRevenue;
+          productSalesMap[pId].cost += itemCost;
+          productSalesMap[pId].profit += (itemRevenue - itemCost);
+        }
       });
     });
 
     const topProducts = Object.values(productSalesMap)
+      .filter(p => p.units > 0 || p.revenue > 0)
       .map(p => ({
         ...p,
         marginPercent: p.revenue > 0 ? Math.round((p.profit / p.revenue) * 1000) / 10 : 0
@@ -758,24 +823,32 @@ export const reportsService = {
     };
 
     const categoryMap: Record<string, { units: number; revenue: number }> = {};
-    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval').forEach(t => {
+    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval').forEach(t => {
       t.items.forEach(item => {
         const cat = item.product.category || 'other';
         if (!categoryMap[cat]) {
           categoryMap[cat] = { units: 0, revenue: 0 };
         }
-        categoryMap[cat].units += item.quantity;
-        categoryMap[cat].revenue += item.product.price * item.quantity;
+        const itemRevenue = item.product.price * item.quantity;
+        if (item.isReturn) {
+          categoryMap[cat].units -= item.quantity;
+          categoryMap[cat].revenue -= itemRevenue;
+        } else {
+          categoryMap[cat].units += item.quantity;
+          categoryMap[cat].revenue += itemRevenue;
+        }
       });
     });
 
+    const totalSoldRevenue = Math.max(0, productSalesRevenue + partsSalesRevenue);
     const salesByCategory = Object.entries(categoryMap).map(([category, val]) => {
-      const percentage = productSalesRevenue > 0 ? Math.round((val.revenue / productSalesRevenue) * 100) : 0;
+      const positiveRev = Math.max(0, val.revenue);
+      const percentage = totalSoldRevenue > 0 ? Math.round((positiveRev / totalSoldRevenue) * 100) : 0;
       return {
         category,
         label: categoryLabels[category] || category,
-        units: val.units,
-        revenue: val.revenue,
+        units: Math.max(0, val.units),
+        revenue: positiveRev,
         percentage
       };
     }).sort((a, b) => b.revenue - a.revenue);
@@ -879,7 +952,7 @@ export const reportsService = {
       averageTicket: number;
     }> = {};
 
-    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval').forEach(t => {
+    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval').forEach(t => {
       const workerName = t.processedByName || 'Store Cashier';
       const workerId = t.processedById || workerName;
 
@@ -941,7 +1014,7 @@ export const reportsService = {
       averageOrder: number;
     }> = {};
 
-    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval').forEach(t => {
+    inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval').forEach(t => {
       const name = t.customerName || 'Walk-in Customer';
       if (!customerMap[name]) {
         customerMap[name] = {
@@ -995,17 +1068,21 @@ export const reportsService = {
         grossRevenue,
         productSalesRevenue,
         repairRevenue,
+        partsSalesRevenue,
+        debtCollectionsTotal,
         discountsTotal,
         refundsTotal,
         refundsCount,
         netRevenue,
         salesCOGS,
         repairsCOGS,
+        partsCOGS,
         totalCOGS,
         grossProfit,
         profitMarginPercent,
         completedSalesCount,
         completedRepairsCount,
+        partsSalesCount,
         totalUnitsSold,
         averageOrderValue
       },

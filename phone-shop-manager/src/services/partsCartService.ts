@@ -22,6 +22,7 @@ export const partsCartService = {
   // ==========================================
   
   getActiveCart: async (): Promise<{ items: CartItem[]; customerName: string; customerId?: string; shopName?: string } | null> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return null;
     try {
       const snap = await getDoc(doc(db, CARTS_COLLECTION, PARTS_ACTIVE_CART_DOC));
       if (!snap.exists()) return null;
@@ -33,6 +34,7 @@ export const partsCartService = {
   },
 
   saveActiveCart: async (items: CartItem[], customerName: string, customerId?: string, shopName?: string): Promise<void> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
     try {
       const payload = cleanForFirestore({
         items,
@@ -47,6 +49,7 @@ export const partsCartService = {
   },
 
   clearActiveCart: async (): Promise<void> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
     try {
       await deleteDoc(doc(db, CARTS_COLLECTION, PARTS_ACTIVE_CART_DOC));
     } catch (e) {
@@ -59,6 +62,7 @@ export const partsCartService = {
   // ==========================================
 
   getAllSuspendedCarts: async (): Promise<SuspendedCart[]> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return [];
     try {
       const snap = await getDocs(collection(db, PARTS_SUSPENDED_COLLECTION));
       const carts = snap.docs.map(d => ({ ...d.data(), id: d.id } as SuspendedCart));
@@ -71,6 +75,7 @@ export const partsCartService = {
   },
 
   saveSuspendedCart: async (cart: SuspendedCart): Promise<void> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
     try {
       const payload = cleanForFirestore(cart);
       await setDoc(doc(db, PARTS_SUSPENDED_COLLECTION, cart.id), payload);
@@ -80,6 +85,7 @@ export const partsCartService = {
   },
 
   deleteSuspendedCart: async (id: string): Promise<void> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
     try {
       await deleteDoc(doc(db, PARTS_SUSPENDED_COLLECTION, id));
     } catch (e) {

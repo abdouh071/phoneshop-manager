@@ -251,7 +251,7 @@
 
 .txFeedRow {
   display: grid;
-  grid-template-columns: 80px 1fr 100px 100px;
+  grid-template-columns: 72px 1fr 95px 75px 95px;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
@@ -297,6 +297,11 @@
 
 .txFeedRefunded {
   color: #dc2626;
+}
+
+.txFeedCancelled {
+  color: #94a3b8;
+  text-decoration: line-through;
 }
 
 .emptyTransactions {
@@ -362,3 +367,127 @@
 .printBrowserBtn:hover:not(:disabled) {
   background: rgba(79, 70, 229, 0.12);
 }
+
+/* Details Grid (Cash Inflow Reconciliation + Payment Methods Breakdown) */
+.detailsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 768px) {
+  .detailsGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.detailPanel {
+  background: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: var(--radius-xl, 14px);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detailPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-surface-container-low, #f1f5f9);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-on-surface, #0f172a);
+}
+
+.detailPanelHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detailRows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detailRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: var(--color-on-surface, #334155);
+}
+
+.detailRowLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detailRowSub {
+  font-size: 11px;
+  color: var(--color-on-surface-variant, #94a3b8);
+  margin-left: 4px;
+}
+
+.detailRowRight {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--color-on-surface, #0f172a);
+}
+
+.detailDivider {
+  height: 1px;
+  background: var(--color-outline-variant, #e2e8f0);
+  margin: 2px 0;
+}
+
+.detailTotalRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-surface-container-low, #f8fafc);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.detailTotalRowGreen {
+  background: rgba(16, 185, 129, 0.08);
+  color: #047857;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.paymentPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.paymentPillCash {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.paymentPillCard {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.paymentPillDebt {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+

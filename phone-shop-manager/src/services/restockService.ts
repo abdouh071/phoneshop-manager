@@ -37,15 +37,30 @@ export const restockService = {
   log: async (
     entry: Omit<RestockEntry, 'id' | 'date'>
   ): Promise<RestockEntry> => {
-    const docRef = await addDoc(collection(db, COLLECTION), {
-      ...entry,
-      timestamp: serverTimestamp(),
-    });
-    return {
-      ...entry,
-      id: docRef.id,
-      date: new Date().toISOString(),
-    };
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return {
+        ...entry,
+        id: `offline_restock_${Date.now()}`,
+        date: new Date().toISOString(),
+      };
+    }
+    try {
+      const docRef = await addDoc(collection(db, COLLECTION), {
+        ...entry,
+        timestamp: serverTimestamp(),
+      });
+      return {
+        ...entry,
+        id: docRef.id,
+        date: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        ...entry,
+        id: `offline_restock_${Date.now()}`,
+        date: new Date().toISOString(),
+      };
+    }
   },
 
   /** Fetch all restock logs, newest first. */

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Customer, CustomerDebtEntry, CustomerDebtPayment, CustomerActivityLog } from '../types';
+import type { Customer, CustomerDebtEntry, CustomerDebtPayment, CustomerActivityLog, CustomerRegisteredDevice } from '../types';
 import { isShopCustomer, isRetailCustomer } from '../types';
 import { customerService } from '../services/customerService';
 import { debtService } from '../services/debtService';
@@ -10,7 +10,7 @@ import { repairService } from '../services/repairService';
 import { useAuthStore } from './authStore';
 import { formatCurrency } from '../utils/formatCurrency';
 import { isPhoneMatch, normalizePhoneDigits, isMoreDescriptiveName, formatStandardPhone, GENERIC_NAMES, isValidNameForDeduplication, isDummyPhone } from '../utils/phoneUtils';
-import { calculateCustomerFinancials } from '../utils/customerFinancials';
+import { calculateCustomerFinancials, matchesCustomer, isGenericCustomerName } from '../utils/customerFinancials';
 
 interface CustomerState {
   customers: Customer[];
@@ -152,18 +152,129 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         repairService.getAll().catch(() => []),
       ]);
       
+      // 1. Enrich existing customer documents with financials and devices from their repair tickets
       const merged = customers.map(c => {
         const fin = calculateCustomerFinancials(c, tickets, transactions, debts);
+        const cTickets = tickets.filter(t => matchesCustomer(c, t));
+        
+        // Merge registered devices from tickets into customer's profile if not already present
+        const currentDevs = c.registeredDevices ? [...c.registeredDevices] : [];
+        const seen = new Set(
+          currentDevs.map(d => `${d.brand || ''}-${d.model || ''}-${d.imei || ''}`.toLowerCase().trim())
+        );
+
+        for (const t of cTickets) {
+          if (t.deviceBrand || t.deviceModel || t.deviceImei) {
+            const devKey = `${t.deviceBrand || ''}-${t.deviceModel || ''}-${t.deviceImei || ''}`.toLowerCase().trim();
+            if (!seen.has(devKey)) {
+              seen.add(devKey);
+              currentDevs.push({
+                brand: t.deviceBrand || '',
+                model: t.deviceModel || '',
+                imei: t.deviceImei || undefined,
+                firstSeen: t.createdAt,
+                lastSeen: t.createdAt,
+              });
+            }
+          }
+        }
+
         return {
           ...c,
           totalDebt: fin.totalDebt,
           totalSpent: fin.totalSpent,
           totalPurchases: fin.totalPurchases,
           lastVisitDate: fin.lastVisitDate || c.lastVisitDate,
+          registeredDevices: currentDevs,
         };
       });
 
-      set({ customers: merged, debts, customerLogs: logs, isLoading: false });
+      // 2. Auto-discover repair clients that exist on tickets but have no standalone customer document
+      const orphanTickets = tickets.filter(t => !customers.some(c => matchesCustomer(c, t)));
+      const orphanGroups: Array<{
+        tickets: typeof tickets;
+        primaryTicket: typeof tickets[0];
+      }> = [];
+
+      orphanTickets.forEach(t => {
+        const phone = (t.customerPhone || '').trim();
+        const cleanPhone = phone ? normalizePhoneDigits(phone) : '';
+        const name = (t.customerName || '').trim().toLowerCase();
+
+        const group = orphanGroups.find(g => {
+          if (cleanPhone && cleanPhone.length >= 7) {
+            const gClean = g.primaryTicket.customerPhone ? normalizePhoneDigits(g.primaryTicket.customerPhone) : '';
+            if (gClean && isPhoneMatch(gClean, cleanPhone)) return true;
+          }
+          if (name && !isGenericCustomerName(name) && name.length >= 3) {
+            const gName = (g.primaryTicket.customerName || '').trim().toLowerCase();
+            if (gName === name) return true;
+          }
+          return false;
+        });
+
+        if (group) {
+          group.tickets.push(t);
+        } else {
+          orphanGroups.push({
+            tickets: [t],
+            primaryTicket: t,
+          });
+        }
+      });
+
+      const synthesizedCustomers: Customer[] = orphanGroups.map(group => {
+        const pt = group.primaryTicket;
+        const allDevices: CustomerRegisteredDevice[] = [];
+        const seenDevs = new Set<string>();
+
+        group.tickets.forEach(t => {
+          if (t.deviceBrand || t.deviceModel || t.deviceImei) {
+            const devKey = `${t.deviceBrand || ''}-${t.deviceModel || ''}-${t.deviceImei || ''}`.toLowerCase().trim();
+            if (!seenDevs.has(devKey)) {
+              seenDevs.add(devKey);
+              allDevices.push({
+                brand: t.deviceBrand || '',
+                model: t.deviceModel || '',
+                imei: t.deviceImei || undefined,
+                firstSeen: t.createdAt,
+                lastSeen: t.createdAt,
+              });
+            }
+          }
+        });
+
+        const rawPhone = pt.customerPhone || '';
+        const cleanPhone = rawPhone ? normalizePhoneDigits(rawPhone) : '';
+        const formattedPhone = rawPhone ? formatStandardPhone(rawPhone) : '';
+
+        const synthCustomer: Customer = {
+          id: pt.customerId || `ticket_client_${cleanPhone || pt.id}`,
+          name: pt.customerName?.trim() || `Client #${pt.ticketNumber || pt.id.slice(-4)}`,
+          phone: formattedPhone || rawPhone,
+          ...(cleanPhone ? { normalizedPhone: cleanPhone } : {}),
+          accountType: (pt as any).accountType === 'shop_repairer' ? 'shop_repairer' : 'retail',
+          shopName: (pt as any).shopName || undefined,
+          totalPurchases: 0,
+          totalSpent: 0,
+          totalDebt: 0,
+          joinDate: pt.createdAt || new Date().toISOString(),
+          lastVisitDate: pt.createdAt || new Date().toISOString(),
+          registeredDevices: allDevices,
+        };
+
+        const fin = calculateCustomerFinancials(synthCustomer, group.tickets, transactions, debts);
+        return {
+          ...synthCustomer,
+          totalDebt: fin.totalDebt,
+          totalSpent: fin.totalSpent,
+          totalPurchases: fin.totalPurchases || group.tickets.length,
+          lastVisitDate: fin.lastVisitDate || synthCustomer.lastVisitDate,
+        };
+      });
+
+      const allMerged = [...merged, ...synthesizedCustomers];
+      set({ customers: allMerged, debts, customerLogs: logs, isLoading: false });
 
       // Asynchronously repair any corrupted or stale records in Firestore in background
       setTimeout(() => {
@@ -417,8 +528,9 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       const newDebt = await debtService.addDebt(debtData);
       set(state => {
         const updatedDebts = [newDebt, ...state.debts];
+        const targetCust = state.customers.find(c => c.id === debtData.customerId);
         const newTotalDebt = updatedDebts
-          .filter(d => d.customerId === debtData.customerId && d.status !== 'paid')
+          .filter(d => (d.customerId === debtData.customerId || (targetCust && matchesCustomer(targetCust, d))) && d.status !== 'paid')
           .reduce((sum, d) => sum + d.remainingBalance, 0);
 
         return {
@@ -454,8 +566,9 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       const updatedDebt = await debtService.recordPayment(debtId, paymentData);
       set(state => {
         const updatedDebts = state.debts.map(d => (d.id === debtId ? updatedDebt : d));
+        const targetCust = state.customers.find(c => c.id === updatedDebt.customerId);
         const newTotalDebt = updatedDebts
-          .filter(d => d.customerId === updatedDebt.customerId && d.status !== 'paid')
+          .filter(d => (d.customerId === updatedDebt.customerId || (targetCust && matchesCustomer(targetCust, d))) && d.status !== 'paid')
           .reduce((sum, d) => sum + d.remainingBalance, 0);
 
         return {
@@ -556,6 +669,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
           actorRole: actor?.role,
           metadata: { debtId, oldTotal: target.totalAmount, newTotal: newTotalAmount, remainingBalance: updatedDebt.remainingBalance },
         }).catch(console.error);
+        get().recalculateCustomer(updatedDebt.customerId).catch(console.error);
       }
 
       return updatedDebt;
@@ -602,6 +716,8 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
           metadata: { debtId, productOrService: target.productOrService, totalAmount: target.totalAmount },
         }).catch(console.error);
 
+        get().recalculateCustomer(target.customerId).catch(console.error);
+
         // If deleting a debt that was linked to a repair ticket, update the ticket
         if (target.type === 'repair' || target.productOrService?.toLowerCase().includes('repair')) {
           try {
@@ -625,15 +741,17 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
   },
 
   getCustomerDebtTotal: (customerId) => {
+    const cust = get().customers.find(c => c.id === customerId);
     return get()
-      .debts.filter(d => d.customerId === customerId && d.status !== 'paid')
+      .debts.filter(d => (d.customerId === customerId || (cust && matchesCustomer(cust, d))) && d.status !== 'paid')
       .reduce((sum, d) => sum + d.remainingBalance, 0);
   },
 
   getCustomerDebts: (customerId) => {
+    const cust = get().customers.find(c => c.id === customerId);
     return get()
-      .debts.filter(d => d.customerId === customerId)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      .debts.filter(d => d.customerId === customerId || (cust && matchesCustomer(cust, d)))
+      .sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
   },
 
   recalculateCustomer: async (customerId: string) => {
@@ -647,7 +765,34 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         repairService.getAll().catch(() => []),
       ]);
 
-      const fin = calculateCustomerFinancials(targetCustomer, tickets, transactions, state.debts);
+      // Pull active in-memory transactions, invoices, and tickets to guarantee 100% real-time reflection
+      let localCartTxs: any[] = [];
+      let localInvoices: any[] = [];
+      let localTickets: any[] = [];
+      try {
+        const { useCartStore } = await import('./cartStore');
+        const { usePartsCartStore } = await import('./partsCartStore');
+        const { useRepairStore } = await import('./repairStore');
+        localCartTxs = useCartStore.getState().transactions || [];
+        localInvoices = usePartsCartStore.getState().invoices || [];
+        localTickets = useRepairStore.getState().tickets || [];
+      } catch (storeErr) {
+        // Fallback to server arrays
+      }
+
+      const txMap = new Map<string, any>();
+      [...transactions, ...localCartTxs, ...localInvoices].forEach(tx => {
+        if (tx && tx.id) txMap.set(tx.id, tx);
+      });
+      const allTransactions = Array.from(txMap.values());
+
+      const ticketMap = new Map<string, any>();
+      [...tickets, ...localTickets].forEach(tk => {
+        if (tk && tk.id) ticketMap.set(tk.id, tk);
+      });
+      const allTickets = Array.from(ticketMap.values());
+
+      const fin = calculateCustomerFinancials(targetCustomer, allTickets, allTransactions, state.debts);
       set({
         customers: state.customers.map(c =>
           c.id === customerId
@@ -682,8 +827,34 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         repairService.getAll().catch(() => []),
       ]);
 
+      let localCartTxs: any[] = [];
+      let localInvoices: any[] = [];
+      let localTickets: any[] = [];
+      try {
+        const { useCartStore } = await import('./cartStore');
+        const { usePartsCartStore } = await import('./partsCartStore');
+        const { useRepairStore } = await import('./repairStore');
+        localCartTxs = useCartStore.getState().transactions || [];
+        localInvoices = usePartsCartStore.getState().invoices || [];
+        localTickets = useRepairStore.getState().tickets || [];
+      } catch (storeErr) {
+        // Fallback
+      }
+
+      const txMap = new Map<string, any>();
+      [...transactions, ...localCartTxs, ...localInvoices].forEach(tx => {
+        if (tx && tx.id) txMap.set(tx.id, tx);
+      });
+      const allTransactions = Array.from(txMap.values());
+
+      const ticketMap = new Map<string, any>();
+      [...tickets, ...localTickets].forEach(tk => {
+        if (tk && tk.id) ticketMap.set(tk.id, tk);
+      });
+      const allTickets = Array.from(ticketMap.values());
+
       const updated = state.customers.map(c => {
-        const fin = calculateCustomerFinancials(c, tickets, transactions, state.debts);
+        const fin = calculateCustomerFinancials(c, allTickets, allTransactions, state.debts);
         return {
           ...c,
           totalSpent: fin.totalSpent,
@@ -871,8 +1042,8 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         return await applyEnrichments(existing);
       }
 
-      // 2. Search remote Firestore fallback if phone was provided
-      if (hasValidPhone) {
+      // 2. Search remote Firestore fallback if phone was provided and online
+      if (hasValidPhone && (typeof navigator === 'undefined' || navigator.onLine)) {
         const remote = await customerService.findByPhone(trimmedPhone);
         if (remote) {
           const enriched = await applyEnrichments(remote);
@@ -1232,6 +1403,20 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
     const combinedSpent = (primary.totalSpent || 0) + (secondary.totalSpent || 0);
     const combinedCredit = (primary.storeCredit || 0) + (secondary.storeCredit || 0);
 
+    // Merge registered devices without duplicates
+    const existingDevices = primary.registeredDevices || [];
+    const secondaryDevices = secondary.registeredDevices || [];
+    const mergedDevices = [...existingDevices];
+    for (const sDev of secondaryDevices) {
+      const alreadyHas = mergedDevices.some(d =>
+        (d.imei && sDev.imei && d.imei === sDev.imei) ||
+        (d.brand.toLowerCase().trim() === sDev.brand.toLowerCase().trim() && d.model.toLowerCase().trim() === sDev.model.toLowerCase().trim())
+      );
+      if (!alreadyHas) {
+        mergedDevices.push(sDev);
+      }
+    }
+
     const primaryUpdates: Partial<Customer> = {
       name: mergedName,
       phone: mergedPhone,
@@ -1242,6 +1427,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       totalPurchases: combinedPurchases,
       totalSpent: combinedSpent,
       storeCredit: combinedCredit,
+      registeredDevices: mergedDevices.length > 0 ? mergedDevices : undefined,
     };
 
     // 1. Update primary customer record
@@ -1368,6 +1554,8 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         deletedSecondaryDoc: deleteSecondaryDoc,
       },
     }).catch(console.error);
+
+    get().recalculateCustomer(primary.id).catch(console.error);
 
     return finalPrimary;
   },

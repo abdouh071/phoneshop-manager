@@ -1,5 +1,6 @@
 import type { CustomerDebtEntry } from '../types';
 import { formatCurrency } from './formatCurrency';
+import { formatWhatsAppUrl } from './phoneUtils';
 
 /**
  * Checks whether a debt record is past its due date with an outstanding balance.
@@ -74,6 +75,8 @@ export const getCustomerOverdueInfo = (debts: CustomerDebtEntry[], customerId: s
 
 /**
  * Generates a pre-filled WhatsApp link with a professional debt reminder message.
+ * Formats the phone number authoritatively with international country code (213 for DZ).
+ * Returns empty string if the phone number is missing or invalid.
  */
 export const buildWhatsAppDebtReminderUrl = (params: {
   customerName: string;
@@ -84,8 +87,6 @@ export const buildWhatsAppDebtReminderUrl = (params: {
   daysOverdue?: number;
   shopName?: string;
 }): string => {
-  const cleanPhone = params.customerPhone.replace(/\D/g, '');
-  
   const formatDate = (iso?: string) => {
     if (!iso) return '';
     const d = new Date(iso);
@@ -111,5 +112,5 @@ export const buildWhatsAppDebtReminderUrl = (params: {
 
   message += `\nMerci de bien vouloir passer à la boutique pour régulariser votre situation. Merci de votre confiance ! 🙏`;
 
-  return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+  return formatWhatsAppUrl(params.customerPhone, message) || '';
 };

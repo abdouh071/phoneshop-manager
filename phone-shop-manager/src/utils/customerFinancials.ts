@@ -34,7 +34,7 @@ export const isGenericCustomerName = (name?: string | null): boolean => {
  */
 export const matchesCustomer = (
   customer: Customer,
-  entity: { customerId?: string; customerPhone?: string; customerName?: string }
+  entity: { customerId?: string; customerPhone?: string; customerName?: string; shopName?: string }
 ): boolean => {
   // 1. Direct ID match
   if (entity.customerId && entity.customerId === customer.id) {
@@ -43,6 +43,25 @@ export const matchesCustomer = (
 
   // 2. Phone match (requires >= 7 digits for confidence)
   if (entity.customerPhone && customer.phone && isPhoneMatch(entity.customerPhone, customer.phone)) {
+    return true;
+  }
+
+  // 2b. Shop name match (if entity.shopName matches customer.shopName)
+  if (
+    entity.shopName &&
+    customer.shopName &&
+    entity.shopName.trim().toLowerCase() === customer.shopName.trim().toLowerCase() &&
+    !isGenericCustomerName(customer.shopName)
+  ) {
+    if (
+      entity.customerPhone &&
+      customer.phone &&
+      normalizePhoneDigits(entity.customerPhone).length >= 7 &&
+      normalizePhoneDigits(customer.phone).length >= 7 &&
+      !isPhoneMatch(entity.customerPhone, customer.phone)
+    ) {
+      return false;
+    }
     return true;
   }
 
@@ -76,6 +95,38 @@ export const matchesCustomer = (
 };
 
 /**
+ * Normalizes device brand and model names to prevent duplicates and redundant prefixes.
+ * e.g. brand "Apple", model "Apple iPhone 11" -> brand "Apple", model "iPhone 11", displayName "Apple iPhone 11"
+ */
+export const normalizeDeviceDetails = (brandRaw?: string | null, modelRaw?: string | null) => {
+  let brand = (brandRaw || '').trim();
+  let model = (modelRaw || '').trim();
+
+  // Strip redundant leading brand from model (case-insensitive)
+  if (brand && model.toLowerCase().startsWith(brand.toLowerCase())) {
+    const stripped = model.slice(brand.length).trim();
+    if (stripped) {
+      model = stripped;
+    }
+  }
+
+  const displayName = brand && model
+    ? `${brand} ${model}`
+    : (brand || model || 'Unknown Device');
+
+  const canonicalKey = `${brand.toLowerCase()} ${model.toLowerCase()}`.trim() || 'unknown';
+
+  return {
+    brand,
+    model,
+    cleanBrand: brand,
+    cleanModel: model,
+    displayName,
+    canonicalKey,
+  };
+};
+
+/**
  * Authoritatively calculates real money spent by a customer from verifiable receipts & records.
  * Rules:
  *  - Only actual money PAID is counted towards totalSpent.
@@ -90,10 +141,30 @@ export const calculateCustomerFinancials = (
   transactions: SaleTransaction[] = [],
   debts: CustomerDebtEntry[] = []
 ): CustomerFinancialStats => {
-  // Filter matching entities without duplicates
-  const matchedDebts = debts.filter(d => matchesCustomer(customer, d));
-  const matchedTickets = tickets.filter(t => matchesCustomer(customer, t));
-  const matchedTxs = transactions.filter(tx => matchesCustomer(customer, tx));
+  // Filter matching entities with strict ID deduplication to prevent double counting
+  const debtMap = new Map<string, CustomerDebtEntry>();
+  for (const d of debts) {
+    if (d && d.id && !debtMap.has(d.id) && matchesCustomer(customer, d)) {
+      debtMap.set(d.id, d);
+    }
+  }
+  const matchedDebts = Array.from(debtMap.values());
+
+  const ticketMap = new Map<string, RepairTicket>();
+  for (const tk of tickets) {
+    if (tk && tk.id && !ticketMap.has(tk.id) && matchesCustomer(customer, tk)) {
+      ticketMap.set(tk.id, tk);
+    }
+  }
+  const matchedTickets = Array.from(ticketMap.values());
+
+  const txMap = new Map<string, SaleTransaction>();
+  for (const tx of transactions) {
+    if (tx && tx.id && !txMap.has(tx.id) && matchesCustomer(customer, tx)) {
+      txMap.set(tx.id, tx);
+    }
+  }
+  const matchedTxs = Array.from(txMap.values());
 
   // Current unpaid debt balance
   const totalDebt = matchedDebts.reduce((sum, d) => {
@@ -144,7 +215,7 @@ export const calculateCustomerFinancials = (
       const nonDebtPaid = tx.payments
         .filter(p => p.method !== 'debt')
         .reduce((s, p) => s + (Number(p.amount) || 0), 0);
-      salesPaid += Math.max(0, nonDebtPaid);
+      salesPaid += Math.min(tx.total || 0, Math.max(0, nonDebtPaid));
       continue;
     }
 

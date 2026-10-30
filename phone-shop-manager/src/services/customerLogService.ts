@@ -36,6 +36,12 @@ export const customerLogService = {
    * Fetch all logs for a specific customer, newest first.
    */
   getByCustomerId: async (customerId: string): Promise<CustomerActivityLog[]> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return getLocalLogs()
+        .filter(l => l.customerId === customerId)
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
+
     try {
       const q = query(
         collection(db, COLLECTION),
@@ -66,6 +72,10 @@ export const customerLogService = {
    * Fetch all customer activity logs across all customers (latest 300).
    */
   getAll: async (): Promise<CustomerActivityLog[]> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return getLocalLogs().sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
+
     try {
       const q = query(
         collection(db, COLLECTION),
@@ -99,7 +109,16 @@ export const customerLogService = {
       metadata: entry.metadata || {},
     };
 
-    let id = `local_log_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    // If offline, store locally with offline_ prefix so unifiedOfflineSyncService catches and syncs it
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const offlineId = `offline_log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const created: CustomerActivityLog = { id: offlineId, ...cleanEntry };
+      const local = getLocalLogs();
+      saveLocalLogs([created, ...local]);
+      return created;
+    }
+
+    let id = `offline_log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     try {
       const docRef = await addDoc(collection(db, COLLECTION), cleanEntry);
       id = docRef.id;

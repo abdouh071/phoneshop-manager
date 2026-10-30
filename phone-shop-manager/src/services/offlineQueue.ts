@@ -18,12 +18,25 @@
 
 const QUEUE_KEY = 'offline_action_queue';
 
+/** Maximum attempts before an action is permanently dropped */
+const MAX_RETRY_COUNT = 5;
+
+/**
+ * Exponential back-off delay (seconds) for retry slot N:
+ *   slot 0 → 2s, slot 1 → 4s, slot 2 → 8s, slot 3 → 16s, slot 4 → 32s (max ≈ 5 min)
+ */
+function backoffDelayMs(retryCount: number): number {
+  return Math.min(Math.pow(2, retryCount + 1) * 1000, 5 * 60 * 1000);
+}
+
 export interface OfflineAction {
   id: string;
   type: string;
   payload: any;
   enqueuedAt: string;
   retryCount: number;
+  /** ISO timestamp before which this action should NOT be retried (exponential back-off) */
+  nextRetryAfter?: string;
 }
 
 type ActionHandler = (payload: any) => Promise<void>;
@@ -82,10 +95,24 @@ export const offlineQueue = {
   },
 
   /**
-   * Enqueue an action for later sync (or immediate execution if online).
-   * Returns true if executed immediately, false if queued for later.
+   * Enqueue an action for later sync.
+   * Supports both:
+   *   offlineQueue.enqueue({ type: 'UPDATE_REPAIR_STATUS', payload: { id, status } })
+   * and:
+   *   offlineQueue.enqueue('UPDATE_REPAIR_STATUS', { id, status })
+   *
+   * Returns true if processed immediately, false if queued for later sync.
    */
-  async enqueue(action: Omit<OfflineAction, 'id' | 'enqueuedAt' | 'retryCount'>): Promise<boolean> {
+  async enqueue(
+    actionOrType: Omit<OfflineAction, 'id' | 'enqueuedAt' | 'retryCount'> | string,
+    payloadArg?: any,
+    options?: { tryImmediate?: boolean }
+  ): Promise<boolean> {
+    const action: Omit<OfflineAction, 'id' | 'enqueuedAt' | 'retryCount'> =
+      typeof actionOrType === 'string'
+        ? { type: actionOrType, payload: payloadArg }
+        : actionOrType;
+
     const fullAction: OfflineAction = {
       ...action,
       id: `offline_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
@@ -93,8 +120,8 @@ export const offlineQueue = {
       retryCount: 0,
     };
 
-    if (navigator.onLine) {
-      // Try to execute immediately if online
+    if (options?.tryImmediate && typeof navigator !== 'undefined' && navigator.onLine) {
+      // Try to execute immediately if explicitly requested and online
       const handler = handlers.get(action.type);
       if (handler) {
         try {
@@ -106,7 +133,7 @@ export const offlineQueue = {
       }
     }
 
-    // Queue for later
+    // Queue for later sync
     const queue = getQueue();
     queue.push(fullAction);
     saveQueue(queue);
@@ -126,8 +153,15 @@ export const offlineQueue = {
     let failed = 0;
     const queue = getQueue();
     const remaining: OfflineAction[] = [];
+    const now = Date.now();
 
     for (const action of queue) {
+      // --- Exponential back-off: skip until the retry window has elapsed ---
+      if (action.nextRetryAfter && new Date(action.nextRetryAfter).getTime() > now) {
+        remaining.push(action); // preserve, will try later
+        continue;
+      }
+
       const handler = handlers.get(action.type);
       if (!handler) {
         console.warn(`[OfflineQueue] No handler for action type: ${action.type} — dropping.`);
@@ -139,12 +173,18 @@ export const offlineQueue = {
         await handler(action.payload);
         success++;
       } catch (err) {
-        console.error(`[OfflineQueue] Failed to sync action ${action.type}:`, err);
+        console.error(`[OfflineQueue] Failed to sync action ${action.type} (attempt ${action.retryCount + 1}/${MAX_RETRY_COUNT}):`, err);
         failed++;
-        if (action.retryCount < 5) {
-          remaining.push({ ...action, retryCount: action.retryCount + 1 });
+        if (action.retryCount < MAX_RETRY_COUNT - 1) {
+          const nextRetry = new Date(now + backoffDelayMs(action.retryCount)).toISOString();
+          remaining.push({
+            ...action,
+            retryCount: action.retryCount + 1,
+            nextRetryAfter: nextRetry,
+          });
+        } else {
+          console.error(`[OfflineQueue] Action ${action.type} (id=${action.id}) permanently dropped after ${MAX_RETRY_COUNT} attempts.`);
         }
-        // else drop after 5 retries
       }
     }
 

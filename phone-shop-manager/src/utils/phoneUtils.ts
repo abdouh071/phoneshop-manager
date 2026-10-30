@@ -218,3 +218,36 @@ export const isMoreDescriptiveName = (newName?: string | null, existingName?: st
 
   return false;
 };
+
+/**
+ * Formats a phone number into an authoritative WhatsApp chat URL.
+ * Handles Algerian numbers: strips leading 0 and adds country code 213
+ * (e.g. 0550 12 34 56 -> https://wa.me/213550123456).
+ * Handles numbers with existing international prefixes (+213, 00213).
+ * Returns null if the phone is missing, dummy, or invalid (< 8 digits).
+ */
+export const formatWhatsAppUrl = (phone?: string | null, message?: string): string | null => {
+  if (!phone || isDummyPhone(phone)) return null;
+
+  const rawClean = phone.replace(/[^\d+]/g, '');
+  const digits = normalizePhoneDigits(phone);
+  if (digits.length < 8) return null;
+
+  let intlDigits = digits;
+
+  // Algerian mobile (05, 06, 07) or landline (02, 03, 04) starting with 0
+  if (digits.startsWith('0') && (digits.length === 10 || digits.length === 9)) {
+    intlDigits = `213${digits.slice(1)}`;
+  } else if (rawClean.startsWith('+') && !rawClean.startsWith('+213')) {
+    // Non-Algerian foreign number with international plus prefix (e.g. +33...)
+    intlDigits = rawClean.slice(1);
+  } else if (!digits.startsWith('213')) {
+    // 9-digit Algerian mobile missing leading zero
+    if (digits.length === 9 && (digits.startsWith('5') || digits.startsWith('6') || digits.startsWith('7'))) {
+      intlDigits = `213${digits}`;
+    }
+  }
+
+  const query = message ? `?text=${encodeURIComponent(message)}` : '';
+  return `https://wa.me/${intlDigits}${query}`;
+};

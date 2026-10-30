@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Printer, Send, Download, FileText, Calendar, Store, User,
   CheckCircle2, AlertCircle, ArrowUpRight, DollarSign, X, ShieldCheck
@@ -6,12 +6,15 @@ import {
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { useCartStore } from '../../store/cartStore';
+import { usePartsCartStore } from '../../store/partsCartStore';
 import { useCustomerStore } from '../../store/customerStore';
 import { useRepairStore } from '../../store/repairStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { exportToCSV } from '../../utils/exportUtils';
+import { matchesCustomer } from '../../utils/customerFinancials';
+import { formatWhatsAppUrl } from '../../utils/phoneUtils';
 import type { Customer, SaleTransaction, CustomerDebtEntry } from '../../types';
 import styles from './AccountStatement.module.css';
 
@@ -51,10 +54,17 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
   onClose,
 }) => {
   const { transactions } = useCartStore();
-  const { getCustomerDebts, getCustomerDebtTotal } = useCustomerStore();
+  const { invoices, fetchInvoices } = usePartsCartStore();
+  const { debts, getCustomerDebts, getCustomerDebtTotal } = useCustomerStore();
   const { tickets } = useRepairStore();
   const settings = useSettingsStore();
   const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
+
+  useEffect(() => {
+    if (invoices.length === 0) {
+      fetchInvoices();
+    }
+  }, [invoices.length, fetchInvoices]);
 
   const [datePreset, setDatePreset] = useState<DatePreset>('this_month');
   const [customStart, setCustomStart] = useState<string>(() => {
@@ -101,20 +111,20 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
   const allEvents = useMemo(() => {
     if (!customer) return [];
 
-    const custNameLower = customer.name.toLowerCase().trim();
-    const custShopLower = (customer.shopName || '').toLowerCase().trim();
-    const custPhone = normalizePhone(customer.phone);
+    // Combine Retail POS and Wholesale B2B Parts Invoices without duplicates
+    const allTxsMap = new Map<string, SaleTransaction>();
+    transactions.forEach(t => allTxsMap.set(t.id, t));
+    invoices.forEach(inv => allTxsMap.set(inv.id, inv));
+    const allCombinedTxs = Array.from(allTxsMap.values());
 
     // 1. Transactions (Retail POS or B2B Parts Invoices)
-    const custTxs = transactions.filter(tx => {
-      if (tx.customerId && tx.customerId === customer.id) return true;
-      if (custPhone && tx.customerPhone && normalizePhone(tx.customerPhone) === custPhone) return true;
-      if (custShopLower && tx.shopName && tx.shopName.toLowerCase().trim() === custShopLower) return true;
-      return (tx.customerName || '').toLowerCase().trim() === custNameLower;
-    });
+    const custTxs = allCombinedTxs.filter(tx => matchesCustomer(customer, tx));
 
-    // 2. Debts
-    const custDebts = getCustomerDebts(customer.id);
+    // 2. Debts (robust matching by ID, phone, or name)
+    const custDebts = debts
+      .filter(d => matchesCustomer(customer, d) || d.customerId === customer.id)
+      .sort((a, b) => new Date(a.createdAt || a.date).getTime() - new Date(b.createdAt || b.date).getTime());
+
     const linkedDebtIds = new Set<string>();
 
     // Map any debt that was created directly from a transaction
@@ -136,12 +146,8 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
       }
     });
 
-    // 3. Repair Tickets (Problem 10 fix: Include repair revenue and intake deposits)
-    const custTickets = tickets.filter(t => {
-      if (t.customerId && t.customerId === customer.id) return true;
-      if (custPhone && t.customerPhone && normalizePhone(t.customerPhone) === custPhone) return true;
-      return (t.customerName || '').toLowerCase().trim() === custNameLower;
-    });
+    // 3. Repair Tickets (Include repair revenue and intake deposits)
+    const custTickets = tickets.filter(t => matchesCustomer(customer, t));
 
     custTickets.forEach(t => {
       if (t.debtEntryId) linkedDebtIds.add(t.debtEntryId);
@@ -303,7 +309,11 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
         const totalPaid = t.paidAmount ?? 0;
         const handoverPaid = Math.max(0, t.handoverAmountPaid ?? (totalPaid - deposit));
 
-        let repairDesc = `Repair Service #${refNumber} (${deviceDesc}${issueSummary})`;
+        const partsDesc = t.partsUsed && t.partsUsed.length > 0
+          ? ` [Parts: ${t.partsUsed.map(p => `${p.quantity}× ${p.name}`).join(', ')}]`
+          : '';
+
+        let repairDesc = `Repair Service #${refNumber} (${deviceDesc}${issueSummary})${partsDesc}`;
         if (finalCost === 0) {
           repairDesc += ' — Free / Warranty Service';
         } else if (totalPaid >= finalCost) {
@@ -330,7 +340,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
 
     // Sort strictly chronologically ascending
     return events.sort((a, b) => a.rawTimestamp - b.rawTimestamp);
-  }, [customer, transactions, getCustomerDebts, tickets]);
+  }, [customer, transactions, invoices, debts, tickets]);
 
   // Compute Opening Balance, Period Journal, and Closing Balance atomically
   const statementData = useMemo(() => {
@@ -430,10 +440,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
 ━━━━━━━━━━━━━━━━━━━
 ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review your account statement and contact us for any inquiries. Thank you!`;
 
-    const cleanPhone = customer.phone.replace(/\D/g, '');
-    const url = cleanPhone
-      ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`
-      : `https://wa.me/?text=${encodeURIComponent(text)}`;
+    const url = formatWhatsAppUrl(customer.phone, text) || `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(url, '_blank');
   };
 

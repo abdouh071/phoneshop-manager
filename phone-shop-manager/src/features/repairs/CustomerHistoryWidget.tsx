@@ -41,6 +41,7 @@ export interface TicketComputedStatus {
   debtAmount: number;
   totalCost: number;
   isDebt: boolean;
+  isActivelyReturned: boolean;
 }
 
 export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
@@ -246,6 +247,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
       debtAmount,
       totalCost,
       isDebt,
+      isActivelyReturned,
     };
   };
 
@@ -541,7 +543,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
                       </span>
 
                       {/* Return and Re-repair notes */}
-                      {t.status === 'returned' && !isActivelyReturned && (
+                      {t.status === 'returned' && !fin.isActivelyReturned && (
                         <div style={{
                           fontSize: '11px',
                           color: '#15803d',

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Modal } from '../../components/ui/Modal';
 import { Printer, Users, FileText } from 'lucide-react';
 import { useCartStore } from '../../store/cartStore';
+import { usePartsCartStore } from '../../store/partsCartStore';
 import { useRepairStore } from '../../store/repairStore';
 import { useCustomerStore } from '../../store/customerStore';
 import { useSettingsStore } from '../../store/settingsStore';
@@ -10,7 +11,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import { printZReportDirect, openZReportPrintWindow } from '../../utils/printWindow';
 import { useToast } from '../../components/ui/Toast';
 import { EndOfDayButton } from '../endofday/EndOfDayButton';
-import { isSameLocalDate } from '../../store/endOfDayStore';
+import { isSameLocalDate, toDateStr } from '../../store/endOfDayStore';
 import { isClaimedAndPaidRepair, getClaimedRepairHandoverCash } from '../../utils/repairFinancials';
 import styles from './CashDrawer.module.css';
 
@@ -21,6 +22,7 @@ interface CashDrawerModalProps {
 
 export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClose }) => {
   const { transactions } = useCartStore();
+  const { invoices: partsInvoices } = usePartsCartStore();
   const { tickets } = useRepairStore();
   const { debts } = useCustomerStore();
   const { storeName, currency } = useSettingsStore();
@@ -28,33 +30,41 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
   const toast = useToast();
 
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'custom'>('today');
-  const [customDate, setCustomDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [customDate, setCustomDate] = useState<string>(() => toDateStr(new Date()));
   const [isPrinting, setIsPrinting] = useState(false);
 
-  // Target Date calculation
+  // Target Date calculation in local timezone
   const targetDateStr = useMemo(() => {
-    const d = new Date();
     if (dateFilter === 'yesterday') {
+      const d = new Date();
       d.setDate(d.getDate() - 1);
-      return d.toISOString().split('T')[0];
+      return toDateStr(d);
     }
     if (dateFilter === 'custom') {
       return customDate;
     }
-    return d.toISOString().split('T')[0];
+    return toDateStr(new Date());
   }, [dateFilter, customDate]);
 
-  // Filter transactions for the selected date
+  // Combine POS transactions and Parts B2B invoices for the selected local date
   const shiftTransactions = useMemo(() => {
-    return transactions.filter(t => {
-      return isSameLocalDate(t.date, targetDateStr);
-    });
-  }, [transactions, targetDateStr]);
+    const posTx = transactions || [];
+    const partsTx = partsInvoices || [];
+    const txMap = new Map<string, typeof posTx[0]>();
+    posTx.forEach(t => txMap.set(t.id, t));
+    partsTx.forEach(t => txMap.set(t.id, t));
+    return Array.from(txMap.values()).filter(t => isSameLocalDate(t.date, targetDateStr));
+  }, [transactions, partsInvoices, targetDateStr]);
 
   // Calculations for real exact cash & income
   const stats = useMemo(() => {
-    const completed = shiftTransactions.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval');
-    const refunded = shiftTransactions.filter(t => t.status === 'refunded');
+    const isCancelledOrVoided = (t: typeof shiftTransactions[0]) =>
+      t.status === 'voided' || t.status === 'cancelled' || t.status === 'pending_approval';
+    const isRefunded = (t: typeof shiftTransactions[0]) => t.status === 'refunded';
+
+    // Strictly active completed transactions (excludes refunded, cancelled, voided, pending_approval)
+    const completed = shiftTransactions.filter(t => !isRefunded(t) && !isCancelledOrVoided(t));
+    const refunded = shiftTransactions.filter(t => isRefunded(t));
 
     const grossSales = completed.reduce((sum, t) => sum + t.total, 0);
     const salesCount = completed.length;
@@ -62,21 +72,37 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
     const refundsAmount = refunded.reduce((sum, t) => sum + t.total, 0);
     const refundsCount = refunded.length;
 
-    // 1. Direct POS Cash
-    const cashIn = completed.reduce((sum, t) => {
-      const cashPayments = (t.payments || [])
-        .filter(p => p.method === 'cash')
-        .reduce((s, p) => s + p.amount, 0);
-      return sum + cashPayments;
-    }, 0);
+    // 1. Direct POS Retail vs Parts B2B Cash split
+    const posRetailTxs = completed.filter(t => t.saleType !== 'parts_b2b');
+    const partsB2BTxs = completed.filter(t => t.saleType === 'parts_b2b');
 
-    // Non-cash breakdown
-    const debtTotal = completed.reduce((sum, t) => {
-      return sum + (t.payments || []).filter(p => p.method === 'debt').reduce((s, p) => s + p.amount, 0);
-    }, 0);
-    const creditTotal = completed.reduce((sum, t) => {
-      return sum + (t.payments || []).filter(p => p.method === 'store_credit').reduce((s, p) => s + p.amount, 0);
-    }, 0);
+    const sumPayment = (txList: typeof completed, method: string) => {
+      return txList.reduce((sum, t) => {
+        if (t.payments && t.payments.length > 0) {
+          const match = t.payments
+            .filter(p => String(p.method || '').toLowerCase() === method.toLowerCase())
+            .reduce((s, p) => s + (p.amount || 0), 0);
+          return sum + match;
+        }
+        return sum + (method.toLowerCase() === 'cash' ? Math.max(0, t.total || 0) : 0);
+      }, 0);
+    };
+
+    const posRetailCash = sumPayment(posRetailTxs, 'cash');
+    const partsB2BCash = sumPayment(partsB2BTxs, 'cash');
+    const cashIn = posRetailCash + partsB2BCash;
+
+    // All tender breakdown for completed sales
+    const cardTotal = sumPayment(completed, 'card');
+    const mobileTotal = sumPayment(completed, 'mobile');
+    const transferTotal = sumPayment(completed, 'transfer');
+    const debtTotal = sumPayment(completed, 'debt');
+    const creditTotal = sumPayment(completed, 'store_credit');
+
+    // Cancelled / Voided transactions
+    const cancelled = shiftTransactions.filter(t => isCancelledOrVoided(t));
+    const cancelledCount = cancelled.length;
+    const cancelledAmount = cancelled.reduce((sum, t) => sum + t.total, 0);
 
     // 2. Repairs Cash (intake deposits + handover completions)
     // Handovers only counted for claimed+paid phones; pure-debt completions excluded
@@ -96,11 +122,25 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
     // 3. Customer Debt Tab Collections Cash
     const todayDebtPayments = debts.flatMap(d => (d.payments || []).filter(p => isSameLocalDate(p.date, targetDateStr)));
     const debtCollectedCash = todayDebtPayments
-      .filter(p => p.method === 'cash')
-      .reduce((s, p) => s + p.amount, 0);
+      .filter(p => String(p.method || '').toLowerCase() === 'cash')
+      .reduce((s, p) => s + (p.amount || 0), 0);
+    const debtCollectedCard = todayDebtPayments
+      .filter(p => String(p.method || '').toLowerCase() === 'card')
+      .reduce((s, p) => s + (p.amount || 0), 0);
+    const debtCollectedMobile = todayDebtPayments
+      .filter(p => String(p.method || '').toLowerCase() === 'mobile')
+      .reduce((s, p) => s + (p.amount || 0), 0);
+
+    // Counts
+    const posRetailCount = posRetailTxs.length;
+    const partsB2BCount = partsB2BTxs.length;
+    const repairHandoversCount = claimedPaidRepairs.length;
+    const repairDepositsCount = createdRepairs.filter(t => (t.depositAmount || 0) > 0).length;
+    const debtCollectionsCount = todayDebtPayments.filter(p => String(p.method || '').toLowerCase() === 'cash').length;
 
     // 4. Exact Physical Cash in Drawer
-    const netCash = Math.max(0, (cashIn + repairsCashIn + debtCollectedCash) - refundsAmount);
+    // Completed transactions only include real money kept; refunded and cancelled transactions are excluded (contribute 0 cash)
+    const netCash = Math.max(0, cashIn + repairsCashIn + debtCollectedCash);
 
     const unitsSold = completed.reduce((sum, t) => {
       return sum + t.items
@@ -137,10 +177,26 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
       salesCount,
       refundsAmount,
       refundsCount,
+      cancelledCount,
+      cancelledAmount,
       netCash,
       cashIn,
+      posRetailCash,
+      posRetailCount,
+      partsB2BCash,
+      partsB2BCount,
       repairsCashIn,
+      repairHandoversCash,
+      repairHandoversCount,
+      repairDepositsCash,
+      repairDepositsCount,
       debtCollectedCash,
+      debtCollectedCard,
+      debtCollectedMobile,
+      debtCollectionsCount,
+      cardTotal,
+      mobileTotal,
+      transferTotal,
       debtTotal,
       creditTotal,
       unitsSold,
@@ -286,7 +342,7 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
             <div className={[styles.kpiValue, styles.kpiValueRefund].join(' ')}>
               {stats.refundsAmount > 0 ? `-${formatCurrency(stats.refundsAmount)}` : formatCurrency(0)}
             </div>
-            <div className={styles.kpiSub}>{stats.refundsCount} refund{stats.refundsCount !== 1 ? 's' : ''} processed</div>
+            <div className={styles.kpiSub}>{stats.refundsCount} refund{stats.refundsCount !== 1 ? 's' : ''} (excluded from drawer)</div>
           </div>
 
           {/* 4. Net Cash in Drawer */}
@@ -327,6 +383,173 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
           </div>
         </div>
 
+        {/* Detailed Financial Panels: Inflow Reconciliation & Tender Breakdown */}
+        <div className={styles.detailsGrid}>
+          {/* Panel 1: Physical Cash Inflows (Till Reconciliation) */}
+          <div className={styles.detailPanel}>
+            <div className={styles.detailPanelHeader}>
+              <div className={styles.detailPanelHeaderLeft}>
+                <span>💵</span>
+                <span>Physical Cash Inflows (Till)</span>
+              </div>
+              <span style={{ fontSize: '11px', color: 'var(--color-on-surface-variant, #64748b)' }}>Itemized</span>
+            </div>
+
+            <div className={styles.detailRows}>
+              <div className={styles.detailRow}>
+                <div className={styles.detailRowLeft}>
+                  <span>🛒 Retail POS Cash</span>
+                  <span className={styles.detailRowSub}>({stats.posRetailCount} sale{stats.posRetailCount !== 1 ? 's' : ''})</span>
+                </div>
+                <span className={styles.detailRowRight}>{formatCurrency(stats.posRetailCash)}</span>
+              </div>
+
+              {stats.partsB2BCash > 0 && (
+                <div className={styles.detailRow}>
+                  <div className={styles.detailRowLeft}>
+                    <span>🔧 Parts B2B Wholesale</span>
+                    <span className={styles.detailRowSub}>({stats.partsB2BCount} order{stats.partsB2BCount !== 1 ? 's' : ''})</span>
+                  </div>
+                  <span className={styles.detailRowRight}>{formatCurrency(stats.partsB2BCash)}</span>
+                </div>
+              )}
+
+              <div className={styles.detailRow}>
+                <div className={styles.detailRowLeft}>
+                  <span>📱 Repair Handover Pickups</span>
+                  <span className={styles.detailRowSub}>({stats.repairHandoversCount} device{stats.repairHandoversCount !== 1 ? 's' : ''})</span>
+                </div>
+                <span className={styles.detailRowRight}>{formatCurrency(stats.repairHandoversCash)}</span>
+              </div>
+
+              {stats.repairDepositsCash > 0 && (
+                <div className={styles.detailRow}>
+                  <div className={styles.detailRowLeft}>
+                    <span>📥 Repair Intake Deposits</span>
+                    <span className={styles.detailRowSub}>({stats.repairDepositsCount} deposit{stats.repairDepositsCount !== 1 ? 's' : ''})</span>
+                  </div>
+                  <span className={styles.detailRowRight}>{formatCurrency(stats.repairDepositsCash)}</span>
+                </div>
+              )}
+
+              {stats.debtCollectedCash > 0 && (
+                <div className={styles.detailRow}>
+                  <div className={styles.detailRowLeft}>
+                    <span>🤝 Customer Debt Repaid</span>
+                    <span className={styles.detailRowSub}>({stats.debtCollectionsCount} payment{stats.debtCollectionsCount !== 1 ? 's' : ''})</span>
+                  </div>
+                  <span className={styles.detailRowRight}>{formatCurrency(stats.debtCollectedCash)}</span>
+                </div>
+              )}
+
+              {stats.refundsCount > 0 && (
+                <div className={styles.detailRow} style={{ color: '#dc2626' }}>
+                  <div className={styles.detailRowLeft}>
+                    <span>↩️ Refunds Given</span>
+                    <span className={styles.detailRowSub}>({stats.refundsCount} excluded)</span>
+                  </div>
+                  <span className={styles.detailRowRight} style={{ color: '#dc2626' }}>-{formatCurrency(stats.refundsAmount)}</span>
+                </div>
+              )}
+
+              {stats.cancelledCount > 0 && (
+                <div className={styles.detailRow} style={{ color: '#64748b' }}>
+                  <div className={styles.detailRowLeft}>
+                    <span>🚫 Voided / Cancelled</span>
+                    <span className={styles.detailRowSub}>({stats.cancelledCount} voided)</span>
+                  </div>
+                  <span className={styles.detailRowRight} style={{ color: '#64748b', textDecoration: 'line-through' }}>{formatCurrency(0)}</span>
+                </div>
+              )}
+            </div>
+
+            <div className={styles.detailDivider}></div>
+
+            <div className={[styles.detailTotalRow, styles.detailTotalRowGreen].join(' ')}>
+              <span>Net Physical Cash in Till</span>
+              <span>{formatCurrency(stats.netCash)}</span>
+            </div>
+          </div>
+
+          {/* Panel 2: All Payment Methods (Tender Breakdown) */}
+          <div className={styles.detailPanel}>
+            <div className={styles.detailPanelHeader}>
+              <div className={styles.detailPanelHeaderLeft}>
+                <span>💳</span>
+                <span>All Payment Methods (Tender)</span>
+              </div>
+              <span style={{ fontSize: '11px', color: 'var(--color-on-surface-variant, #64748b)' }}>By Method</span>
+            </div>
+
+            <div className={styles.detailRows}>
+              <div className={styles.detailRow}>
+                <div className={styles.detailRowLeft}>
+                  <span>💵 Cash Payments</span>
+                </div>
+                <span className={styles.detailRowRight}>{formatCurrency(stats.posRetailCash + stats.partsB2BCash)}</span>
+              </div>
+
+              <div className={styles.detailRow}>
+                <div className={styles.detailRowLeft}>
+                  <span>💳 Card / TPE Terminal</span>
+                  {stats.debtCollectedCard > 0 && (
+                    <span className={styles.detailRowSub}>
+                      ({formatCurrency(stats.cardTotal)} sales + {formatCurrency(stats.debtCollectedCard)} debt)
+                    </span>
+                  )}
+                </div>
+                <span className={styles.detailRowRight}>{formatCurrency(stats.cardTotal + stats.debtCollectedCard)}</span>
+              </div>
+
+              <div className={styles.detailRow}>
+                <div className={styles.detailRowLeft}>
+                  <span>📱 Mobile / BaridiMob</span>
+                  {stats.debtCollectedMobile > 0 && (
+                    <span className={styles.detailRowSub}>
+                      ({formatCurrency(stats.mobileTotal)} sales + {formatCurrency(stats.debtCollectedMobile)} debt)
+                    </span>
+                  )}
+                </div>
+                <span className={styles.detailRowRight}>{formatCurrency(stats.mobileTotal + stats.debtCollectedMobile)}</span>
+              </div>
+
+              {stats.transferTotal > 0 && (
+                <div className={styles.detailRow}>
+                  <div className={styles.detailRowLeft}>
+                    <span>🏦 Bank Transfer</span>
+                  </div>
+                  <span className={styles.detailRowRight}>{formatCurrency(stats.transferTotal)}</span>
+                </div>
+              )}
+
+              {stats.debtTotal > 0 && (
+                <div className={styles.detailRow}>
+                  <div className={styles.detailRowLeft}>
+                    <span>📋 Charged to Debt Tab</span>
+                  </div>
+                  <span className={styles.detailRowRight}>{formatCurrency(stats.debtTotal)}</span>
+                </div>
+              )}
+
+              {stats.creditTotal > 0 && (
+                <div className={styles.detailRow}>
+                  <div className={styles.detailRowLeft}>
+                    <span>🎟️ Store Credit</span>
+                  </div>
+                  <span className={styles.detailRowRight}>{formatCurrency(stats.creditTotal)}</span>
+                </div>
+              )}
+            </div>
+
+            <div className={styles.detailDivider}></div>
+
+            <div className={styles.detailTotalRow}>
+              <span>Gross Sales Volume</span>
+              <span>{formatCurrency(stats.grossSales)}</span>
+            </div>
+          </div>
+        </div>
+
         {/* Staff / Cashier Breakdown */}
         {stats.staffBreakdown.length > 0 && (
           <div>
@@ -361,23 +584,42 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
                 No transactions recorded for {formattedDateTitle}.
               </div>
             ) : (
-              shiftTransactions.map(t => (
-                <div key={t.id} className={styles.txFeedRow}>
-                  <span className={styles.txFeedId}>
-                    {new Date(t.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                  <span className={styles.txFeedItems} title={t.items.map(i => `${i.quantity}x ${i.product.name}`).join(', ')}>
-                    {t.items.slice(0, 2).map(i => `${i.quantity}× ${i.product.name} ${i.product.model}`).join(', ')}
-                    {t.items.length > 2 ? ` (+${t.items.length - 2} more)` : ''}
-                  </span>
-                  <span className={styles.txFeedCustomer}>
-                    {t.customerName || 'Walk-in'}
-                  </span>
-                  <span className={[styles.txFeedAmount, t.status === 'refunded' && styles.txFeedRefunded].filter(Boolean).join(' ')}>
-                    {t.status === 'refunded' ? `-${formatCurrency(t.total)}` : formatCurrency(t.total)}
-                  </span>
-                </div>
-              ))
+              shiftTransactions.map(t => {
+                const isRefunded = t.status === 'refunded';
+                const isCancelled = t.status === 'voided' || t.status === 'cancelled' || t.status === 'pending_approval';
+                const mainMethod = t.payments && t.payments[0]?.method ? t.payments[0].method.toLowerCase() : 'cash';
+                let pillClass = styles.paymentPill;
+                if (mainMethod === 'cash') pillClass = `${styles.paymentPill} ${styles.paymentPillCash}`;
+                else if (mainMethod === 'card') pillClass = `${styles.paymentPill} ${styles.paymentPillCard}`;
+                else if (mainMethod === 'debt') pillClass = `${styles.paymentPill} ${styles.paymentPillDebt}`;
+
+                return (
+                  <div key={t.id} className={styles.txFeedRow}>
+                    <span className={styles.txFeedId}>
+                      {new Date(t.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <span className={styles.txFeedItems} title={t.items.map(i => `${i.quantity}x ${i.product.name}`).join(', ')}>
+                      {t.items.slice(0, 2).map(i => `${i.quantity}× ${i.product.name} ${i.product.model || ''}`).join(', ')}
+                      {t.items.length > 2 ? ` (+${t.items.length - 2} more)` : ''}
+                    </span>
+                    <span className={styles.txFeedCustomer}>
+                      {t.customerName || 'Walk-in'}
+                      {isRefunded && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#fee2e2', color: '#b91c1c', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>REFUNDED</span>}
+                      {isCancelled && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#f1f5f9', color: '#64748b', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>VOIDED</span>}
+                    </span>
+                    <span className={pillClass}>
+                      {mainMethod === 'cash' ? '💵 Cash' : mainMethod === 'card' ? '💳 Card' : mainMethod === 'debt' ? '📋 Debt' : mainMethod.toUpperCase()}
+                    </span>
+                    <span className={[
+                      styles.txFeedAmount,
+                      isRefunded && styles.txFeedRefunded,
+                      isCancelled && styles.txFeedCancelled
+                    ].filter(Boolean).join(' ')}>
+                      {isRefunded ? `-${formatCurrency(t.total)}` : isCancelled ? formatCurrency(0) : formatCurrency(t.total)}
+                    </span>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>

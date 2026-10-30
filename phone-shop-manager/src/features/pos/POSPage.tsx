@@ -7,6 +7,10 @@ import { StockBadge } from '../../components/ui/Badge';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useCartStore } from '../../store/cartStore';
 import { useCustomerStore } from '../../store/customerStore';
+import { useRepairStore } from '../../store/repairStore';
+import { usePartsCartStore } from '../../store/partsCartStore';
+import { isSameLocalDate, toDateStr } from '../../store/endOfDayStore';
+import { isClaimedAndPaidRepair, getClaimedRepairHandoverCash } from '../../utils/repairFinancials';
 import { ReceiptModal } from './ReceiptModal';
 import { TransactionHistoryTab } from './TransactionHistoryTab';
 import { VariantSelectModal } from './VariantSelectModal';
@@ -242,6 +246,9 @@ export const POSPage = () => {
     fetchTransactions, transactions,
     isCheckingOut
   } = useCartStore();
+  const { invoices: partsInvoices } = usePartsCartStore();
+  const { tickets } = useRepairStore();
+  const { debts } = useCustomerStore();
   const { currency } = useSettingsStore();
   const currencySymbol = getCurrencySymbol(currency);
   const toast = useToast();
@@ -343,29 +350,53 @@ export const POSPage = () => {
     return (currentCustomerDebt + creditDebtToLog) > matchedCustomer.creditLimit;
   }, [paymentMode, matchedCustomer, currentCustomerDebt, creditDebtToLog]);
 
-  // Real-time Today Net Cash in Drawer (strictly cash tender, excluding voided sales)
+  // Real-time Today Net Cash in Drawer (strictly cash tender: POS cash + parts cash + repairs cash + debt collections, excluding refunded/cancelled sales)
   const todayNetCash = useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const todayTxs = transactions.filter(t => new Date(t.date).toISOString().split('T')[0] === todayStr);
-    const completed = todayTxs.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval');
-    const refunded = todayTxs.filter(t => t.status === 'refunded');
+    const todayStr = toDateStr(new Date());
 
-    const grossCash = completed.reduce((sum, t) => {
-      const cashPart = (t.payments || [])
-        .filter(p => p.method === 'cash')
-        .reduce((s, p) => s + (p.amount || 0), 0);
-      return sum + cashPart;
+    const allTx = [...(transactions || []), ...(partsInvoices || [])];
+    const uniqueTxMap = new Map<string, typeof allTx[0]>();
+    allTx.forEach(t => uniqueTxMap.set(t.id, t));
+
+    // 1. Completed sales (strictly excluding refunded, voided, cancelled, and pending approval)
+    const completed = Array.from(uniqueTxMap.values()).filter(t =>
+      t.status !== 'refunded' &&
+      t.status !== 'voided' &&
+      t.status !== 'cancelled' &&
+      t.status !== 'pending_approval' &&
+      isSameLocalDate(t.date, todayStr)
+    );
+
+    const posCash = completed.reduce((sum, t) => {
+      if (t.payments && t.payments.length > 0) {
+        const cashPart = t.payments
+          .filter(p => String(p.method || '').toLowerCase() === 'cash')
+          .reduce((s, p) => s + (p.amount || 0), 0);
+        return sum + cashPart;
+      }
+      return sum + Math.max(0, t.total || 0);
     }, 0);
 
-    const refCash = refunded.reduce((sum, t) => {
-      const cashPart = (t.payments || [])
-        .filter(p => p.method === 'cash')
-        .reduce((s, p) => s + (p.amount || 0), 0);
-      return sum + (cashPart > 0 ? cashPart : t.total);
-    }, 0);
+    // 2. Repairs Cash (intake deposits + handover cash)
+    const completedRepairs = tickets.filter(t =>
+      t.status === 'completed' &&
+      isSameLocalDate(t.completedAt || t.updatedAt, todayStr)
+    );
+    const claimedPaidRepairs = completedRepairs.filter(r => isClaimedAndPaidRepair(r));
+    const repairHandoversCash = claimedPaidRepairs.reduce((s, r) => s + getClaimedRepairHandoverCash(r), 0);
 
-    return Math.max(0, grossCash - refCash);
-  }, [transactions]);
+    const createdRepairs = tickets.filter(t => isSameLocalDate(t.createdAt, todayStr));
+    const repairDepositsCash = createdRepairs.reduce((s, t) => s + (t.depositAmount || 0), 0);
+    const repairsCash = repairHandoversCash + repairDepositsCash;
+
+    // 3. Customer Debt Cash Collections
+    const todayDebtPayments = debts.flatMap(d => (d.payments || []).filter(p => isSameLocalDate(p.date, todayStr)));
+    const debtCollectedCash = todayDebtPayments
+      .filter(p => String(p.method || '').toLowerCase() === 'cash')
+      .reduce((s, p) => s + (p.amount || 0), 0);
+
+    return Math.max(0, posCash + repairsCash + debtCollectedCash);
+  }, [transactions, partsInvoices, tickets, debts]);
 
   // Dynamic quick tender denomination presets for Cash checkout
   const tenderPresets = useMemo(() => {

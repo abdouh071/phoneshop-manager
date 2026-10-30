@@ -139,7 +139,7 @@ export const DashboardPage = () => {
 
   const yesterday = useMemo(() => { const d = new Date(today); d.setDate(d.getDate()-1); return d; }, [today]);
 
-  const activeTx = useMemo(() => transactions.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval'), [transactions]);
+  const activeTx = useMemo(() => transactions.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval'), [transactions]);
   // All phones that have been claimed AND marked as paid or partly-paid (recognized revenue)
   const completedRepairs = useMemo(() => tickets.filter(t => isClaimedAndPaidRepair(t)), [tickets]);
 
@@ -168,8 +168,13 @@ export const DashboardPage = () => {
 
   const startOfMonth = useMemo(() => new Date(today.getFullYear(), today.getMonth(), 1), [today]);
 
-  // Combined Daily Revenue (Sales + Repairs + Debt Collections on the day paid)
+  // Combined Daily Revenue (Retail Sales + Parts B2B + Repairs + Debt Collections on the day paid)
   const todaySalesRev = useMemo(() => todayTx.reduce((s,t) => s+t.total, 0), [todayTx]);
+  const todayRetailTx = useMemo(() => todayTx.filter(t => t.saleType !== 'parts_b2b'), [todayTx]);
+  const todayPartsTx = useMemo(() => todayTx.filter(t => t.saleType === 'parts_b2b'), [todayTx]);
+  const todayRetailSalesRev = useMemo(() => todayRetailTx.reduce((s,t) => s+t.total, 0), [todayRetailTx]);
+  const todayPartsRev = useMemo(() => todayPartsTx.reduce((s,t) => s+t.total, 0), [todayPartsTx]);
+
   const todayRepRev = useMemo(
     () => todayRepairs.reduce((s,r) => s + getClaimedRepairRevenue(r), 0),
     [todayRepairs]
@@ -177,11 +182,11 @@ export const DashboardPage = () => {
   const todayDebtCollected = useMemo(() => {
     return debts
       .flatMap(d => (d.payments || []).filter(p => isSameDay(p.date, today)))
-      .filter(p => p.method === 'cash')
-      .reduce((s, p) => s + p.amount, 0);
+      .filter(p => String(p.method || '').toLowerCase() === 'cash')
+      .reduce((s, p) => s + (p.amount || 0), 0);
   }, [debts, today]);
 
-  const dailyRevenue = todaySalesRev + todayRepRev + todayDebtCollected;
+  const dailyRevenue = todaySalesRev + todayRepRev;
 
   const yestSalesRev = useMemo(() => yesterdayTx.reduce((s,t) => s+t.total, 0), [yesterdayTx]);
   const yestRepRev = useMemo(
@@ -191,13 +196,13 @@ export const DashboardPage = () => {
   const yestDebtCollected = useMemo(() => {
     return debts
       .flatMap(d => (d.payments || []).filter(p => isSameDay(p.date, yesterday)))
-      .filter(p => p.method === 'cash')
-      .reduce((s, p) => s + p.amount, 0);
+      .filter(p => String(p.method || '').toLowerCase() === 'cash')
+      .reduce((s, p) => s + (p.amount || 0), 0);
   }, [debts, yesterday]);
 
-  const yesterdayRev = yestSalesRev + yestRepRev + yestDebtCollected;
+  const yesterdayRev = yestSalesRev + yestRepRev;
 
-  // Today's Estimated Net Profit (parts cost only for claimed+paid repairs, debt recovery flows 100% to profit)
+  // Today's Estimated Net Profit (parts cost only for claimed+paid repairs; debt collection is cash inflow, not double-counted revenue)
   const todaySalesCOGS = useMemo(
     () => todayTx.reduce((sum, t) => sum + t.items.reduce((s, i) => s + (i.product.costPrice || 0) * i.quantity, 0), 0),
     [todayTx]
@@ -210,22 +215,35 @@ export const DashboardPage = () => {
 
   // Today's Cash Drawer Balance (reconciled with cash sales + handover cash + intake deposits + debt collections)
   const todayCash = useMemo(() => {
-    let cash = 0;
+    // Cash in: completed (non-refunded, non-cancelled) POS sales & parts B2B
+    let cashIn = 0;
     todayTx.forEach(t => {
-      t.payments.forEach(p => { if (p.method === 'cash') cash += p.amount; });
+      if (t.payments && t.payments.length > 0) {
+        t.payments.forEach(p => {
+          if (String(p.method || '').toLowerCase() === 'cash') cashIn += (p.amount || 0);
+        });
+      } else {
+        // Fallback for transactions without an explicit payments array
+        cashIn += Math.max(0, t.total || 0);
+      }
     });
+
     const repairHandovers = todayRepairs.reduce((s, r) => s + getClaimedRepairHandoverCash(r), 0);
     const repairDeposits = tickets
       .filter(t => isSameDay(t.createdAt, today))
       .reduce((s, t) => s + (t.depositAmount || 0), 0);
 
-    return cash + repairHandovers + repairDeposits + todayDebtCollected;
+    return Math.max(0, cashIn + repairHandovers + repairDeposits + todayDebtCollected);
   }, [todayTx, todayRepairs, tickets, todayDebtCollected, today]);
 
   const todayCard = useMemo(() => {
     let card = 0;
     todayTx.forEach(t => {
-      t.payments.forEach(p => { if (p.method === 'card') card += p.amount; });
+      if (t.payments && t.payments.length > 0) {
+        t.payments.forEach(p => {
+          if (String(p.method || '').toLowerCase() === 'card') card += (p.amount || 0);
+        });
+      }
     });
     return card;
   }, [todayTx]);
@@ -233,25 +251,27 @@ export const DashboardPage = () => {
   const todayMobile = useMemo(() => {
     let mob = 0;
     todayTx.forEach(t => {
-      t.payments.forEach(p => { if (p.method === 'mobile') mob += p.amount; });
+      if (t.payments && t.payments.length > 0) {
+        t.payments.forEach(p => {
+          if (String(p.method || '').toLowerCase() === 'mobile') mob += (p.amount || 0);
+        });
+      }
     });
     return mob;
   }, [todayTx]);
 
-  // Weekly & Monthly Combined Revenues (Sales + Repairs + Debt Collections)
+  // Weekly & Monthly Combined Revenues (Sales + Repairs)
   const weeklyRevenue = useMemo(() => {
     const sRev = activeTx.filter(t => new Date(t.date) >= startOfWeek).reduce((s,t)=>s+t.total, 0);
     const rRev = completedRepairs.filter(r => new Date(r.completedAt || r.updatedAt) >= startOfWeek).reduce((s,r)=>s+getClaimedRepairRevenue(r), 0);
-    const dRev = debts.flatMap(d => (d.payments || []).filter(p => new Date(p.date) >= startOfWeek)).reduce((s,p)=>s+p.amount, 0);
-    return sRev + rRev + dRev;
-  }, [activeTx, completedRepairs, debts, startOfWeek]);
+    return sRev + rRev;
+  }, [activeTx, completedRepairs, startOfWeek]);
 
   const monthlyRevenue = useMemo(() => {
     const sRev = activeTx.filter(t => new Date(t.date) >= startOfMonth).reduce((s,t)=>s+t.total, 0);
     const rRev = completedRepairs.filter(r => new Date(r.completedAt || r.updatedAt) >= startOfMonth).reduce((s,r)=>s+getClaimedRepairRevenue(r), 0);
-    const dRev = debts.flatMap(d => (d.payments || []).filter(p => new Date(p.date) >= startOfMonth)).reduce((s,p)=>s+p.amount, 0);
-    return sRev + rRev + dRev;
-  }, [activeTx, completedRepairs, debts, startOfMonth]);
+    return sRev + rRev;
+  }, [activeTx, completedRepairs, startOfMonth]);
 
   const unitsSoldToday = useMemo(() => todayTx.reduce((s,t) => s+t.items.reduce((a,i)=>a+i.quantity,0), 0), [todayTx]);
   const unitsYesterday = useMemo(() => yesterdayTx.reduce((s,t) => s+t.items.reduce((a,i)=>a+i.quantity,0), 0), [yesterdayTx]);
@@ -428,7 +448,13 @@ export const DashboardPage = () => {
           label={permissions.pos ? "Today's Total Revenue" : "Today's Repair Revenue"}
           value={formatPrivateCurrency(permissions.pos ? (permissions.repairs ? dailyRevenue : todaySalesRev) : todayRepRev)}
           change={revenueChange}
-          subtext={permissions.pos && permissions.repairs ? `Sales: ${formatPrivateCurrency(todaySalesRev)} • Repairs: ${formatPrivateCurrency(todayRepRev)}` : permissions.repairs ? `${todayRepairs.length} repairs finished today` : `${todayTx.length} completed sales`}
+          subtext={
+            permissions.pos && permissions.repairs
+              ? `Sales: ${formatPrivateCurrency(todayRetailSalesRev)} • Repairs: ${formatPrivateCurrency(todayRepRev)}${todayPartsRev > 0 ? ` • Parts: ${formatPrivateCurrency(todayPartsRev)}` : ''}`
+              : permissions.repairs
+                ? `${todayRepairs.length} repairs finished today`
+                : `${todayTx.length} completed sales`
+          }
           icon={<DollarSign size={20} />}
           onClick={permissions.pos ? () => navigate('/pos') : () => navigate('/repairs')}
           linkLabel={permissions.pos ? 'Open POS' : 'Open Repairs'}

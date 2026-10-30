@@ -798,7 +798,26 @@ export async function printZReportDirect(
       salesCount: number;
       refundsAmount: number;
       refundsCount: number;
+      cancelledCount?: number;
+      cancelledAmount?: number;
       netCash: number;
+      cashIn?: number;
+      posRetailCash?: number;
+      posRetailCount?: number;
+      partsB2BCash?: number;
+      partsB2BCount?: number;
+      repairsCashIn?: number;
+      repairHandoversCash?: number;
+      repairHandoversCount?: number;
+      repairDepositsCash?: number;
+      repairDepositsCount?: number;
+      debtCollectedCash?: number;
+      debtCollectionsCount?: number;
+      cardTotal?: number;
+      mobileTotal?: number;
+      transferTotal?: number;
+      debtTotal?: number;
+      creditTotal?: number;
       unitsSold: number;
       discountsTotal: number;
       avgTicket: number;
@@ -865,7 +884,26 @@ export function openZReportPrintWindow(
       salesCount: number;
       refundsAmount: number;
       refundsCount: number;
+      cancelledCount?: number;
+      cancelledAmount?: number;
       netCash: number;
+      cashIn?: number;
+      posRetailCash?: number;
+      posRetailCount?: number;
+      partsB2BCash?: number;
+      partsB2BCount?: number;
+      repairsCashIn?: number;
+      repairHandoversCash?: number;
+      repairHandoversCount?: number;
+      repairDepositsCash?: number;
+      repairDepositsCount?: number;
+      debtCollectedCash?: number;
+      debtCollectionsCount?: number;
+      cardTotal?: number;
+      mobileTotal?: number;
+      transferTotal?: number;
+      debtTotal?: number;
+      creditTotal?: number;
       unitsSold: number;
       discountsTotal: number;
       avgTicket: number;
@@ -891,7 +929,26 @@ export function buildZReportHTML(
       salesCount: number;
       refundsAmount: number;
       refundsCount: number;
+      cancelledCount?: number;
+      cancelledAmount?: number;
       netCash: number;
+      cashIn?: number;
+      posRetailCash?: number;
+      posRetailCount?: number;
+      partsB2BCash?: number;
+      partsB2BCount?: number;
+      repairsCashIn?: number;
+      repairHandoversCash?: number;
+      repairHandoversCount?: number;
+      repairDepositsCash?: number;
+      repairDepositsCount?: number;
+      debtCollectedCash?: number;
+      debtCollectionsCount?: number;
+      cardTotal?: number;
+      mobileTotal?: number;
+      transferTotal?: number;
+      debtTotal?: number;
+      creditTotal?: number;
       unitsSold: number;
       discountsTotal: number;
       avgTicket: number;
@@ -909,8 +966,14 @@ export function buildZReportHTML(
     </div>
   `).join('');
 
+  const posCash = summary.posRetailCash ?? summary.cashIn ?? 0;
+  const partsCash = summary.partsB2BCash ?? 0;
+  const repairPickups = summary.repairHandoversCash ?? summary.repairsCashIn ?? 0;
+  const repairDeposits = summary.repairDepositsCash ?? 0;
+  const debtCollected = summary.debtCollectedCash ?? 0;
+
   return `
-    <div style="font-family:'Courier New',Courier,monospace;font-size:12px;max-width:300px;margin:0 auto;padding:12px;background:#fff;color:#000;">
+    <div style="font-family:'Courier New',Courier,monospace;font-size:12px;max-width:320px;margin:0 auto;padding:12px;background:#fff;color:#000;">
       <div style="text-align:center;margin-bottom:8px;">
         <h2 style="font-size:16px;font-weight:bold;margin:0 0 4px 0;text-transform:uppercase;">${storeName || 'PhoneShop Pro'}</h2>
         <div style="font-size:13px;font-weight:bold;margin:4px 0;">*** END-OF-DAY Z-REPORT ***</div>
@@ -921,7 +984,7 @@ export function buildZReportHTML(
 
       <div style="border-top:1px dashed #000;margin:8px 0;"></div>
 
-      <div style="font-weight:bold;margin:6px 0 4px 0;">${i18n.t('reports.salesSummary', 'SALES SUMMARY')}</div>
+      <div style="font-weight:bold;margin:6px 0 4px 0;">${i18n.t('reports.salesSummary', 'SALES SUMMARY (TOTALS)')}</div>
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
         <span>${i18n.t('reports.grossSales', 'Gross Sales')} (${summary.salesCount} ${i18n.t('reports.txs', 'txs')}):</span>
         <strong>${formatCurrency(summary.grossSales)}</strong>
@@ -943,27 +1006,91 @@ export function buildZReportHTML(
 
       <div style="border-top:1px dashed #000;margin:8px 0;"></div>
 
-      <div style="font-weight:bold;margin:6px 0 4px 0;">${i18n.t('reports.returnsRefunds', 'RETURNS & REFUNDS')}</div>
+      <div style="font-weight:bold;margin:6px 0 4px 0;">${i18n.t('reports.returnsRefunds', 'EXCLUSIONS & REFUNDS')}</div>
       <div style="display:flex;justify-content:space-between;margin:2px 0;color:#dc2626;">
         <span>${i18n.t('reports.refundsGiven', 'Refunds')} (${summary.refundsCount} ${i18n.t('reports.txs', 'txs')}):</span>
         <strong>-${formatCurrency(summary.refundsAmount)}</strong>
       </div>
+      <div style="font-size:10px;color:#666;margin-bottom:2px;">(Excluded from drawer sales; contributes $0 cash)</div>
+      ${(summary.cancelledCount && summary.cancelledCount > 0) ? `
+      <div style="display:flex;justify-content:space-between;margin:2px 0;color:#666;">
+        <span>Voided / Cancelled (${summary.cancelledCount} ${i18n.t('reports.txs', 'txs')}):</span>
+        <strong>${formatCurrency(0)}</strong>
+      </div>
+      ` : ''}
 
       <div style="border-top:1px dashed #000;margin:8px 0;"></div>
 
-      <div style="font-weight:bold;margin:6px 0 4px 0;">${i18n.t('reports.cashDrawerRec', 'CASH DRAWER RECONCILIATION')}</div>
+      <div style="font-weight:bold;margin:6px 0 4px 0;">${i18n.t('reports.cashDrawerRec', 'PHYSICAL CASH INFLOW (DETAILS)')}</div>
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
-        <span>${i18n.t('reports.cashCollected', 'Total Cash In:')}</span>
-        <span>${formatCurrency(summary.grossSales)}</span>
+        <span>• Retail POS Cash (${summary.posRetailCount || summary.salesCount} sales):</span>
+        <span>${formatCurrency(posCash)}</span>
       </div>
+      ${partsCash > 0 ? `
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
-        <span>${i18n.t('reports.cashPaidOut', 'Total Cash Out (Refunds):')}</span>
-        <span>-${formatCurrency(summary.refundsAmount)}</span>
+        <span>• Parts B2B Wholesale:</span>
+        <span>${formatCurrency(partsCash)}</span>
       </div>
+      ` : ''}
+      <div style="display:flex;justify-content:space-between;margin:2px 0;">
+        <span>• Repair Handover Pickups:</span>
+        <span>+${formatCurrency(repairPickups)}</span>
+      </div>
+      ${repairDeposits > 0 ? `
+      <div style="display:flex;justify-content:space-between;margin:2px 0;">
+        <span>• Repair Intake Deposits:</span>
+        <span>+${formatCurrency(repairDeposits)}</span>
+      </div>
+      ` : ''}
+      ${debtCollected > 0 ? `
+      <div style="display:flex;justify-content:space-between;margin:2px 0;">
+        <span>• Customer Debt Repaid:</span>
+        <span>+${formatCurrency(debtCollected)}</span>
+      </div>
+      ` : ''}
 
       <div style="border:2px solid #000;border-radius:4px;padding:8px;margin:10px 0;text-align:center;background:#f9f9f9;">
-        <div style="font-size:11px;font-weight:bold;text-transform:uppercase;">${i18n.t('reports.netCashDrawer', 'NET CASH IN DRAWER')}</div>
+        <div style="font-size:11px;font-weight:bold;text-transform:uppercase;">${i18n.t('reports.netCashDrawer', 'NET PHYSICAL CASH IN DRAWER')}</div>
         <div style="font-size:18px;font-weight:bold;margin-top:2px;">${formatCurrency(summary.netCash)}</div>
+        <div style="font-size:10px;color:#555;">(Exact cash to count in till)</div>
+      </div>
+
+      <div style="border-top:1px dashed #000;margin:8px 0;"></div>
+
+      <div style="font-weight:bold;margin:6px 0 4px 0;">PAYMENT METHODS (TENDER)</div>
+      <div style="display:flex;justify-content:space-between;margin:2px 0;">
+        <span>• Cash Tender:</span>
+        <span>${formatCurrency(posCash + partsCash)}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin:2px 0;">
+        <span>• Card / TPE Terminal:</span>
+        <span>${formatCurrency(summary.cardTotal || 0)}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin:2px 0;">
+        <span>• Mobile Money / BaridiMob:</span>
+        <span>${formatCurrency(summary.mobileTotal || 0)}</span>
+      </div>
+      ${(summary.transferTotal && summary.transferTotal > 0) ? `
+      <div style="display:flex;justify-content:space-between;margin:2px 0;">
+        <span>• Bank Transfers:</span>
+        <span>${formatCurrency(summary.transferTotal)}</span>
+      </div>
+      ` : ''}
+      ${(summary.debtTotal && summary.debtTotal > 0) ? `
+      <div style="display:flex;justify-content:space-between;margin:2px 0;">
+        <span>• Charged to Debt Tab:</span>
+        <span>${formatCurrency(summary.debtTotal)}</span>
+      </div>
+      ` : ''}
+      ${(summary.creditTotal && summary.creditTotal > 0) ? `
+      <div style="display:flex;justify-content:space-between;margin:2px 0;">
+        <span>• Store Credit Applied:</span>
+        <span>${formatCurrency(summary.creditTotal)}</span>
+      </div>
+      ` : ''}
+      <div style="display:flex;justify-content:space-between;margin:4px 0 2px 0;font-weight:bold;border-top:1px dotted #ccc;padding-top:2px;">
+        <span>Gross Sales Volume:</span>
+        <span>${formatCurrency(summary.grossSales)}</span>
       </div>
 
       ${summary.staffBreakdown.length > 0 ? `
@@ -1498,6 +1625,19 @@ export async function calibrateLabelPrinter(): Promise<{ success: boolean; messa
   }
 }
 
+export interface LowStockProductItem {
+  name: string;
+  model: string;
+  category?: string;
+  accessorySubCategory?: string;
+  sku?: string;
+  stock: number;
+  lowStockThreshold?: number;
+  supplier?: string;
+  costPrice?: number;
+  price?: number;
+}
+
 export interface LowStockReportPrintPayload {
   storeName?: string;
   currency?: string;
@@ -1506,18 +1646,20 @@ export interface LowStockReportPrintPayload {
   totalUnitsNeeded?: number;
   totalRestockCost?: number;
   canViewCosts?: boolean;
-  products: Array<{
-    name: string;
-    model: string;
-    category?: string;
-    accessorySubCategory?: string;
-    sku?: string;
-    stock: number;
-    lowStockThreshold?: number;
-    supplier?: string;
-    costPrice?: number;
-    price?: number;
-  }>;
+  products: LowStockProductItem[];
+}
+
+export interface LowStockReportThermalPayload {
+  shopName: string;
+  generatedAt: string;
+  generatedBy?: string;
+  currency?: string;
+  category?: string;
+  subCategory?: string;
+  totalUnitsNeeded?: number;
+  totalRestockCost?: number;
+  canViewCosts?: boolean;
+  products: LowStockProductItem[];
 }
 
 function formatTwoCol(left: string, right: string, width = 42): string {

@@ -11,6 +11,8 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "print-server": "cd print-server && node server.js",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
     "electron:build:mac": "electron-builder --mac",
@@ -43,6 +45,7 @@
       "allowToChangeInstallationDirectory": true
     },
     "files": [
+      "dist/**/*",
       "electron/**/*",
       "print-server/**/*"
     ],
@@ -116,7 +119,7 @@
     "oxlint": "^1.71.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
+    "vitest": "^4.1.12",
     "wait-on": "^9.5.1"
   }
 }
-

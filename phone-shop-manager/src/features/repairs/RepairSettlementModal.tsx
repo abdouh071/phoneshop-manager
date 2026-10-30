@@ -313,21 +313,21 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
               ? { ...r, status: 'completed' as const, resolvedAt: new Date().toISOString(), actualCost: finalPrice }
               : r
           );
-          await updateTicket(parent.id, {
+          updateTicket(parent.id, {
             status: 'completed',
             completedAt: new Date().toISOString(),
             activeReturnTicketId: undefined,
             returnRecords: updatedReturnRecords,
             statusHistory: [...(parent.statusHistory || []), parentHistoryEntry],
-          });
+          }).catch(console.error);
         }
       } else if (ticket.activeReturnTicketId) {
         const child = storeTickets.find(t => t.id === ticket.activeReturnTicketId);
         if (child && child.status !== 'completed') {
-          await updateTicket(child.id, {
+          updateTicket(child.id, {
             status: 'completed',
             completedAt: new Date().toISOString(),
-          });
+          }).catch(console.error);
         }
       }
 

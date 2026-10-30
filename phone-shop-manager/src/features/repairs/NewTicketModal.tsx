@@ -474,6 +474,7 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
       };
 
       if (ticketToEdit && isCompleted) {
+        const oldPrice = ticketToEdit.actualCost ?? ticketToEdit.estimatedCost ?? 0;
         ticketPayload.actualCost = newCost;
 
         const totalPaid = ticketToEdit.paidAmount !== undefined ? ticketToEdit.paidAmount : newDeposit;

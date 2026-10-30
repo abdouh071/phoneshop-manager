@@ -5,6 +5,7 @@ import {
   getDoc,
   addDoc,
   updateDoc,
+  setDoc,
   deleteDoc,
   query,
   where,
@@ -63,9 +64,17 @@ const saveLocalCustomers = (customers: Customer[]) => {
 
 export const customerService = {
   getAll: async (): Promise<Customer[]> => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return getLocalCustomers();
+    }
+
     try {
       const q = query(collection(db, COLLECTION), orderBy('name'));
-      const snap = await getDocs(q);
+      const snapPromise = getDocs(q);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore customers fetch timeout')), 2500)
+      );
+      const snap = await Promise.race([snapPromise, timeoutPromise]);
       const items = snap.docs.map(d => docToCustomer(d.id, d.data() as Record<string, unknown>));
       
       const local = getLocalCustomers();
@@ -88,12 +97,21 @@ export const customerService = {
     const localMatch = local.find(c => isPhoneMatch(c.phone, phone) || (c.normalizedPhone && isPhoneMatch(c.normalizedPhone, phone)));
     if (localMatch) return localMatch;
 
-    // 2. Query Firestore by normalizedPhone if possible
+    // If offline, never touch Firestore — return undefined immediately
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return undefined;
+    }
+
+    // 2. Query Firestore by normalizedPhone if possible with timeout
     const cleanDigits = normalizePhoneDigits(phone);
     if (cleanDigits && cleanDigits.length >= 7) {
       try {
         const qNorm = query(collection(db, COLLECTION), where('normalizedPhone', '==', cleanDigits));
-        const snapNorm = await getDocs(qNorm);
+        const snapPromise = getDocs(qNorm);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Firestore findByPhone timeout')), 2000)
+        );
+        const snapNorm = await Promise.race([snapPromise, timeoutPromise]);
         if (!snapNorm.empty) {
           const docItem = docToCustomer(snapNorm.docs[0].id, snapNorm.docs[0].data() as Record<string, unknown>);
           return docItem;
@@ -103,12 +121,16 @@ export const customerService = {
       }
     }
 
-    // 3. Query Firestore by all potential formatted/unformatted variations using 'in' operator
+    // 3. Query Firestore by all potential formatted/unformatted variations using 'in' operator with timeout
     const variants = getPhoneSearchVariants(phone);
     if (variants.length > 0) {
       try {
         const qVariants = query(collection(db, COLLECTION), where('phone', 'in', variants.slice(0, 30)));
-        const snapVariants = await getDocs(qVariants);
+        const snapPromise = getDocs(qVariants);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Firestore findByPhone variants timeout')), 2000)
+        );
+        const snapVariants = await Promise.race([snapPromise, timeoutPromise]);
         if (!snapVariants.empty) {
           const docItem = docToCustomer(snapVariants.docs[0].id, snapVariants.docs[0].data() as Record<string, unknown>);
           return docItem;
@@ -140,6 +162,35 @@ export const customerService = {
     }
 
     const runAdd = async (): Promise<Customer> => {
+      const local = getLocalCustomers();
+
+      // If offline, store locally immediately and enqueue into persistent background sync queue with zero remote delay
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        if (hasValidPhone) {
+          const localExisting = local.find(c => isPhoneMatch(c.phone, customer.phone));
+          if (localExisting) {
+            return localExisting;
+          }
+        }
+        console.warn('[CustomerService] Device is offline. Storing customer locally and enqueuing for background sync.');
+        const offlineId = `offline_cust_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const now = new Date().toISOString();
+        const formattedPhone = customer.phone ? formatStandardPhone(customer.phone) : '';
+        const created: Customer = {
+          ...customer,
+          id: offlineId,
+          phone: formattedPhone || customer.phone || '',
+          ...(cleanPhone ? { normalizedPhone: cleanPhone } : {}),
+          totalPurchases: 0,
+          totalSpent: 0,
+          joinDate: now,
+          lastVisitDate: now,
+        };
+        saveLocalCustomers([...local, created]);
+        offlineCustomerSyncService.enqueue(created);
+        return created;
+      }
+
       // Pre-check: if a customer with this phone number already exists, enrich and return existing
       if (hasValidPhone) {
         const existing = await customerService.findByPhone(customer.phone);
@@ -215,20 +266,12 @@ export const customerService = {
         lastVisitDate: now,
       };
 
-      const local = getLocalCustomers();
-
-      // If offline, store locally immediately and enqueue into persistent background sync queue
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        console.warn('[CustomerService] Device is offline. Storing customer locally and enqueuing for background sync.');
-        const offlineId = `offline_cust_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        const created = { ...newCustomer, id: offlineId };
-        saveLocalCustomers([...local, created]);
-        offlineCustomerSyncService.enqueue(created);
-        return created;
-      }
-
       try {
-        const docRef = await addDoc(collection(db, COLLECTION), newCustomer);
+        const addDocPromise = addDoc(collection(db, COLLECTION), newCustomer);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Firestore addDoc timeout')), 2500)
+        );
+        const docRef = await Promise.race([addDocPromise, timeoutPromise]);
         const created = { ...newCustomer, id: docRef.id };
         saveLocalCustomers([...local.filter(c => c.id !== created.id), created]);
         return created;
@@ -272,18 +315,21 @@ export const customerService = {
 
     if (id.startsWith('offline_')) {
       offlineCustomerSyncService.updateQueuedCustomer(id, sanitizedUpdates);
+      return merged;
+    }
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return merged;
     }
 
     try {
       const ref = doc(db, COLLECTION, id);
-      const snap = await getDoc(ref);
-      if (snap.exists()) {
-        const serverMerged = { ...(snap.data() as Omit<Customer, 'id'>), ...sanitizedUpdates };
-        await updateDoc(ref, serverMerged);
-        const finalCustomer = { ...serverMerged, id };
-        saveLocalCustomers(local.map(c => c.id === id ? finalCustomer : c));
-        return finalCustomer;
-      }
+      const updatePromise = setDoc(ref, sanitizedUpdates, { merge: true });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore updateDoc customer timeout')), 1200)
+      );
+      await Promise.race([updatePromise, timeoutPromise]);
+      return merged;
     } catch (err) {
       console.warn('Failed to update customer on Firestore, stored locally:', err);
     }
@@ -295,14 +341,22 @@ export const customerService = {
     if (id.startsWith('offline_')) {
       offlineCustomerSyncService.removeFromQueue(id);
     }
+    const local = getLocalCustomers();
+    saveLocalCustomers(local.filter(c => c.id !== id));
+
+    if (id.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      return;
+    }
 
     try {
       const ref = doc(db, COLLECTION, id);
-      await deleteDoc(ref);
+      const delPromise = deleteDoc(ref);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore deleteDoc customer timeout')), 1200)
+      );
+      await Promise.race([delPromise, timeoutPromise]);
     } catch (err) {
       console.warn('Failed to delete customer on Firestore, removing locally:', err);
     }
-    const local = getLocalCustomers();
-    saveLocalCustomers(local.filter(c => c.id !== id));
   },
 };

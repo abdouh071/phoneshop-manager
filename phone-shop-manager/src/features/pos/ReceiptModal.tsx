@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Printer, CheckCircle2, Share2, MessageCircle } from 'lucide-react';
-import { normalizePhoneDigits } from '../../utils/phoneUtils';
+import { normalizePhoneDigits, formatWhatsAppUrl } from '../../utils/phoneUtils';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import type { SaleTransaction } from '../../types';
@@ -76,10 +76,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
 
   const handleWhatsApp = () => {
     const text = buildReceiptText();
-    const phone = transaction.customerPhone ? normalizePhoneDigits(transaction.customerPhone) : '';
-    const url = phone
-      ? `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
-      : `https://wa.me/?text=${encodeURIComponent(text)}`;
+    const url = formatWhatsAppUrl(transaction.customerPhone, text) || `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(url, '_blank');
   };
 

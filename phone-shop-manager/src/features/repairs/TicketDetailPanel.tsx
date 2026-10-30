@@ -26,6 +26,7 @@ import { CustomerHistoryWidget } from './CustomerHistoryWidget';
 import { PrintRepairTicketModal } from './PrintRepairTicketModal';
 import { PhoneLifecycleHistoryCard } from './PhoneLifecycleHistoryCard';
 import { isTicketActiveReturnPending } from '../../utils/phoneLifecycle';
+import { formatWhatsAppUrl } from '../../utils/phoneUtils';
 
 interface TicketDetailPanelProps {
   ticket: RepairTicket | null;
@@ -715,12 +716,10 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
                   marginTop: '2px',
                 }}
                 onClick={() => {
-                  const phoneClean = ticket.customerPhone.replace(/[^0-9]/g, '');
                   const remaining = (ticket.actualCost ?? ticket.estimatedCost) - (ticket.depositAmount || 0);
-                  const msg = encodeURIComponent(
-                    `Bonjour ${ticket.customerName}! Votre ${ticket.deviceBrand} ${ticket.deviceModel} (Ticket #${ticket.ticketNumber}) est réparé et prêt à être récupéré chez ${settings.storeName || 'PhoneShop Pro'}. Montant à régler: ${formatCurrency(Math.max(0, remaining))}. Merci!`
-                  );
-                  window.open(`https://wa.me/${phoneClean}?text=${msg}`, '_blank');
+                  const msg = `Bonjour ${ticket.customerName}! Votre ${ticket.deviceBrand} ${ticket.deviceModel} (Ticket #${ticket.ticketNumber}) est réparé et prêt à être récupéré chez ${settings.storeName || 'PhoneShop Pro'}. Montant à régler: ${formatCurrency(Math.max(0, remaining))}. Merci!`;
+                  const waUrl = formatWhatsAppUrl(ticket.customerPhone, msg) || `https://wa.me/?text=${encodeURIComponent(msg)}`;
+                  window.open(waUrl, '_blank');
                 }}
               >
                 <span>💬 {t('ticket.whatsappCustomer')}</span>
@@ -1120,7 +1119,7 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', paddingTop: '10px', borderTop: '2px solid var(--color-success, #10b981)' }}>
                     <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--color-on-surface)' }}>{t('ticket.totalPartsCost')}</span>
                     <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--color-success, #10b981)' }}>
-                      {formatCurrency(ticket.partsUsed.reduce((sum, p) => sum + (p.cost || 0), 0))}
+                      {formatCurrency(ticket.partsUsed.reduce((sum, p) => sum + (p.cost || 0) * (p.quantity || 1), 0))}
                     </span>
                   </div>
                 )}

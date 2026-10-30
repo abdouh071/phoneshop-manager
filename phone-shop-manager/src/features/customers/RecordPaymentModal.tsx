@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useCustomerStore } from '../../store/customerStore';
 import { usePrivacyStore } from '../../store/privacyStore';
+import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
 import type { CustomerDebtEntry, PaymentMethod } from '../../types';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
@@ -18,6 +19,7 @@ interface RecordPaymentModalProps {
 
 export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, onClose, debt }) => {
   const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
+  const user = useAuthStore(s => s.user);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -62,6 +64,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
         method,
         date: date ? new Date(date).toISOString() : new Date().toISOString(),
         note: note.trim() || undefined,
+        receivedByName: user?.name || 'Staff',
       });
 
       toast.success(

@@ -1169,29 +1169,71 @@ async function handlePrintZReport(body) {
 
     printer.drawLine();
 
-    // ---- Returns & Refunds ----
-    printer.bold(true);
-    printer.println(t('returnsRefunds', 'RETURNS & REFUNDS'));
-    printer.bold(false);
-    printer.println(twoColumnRow(`${t('refundsGiven', 'Refunds Given')} (${summary.refundsCount} ${t('txs', 'txs')}):`, `-${fmt(summary.refundsAmount)}`));
+    // ---- Exclusions & Refunds ----
+    if (summary.refundsCount > 0 || (summary.cancelledCount && summary.cancelledCount > 0)) {
+      printer.bold(true);
+      printer.println(t('returnsRefunds', 'EXCLUSIONS & REFUNDS'));
+      printer.bold(false);
+      if (summary.refundsCount > 0) {
+        printer.println(twoColumnRow(`${t('refundsGiven', 'Refunds')} (${summary.refundsCount} ${t('txs', 'txs')}):`, `-${fmt(summary.refundsAmount)}`));
+      }
+      if (summary.cancelledCount && summary.cancelledCount > 0) {
+        printer.println(twoColumnRow(`Voided / Cancelled (${summary.cancelledCount} ${t('txs', 'txs')}):`, fmt(0)));
+      }
+      printer.drawLine();
+    }
 
-    printer.drawLine();
-
-    // ---- Cash Drawer Reconciliation ----
+    // ---- Physical Cash Breakdown ----
+    printer.alignLeft();
     printer.bold(true);
-    printer.println(t('cashDrawerRec', 'CASH DRAWER RECONCILIATION'));
+    printer.println(t('cashDrawerRec', 'PHYSICAL CASH INFLOW (DETAILS)'));
     printer.bold(false);
-    printer.println(twoColumnRow(t('cashCollected', 'Cash Collected:'), fmt(summary.grossSales)));
-    printer.println(twoColumnRow(t('cashPaidOut', 'Cash Paid Out (Refunds):'), `-${fmt(summary.refundsAmount)}`));
+
+    const posCash = summary.posRetailCash ?? summary.cashIn ?? 0;
+    const partsCash = summary.partsB2BCash ?? 0;
+    const repairPickups = summary.repairHandoversCash ?? summary.repairsCashIn ?? 0;
+    const repairDeposits = summary.repairDepositsCash ?? 0;
+    const debtCollected = summary.debtCollectedCash ?? 0;
+
+    printer.println(twoColumnRow(`Retail POS Cash:`, fmt(posCash)));
+    if (partsCash > 0) {
+      printer.println(twoColumnRow('Parts B2B Wholesale:', fmt(partsCash)));
+    }
+    printer.println(twoColumnRow('Repair Handover Pickups:', `+${fmt(repairPickups)}`));
+    if (repairDeposits > 0) {
+      printer.println(twoColumnRow('Repair Intake Deposits:', `+${fmt(repairDeposits)}`));
+    }
+    if (debtCollected > 0) {
+      printer.println(twoColumnRow('Customer Debt Repaid:', `+${fmt(debtCollected)}`));
+    }
     printer.drawLine();
 
     printer.bold(true);
     printer.setTextSize(1, 1);
     printer.alignCenter();
-    printer.println(t('netCashDrawer', 'NET CASH IN DRAWER:'));
+    printer.println(t('netCashDrawer', 'NET PHYSICAL CASH IN DRAWER:'));
     printer.println(fmt(summary.netCash));
     printer.setTextNormal();
     printer.bold(false);
+    printer.drawLine();
+
+    // ---- Payment Methods / Tender Breakdown ----
+    printer.alignLeft();
+    printer.bold(true);
+    printer.println('PAYMENT METHODS (TENDER)');
+    printer.bold(false);
+    printer.println(twoColumnRow('Cash Tender:', fmt(posCash + partsCash)));
+    printer.println(twoColumnRow('Card / TPE Terminal:', fmt(summary.cardTotal || 0)));
+    printer.println(twoColumnRow('Mobile / BaridiMob:', fmt(summary.mobileTotal || 0)));
+    if (summary.transferTotal && summary.transferTotal > 0) {
+      printer.println(twoColumnRow('Bank Transfers:', fmt(summary.transferTotal)));
+    }
+    if (summary.debtTotal && summary.debtTotal > 0) {
+      printer.println(twoColumnRow('Charged to Debt Tab:', fmt(summary.debtTotal)));
+    }
+    if (summary.creditTotal && summary.creditTotal > 0) {
+      printer.println(twoColumnRow('Store Credit Applied:', fmt(summary.creditTotal)));
+    }
     printer.drawLine();
 
     // ---- Staff Breakdown ----

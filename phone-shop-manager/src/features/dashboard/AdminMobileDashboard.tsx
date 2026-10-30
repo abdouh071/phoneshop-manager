@@ -9,6 +9,7 @@ import { useRepairStore } from '../../store/repairStore';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useAuthStore } from '../../store/authStore';
 import { useApprovalStore } from '../../store/approvalStore';
+import { useCustomerStore } from '../../store/customerStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useHaptic } from '../../hooks/useHaptic';
 import {
@@ -25,6 +26,7 @@ export const AdminMobileDashboard: React.FC = () => {
   const { transactions } = useCartStore();
   const { tickets } = useRepairStore();
   const { products } = useInventoryStore();
+  const { debts } = useCustomerStore();
   const { pendingCount, openModal } = useApprovalStore();
   const { currency } = useSettingsStore();
 
@@ -36,13 +38,15 @@ export const AdminMobileDashboard: React.FC = () => {
     return d.getTime() === day.getTime();
   };
 
-  const activeTx = useMemo(() => transactions.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'pending_approval'), [transactions]);
+  const activeTx = useMemo(() => transactions.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval'), [transactions]);
   const completedRepairs = useMemo(() => tickets.filter(t => isClaimedAndPaidRepair(t)), [tickets]);
 
   const todayTx = useMemo(() => activeTx.filter(t => isSameDay(t.date, today)), [activeTx, today]);
   const yesterdayTx = useMemo(() => activeTx.filter(t => isSameDay(t.date, yesterday)), [activeTx, yesterday]);
 
-  const todaySalesRev = useMemo(() => todayTx.reduce((s, t) => s + t.total, 0), [todayTx]);
+  const todayRetailSalesRev = useMemo(() => todayTx.filter(t => t.saleType !== 'parts_b2b').reduce((s, t) => s + t.total, 0), [todayTx]);
+  const todayPartsRev = useMemo(() => todayTx.filter(t => t.saleType === 'parts_b2b').reduce((s, t) => s + t.total, 0), [todayTx]);
+  const todaySalesRev = todayRetailSalesRev + todayPartsRev;
   const yesterdaySalesRev = useMemo(() => yesterdayTx.reduce((s, t) => s + t.total, 0), [yesterdayTx]);
 
   const todayRepairRev = useMemo(() =>
@@ -57,6 +61,20 @@ export const AdminMobileDashboard: React.FC = () => {
       .reduce((s, r) => s + getClaimedRepairRevenue(r), 0),
     [completedRepairs, yesterday]
   );
+
+  const todayDebtCollected = useMemo(() => {
+    return debts
+      .flatMap(d => (d.payments || []).filter(p => isSameDay(p.date, today)))
+      .filter(p => String(p.method || '').toLowerCase() === 'cash')
+      .reduce((s, p) => s + p.amount, 0);
+  }, [debts, today]);
+
+  const yestDebtCollected = useMemo(() => {
+    return debts
+      .flatMap(d => (d.payments || []).filter(p => isSameDay(p.date, yesterday)))
+      .filter(p => String(p.method || '').toLowerCase() === 'cash')
+      .reduce((s, p) => s + p.amount, 0);
+  }, [debts, yesterday]);
 
   const startOfMonth = useMemo(() => new Date(today.getFullYear(), today.getMonth(), 1), [today]);
   const monthlyRev = useMemo(() => {
@@ -131,13 +149,25 @@ export const AdminMobileDashboard: React.FC = () => {
           </div>
           <div className={styles.revenueBreakdown}>
             <div className={styles.breakdownRow}>
-              <span>📦 Sales</span>
-              <span>{formatPrivateCurrency(todaySalesRev)}</span>
+              <span>🛒 Retail Sales</span>
+              <span>{formatPrivateCurrency(todayRetailSalesRev)}</span>
             </div>
             <div className={styles.breakdownRow}>
               <span>🔧 Repairs</span>
               <span>{formatPrivateCurrency(todayRepairRev)}</span>
             </div>
+            {todayPartsRev > 0 && (
+              <div className={styles.breakdownRow}>
+                <span>📦 Parts B2B</span>
+                <span>{formatPrivateCurrency(todayPartsRev)}</span>
+              </div>
+            )}
+            {todayDebtCollected > 0 && (
+              <div className={styles.breakdownRow}>
+                <span>💳 Debt Collections</span>
+                <span>{formatPrivateCurrency(todayDebtCollected)}</span>
+              </div>
+            )}
             <div className={[styles.breakdownRow, styles.breakdownRowTotal].join(' ')}>
               <span>📅 This Month</span>
               <span>{formatPrivateCurrency(monthlyRev)}</span>

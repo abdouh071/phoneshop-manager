@@ -5,6 +5,7 @@ import { settingsService } from '../../services/settingsService';
 import type { RepairTicket } from '../../types';
 import type { StoreSettings } from '../../services/settingsService';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { formatWhatsAppUrl } from '../../utils/phoneUtils';
 import styles from './CustomerTracking.module.css';
 
 // ============================================================
@@ -436,7 +437,7 @@ export const CustomerTrackingPage: React.FC = () => {
               📞 Call Shop
             </a>
             <a
-              href={`https://wa.me/${cleanPhone.replace(/^\+/, '')}?text=${whatsappMsg}`}
+              href={formatWhatsAppUrl(cleanPhone, whatsappMsg) || `https://wa.me/?text=${encodeURIComponent(whatsappMsg)}`}
               target="_blank"
               rel="noopener noreferrer"
               className={`${styles.contactBtn} ${styles.whatsappBtn}`}

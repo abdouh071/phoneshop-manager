@@ -7,7 +7,7 @@ import {
   Phone, Mail, ShoppingBag, Clock, Smartphone, MessageCircle,
   Wrench, ShoppingCart, Receipt, User, BookOpen, Plus,
   DollarSign, Trash2, Send, AlertTriangle, FileText, Store, FileEdit, RotateCcw,
-  GitMerge, ArrowRightLeft, Edit, Edit2, Printer
+  GitMerge, ArrowRightLeft, Edit, Edit2, Printer, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { useCartStore } from '../../store/cartStore';
 import { usePartsCartStore } from '../../store/partsCartStore';
@@ -39,7 +39,8 @@ import { usePrivacyStore } from '../../store/privacyStore';
 import { Customer360Timeline } from './Customer360Timeline';
 import { CustomerActivityLogList } from './CustomerActivityLogList';
 import { isDebtOverdue, getDaysOverdue, buildWhatsAppDebtReminderUrl } from '../../utils/debtAlerts';
-import { calculateCustomerFinancials } from '../../utils/customerFinancials';
+import { calculateCustomerFinancials, matchesCustomer, normalizeDeviceDetails } from '../../utils/customerFinancials';
+import { formatWhatsAppUrl, normalizePhoneDigits } from '../../utils/phoneUtils';
 import { isTicketActiveReturnPending } from '../../utils/phoneLifecycle';
 
 interface CustomerProfilePanelProps {
@@ -92,6 +93,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
   const [isMergeOpen, setIsMergeOpen] = useState(false);
   const [isDeleteCustomerOpen, setIsDeleteCustomerOpen] = useState(false);
   const [deviceToDelete, setDeviceToDelete] = useState<{ device: string; brand: string; model: string; tickets: any[] } | null>(null);
+  const [deleteDeviceRepairsToo, setDeleteDeviceRepairsToo] = useState(false);
   const [deviceToEdit, setDeviceToEdit] = useState<{ id?: string; oldBrand: string; oldModel: string; brand: string; model: string; imei?: string; notes?: string } | null>(null);
   const [ticketToDelete, setTicketToDelete] = useState<RepairTicket | null>(null);
   const [isActionLoading, setIsActionLoading] = useState(false);
@@ -109,6 +111,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
   const [newPhoneImei, setNewPhoneImei] = useState('');
   const [newPhoneNotes, setNewPhoneNotes] = useState('');
   const [createTicketForNewPhone, setCreateTicketForNewPhone] = useState(false);
+  const [expandedDeviceKey, setExpandedDeviceKey] = useState<string | null>(null);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -151,7 +154,6 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
     }
   };
 
-  // Problem 8 fix: Only unregister device, do NOT cascade-delete repair tickets
   const confirmDeleteDevice = async () => {
     if (!customer || !deviceToDelete) return;
     setIsActionLoading(true);
@@ -159,7 +161,18 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
       const brand = deviceToDelete.brand;
       const model = deviceToDelete.model;
 
-      // Only remove from registeredDevices array — preserve repair ticket history
+      // Step 1: Optionally delete all linked repair tickets for this device
+      let deletedTicketCount = 0;
+      if (deleteDeviceRepairsToo && deviceToDelete.tickets.length > 0) {
+        deletedTicketCount = await deleteDeviceFromCustomer(
+          customer.id,
+          customer.phone,
+          brand,
+          model
+        );
+      }
+
+      // Step 2: Remove device from registeredDevices array
       if (customer.registeredDevices && customer.registeredDevices.length > 0) {
         const cleanBrand = brand.toLowerCase().trim();
         const cleanModel = model.toLowerCase().trim();
@@ -171,11 +184,15 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         }
       }
 
+      const ticketMsg = deletedTicketCount > 0
+        ? ` ${deletedTicketCount} repair ticket(s) also deleted.`
+        : ' Repair history preserved.';
       toast.success(
-        'Device Unregistered',
-        `${deviceToDelete.device} has been removed from ${customer.name}'s registered devices. Repair history is preserved.`
+        'Device Removed',
+        `${deviceToDelete.device} removed from ${customer.name}'s profile.${ticketMsg}`
       );
       setDeviceToDelete(null);
+      setDeleteDeviceRepairsToo(false);
     } catch (err) {
       toast.error('Failed to remove device', 'An error occurred.');
     } finally {
@@ -382,34 +399,41 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
   const custNameLower = customer ? customer.name.toLowerCase().trim() : '';
 
   const allTxs = useMemo(() => {
-    return [...transactions, ...invoices];
+    const txMap = new Map<string, SaleTransaction>();
+    [...transactions, ...invoices].forEach(tx => {
+      if (tx && tx.id) txMap.set(tx.id, tx);
+    });
+    return Array.from(txMap.values());
   }, [transactions, invoices]);
 
   const customerTxs = useMemo(() => {
     if (!customer) return [];
     return allTxs
-      .filter(tx => {
-        if (tx.customerId && tx.customerId === customer.id) return true;
-        if (!tx.customerName) return false;
-        return tx.customerName.toLowerCase().trim() === custNameLower;
-      })
+      .filter(tx => matchesCustomer(customer, tx))
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [allTxs, customer, custNameLower]);
+  }, [allTxs, customer]);
 
   const customerTickets = useMemo(() => {
     if (!customer) return [];
     return tickets
-      .filter(tk => {
-        if (tk.customerId && tk.customerId === customer.id) return true;
-        if (tk.customerPhone && normalizePhone(tk.customerPhone) === custPhone) return true;
-        return tk.customerName.toLowerCase().trim() === custNameLower;
-      })
+      .filter(tk => matchesCustomer(customer, tk))
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [tickets, customer, custPhone, custNameLower]);
+  }, [tickets, customer]);
 
-  // Customer debts and logs
-  const customerDebts = customer ? getCustomerDebts(customer.id) : [];
-  const totalDebtBalance = customer ? getCustomerDebtTotal(customer.id) : 0;
+  // Customer debts and logs (robust match by ID, phone, or name)
+  const customerDebts = useMemo(() => {
+    if (!customer) return [];
+    return debts
+      .filter(d => matchesCustomer(customer, d) || d.customerId === customer.id)
+      .sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
+  }, [customer, debts]);
+
+  const totalDebtBalance = useMemo(() => {
+    return customerDebts
+      .filter(d => d.status !== 'paid')
+      .reduce((sum, d) => sum + d.remainingBalance, 0);
+  }, [customerDebts]);
+
   const customerLogs = customer ? getCustomerLogs(customer.id) : [];
 
   // Authoritative real-time customer financials
@@ -418,11 +442,12 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
     return calculateCustomerFinancials(customer, customerTickets, customerTxs, customerDebts);
   }, [customer, customerTickets, customerTxs, customerDebts]);
 
-  // Device Fleet calculation (combines repair tickets + registered devices)
+  // Device Fleet calculation (smart canonical normalization + IMEI deduplication + repair tickets & registered devices)
   const deviceStats = useMemo(() => {
     if (!customer) return [];
     const map: Record<string, {
       id?: string;
+      displayName: string;
       brand: string;
       model: string;
       imei?: string;
@@ -436,14 +461,39 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
 
     // 1. From repair tickets
     customerTickets.forEach(tk => {
-      const brand = (tk.deviceBrand || '').trim();
-      const model = (tk.deviceModel || '').trim();
-      const key = `${brand} ${model}`.trim() || 'Unknown Device';
-      if (!map[key]) {
-        map[key] = { brand, model, count: 0, totalSpent: 0, issues: [], tickets: [] };
+      const { brand, model, displayName, canonicalKey } = normalizeDeviceDetails(tk.deviceBrand, tk.deviceModel);
+      const imei = (tk.serialNumber || tk.imei || '').trim();
+
+      // Find by IMEI if available, or by canonical key
+      let key = canonicalKey;
+      if (imei) {
+        const existingKey = Object.keys(map).find(k => map[k].imei && map[k].imei === imei);
+        if (existingKey) key = existingKey;
       }
+
+      if (!map[key]) {
+        map[key] = {
+          displayName,
+          brand,
+          model,
+          imei: imei || undefined,
+          count: 0,
+          totalSpent: 0,
+          issues: [],
+          tickets: [],
+        };
+      } else {
+        if (displayName.length > map[key].displayName.length) {
+          map[key].displayName = displayName;
+        }
+        if (imei && !map[key].imei) {
+          map[key].imei = imei;
+        }
+      }
+
       map[key].count++;
-      map[key].totalSpent += tk.actualCost || tk.estimatedCost || 0;
+      const cost = tk.actualCost != null && tk.actualCost > 0 ? tk.actualCost : (tk.estimatedCost || 0);
+      map[key].totalSpent += cost;
       if (tk.issueDescription && !map[key].issues.includes(tk.issueDescription)) {
         map[key].issues.push(tk.issueDescription);
       }
@@ -452,19 +502,42 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
 
     // 2. From customer.registeredDevices
     (customer.registeredDevices || []).forEach(dev => {
-      const brand = (dev.brand || '').trim();
-      const model = (dev.model || '').trim();
-      const key = `${brand} ${model}`.trim() || 'Unknown Device';
+      const { brand, model, displayName, canonicalKey } = normalizeDeviceDetails(dev.brand, dev.model);
+      const imei = (dev.imei || '').trim();
+
+      let key = canonicalKey;
+      if (imei) {
+        const existingKey = Object.keys(map).find(k => map[k].imei && map[k].imei === imei);
+        if (existingKey) key = existingKey;
+      }
+
       if (!map[key]) {
-        map[key] = { id: dev.id, brand, model, imei: dev.imei, notes: dev.notes, count: 0, totalSpent: 0, issues: [], tickets: [], isRegisteredOnly: true };
+        map[key] = {
+          id: dev.id,
+          displayName,
+          brand,
+          model,
+          imei: imei || undefined,
+          notes: dev.notes,
+          count: 0,
+          totalSpent: 0,
+          issues: [],
+          tickets: [],
+          isRegisteredOnly: true,
+        };
       } else {
         map[key].id = dev.id || map[key].id;
-        map[key].imei = dev.imei || map[key].imei;
+        map[key].imei = imei || map[key].imei;
         map[key].notes = dev.notes || map[key].notes;
       }
     });
 
-    return Object.entries(map);
+    // Sort tickets inside each device newest first
+    Object.values(map).forEach(d => {
+      d.tickets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    });
+
+    return Object.entries(map).map(([_, data]) => [data.displayName, data] as const);
   }, [customerTickets, customer]);
 
   const mostRecentDevice = deviceStats.length > 0 ? deviceStats[0][0] : undefined;
@@ -597,15 +670,30 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
               </div>
 
               <div className={styles.headerActions}>
-                <a
-                  href={`https://wa.me/${custPhone}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={[styles.actionBtn, styles.actionBtnWa].join(' ')}
-                  title="Message on WhatsApp"
-                >
-                  <MessageCircle size={14} /> WA
-                </a>
+                {(() => {
+                  const waUrl = formatWhatsAppUrl(customer.phone);
+                  return waUrl ? (
+                    <a
+                      href={waUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={[styles.actionBtn, styles.actionBtnWa].join(' ')}
+                      title="Message on WhatsApp"
+                    >
+                      <MessageCircle size={14} /> WA
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      className={[styles.actionBtn, styles.actionBtnWa].join(' ')}
+                      style={{ opacity: 0.4, cursor: 'not-allowed' }}
+                      title="No valid phone number on file"
+                    >
+                      <MessageCircle size={14} /> WA
+                    </button>
+                  );
+                })()}
                 <button
                   type="button"
                   className={styles.actionBtn}
@@ -846,8 +934,8 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                   <div key={device} className={styles.deviceCard}>
                     <div className={device ? styles.deviceCardTop : ''}>
                       <p className={styles.deviceName}>{device || 'Unknown Device'}</p>
-                      <span className={styles.deviceRepairsCount}>
-                        {data.count} {data.count === 1 ? 'repair' : 'repairs'}
+                      <span className={styles.deviceRepairsCount} style={{ background: data.count > 0 ? '#eff6ff' : '#f1f5f9', color: data.count > 0 ? '#1d4ed8' : '#64748b' }}>
+                        {data.count === 0 ? 'Registered Phone' : `Brought ${data.count} ${data.count === 1 ? 'time' : 'times'}`}
                       </span>
                     </div>
                     {data.imei && (
@@ -870,9 +958,145 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                         Registered Device (No active repairs)
                       </p>
                     )}
+
+                    {/* Expandable Repair Visits History */}
+                    {data.count > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setExpandedDeviceKey(expandedDeviceKey === device ? null : device)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          width: '100%',
+                          padding: '5px 8px',
+                          borderRadius: '6px',
+                          background: expandedDeviceKey === device ? '#e0e7ff' : '#f8fafc',
+                          border: `1px solid ${expandedDeviceKey === device ? '#c7d2fe' : '#e2e8f0'}`,
+                          color: expandedDeviceKey === device ? '#4338ca' : '#475569',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          marginTop: '4px',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                          <Clock size={11} />
+                          <span>Repair History ({data.count} {data.count === 1 ? 'visit' : 'visits'})</span>
+                        </span>
+                        {expandedDeviceKey === device ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                      </button>
+                    )}
+
+                    {expandedDeviceKey === device && (
+                      <div style={{
+                        marginTop: '6px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px',
+                        maxHeight: '260px',
+                        overflowY: 'auto',
+                        paddingRight: '2px',
+                      }}>
+                        {data.tickets.map((t, idx) => {
+                          const cost = t.actualCost != null && t.actualCost > 0 ? t.actualCost : (t.estimatedCost || 0);
+                          const deposit = t.depositAmount || 0;
+                          const paid = t.paidAmount ?? deposit;
+                          const isSettled = t.paymentStatus === 'paid' || (cost > 0 && paid >= cost);
+                          return (
+                            <div
+                              key={t.id}
+                              style={{
+                                padding: '7px 9px',
+                                background: '#f8fafc',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: '7px',
+                                fontSize: '11px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '3px',
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontWeight: 700, color: '#0f172a' }}>
+                                  Visit #{data.tickets.length - idx} · #{t.ticketNumber}
+                                </span>
+                                <RepairStatusBadge status={t.status} />
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b', fontSize: '10.5px' }}>
+                                <span>Brought: {formatDate(t.createdAt)}</span>
+                                {t.completedAt && <span>Claimed: {formatDate(t.completedAt)}</span>}
+                              </div>
+                              {t.issueDescription && (
+                                <p style={{ margin: '1px 0', color: '#334155' }}>
+                                  <strong>Issue:</strong> {t.issueDescription}
+                                </p>
+                              )}
+                              {t.remark && (
+                                <p style={{ margin: '1px 0', color: '#475569', fontStyle: 'italic', fontSize: '10.5px' }}>
+                                  Note: "{t.remark}"
+                                </p>
+                              )}
+                              {t.partsUsed && t.partsUsed.length > 0 && (
+                                <div style={{ color: '#0369a1', background: '#f0f9ff', padding: '2px 5px', borderRadius: '4px', fontSize: '10.5px', marginTop: '1px' }}>
+                                  Parts: {t.partsUsed.map((p: any) => `${p.quantity}× ${p.name}`).join(', ')}
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '3px', paddingTop: '3px', borderTop: '1px dashed #cbd5e1' }}>
+                                <span style={{ fontWeight: 700, color: isSettled ? '#16a34a' : '#d97706', fontSize: '11px' }}>
+                                  Cost: {formatPrivateCurrency(cost)} {isSettled ? '✅ Paid' : `(Paid: ${formatPrivateCurrency(paid)})`}
+                                </span>
+                                <div style={{ display: 'flex', gap: '3px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onClose();
+                                      navigate(`/repairs?focusId=${t.ticketNumber}`);
+                                    }}
+                                    style={{
+                                      background: '#eff6ff',
+                                      border: '1px solid #bfdbfe',
+                                      color: '#1d4ed8',
+                                      padding: '2px 5px',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer',
+                                      fontSize: '10px',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    View Ticket
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setPrintingTicket(t);
+                                    }}
+                                    style={{
+                                      background: '#f1f5f9',
+                                      border: '1px solid #cbd5e1',
+                                      color: '#334155',
+                                      padding: '2px 5px',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer',
+                                      fontSize: '10px',
+                                    }}
+                                    title="Print ticket label"
+                                  >
+                                    <Printer size={10} />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed #e2e8f0', flexWrap: 'wrap', gap: '6px' }}>
                       <span className={styles.deviceSpent}>
-                        {data.totalSpent > 0 ? `Total: ${formatPrivateCurrency(data.totalSpent)}` : 'No Repair Cost'}
+                        {data.totalSpent > 0 ? `Total Spent: ${formatPrivateCurrency(data.totalSpent)}` : 'No Repair Cost'}
                       </span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                         {permissions.repairs && (
@@ -939,6 +1163,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
+                            setDeleteDeviceRepairsToo(false);
                             setDeviceToDelete({
                               device,
                               brand: data.brand || device.split(' ')[0] || '',
@@ -1407,6 +1632,47 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                       <p className={styles.ticketDevice}>{tk.deviceBrand} {tk.deviceModel}</p>
                       <p className={styles.ticketIssue}>{tk.issueDescription}</p>
 
+                      {/* Technician Remark / Findings */}
+                      {tk.remark && (
+                        <div style={{
+                          fontSize: '11px',
+                          color: '#475569',
+                          background: '#f8fafc',
+                          border: '1px dashed #cbd5e1',
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          margin: '4px 0',
+                        }}>
+                          <strong>Tech Note / Findings:</strong> "{tk.remark}"
+                        </div>
+                      )}
+
+                      {/* Spare Parts Installed on this device */}
+                      {tk.partsUsed && tk.partsUsed.length > 0 && (
+                        <div style={{
+                          fontSize: '11px',
+                          color: '#0369a1',
+                          background: '#f0f9ff',
+                          border: '1px solid #bae6fd',
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          margin: '4px 0',
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: '4px',
+                          alignItems: 'center',
+                        }}>
+                          <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                            <Wrench size={10} /> Spare Parts Used:
+                          </strong>
+                          {tk.partsUsed.map((p: any, i: number) => (
+                            <span key={i} style={{ background: '#ffffff', padding: '1px 5px', borderRadius: '3px', border: '1px solid #e0f2fe' }}>
+                              {p.quantity}× {p.name} ({formatPrivateCurrency(p.cost)})
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
                       {/* Return reason banner if returned */}
                       {tk.returnReason && (
                         <div style={{
@@ -1441,11 +1707,20 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                               Deposit: {formatPrivateCurrency(deposit)}
                             </span>
                           )}
-                          {debt > 0 && (
+                          {tk.handoverAmountPaid && tk.handoverAmountPaid > 0 ? (
+                            <span style={{ fontSize: '10.5px', color: '#059669', fontWeight: 600 }}>
+                              Handover Paid: {formatPrivateCurrency(tk.handoverAmountPaid)}
+                            </span>
+                          ) : null}
+                          {debt > 0 ? (
                             <span style={{ fontSize: '10.5px', color: '#dc2626', fontWeight: 600 }}>
                               ⚠️ Dept: {formatPrivateCurrency(debt)}
                             </span>
-                          )}
+                          ) : (effectiveStatus === 'completed' || tk.paymentStatus === 'paid') ? (
+                            <span style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: 700 }}>
+                              ✅ Paid in Full
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                       <div style={{
@@ -1516,10 +1791,21 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           <span>{formatPrivateCurrency(item.product.price * item.quantity)}</span>
                         </div>
                       ))}
+                      {tx.discount && (typeof tx.discount === 'object' ? tx.discount.value > 0 : (tx.discount as any) > 0) && (
+                        <div className={styles.saleItemRow} style={{ color: '#15803d', fontWeight: 600 }}>
+                          <span>🏷️ Discount Applied</span>
+                          <span>-{formatPrivateCurrency(typeof tx.discount === 'object' ? (tx.discount.type === 'percent' ? ((tx.subtotal || tx.total) * tx.discount.value / 100) : tx.discount.value) : (tx.discount as any))}</span>
+                        </div>
+                      )}
                     </div>
                     <div className={styles.ticketFooter} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px' }}>
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                         <span className={styles.ticketDate}>{formatDate(tx.date)}</span>
+                        {tx.payments && tx.payments.length > 0 && (
+                          <span style={{ fontSize: '10.5px', color: '#475569', background: '#f1f5f9', padding: '1px 6px', borderRadius: '4px' }}>
+                            via {tx.payments.map(p => p.method.toUpperCase()).join('+')}
+                          </span>
+                        )}
                         {tx.status === 'refunded' && (
                           <span style={{ fontSize: '10.5px', color: '#dc2626', background: '#fee2e2', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
                             Refunded
@@ -1801,20 +2087,53 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
       {/* Delete Phone Device Confirmation Dialog */}
       <ConfirmDialog
         isOpen={!!deviceToDelete}
-        onClose={() => setDeviceToDelete(null)}
+        onClose={() => { setDeviceToDelete(null); setDeleteDeviceRepairsToo(false); }}
         onConfirm={confirmDeleteDevice}
-        title="Delete Phone / Device from Customer"
+        title="Remove Phone / Device from Customer"
         message={
           <div>
-            <p style={{ margin: '0 0 8px 0' }}>
-              Are you sure you want to remove <strong>{deviceToDelete?.device}</strong> ({deviceToDelete?.tickets.length} repair ticket(s)) from <strong>{customer?.name}</strong>?
+            <p style={{ margin: '0 0 10px 0' }}>
+              Remove <strong>{deviceToDelete?.device}</strong> from <strong>{customer?.name}</strong>'s profile?
             </p>
-            <p style={{ margin: 0, color: '#475569', fontSize: '12.5px' }}>
-              This will remove this phone device and its associated repair records from this customer. <strong>{customer?.name}'s customer account will NOT be deleted.</strong>
+            {deviceToDelete && deviceToDelete.tickets.length > 0 && (
+              <div
+                style={{
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  borderRadius: '8px',
+                  padding: '10px 12px',
+                  marginBottom: '10px',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                  cursor: 'pointer',
+                }}
+                onClick={() => setDeleteDeviceRepairsToo(v => !v)}
+              >
+                <input
+                  type="checkbox"
+                  id="deleteRepairsCheck"
+                  checked={deleteDeviceRepairsToo}
+                  onChange={e => setDeleteDeviceRepairsToo(e.target.checked)}
+                  style={{ marginTop: '2px', cursor: 'pointer' }}
+                  onClick={e => e.stopPropagation()}
+                />
+                <label htmlFor="deleteRepairsCheck" style={{ fontSize: '12.5px', color: '#991b1b', fontWeight: 600, cursor: 'pointer' }}>
+                  Also permanently delete the {deviceToDelete.tickets.length} linked repair ticket(s)
+                  <span style={{ display: 'block', fontWeight: 400, color: '#b91c1c', fontSize: '11.5px', marginTop: '2px' }}>
+                    ⚠️ This cannot be undone. Uncheck to keep the repair history.
+                  </span>
+                </label>
+              </div>
+            )}
+            <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>
+              {deleteDeviceRepairsToo
+                ? `This will remove the device and delete all ${deviceToDelete?.tickets.length} repair record(s) permanently.`
+                : 'The device will be unregistered. Existing repair history will be preserved.'}
             </p>
           </div>
         }
-        confirmLabel="Delete Phone"
+        confirmLabel={deleteDeviceRepairsToo ? 'Delete Device + Repairs' : 'Remove Device'}
         variant="danger"
         isLoading={isActionLoading}
       />

@@ -457,7 +457,12 @@ export const useRepairStore = create<RepairState>((set, get) => ({
     try {
       const ticket = get().tickets.find(t => t.id === id);
 
-      // Clean up linked customer debt if one exists
+      // 1. Instant optimistic state removal
+      set(state => ({
+        tickets: state.tickets.filter(t => t.id !== id),
+      }));
+
+      // 2. Clean up linked customer debt if one exists
       if (ticket?.debtEntryId) {
         try {
           const { useCustomerStore } = await import('./customerStore');
@@ -467,12 +472,44 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         }
       }
 
-      await repairService.deleteTicket(id);
-      set(state => ({
-        tickets: state.tickets.filter(t => t.id !== id),
-      }));
+      // 3. Clean up return child / parent links
+      if (ticket?.parentTicketId) {
+        const parent = get().tickets.find(t => t.id === ticket.parentTicketId);
+        if (parent) {
+          const updatedRecords = (parent.returnRecords || []).filter(
+            r => r.returnTicketId !== id && r.returnTicketNumber !== ticket.ticketNumber
+          );
+          const updates: Partial<RepairTicket> = {
+            returnRecords: updatedRecords,
+          };
+          if (parent.activeReturnTicketId === id) {
+            updates.activeReturnTicketId = undefined;
+          }
+          get().updateTicket(parent.id, updates).catch(console.error);
+        }
+      } else if (ticket?.activeReturnTicketId) {
+        const childId = ticket.activeReturnTicketId;
+        get().deleteTicket(childId).catch(console.error);
+      }
 
-      // Authoritative recalculation of customer financials on ticket delete
+      // 4. Delete from service (tombstones + local storage + firestore / offline queue)
+      await repairService.deleteTicket(id);
+
+      // 5. Activity log
+      const actor = useAuthStore.getState().user;
+      activityLogService.log(
+        'repairs',
+        `Repair ticket #${ticket?.ticketNumber || id} deleted`,
+        {
+          detail: `Customer: ${ticket?.customerName || 'Unknown'}, Device: ${ticket?.deviceBrand || ''} ${ticket?.deviceModel || ''}`,
+          entityId: id,
+          entityType: 'repair',
+          userName: actor?.name,
+          userId: actor?.id,
+        }
+      ).catch(console.error);
+
+      // 6. Authoritative recalculation of customer financials on ticket delete
       if (ticket?.customerId) {
         try {
           const { useCustomerStore } = await import('./customerStore');
