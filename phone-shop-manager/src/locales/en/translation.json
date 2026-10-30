@@ -742,6 +742,16 @@
     "accountType": "Account Type",
     "commercialShop": "Commercial / Phone Shop",
     "retailClient": "Retail Client",
-    "liveLedgerBalance": "Live Ledger Balance"
+    "liveLedgerBalance": "Live Ledger Balance",
+    "closingBalanceLabel": "Total Balance Due",
+    "unpaidStatus": "Payment Pending",
+    "paidStatus": "Account Settled",
+    "totalBilled": "Total Billed",
+    "totalPaid": "Total Paid",
+    "priorDebt": "Prior Balance",
+    "transactionsTitle": "Transaction History",
+    "amount": "Amount",
+    "operation": "Operation & Details",
+    "simplifiedTitle": "Customer Account Statement"
   }
 }

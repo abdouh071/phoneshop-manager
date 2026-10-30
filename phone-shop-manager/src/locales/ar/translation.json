@@ -742,6 +742,16 @@
     "accountType": "نوع الحساب",
     "commercialShop": "محل شريك / B2B",
     "retailClient": "زبون تجزئة",
-    "liveLedgerBalance": "الرصيد المستحق الفعلي حالياً"
+    "liveLedgerBalance": "الرصيد المستحق الفعلي حالياً",
+    "closingBalanceLabel": "الرصيد المتبقي المستحق",
+    "unpaidStatus": "بانتظار السداد",
+    "paidStatus": "الحساب مسوى",
+    "totalBilled": "إجمالي الفواتير",
+    "totalPaid": "المدفوع",
+    "priorDebt": "الرصيد السابق",
+    "transactionsTitle": "سجل العمليات",
+    "amount": "المبلغ",
+    "operation": "العملية والتفاصيل",
+    "simplifiedTitle": "كشف حساب الزبون"
   }
 }

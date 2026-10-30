@@ -428,20 +428,19 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
     exportToCSV(filename, headers, rows);
   };
 
+  const isDebt = statementData.closingBalance > 0;
+
   const handleShareWhatsApp = () => {
     const shopDisplayName = customer.shopName || customer.name;
-    const text = `🏪 *ACCOUNT STATEMENT / RELEVÉ DE COMPTE*
+    const text = `🏪 *${t('statementModal.simplifiedTitle', 'Relevé de compte client')}*
 *Client:* ${shopDisplayName}
-*Date:* ${new Date().toLocaleDateString()}
-*Period:* ${dateRangeLabel}
+*Période:* ${dateRangeLabel}
 ━━━━━━━━━━━━━━━━━━━
-📊 *Opening Balance:* ${formatCurrency(statementData.openingBalance)}
-📦 *Invoices / Billed (+):* ${formatCurrency(statementData.periodDebits)}
-💳 *Payments Received (-):* ${formatCurrency(statementData.periodCredits)}
+💰 *${t('statementModal.closingBalanceLabel', 'SOLDE RESTANT DÛ')}:* ${formatCurrency(statementData.closingBalance)}
+📦 ${t('statementModal.totalBilled', 'Total facturé')}: ${formatCurrency(statementData.periodDebits)}
+💳 ${t('statementModal.totalPaid', 'Total réglé')}: ${formatCurrency(statementData.periodCredits)}
 ━━━━━━━━━━━━━━━━━━━
-🔴 *CLOSING BALANCE DUE:* ${formatCurrency(statementData.closingBalance)}
-━━━━━━━━━━━━━━━━━━━
-${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review your account statement and contact us for any inquiries. Thank you!`;
+${settings.storeName ? `${settings.storeName}\n` : ''}`;
 
     const url = formatWhatsAppUrl(customer.phone, text) || `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(url, '_blank');
@@ -451,99 +450,93 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={t('statementModal.title', 'B2B Account Statement & Ledger')}
-      subtitle={`${customer.shopName || customer.name} • ${dateRangeLabel}`}
+      title={`${customer.shopName || customer.name}`}
+      subtitle={`${t('statementModal.simplifiedTitle', 'Relevé de compte client')} • ${dateRangeLabel}`}
       size="lg"
       footer={
-        <div className={styles.actionsBar} style={{ width: '100%' }}>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <Button variant="secondary" onClick={handleExportCSV} leftIcon={<Download size={15} />}>
-              {t('statementModal.exportCsv', 'Export CSV')}
-            </Button>
+        <div className={styles.actionsBar}>
+          <Button variant="secondary" onClick={handleExportCSV} leftIcon={<Download size={15} />}>
+            {t('statementModal.exportCsv', 'Export CSV')}
+          </Button>
+
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <Button
               variant="secondary"
               onClick={handleShareWhatsApp}
               leftIcon={<Send size={15} />}
               style={{ background: '#25D366', color: '#ffffff', borderColor: '#22c55e' }}
             >
-              {t('statementModal.shareWhatsApp', 'Share via WhatsApp')}
+              WhatsApp ({formatPrivateCurrency(statementData.closingBalance)})
             </Button>
-          </div>
-
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            {isReconciled && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#16a34a', fontWeight: 600 }}>
-                <ShieldCheck size={14} /> {t('statementModal.reconciled', '100% Reconciled')}
-              </span>
-            )}
             <Button variant="ghost" onClick={onClose}>
-              {t('statementModal.close', 'Close')}
+              {t('statementModal.close', 'Fermer')}
             </Button>
             <Button onClick={handlePrint} leftIcon={<Printer size={15} />}>
-              {t('statementModal.printPdf', 'Print / Save PDF')}
+              {t('statementModal.printPdf', 'Imprimer / PDF')}
             </Button>
           </div>
         </div>
       }
     >
       <div className={styles.modalContainer}>
-        {/* Date Filter & Controls Toolbar */}
-        <div className={styles.controlsBar}>
-          <div className={styles.filterPills}>
+        {/* Print-only Header */}
+        <div className={styles.printHeader}>
+          <h2 className={styles.printStoreTitle}>{settings.storeName || 'PHONE SHOP MANAGER PRO'}</h2>
+          <p className={styles.printMeta}>
+            {t('statementModal.simplifiedTitle', 'Relevé de compte client')} — {customer.shopName || customer.name} ({customer.phone}) • {dateRangeLabel}
+          </p>
+        </div>
+
+        {/* 1. Clean Filter Toolbar */}
+        <div className={styles.toolbarRow}>
+          <div className={styles.segmentedControl}>
             <button
               type="button"
-              className={[styles.filterPill, datePreset === 'this_month' && styles.filterPillActive].filter(Boolean).join(' ')}
+              className={[styles.segmentBtn, datePreset === 'this_month' && styles.segmentBtnActive].filter(Boolean).join(' ')}
               onClick={() => setDatePreset('this_month')}
             >
-              {t('statementModal.thisMonth', 'This Month')}
+              {t('statementModal.thisMonth', 'Ce mois')}
             </button>
             <button
               type="button"
-              className={[styles.filterPill, datePreset === 'last_month' && styles.filterPillActive].filter(Boolean).join(' ')}
+              className={[styles.segmentBtn, datePreset === 'last_month' && styles.segmentBtnActive].filter(Boolean).join(' ')}
               onClick={() => setDatePreset('last_month')}
             >
-              {t('statementModal.lastMonth', 'Last Month')}
+              {t('statementModal.lastMonth', 'Mois dernier')}
             </button>
             <button
               type="button"
-              className={[styles.filterPill, datePreset === 'last_30_days' && styles.filterPillActive].filter(Boolean).join(' ')}
-              onClick={() => setDatePreset('last_30_days')}
-            >
-              {t('statementModal.last30Days', 'Last 30 Days')}
-            </button>
-            <button
-              type="button"
-              className={[styles.filterPill, datePreset === 'this_year' && styles.filterPillActive].filter(Boolean).join(' ')}
+              className={[styles.segmentBtn, datePreset === 'this_year' && styles.segmentBtnActive].filter(Boolean).join(' ')}
               onClick={() => setDatePreset('this_year')}
             >
-              {t('statementModal.thisYear', 'This Year')}
+              {t('statementModal.thisYear', 'Cette année')}
             </button>
             <button
               type="button"
-              className={[styles.filterPill, datePreset === 'all' && styles.filterPillActive].filter(Boolean).join(' ')}
+              className={[styles.segmentBtn, datePreset === 'all' && styles.segmentBtnActive].filter(Boolean).join(' ')}
               onClick={() => setDatePreset('all')}
             >
-              {t('statementModal.allTime', 'All Time')}
+              {t('statementModal.allTime', 'Tout')}
             </button>
             <button
               type="button"
-              className={[styles.filterPill, datePreset === 'custom' && styles.filterPillActive].filter(Boolean).join(' ')}
+              className={[styles.segmentBtn, datePreset === 'custom' && styles.segmentBtnActive].filter(Boolean).join(' ')}
               onClick={() => setDatePreset('custom')}
             >
-              {t('statementModal.customRange', 'Custom Range')}
+              {t('statementModal.customRange', 'Dates')}
             </button>
           </div>
 
           {datePreset === 'custom' && (
             <div className={styles.customDateRow}>
-              <span>{t('statementModal.from', 'From:')}</span>
+              <span>{t('statementModal.from', 'Du :')}</span>
               <input
                 type="date"
                 value={customStart}
                 onChange={e => setCustomStart(e.target.value)}
                 className={styles.dateInput}
               />
-              <span>{t('statementModal.to', 'To:')}</span>
+              <span>{t('statementModal.to', 'Au :')}</span>
               <input
                 type="date"
                 value={customEnd}
@@ -554,182 +547,145 @@ ${settings.storeName ? `Issued by: ${settings.storeName}\n` : ''}Please review y
           )}
         </div>
 
-        {/* Printable Statement Sheet */}
-        <div className={`${styles.statementSheet} printable-statement`}>
-          {/* Statement Header */}
-          <div className={styles.statementHeader}>
-            <div className={styles.storeInfo}>
-              <h2>{settings.storeName || 'PHONE SHOP MANAGER PRO'}</h2>
-              <p className={styles.storeSub}>Wholesale Parts & Commercial Ledger Division</p>
-              {'phone' in settings && (settings as any).phone && <p className={styles.storeSub}>📞 {(settings as any).phone}</p>}
-              {'address' in settings && (settings as any).address && <p className={styles.storeSub}>📍 {(settings as any).address}</p>}
-            </div>
-
-            <div className={styles.statementMeta}>
-              <span className={styles.statementBadge}>RELEVÉ DE COMPTE</span>
-              <h3 className={styles.statementTitle}>ACCOUNT STATEMENT</h3>
-              <p className={styles.statementDate}>Ref: <strong>{statementNumber}</strong></p>
-              <p className={styles.statementDate}>Date: <strong>{new Date().toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' })}</strong></p>
-            </div>
+        {/* 2. Hero Balance Card */}
+        <div className={[styles.heroCard, isDebt ? styles.heroCardDebt : styles.heroCardSettled].join(' ')}>
+          <div className={styles.heroHeader}>
+            <span className={styles.heroSubtitle}>{t('statementModal.closingBalanceLabel', 'Solde restant dû')}</span>
+            <span className={[styles.statusBadge, isDebt ? styles.statusBadgeUnpaid : styles.statusBadgePaid].join(' ')}>
+              {isDebt ? (
+                <>
+                  <AlertCircle size={13} />
+                  {t('statementModal.unpaidStatus', 'En attente de règlement')}
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={13} />
+                  {t('statementModal.paidStatus', 'Compte à jour')}
+                </>
+              )}
+            </span>
           </div>
 
-          {/* Client & Period Info */}
-          <div className={styles.partiesGrid}>
-            <div className={styles.clientCol}>
-              <h4>{t('statementModal.accountDetails', 'CLIENT ACCOUNT DETAILS')}</h4>
-              <p className={styles.clientName}>{customer.shopName || customer.name}</p>
-              {customer.shopName && <p className={styles.clientDetail}>Contact Person: <strong>{customer.name}</strong></p>}
-              <p className={styles.clientDetail}>Phone: {customer.phone}</p>
-              {customer.email && <p className={styles.clientDetail}>Email: {customer.email}</p>}
-              {customer.address && <p className={styles.clientDetail}>Address: {customer.address}</p>}
-              {(customer.rc || customer.nif || customer.nis || customer.art) && (
-                <div style={{ marginTop: '4px', fontSize: '11px', color: '#475569', lineHeight: 1.4 }}>
-                  {customer.rc && <div>RC: <strong>{customer.rc}</strong></div>}
-                  {customer.nif && <div>NIF: <strong>{customer.nif}</strong></div>}
-                  {customer.nis && <div>NIS: <strong>{customer.nis}</strong></div>}
-                  {customer.art && <div>Art: <strong>{customer.art}</strong></div>}
+          <div className={[styles.heroAmount, isDebt ? styles.heroAmountDebt : styles.heroAmountSettled].join(' ')}>
+            {formatPrivateCurrency(statementData.closingBalance)}
+          </div>
+
+          <div className={styles.heroMetaRow}>
+            <div className={styles.heroMetaItem}>
+              <span className={styles.metaLabel}>{t('statementModal.totalBilled', 'Total facturé')} :</span>
+              <span className={styles.metaValueBilled}>+{formatPrivateCurrency(statementData.periodDebits)}</span>
+            </div>
+            <span className={styles.metaDivider}>•</span>
+            <div className={styles.heroMetaItem}>
+              <span className={styles.metaLabel}>{t('statementModal.totalPaid', 'Déjà réglé')} :</span>
+              <span className={styles.metaValuePaid}>-{formatPrivateCurrency(statementData.periodCredits)}</span>
+            </div>
+            {statementData.openingBalance > 0 && (
+              <>
+                <span className={styles.metaDivider}>•</span>
+                <div className={styles.heroMetaItem}>
+                  <span className={styles.metaLabel}>{t('statementModal.priorDebt', 'Report antérieur')} :</span>
+                  <strong>{formatPrivateCurrency(statementData.openingBalance)}</strong>
                 </div>
-              )}
-              {customer.creditLimit && customer.creditLimit > 0 && (
-                <p className={styles.clientDetail} style={{ color: '#2563eb', fontWeight: 600 }}>
-                  Credit Limit: {formatPrivateCurrency(customer.creditLimit)}
-                </p>
-              )}
-            </div>
+              </>
+            )}
+          </div>
+        </div>
 
-            <div className={styles.accountCol}>
-              <h4>{t('statementModal.statementPeriod', 'STATEMENT PERIOD')}</h4>
-              <p className={styles.clientName}>{dateRangeLabel}</p>
-              <p className={styles.clientDetail}>{t('statementModal.accountType', 'Account Type')}: <strong>{customer.shopName ? t('statementModal.commercialShop', '🏪 Commercial / Phone Shop') : t('statementModal.retailClient', '👤 Retail Client')}</strong></p>
-              <p className={styles.clientDetail}>{t('statementModal.liveLedgerBalance', 'Live Ledger Balance')}: <strong style={{ color: currentTotalDebt > 0 ? '#dc2626' : '#16a34a' }}>{formatPrivateCurrency(currentTotalDebt)}</strong></p>
-            </div>
+        {/* 3. Transaction History */}
+        <div className={styles.transactionsSection}>
+          <div className={styles.sectionHeader}>
+            <h4 className={styles.sectionTitle}>
+              <History size={15} />
+              {t('statementModal.transactionsTitle', 'Historique des opérations')}
+            </h4>
+            <span className={styles.countBadge}>
+              {statementData.periodJournal.length} {t('statementModal.operation', 'opérations')}
+            </span>
           </div>
 
-          {/* 4 Financial KPI Summary Cards */}
-          <div className={styles.kpiGrid}>
-            <div className={styles.kpiCard}>
-              <div className={styles.kpiLabel}>
-                <History size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 4 }} />
-                {t('statementModal.openingBalance', '1. Opening Balance')}
-              </div>
-              <p className={styles.kpiValue}>{formatPrivateCurrency(statementData.openingBalance)}</p>
-            </div>
-            <div className={styles.kpiCard}>
-              <div className={styles.kpiLabel}>
-                <ArrowUpRight size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 4, color: '#2563eb' }} />
-                {t('statementModal.periodDebits', '2. Billed / Invoices (+)')}
-              </div>
-              <p className={styles.kpiValue} style={{ color: '#2563eb' }}>+{formatPrivateCurrency(statementData.periodDebits)}</p>
-            </div>
-            <div className={styles.kpiCard}>
-              <div className={styles.kpiLabel}>
-                <TrendingDown size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 4, color: '#16a34a' }} />
-                {t('statementModal.periodCredits', '3. Payments Received (-)')}
-              </div>
-              <p className={[styles.kpiValue, styles.kpiValuePaid].join(' ')}>-{formatPrivateCurrency(statementData.periodCredits)}</p>
-            </div>
-            <div className={styles.kpiCard} style={{ background: '#fef2f2', borderColor: '#fecaca' }}>
-              <div className={styles.kpiLabel} style={{ color: '#991b1b' }}>
-                <DollarSign size={12} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 4 }} />
-                {t('statementModal.closingBalance', '4. Closing Balance Due')}
-              </div>
-              <p className={[styles.kpiValue, styles.kpiValueClosing].join(' ')}>{formatPrivateCurrency(statementData.closingBalance)}</p>
-            </div>
-          </div>
-
-          {/* Ledger Table */}
-          <div className={styles.tableContainer}>
-            <table className={styles.statementTable}>
+          <div className={styles.tableCard}>
+            <table className={styles.cleanTable}>
               <thead>
                 <tr>
-                  <th style={{ width: '105px' }}>{t('statementModal.date', 'Date')}</th>
-                  <th style={{ width: '125px' }}>{t('statementModal.reference', 'Reference')}</th>
-                  <th style={{ width: '105px' }}>{t('statementModal.type', 'Type')}</th>
-                  <th>{t('statementModal.description', 'Description / Line Items')}</th>
-                  <th className={styles.numCol} style={{ width: '110px' }}>{t('statementModal.debit', 'Debit (+)')}</th>
-                  <th className={styles.numCol} style={{ width: '110px' }}>{t('statementModal.credit', 'Credit (-)')}</th>
-                  <th className={styles.numCol} style={{ width: '115px' }}>{t('statementModal.balance', 'Balance')}</th>
+                  <th className={styles.colDate}>{t('statementModal.date', 'Date')}</th>
+                  <th>{t('statementModal.operation', 'Opération & Prestations')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('statementModal.amount', 'Montant')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('statementModal.balance', 'Solde')}</th>
                 </tr>
               </thead>
               <tbody>
-                {/* Opening Balance Row */}
-                <tr className={styles.trOpening}>
-                  <td>{startDate ? formatDateStr(startDate.toISOString()) : 'Prior'}</td>
-                  <td><code>OPENING</code></td>
-                  <td>
-                    <span className={[styles.typeBadge, styles.typeTab].join(' ')}>
-                      {t('statementModal.balanceFwd', 'Balance Fwd')}
-                    </span>
-                  </td>
-                  <td>{t('statementModal.openingBalanceDesc', 'Balance brought forward from prior transactions')}</td>
-                  <td className={styles.numCol}>-</td>
-                  <td className={styles.numCol}>-</td>
-                  <td className={[styles.numCol, styles.balanceText].join(' ')} data-col="balance">
-                    {formatPrivateCurrency(statementData.openingBalance)}
-                  </td>
-                </tr>
+                {statementData.openingBalance > 0 && (
+                  <tr>
+                    <td className={styles.colDate}>{startDate ? formatDateStr(startDate.toISOString()) : '---'}</td>
+                    <td className={styles.colDesc}>
+                      <div className={styles.opMainTitle}>{t('statementModal.balanceFwd', 'Solde initial (Report)')}</div>
+                      <div className={styles.opMetaRow}>
+                        <span className={[styles.typeBadge, styles.typeOpening].join(' ')}>
+                          {t('statementModal.openingBalanceDesc', 'Report antérieur')}
+                        </span>
+                      </div>
+                    </td>
+                    <td className={styles.colAmount}>-</td>
+                    <td className={styles.colBalance}>{formatPrivateCurrency(statementData.openingBalance)}</td>
+                  </tr>
+                )}
 
                 {statementData.periodJournal.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: '24px', color: '#94a3b8' }}>
-                      {t('statementModal.noTransactions', 'No new ledger transactions or invoices recorded in this date range.')}
+                    <td colSpan={4} className={styles.emptyState}>
+                      {t('statementModal.noTransactions', 'Aucune opération sur cette période.')}
                     </td>
                   </tr>
                 ) : (
-                  statementData.periodJournal.map((item, idx) => (
-                    <tr key={idx}>
-                      <td>{formatDateStr(item.date)}</td>
-                      <td><code style={{ fontSize: '11px', fontWeight: 600 }}>{item.refNumber}</code></td>
-                      <td>
-                        <span className={[
-                          styles.typeBadge,
-                          item.type === 'repair' ? styles.typeRepair :
-                          item.type === 'invoice' ? styles.typeInvoice :
-                          item.type === 'payment' ? styles.typePayment :
-                          item.type === 'refund' ? styles.typeRefund : styles.typeTab
-                        ].join(' ')}>
-                          {item.type === 'repair' ? t('statementModal.repair', 'Repair') :
-                           item.type === 'invoice' ? t('statementModal.invoice', 'Invoice') :
-                           item.type === 'payment' ? t('statementModal.payment', 'Payment') :
-                           item.type === 'refund' ? t('statementModal.refund', 'Refund') :
-                           t('statementModal.creditTab', 'Credit Tab')}
-                        </span>
-                      </td>
-                      <td style={{ maxWidth: '280px', lineHeight: 1.3 }}>{item.description}</td>
-                      <td className={[styles.numCol, item.debit > 0 && styles.debitText].filter(Boolean).join(' ')} data-col="debit">
-                        {item.debit > 0 ? `+${formatPrivateCurrency(item.debit)}` : '-'}
-                      </td>
-                      <td className={[styles.numCol, item.credit > 0 && styles.creditText].filter(Boolean).join(' ')} data-col="credit">
-                        {item.credit > 0 ? `-${formatPrivateCurrency(item.credit)}` : '-'}
-                      </td>
-                      <td className={[styles.numCol, styles.balanceText].join(' ')} data-col="balance">
-                        {formatPrivateCurrency(item.runningBalance)}
-                      </td>
-                    </tr>
-                  ))
+                  statementData.periodJournal.map((item, idx) => {
+                    const isDebit = item.debit > 0;
+                    return (
+                      <tr key={idx}>
+                        <td className={styles.colDate}>{formatDateStr(item.date)}</td>
+                        <td className={styles.colDesc}>
+                          <div className={styles.opMainTitle}>{item.description}</div>
+                          <div className={styles.opMetaRow}>
+                            <span className={[
+                              styles.typeBadge,
+                              item.type === 'repair' ? styles.typeRepair :
+                              item.type === 'invoice' ? styles.typeInvoice :
+                              item.type === 'payment' ? styles.typePayment :
+                              item.type === 'refund' ? styles.typeRefund : styles.typeTab
+                            ].join(' ')}>
+                              {item.type === 'repair' ? t('statementModal.repair', 'Réparation') :
+                               item.type === 'invoice' ? t('statementModal.invoice', 'Pièce') :
+                               item.type === 'payment' ? t('statementModal.payment', 'Paiement') :
+                               item.type === 'refund' ? t('statementModal.refund', 'Remboursement') :
+                               t('statementModal.creditTab', 'Dette')}
+                            </span>
+                            {item.refNumber && (
+                              <span className={styles.opRefCode}>#{item.refNumber}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className={[styles.colAmount, isDebit ? styles.amountDebit : styles.amountCredit].join(' ')}>
+                          {isDebit ? `+${formatPrivateCurrency(item.debit)}` : `-${formatPrivateCurrency(item.credit)}`}
+                        </td>
+                        <td className={styles.colBalance}>
+                          {formatPrivateCurrency(item.runningBalance)}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
+        </div>
 
-          {/* Statement Signatures & Terms */}
-          <div className={styles.statementFooter}>
-            <div className={styles.signaturesRow}>
-              <div className={styles.signatureBox}>
-                <div className={styles.signatureLine}>
-                  {t('statementModal.authStamp', 'Authorized Store Signature & Stamp')}
-                </div>
-              </div>
-              <div className={styles.signatureBox}>
-                <div className={styles.signatureLine}>
-                  {t('statementModal.clientSignature', 'Client Acknowledgment & Signature')}
-                </div>
-              </div>
-            </div>
-
-            <p className={styles.statementNote}>
-              {t('statementModal.disclaimer', 'This document is an official accounting record of all wholesale parts invoices, credit tabs, and settlement payments. Please report any discrepancies within 7 business days.')}
-            </p>
+        {/* Print-only Signatures */}
+        <div className={styles.printSignatures}>
+          <div className={styles.signatureBlock}>
+            {t('statementModal.authStamp', 'Signature & Cachet Magasin')}
+          </div>
+          <div className={styles.signatureBlock}>
+            {t('statementModal.clientSignature', 'Signature & Accord Client')}
           </div>
         </div>
       </div>

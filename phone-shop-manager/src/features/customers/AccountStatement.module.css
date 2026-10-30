@@ -1,57 +1,58 @@
-/* Account Statement Modal & Print Styles */
+/* Minimal & Clean Account Statement Styles */
 
 .modalContainer {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
 
-.controlsBar {
+/* 1. Filter Toolbar */
+.toolbarRow {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
-  padding: 12px 16px;
-  border-radius: 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
 }
 
-.filterPills {
+.segmentedControl {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  background: #e2e8f0;
+  padding: 2px;
+  border-radius: 8px;
+  gap: 2px;
 }
 
-.filterPill {
-  background: #ffffff;
-  border: 1px solid #cbd5e1;
-  color: #475569;
-  padding: 6px 12px;
-  border-radius: 20px;
+.segmentBtn {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 12px;
   font-size: 12px;
   font-weight: 600;
+  color: #475569;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.filterPill:hover {
-  border-color: #94a3b8;
-  color: #1e293b;
+.segmentBtn:hover {
+  color: #0f172a;
 }
 
-.filterPillActive {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #ffffff;
-  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+.segmentBtnActive {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .customDateRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 12px;
   color: #64748b;
   font-weight: 600;
@@ -60,206 +61,223 @@
 .dateInput {
   border: 1px solid #cbd5e1;
   border-radius: 6px;
-  padding: 4px 8px;
+  padding: 3px 8px;
   font-size: 12px;
   color: #1e293b;
   background: #ffffff;
 }
 
-/* Statement Sheet (Screen & Print) */
-.statementSheet {
+/* 2. Hero Summary Balance Card */
+.heroCard {
   background: #ffffff;
-  border: 1px solid #e2e8f0;
   border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  font-family: inherit;
+  padding: 16px 20px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
-/* Header */
-.statementHeader {
+.heroCardDebt {
+  border-color: #fecaca;
+  border-left: 5px solid #ef4444;
+  background: linear-gradient(180deg, #ffffff 0%, #fff8f8 100%);
+}
+
+.heroCardSettled {
+  border-color: #bbf7d0;
+  border-left: 5px solid #22c55e;
+  background: linear-gradient(180deg, #ffffff 0%, #f6fef8 100%);
+}
+
+.heroHeader {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  padding-bottom: 20px;
-  border-bottom: 2px solid #e2e8f0;
-  gap: 20px;
+  align-items: center;
 }
 
-.storeInfo h2 {
-  font-size: 22px;
-  font-weight: 800;
-  color: #0f172a;
-  margin: 0 0 4px 0;
-  letter-spacing: -0.5px;
-}
-
-.storeSub {
-  font-size: 12.5px;
-  color: #64748b;
-  margin: 2px 0;
-}
-
-.statementMeta {
-  text-align: right;
-}
-
-.statementBadge {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  padding: 4px 10px;
-  background: #eff6ff;
-  color: #1d4ed8;
-  border: 1px solid #bfdbfe;
-  border-radius: 6px;
-  margin-bottom: 6px;
-}
-
-.statementTitle {
-  font-size: 18px;
-  font-weight: 800;
-  color: #1e293b;
-  margin: 0;
-}
-
-.statementDate {
-  font-size: 12px;
-  color: #64748b;
-  margin-top: 4px;
-}
-
-/* Client & Summary Grid */
-.partiesGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-  margin-top: 20px;
-  padding: 16px;
-  background: #f8fafc;
-  border-radius: 10px;
-  border: 1px solid #edf2f7;
-}
-
-.clientCol h4, .accountCol h4 {
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #64748b;
-  margin: 0 0 6px 0;
-}
-
-.clientName {
-  font-size: 16px;
-  font-weight: 800;
-  color: #0f172a;
-  margin: 0 0 4px 0;
-}
-
-.clientDetail {
-  font-size: 12.5px;
-  color: #475569;
-  margin: 2px 0;
-}
-
-/* KPI Summary 4-Card Strip */
-.kpiGrid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  margin-top: 20px;
-}
-
-.kpiCard {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  padding: 12px 14px;
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  transition: all 0.15s ease;
-}
-
-.kpiLabel {
+.heroSubtitle {
   font-size: 11.5px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.3px;
-  color: #475569;
-  margin-bottom: 6px;
-  display: flex;
-  align-items: center;
-  line-height: 1.2;
+  letter-spacing: 0.5px;
+  color: #64748b;
 }
 
-.kpiValue {
-  font-size: 18px;
+.heroAmount {
+  font-size: 28px;
   font-weight: 800;
-  color: #0f172a;
-  margin: 0;
-  letter-spacing: -0.3px;
+  margin-top: 4px;
+  letter-spacing: -0.5px;
+  font-variant-numeric: tabular-nums;
 }
 
-.kpiValueClosing {
+.heroAmountDebt {
   color: #dc2626;
-  font-weight: 900;
 }
 
-.kpiValuePaid {
+.heroAmountSettled {
   color: #16a34a;
 }
 
-/* Table */
-.tableContainer {
-  margin-top: 24px;
-  overflow-x: auto;
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.statementTable {
+.statusBadgeUnpaid {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.statusBadgePaid {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.heroMetaRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: #475569;
+}
+
+.heroMetaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.metaLabel {
+  color: #64748b;
+}
+
+.metaValueBilled {
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.metaValuePaid {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+.metaDivider {
+  color: #cbd5e1;
+}
+
+/* 3. Transactions Section */
+.transactionsSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sectionTitle {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.countBadge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  background: #f1f5f9;
+  color: #64748b;
+  border-radius: 12px;
+}
+
+.tableCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.cleanTable {
   width: 100%;
   border-collapse: collapse;
   font-size: 12.5px;
 }
 
-.statementTable th {
-  background: #f1f5f9;
+.cleanTable th {
+  background: #f8fafc;
   color: #475569;
   font-weight: 700;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #e2e8f0;
   text-align: left;
-  padding: 10px 12px;
-  border-bottom: 2px solid #cbd5e1;
-  white-space: nowrap;
 }
 
-.statementTable td {
-  padding: 10px 12px;
-  border-bottom: 1px solid #e2e8f0;
+.cleanTable td {
+  padding: 11px 14px;
+  border-bottom: 1px solid #f1f5f9;
   color: #1e293b;
   vertical-align: middle;
 }
 
-.trOpening {
-  background: #f8fafc;
-  font-weight: 700;
+.cleanTable tr:last-child td {
+  border-bottom: none;
 }
 
-.trOpening td {
-  border-bottom: 2px solid #cbd5e1;
+.cleanTable tr:hover td {
+  background: #fbfcfe;
+}
+
+.colDate {
+  width: 100px;
+  color: #64748b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.colDesc {
+  line-height: 1.35;
+}
+
+.opMainTitle {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.opMetaRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
 }
 
 .typeBadge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11px;
+  display: inline-block;
+  font-size: 10.5px;
   font-weight: 700;
-  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
 }
 
 .typeInvoice {
@@ -287,130 +305,127 @@
   color: #b91c1c;
 }
 
-.numCol {
+.typeOpening {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.opRefCode {
+  font-family: monospace;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.colAmount {
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.debitText {
-  color: #dc2626;
   font-weight: 600;
 }
 
-.creditText {
+.amountDebit {
+  color: #2563eb;
+}
+
+.amountCredit {
   color: #16a34a;
-  font-weight: 600;
 }
 
-.balanceText {
+.colBalance {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   font-weight: 700;
+  color: #0f172a;
 }
 
-/* Footer & Signatures */
-.statementFooter {
-  margin-top: 32px;
-  padding-top: 20px;
-  border-top: 2px solid #e2e8f0;
-}
-
-.signaturesRow {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 40px;
-  gap: 40px;
-}
-
-.signatureBox {
-  flex: 1;
+.emptyState {
   text-align: center;
+  padding: 28px 16px;
+  color: #94a3b8;
+  font-size: 13px;
 }
 
-.signatureLine {
-  border-top: 1px dashed #94a3b8;
-  margin-top: 50px;
-  padding-top: 6px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #64748b;
-}
-
-.statementNote {
-  font-size: 11.5px;
-  color: #64748b;
-  text-align: center;
-  margin-top: 24px;
-  line-height: 1.4;
-}
-
-/* Modal Actions Bottom Bar */
+/* 4. Modal Actions Bottom Bar */
 .actionsBar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #e2e8f0;
+  width: 100%;
 }
 
-/* Print Specific Rules */
+/* 5. Print Sheet (Only for Paper/PDF) */
+.printHeader {
+  display: none;
+}
+
+.printSignatures {
+  display: none;
+}
+
 @media print {
   body {
     background: #ffffff !important;
     padding: 0 !important;
   }
 
-  .controlsBar,
+  .toolbarRow,
   .actionsBar,
-  .noPrint {
+  :global(.modal-close-button) {
     display: none !important;
   }
 
-  .statementSheet {
-    border: none !important;
+  .printHeader {
+    display: block !important;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #0f172a;
+  }
+
+  .printStoreTitle {
+    font-size: 20px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0;
+  }
+
+  .printMeta {
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 4px;
+  }
+
+  .printSignatures {
+    display: flex !important;
+    justify-content: space-between;
+    margin-top: 40px;
+    padding-top: 20px;
+  }
+
+  .signatureBlock {
+    width: 40%;
+    text-align: center;
+    border-top: 1px dashed #94a3b8;
+    padding-top: 8px;
+    font-size: 11px;
+    color: #64748b;
+  }
+
+  .heroCard {
+    border: 1px solid #cbd5e1 !important;
     box-shadow: none !important;
-    padding: 0 !important;
-    width: 100% !important;
+    page-break-inside: avoid;
   }
 
-  .statementHeader {
-    padding-bottom: 12px !important;
-    border-bottom: 2px solid #000000 !important;
-  }
-
-  .statementTable th {
+  .cleanTable th {
     background: #f1f5f9 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
 
-  .statementTable td, .statementTable th {
-    padding: 6px 8px !important;
+  .cleanTable td, .cleanTable th {
+    padding: 6px 10px !important;
     font-size: 11px !important;
-  }
-
-  .partiesGrid {
-    background: #f8fafc !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-    padding: 10px !important;
-    margin-top: 10px !important;
-  }
-
-  .kpiGrid {
-    margin-top: 10px !important;
-    gap: 8px !important;
-  }
-
-  .kpiCard {
-    padding: 8px !important;
-  }
-
-  .signaturesRow {
-    margin-top: 30px !important;
-  }
-
-  .signatureLine {
-    margin-top: 40px !important;
   }
 }

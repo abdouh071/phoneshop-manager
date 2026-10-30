@@ -742,6 +742,16 @@
     "accountType": "Type de Compte",
     "commercialShop": "Atelier Partenaire / B2B",
     "retailClient": "Client Particulier",
-    "liveLedgerBalance": "Solde Dû Actuel en Direct"
+    "liveLedgerBalance": "Solde Dû Actuel en Direct",
+    "closingBalanceLabel": "Solde restant dû",
+    "unpaidStatus": "En attente de règlement",
+    "paidStatus": "Compte à jour",
+    "totalBilled": "Total facturé",
+    "totalPaid": "Déjà réglé",
+    "priorDebt": "Report antérieur",
+    "transactionsTitle": "Historique des opérations",
+    "amount": "Montant",
+    "operation": "Opération & Prestations",
+    "simplifiedTitle": "Relevé de compte client"
   }
 }
