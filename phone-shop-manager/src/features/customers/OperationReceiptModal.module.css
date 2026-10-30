@@ -1,0 +1,293 @@
+/* ═══════════════════════════════════════════════════════
+   Operation Thermal Receipt Preview Modal
+   Clean 80mm POS Paper Styling
+   ═══════════════════════════════════════════════════════ */
+
+.receiptPaper {
+  max-width: 380px;
+  margin: 0 auto;
+  padding: 24px 20px;
+  background: #ffffff;
+  color: #111827;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
+}
+
+/* ── Header ── */
+.header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.logo {
+  max-width: 150px;
+  max-height: 50px;
+  object-fit: contain;
+  margin-bottom: 4px;
+}
+
+.storeName {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #0f172a;
+  margin: 0;
+}
+
+.storeSub {
+  font-size: 11px;
+  color: #64748b;
+  margin: 0;
+}
+
+.badgePill {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: #f1f5f9;
+  color: #334155;
+  padding: 3px 10px;
+  border-radius: 6px;
+  margin-top: 6px;
+}
+
+.refTag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+
+.dateText {
+  font-size: 11px;
+  color: #64748b;
+}
+
+/* ── Dividers ── */
+.dashedRule {
+  border: none;
+  border-top: 1px dashed #cbd5e1;
+  margin: 12px 0;
+}
+
+.solidRule {
+  border: none;
+  border-top: 1.5px solid #0f172a;
+  margin: 10px 0;
+}
+
+/* ── Meta Rows ── */
+.metaBox {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.metaRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.metaLabel {
+  color: #64748b;
+  font-size: 11.5px;
+}
+
+.metaValue {
+  font-weight: 600;
+  color: #1e293b;
+  text-align: right;
+}
+
+/* ── Highlight Device Info (Repair) ── */
+.repairCard {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+}
+
+.repairDeviceTitle {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.repairIssue {
+  color: #475569;
+}
+
+.repairStatusTag {
+  align-self: flex-start;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: #e0f2fe;
+  color: #0369a1;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-top: 2px;
+}
+
+/* ── Items Table ── */
+.itemsSection {
+  margin: 6px 0;
+}
+
+.itemsHeader {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.itemRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 6px 0;
+  border-bottom: 1px solid #f8fafc;
+  font-size: 12px;
+}
+
+.itemRow:last-child {
+  border-bottom: none;
+}
+
+.itemLeft {
+  flex: 1;
+  padding-right: 8px;
+}
+
+.itemName {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.itemDetail {
+  font-size: 10.5px;
+  color: #64748b;
+  margin-top: 1px;
+}
+
+.itemRight {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.itemPrice {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.itemQty {
+  font-size: 10.5px;
+  color: #94a3b8;
+}
+
+/* ── Financial Summary ── */
+.totalsSection {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+}
+
+.totalRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #475569;
+}
+
+.grandTotalRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 16px;
+  font-weight: 800;
+  color: #0f172a;
+  padding-top: 8px;
+  margin-top: 4px;
+  border-top: 2px solid #0f172a;
+}
+
+/* ── Running Customer Debt Box ── */
+.balanceDueBox {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.balancePending {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.balanceSettled {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.balanceAmount {
+  font-size: 14.5px;
+  font-weight: 800;
+}
+
+/* ── Signatures & Stamp ── */
+.signatures {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 16px;
+  font-size: 10px;
+  color: #64748b;
+  text-align: center;
+}
+
+.sigBlock {
+  width: 46%;
+  border-top: 1px dashed #cbd5e1;
+  padding-top: 4px;
+}
+
+/* ── Footer ── */
+.footerText {
+  text-align: center;
+  font-size: 10.5px;
+  color: #94a3b8;
+  margin-top: 14px;
+  line-height: 1.4;
+  white-space: pre-line;
+}

@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/Button';
 import { useToast } from '../../components/ui/Toast';
 import { ReceiptModal } from '../pos/ReceiptModal';
 import { PrintRepairTicketModal } from '../repairs/PrintRepairTicketModal';
+import { OperationReceiptModal } from './OperationReceiptModal';
 import { printOperationReceipt } from '../../utils/statementPrint';
 import { useCartStore } from '../../store/cartStore';
 import { usePartsCartStore } from '../../store/partsCartStore';
@@ -89,6 +90,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [txToView, setTxToView] = useState<SaleTransaction | null>(null);
   const [ticketToPrint, setTicketToPrint] = useState<RepairTicket | null>(null);
+  const [operationReceiptToPreview, setOperationReceiptToPreview] = useState<LedgerEvent | null>(null);
 
   // Determine active start/end Date objects
   const { startDate, endDate, dateRangeLabel } = useMemo(() => {
@@ -721,12 +723,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                         variant="secondary"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          printOperationReceipt({
-                                            event: item,
-                                            customer,
-                                            currentTotalDebt,
-                                            toast,
-                                          });
+                                          setOperationReceiptToPreview(item);
                                         }}
                                         leftIcon={<Printer size={13} />}
                                       >
@@ -799,12 +796,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                           variant="secondary"
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            printOperationReceipt({
-                                              event: item,
-                                              customer,
-                                              currentTotalDebt,
-                                              toast,
-                                            });
+                                            setOperationReceiptToPreview(item);
                                           }}
                                           leftIcon={<Printer size={13} />}
                                         >
@@ -882,12 +874,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                         variant="secondary"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          printOperationReceipt({
-                                            event: item,
-                                            customer,
-                                            currentTotalDebt,
-                                            toast,
-                                          });
+                                          setOperationReceiptToPreview(item);
                                         }}
                                         leftIcon={<Printer size={13} />}
                                       >
@@ -951,12 +938,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                         variant="secondary"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          printOperationReceipt({
-                                            event: item,
-                                            customer,
-                                            currentTotalDebt,
-                                            toast,
-                                          });
+                                          setOperationReceiptToPreview(item);
                                         }}
                                         leftIcon={<Printer size={13} />}
                                       >
@@ -1056,6 +1038,17 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
         isOpen={Boolean(ticketToPrint)}
         onClose={() => setTicketToPrint(null)}
         ticket={ticketToPrint}
+      />
+    )}
+
+    {/* Dedicated Operation Thermal Receipt Preview & Print Modal */}
+    {operationReceiptToPreview && (
+      <OperationReceiptModal
+        isOpen={Boolean(operationReceiptToPreview)}
+        onClose={() => setOperationReceiptToPreview(null)}
+        event={operationReceiptToPreview}
+        customer={customer}
+        currentTotalDebt={statementData.closingBalance}
       />
     )}
   </>
