@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
+import { useToast } from '../../components/ui/Toast';
 import { ReceiptModal } from '../pos/ReceiptModal';
 import { PrintRepairTicketModal } from '../repairs/PrintRepairTicketModal';
 import { printOperationReceipt } from '../../utils/statementPrint';
@@ -54,6 +55,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
   onClose,
 }) => {
   const { t, i18n } = useTranslation();
+  const toast = useToast();
   const locale = i18n.language === 'ar' ? 'ar-DZ' : i18n.language === 'fr' ? 'fr-FR' : 'en-US';
 
   const formatDateStr = (iso: string) =>
@@ -723,6 +725,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                             event: item,
                                             customer,
                                             currentTotalDebt,
+                                            toast,
                                           });
                                         }}
                                         leftIcon={<Printer size={13} />}
@@ -800,6 +803,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                               event: item,
                                               customer,
                                               currentTotalDebt,
+                                              toast,
                                             });
                                           }}
                                           leftIcon={<Printer size={13} />}
@@ -882,6 +886,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                             event: item,
                                             customer,
                                             currentTotalDebt,
+                                            toast,
                                           });
                                         }}
                                         leftIcon={<Printer size={13} />}
@@ -950,6 +955,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                             event: item,
                                             customer,
                                             currentTotalDebt,
+                                            toast,
                                           });
                                         }}
                                         leftIcon={<Printer size={13} />}
