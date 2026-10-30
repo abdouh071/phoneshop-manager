@@ -7,7 +7,7 @@ import {
   Phone, Mail, ShoppingBag, Clock, Smartphone, MessageCircle,
   Wrench, ShoppingCart, Receipt, User, BookOpen, Plus,
   DollarSign, Trash2, Send, AlertTriangle, FileText, Store, FileEdit, RotateCcw,
-  GitMerge, ArrowRightLeft, Edit, Edit2, Printer, ChevronDown, ChevronUp
+  GitMerge, ArrowRightLeft, Edit, Edit2, Printer, ChevronDown, ChevronUp, MoreVertical
 } from 'lucide-react';
 import { useCartStore } from '../../store/cartStore';
 import { usePartsCartStore } from '../../store/partsCartStore';
@@ -16,6 +16,7 @@ import { useCustomerStore } from '../../store/customerStore';
 import { useAuthStore } from '../../store/authStore';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useToast } from '../../components/ui/Toast';
+import { useTranslation } from 'react-i18next';
 import { RepairStatusBadge } from '../../components/ui/Badge';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Modal } from '../../components/ui/Modal';
@@ -36,7 +37,6 @@ import { PrintRepairTicketModal } from '../repairs/PrintRepairTicketModal';
 import styles from './CustomerProfile.module.css';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { usePrivacyStore } from '../../store/privacyStore';
-import { Customer360Timeline } from './Customer360Timeline';
 import { CustomerActivityLogList } from './CustomerActivityLogList';
 import { isDebtOverdue, getDaysOverdue, buildWhatsAppDebtReminderUrl } from '../../utils/debtAlerts';
 import { calculateCustomerFinancials, matchesCustomer, normalizeDeviceDetails } from '../../utils/customerFinancials';
@@ -50,7 +50,7 @@ interface CustomerProfilePanelProps {
   onNewRepair?: (customer: Customer, lastDevice?: string) => void;
 }
 
-type ProfileTab = 'debts' | 'repairs' | 'purchases' | 'timeline' | 'activity';
+type ProfileTab = 'debts' | 'repairs' | 'purchases';
 
 export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
   customer: propCustomer,
@@ -67,6 +67,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
   const permissions = usePermissions();
   const navigate = useNavigate();
   const toast = useToast();
+  const { t } = useTranslation();
 
   // Reactive customer record from customerStore
   const customer = useMemo(() => {
@@ -92,6 +93,22 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
   const [isSwitchTypeOpen, setIsSwitchTypeOpen] = useState(false);
   const [isMergeOpen, setIsMergeOpen] = useState(false);
   const [isDeleteCustomerOpen, setIsDeleteCustomerOpen] = useState(false);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
+  const moreMenuRef = React.useRef<HTMLDivElement>(null);
+
+  // Close more menu on click outside
+  useEffect(() => {
+    if (!isMoreMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setIsMoreMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isMoreMenuOpen]);
+
   const [deviceToDelete, setDeviceToDelete] = useState<{ device: string; brand: string; model: string; tickets: any[] } | null>(null);
   const [deleteDeviceRepairsToo, setDeleteDeviceRepairsToo] = useState(false);
   const [deviceToEdit, setDeviceToEdit] = useState<{ id?: string; oldBrand: string; oldModel: string; brand: string; model: string; imei?: string; notes?: string } | null>(null);
@@ -111,7 +128,6 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
   const [newPhoneImei, setNewPhoneImei] = useState('');
   const [newPhoneNotes, setNewPhoneNotes] = useState('');
   const [createTicketForNewPhone, setCreateTicketForNewPhone] = useState(false);
-  const [expandedDeviceKey, setExpandedDeviceKey] = useState<string | null>(null);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -583,7 +599,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
       <SlidePanel
         isOpen={isOpen}
         onClose={onClose}
-        title="Customer Profile"
+        title={t('customers.profile', 'Customer Profile')}
         width="xl"
       >
         <div className={styles.container}>
@@ -606,7 +622,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                         padding: '2px 8px',
                         borderRadius: '6px',
                       }}>
-                        B2B Shop
+                        {t('common.b2bShop', 'B2B Shop')}
                       </span>
                     )}
                     {customer.wholesaleDiscountPercent && customer.wholesaleDiscountPercent > 0 && (
@@ -634,32 +650,36 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                         alignItems: 'center',
                         gap: '4px',
                       }} title="Created offline. Queued to sync to Firestore automatically.">
-                        ☁️ Offline (Queued)
+                        ☁️ Offline
                       </span>
                     )}
                   </div>
+
                   {customer.shopName && (
-                    <p style={{ fontSize: '12.5px', color: '#64748b', margin: '2px 0 4px 0' }}>
+                    <p style={{ fontSize: '12px', color: '#64748b', margin: '2px 0 3px 0' }}>
                       Contact: <strong>{customer.name}</strong>
                     </p>
                   )}
+
                   <div className={styles.contactRow}>
-                    <a href={`tel:${customer.phone}`} className={styles.contactItem}>
+                    <a href={`tel:${customer.phone}`} className={styles.contactItem} title="Call customer">
                       <Phone size={13} /> {customer.phone}
                     </a>
                     {customer.email && (
-                      <a href={`mailto:${customer.email}`} className={styles.contactItem}>
+                      <a href={`mailto:${customer.email}`} className={styles.contactItem} title="Send email">
                         <Mail size={13} /> {customer.email}
                       </a>
                     )}
+                    {customer.creditLimit && customer.creditLimit > 0 && (
+                      <span style={{ fontSize: '11px', color: '#475569' }}>
+                        Limit: <strong style={{ color: '#2563eb' }}>{formatPrivateCurrency(customer.creditLimit)}</strong>
+                      </span>
+                    )}
                   </div>
-                  {customer.creditLimit && customer.creditLimit > 0 && (
-                    <div style={{ fontSize: '11.5px', color: '#475569', marginTop: '3px' }}>
-                      Credit Limit: <strong style={{ color: '#2563eb' }}>{formatPrivateCurrency(customer.creditLimit)}</strong>
-                    </div>
-                  )}
-                  {(customer.rc || customer.nif || customer.nis || customer.art) && (
-                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+
+                  {/* B2B Legal IDs — only visible if shop customer has them filled */}
+                  {isShopCustomer(customer) && (customer.rc || customer.nif || customer.nis || customer.art) && (
+                    <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '4px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                       {customer.rc && <span>RC: <strong style={{ color: '#334155' }}>{customer.rc}</strong></span>}
                       {customer.nif && <span>NIF: <strong style={{ color: '#334155' }}>{customer.nif}</strong></span>}
                       {customer.nis && <span>NIS: <strong style={{ color: '#334155' }}>{customer.nis}</strong></span>}
@@ -669,6 +689,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                 </div>
               </div>
 
+              {/* Action Buttons Bar */}
               <div className={styles.headerActions}>
                 {(() => {
                   const waUrl = formatWhatsAppUrl(customer.phone);
@@ -694,15 +715,17 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                     </button>
                   );
                 })()}
+
                 <button
                   type="button"
                   className={styles.actionBtn}
                   onClick={() => setIsStatementOpen(true)}
                   style={{ background: '#f8fafc', color: '#0f172a', borderColor: '#cbd5e1' }}
-                  title="Generate Account Statement (Relevé de Compte / Ledger)"
+                  title="Generate Account Statement (Relevé de Compte)"
                 >
-                  <FileText size={14} /> Statement
+                  <FileText size={14} /> {t('common.statement', 'Statement')}
                 </button>
+
                 {permissions.repairs && (
                   <button
                     type="button"
@@ -710,10 +733,11 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                     onClick={handleStartRepair}
                     title="New Repair Ticket"
                   >
-                    <Wrench size={14} /> Repair
+                    <Wrench size={14} /> {t('common.repair', 'Repair')}
                   </button>
                 )}
-                {permissions.inventory_parts && (
+
+                {permissions.inventory_parts && isShopCustomer(customer) && (
                   <button
                     type="button"
                     className={styles.actionBtn}
@@ -721,17 +745,19 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                     style={{ background: '#eff6ff', color: '#1d4ed8', borderColor: '#bfdbfe' }}
                     title="New Parts Order"
                   >
-                    <Store size={14} /> Parts
+                    <Store size={14} /> {t('common.parts', 'Parts')}
                   </button>
                 )}
+
                 <button
                   type="button"
                   className={styles.actionBtn}
                   onClick={handleStartSale}
                   title="New POS Sale"
                 >
-                  <ShoppingCart size={14} /> POS
+                  <ShoppingCart size={14} /> {t('common.pos', 'POS')}
                 </button>
+
                 <button
                   type="button"
                   className={styles.actionBtn}
@@ -746,108 +772,102 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                   style={{ background: '#f5f3ff', color: '#6d28d9', borderColor: '#ddd6fe' }}
                   title="Register New Phone to Customer Account"
                 >
-                  <Smartphone size={14} /> + Phone
+                  <Smartphone size={14} /> {t('common.addPhone', '+ Phone')}
                 </button>
+
+                {/* More Options Dropdown (Administrative Actions) */}
+                <div className={styles.moreMenuContainer} ref={moreMenuRef}>
+                  <button
+                    type="button"
+                    className={styles.actionBtn}
+                    onClick={() => setIsMoreMenuOpen(prev => !prev)}
+                    title="Account Actions & Settings"
+                    style={{ padding: '6px 8px' }}
+                  >
+                    <MoreVertical size={15} />
+                  </button>
+
+                  {isMoreMenuOpen && (
+                    <div className={styles.moreMenuDropdown}>
+                      <button
+                        type="button"
+                        className={styles.moreMenuItem}
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setIsSwitchTypeOpen(true);
+                        }}
+                      >
+                        {isShopCustomer(customer) ? <User size={14} /> : <Store size={14} />}
+                        <span>{isShopCustomer(customer) ? t('customers.switchToRetail', 'Switch to Retail') : t('customers.switchToShop', 'Switch to B2B Shop')}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className={styles.moreMenuItem}
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setIsMergeOpen(true);
+                        }}
+                      >
+                        <GitMerge size={14} />
+                        <span>{t('customers.mergeAccount', 'Merge Account')}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className={styles.moreMenuItem}
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setIsActivityModalOpen(true);
+                        }}
+                      >
+                        <Clock size={14} />
+                        <span>{t('customers.viewAudit', 'View Audit & Activity Log')}</span>
+                      </button>
+
+                      <div style={{ height: '1px', background: '#e2e8f0', margin: '4px 0' }} />
+
+                      <button
+                        type="button"
+                        className={[styles.moreMenuItem, styles.moreMenuItemDanger].join(' ')}
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setIsDeleteCustomerOpen(true);
+                        }}
+                      >
+                        <Trash2 size={14} />
+                        <span>{t('customers.deleteClient', 'Delete Client')}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-
-            {/* Account Operations Toolbar */}
-            <div className={styles.headerOperations}>
-              <button
-                type="button"
-                onClick={() => setIsSwitchTypeOpen(true)}
-                title={isShopCustomer(customer) ? 'Convert to Retail Client' : 'Convert to B2B Shop'}
-                style={{
-                  padding: '5px 10px',
-                  borderRadius: '6px',
-                  border: `1px solid ${isShopCustomer(customer) ? '#bfdbfe' : '#fde68a'}`,
-                  background: isShopCustomer(customer) ? '#eff6ff' : '#fef3c7',
-                  color: isShopCustomer(customer) ? '#1e40af' : '#92400e',
-                  fontSize: '11.5px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  transition: 'opacity 0.15s ease',
-                }}
-              >
-                {isShopCustomer(customer) ? <User size={13} /> : <Store size={13} />}
-                <span>{isShopCustomer(customer) ? 'Switch to Retail' : 'Switch to Shop'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsMergeOpen(true)}
-                title="Merge this account with another duplicate account"
-                style={{
-                  padding: '5px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
-                  background: '#ffffff',
-                  color: '#334155',
-                  fontSize: '11.5px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  transition: 'background 0.15s ease',
-                }}
-              >
-                <GitMerge size={13} />
-                <span>Merge Account</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsDeleteCustomerOpen(true)}
-                title="Delete this customer profile"
-                style={{
-                  padding: '5px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid #fecaca',
-                  background: '#fff5f5',
-                  color: '#dc2626',
-                  fontSize: '11.5px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  marginLeft: 'auto',
-                  transition: 'background 0.15s ease',
-                }}
-              >
-                <Trash2 size={13} />
-                <span>Delete Client</span>
-              </button>
             </div>
           </div>
 
-          {/* KPI Summary (with Store Credit if available) */}
+          {/* KPI Summary */}
           <div className={styles.stats}>
             <div className={styles.statBox}>
-              <span className={styles.statLabel}>Total Spent</span>
+              <span className={styles.statLabel}>{t('common.totalSpent', 'Total Spent')}</span>
               <span className={styles.statValue}>{formatPrivateCurrency(customerFinancials.totalSpent)}</span>
             </div>
             <div className={styles.statBox}>
-              <span className={styles.statLabel}>Orders</span>
+              <span className={styles.statLabel}>{t('common.orders', 'Orders')}</span>
               <span className={styles.statValue}>{customerFinancials.totalPurchases}</span>
             </div>
             <div className={styles.statBox}>
-              <span className={styles.statLabel}>Repairs</span>
+              <span className={styles.statLabel}>{t('common.repairs', 'Repairs')}</span>
               <span className={styles.statValue}>{customerTickets.length}</span>
             </div>
             <div className={styles.statBox} style={{ background: customerFinancials.totalDebt > 0 ? '#fef2f2' : undefined, borderColor: customerFinancials.totalDebt > 0 ? '#fecaca' : undefined }}>
-              <span className={styles.statLabel} style={{ color: customerFinancials.totalDebt > 0 ? '#991b1b' : undefined }}>Debt Balance</span>
+              <span className={styles.statLabel} style={{ color: customerFinancials.totalDebt > 0 ? '#991b1b' : undefined }}>{t('common.debtBalance', 'Debt Balance')}</span>
               <span className={styles.statValue} style={{ color: customerFinancials.totalDebt > 0 ? '#dc2626' : undefined }}>
                 {formatPrivateCurrency(customerFinancials.totalDebt)}
               </span>
             </div>
             {(customer.storeCredit || 0) > 0 && (
               <div className={styles.statBox} style={{ background: '#ecfdf5', borderColor: '#a7f3d0' }}>
-                <span className={styles.statLabel} style={{ color: '#065f46' }}>🎟️ Store Credit (Avoir)</span>
+                <span className={styles.statLabel} style={{ color: '#065f46' }}>🎟️ {t('common.storeCredit', 'Store Credit (Avoir)')}</span>
                 <span className={styles.statValue} style={{ color: '#059669' }}>
                   {formatPrivateCurrency(customer.storeCredit || 0)}
                 </span>
@@ -855,11 +875,11 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
             )}
           </div>
 
-          {/* Device Fleet Section */}
+          {/* Registered Phones Section — Clean, Compact Fleet */}
           <div className={styles.section}>
-            <div className={styles.sectionHeader} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className={styles.sectionHeader}>
               <h3 className={styles.sectionTitle}>
-                <Smartphone size={15} /> Registered Phones ({deviceStats.length})
+                <Smartphone size={15} /> {t('common.registeredPhones', 'Registered Phones')} ({deviceStats.length})
               </h3>
               <button
                 type="button"
@@ -886,219 +906,60 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                 }}
                 title="Register a new phone for this customer"
               >
-                <Plus size={12} /> Add Phone
+                <Plus size={12} /> {t('customers.addPhone', 'Add Phone')}
               </button>
             </div>
 
             {deviceStats.length === 0 ? (
               <div style={{
-                padding: '16px',
+                padding: '12px 16px',
                 background: 'var(--color-surface-container-low, #f8fafc)',
                 border: '1px dashed #cbd5e1',
-                borderRadius: '10px',
+                borderRadius: '8px',
                 textAlign: 'center',
                 fontSize: '12px',
                 color: '#64748b'
               }}>
-                <p style={{ margin: '0 0 8px 0' }}>No phones registered for this customer yet.</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNewPhoneBrand('');
-                    setNewPhoneModel('');
-                    setNewPhoneImei('');
-                    setNewPhoneNotes('');
-                    setCreateTicketForNewPhone(false);
-                    setIsAddPhoneOpen(true);
-                  }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    padding: '5px 12px',
-                    borderRadius: '6px',
-                    background: 'var(--color-primary, #4f46e5)',
-                    border: 'none',
-                    color: '#ffffff',
-                    fontSize: '11.5px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <Plus size={12} /> Register First Phone
-                </button>
+                {t('customers.noPhonesRegistered', 'No phones registered yet.')}
               </div>
             ) : (
               <div className={styles.deviceGrid}>
                 {deviceStats.map(([device, data]) => (
                   <div key={device} className={styles.deviceCard}>
-                    <div className={device ? styles.deviceCardTop : ''}>
-                      <p className={styles.deviceName}>{device || 'Unknown Device'}</p>
-                      <span className={styles.deviceRepairsCount} style={{ background: data.count > 0 ? '#eff6ff' : '#f1f5f9', color: data.count > 0 ? '#1d4ed8' : '#64748b' }}>
-                        {data.count === 0 ? 'Registered Phone' : `Brought ${data.count} ${data.count === 1 ? 'time' : 'times'}`}
-                      </span>
-                    </div>
-                    {data.imei && (
-                      <p style={{ fontSize: '11px', color: '#6366f1', margin: '2px 0', fontWeight: 600 }}>
-                        IMEI: {data.imei}
-                      </p>
-                    )}
-                    {data.notes && (
-                      <p style={{ fontSize: '11px', color: '#64748b', margin: '2px 0' }}>
-                        📝 {data.notes}
-                      </p>
-                    )}
-                    {data.issues.length > 0 ? (
-                      <p className={styles.deviceIssuesList}>
-                        {data.issues.slice(0, 2).join(' · ')}
-                        {data.issues.length > 2 ? ` +${data.issues.length - 2} more` : ''}
-                      </p>
-                    ) : (
-                      <p className={styles.deviceIssuesList} style={{ fontStyle: 'italic', opacity: 0.7 }}>
-                        Registered Device (No active repairs)
-                      </p>
-                    )}
-
-                    {/* Expandable Repair Visits History */}
-                    {data.count > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setExpandedDeviceKey(expandedDeviceKey === device ? null : device)}
-                        style={{
-                          display: 'inline-flex',
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                        <div style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '8px',
+                          background: '#eff6ff',
+                          color: '#2563eb',
+                          display: 'flex',
                           alignItems: 'center',
-                          justifyContent: 'space-between',
-                          width: '100%',
-                          padding: '5px 8px',
-                          borderRadius: '6px',
-                          background: expandedDeviceKey === device ? '#e0e7ff' : '#f8fafc',
-                          border: `1px solid ${expandedDeviceKey === device ? '#c7d2fe' : '#e2e8f0'}`,
-                          color: expandedDeviceKey === device ? '#4338ca' : '#475569',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          marginTop: '4px',
-                          transition: 'all 0.15s ease',
-                        }}
-                      >
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                          <Clock size={11} />
-                          <span>Repair History ({data.count} {data.count === 1 ? 'visit' : 'visits'})</span>
-                        </span>
-                        {expandedDeviceKey === device ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                      </button>
-                    )}
-
-                    {expandedDeviceKey === device && (
-                      <div style={{
-                        marginTop: '6px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '6px',
-                        maxHeight: '260px',
-                        overflowY: 'auto',
-                        paddingRight: '2px',
-                      }}>
-                        {data.tickets.map((t, idx) => {
-                          const cost = t.actualCost != null && t.actualCost > 0 ? t.actualCost : (t.estimatedCost || 0);
-                          const deposit = t.depositAmount || 0;
-                          const paid = t.paidAmount ?? deposit;
-                          const isSettled = t.paymentStatus === 'paid' || (cost > 0 && paid >= cost);
-                          return (
-                            <div
-                              key={t.id}
-                              style={{
-                                padding: '7px 9px',
-                                background: '#f8fafc',
-                                border: '1px solid #e2e8f0',
-                                borderRadius: '7px',
-                                fontSize: '11px',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '3px',
-                              }}
-                            >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontWeight: 700, color: '#0f172a' }}>
-                                  Visit #{data.tickets.length - idx} · #{t.ticketNumber}
-                                </span>
-                                <RepairStatusBadge status={t.status} />
-                              </div>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b', fontSize: '10.5px' }}>
-                                <span>Brought: {formatDate(t.createdAt)}</span>
-                                {t.completedAt && <span>Claimed: {formatDate(t.completedAt)}</span>}
-                              </div>
-                              {t.issueDescription && (
-                                <p style={{ margin: '1px 0', color: '#334155' }}>
-                                  <strong>Issue:</strong> {t.issueDescription}
-                                </p>
-                              )}
-                              {t.remark && (
-                                <p style={{ margin: '1px 0', color: '#475569', fontStyle: 'italic', fontSize: '10.5px' }}>
-                                  Note: "{t.remark}"
-                                </p>
-                              )}
-                              {t.partsUsed && t.partsUsed.length > 0 && (
-                                <div style={{ color: '#0369a1', background: '#f0f9ff', padding: '2px 5px', borderRadius: '4px', fontSize: '10.5px', marginTop: '1px' }}>
-                                  Parts: {t.partsUsed.map((p: any) => `${p.quantity}× ${p.name}`).join(', ')}
-                                </div>
-                              )}
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '3px', paddingTop: '3px', borderTop: '1px dashed #cbd5e1' }}>
-                                <span style={{ fontWeight: 700, color: isSettled ? '#16a34a' : '#d97706', fontSize: '11px' }}>
-                                  Cost: {formatPrivateCurrency(cost)} {isSettled ? '✅ Paid' : `(Paid: ${formatPrivateCurrency(paid)})`}
-                                </span>
-                                <div style={{ display: 'flex', gap: '3px' }}>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      onClose();
-                                      navigate(`/repairs?focusId=${t.ticketNumber}`);
-                                    }}
-                                    style={{
-                                      background: '#eff6ff',
-                                      border: '1px solid #bfdbfe',
-                                      color: '#1d4ed8',
-                                      padding: '2px 5px',
-                                      borderRadius: '4px',
-                                      cursor: 'pointer',
-                                      fontSize: '10px',
-                                      fontWeight: 600,
-                                    }}
-                                  >
-                                    View Ticket
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setPrintingTicket(t);
-                                    }}
-                                    style={{
-                                      background: '#f1f5f9',
-                                      border: '1px solid #cbd5e1',
-                                      color: '#334155',
-                                      padding: '2px 5px',
-                                      borderRadius: '4px',
-                                      cursor: 'pointer',
-                                      fontSize: '10px',
-                                    }}
-                                    title="Print ticket label"
-                                  >
-                                    <Printer size={10} />
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
+                          justifyContent: 'center',
+                          flexShrink: 0
+                        }}>
+                          <Smartphone size={16} />
+                        </div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <p className={styles.deviceName} style={{ fontSize: '13px', margin: 0 }}>
+                            {device || 'Unknown Device'}
+                          </p>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 500 }}>
+                              {data.count > 0 ? t('common.broughtTimes', { count: data.count, defaultValue: `${data.count} repairs` }) : t('customers.registeredPhone', 'Registered phone')}
+                            </span>
+                            {data.imei && (
+                              <span style={{ fontSize: '10px', color: '#4f46e5', background: '#eef2ff', padding: '1px 5px', borderRadius: '4px', fontWeight: 600 }}>
+                                IMEI: {data.imei}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    )}
 
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed #e2e8f0', flexWrap: 'wrap', gap: '6px' }}>
-                      <span className={styles.deviceSpent}>
-                        {data.totalSpent > 0 ? `Total Spent: ${formatPrivateCurrency(data.totalSpent)}` : 'No Repair Cost'}
-                      </span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      {/* Compact Quick Actions */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
                         {permissions.repairs && (
                           <button
                             type="button"
@@ -1108,23 +969,11 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                               setTicketToEdit(null);
                               setIsNewTicketOpen(true);
                             }}
-                            title={`Create new repair ticket for ${device}`}
-                            style={{
-                              background: '#eff6ff',
-                              border: '1px solid #bfdbfe',
-                              color: '#1d4ed8',
-                              cursor: 'pointer',
-                              padding: '3px 7px',
-                              borderRadius: '5px',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '3px',
-                              fontSize: '11px',
-                              fontWeight: 600,
-                            }}
+                            title={`New repair ticket for ${device}`}
+                            className={styles.compactDeviceBtn}
                           >
                             <Wrench size={11} />
-                            <span>New Ticket</span>
+                            <span>{t('common.ticket', 'Ticket')}</span>
                           </button>
                         )}
                         <button
@@ -1141,30 +990,16 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                               notes: data.notes || '',
                             });
                           }}
-                          title={`Edit phone "${device}"`}
-                          style={{
-                            background: '#f1f5f9',
-                            border: '1px solid #cbd5e1',
-                            color: '#334155',
-                            cursor: 'pointer',
-                            padding: '3px 7px',
-                            borderRadius: '5px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '3px',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                          }}
+                          title={`${t('common.edit', 'Edit')} ${device}`}
+                          className={styles.compactIconBtn}
                         >
                           <Edit2 size={11} />
-                          <span>Edit</span>
                         </button>
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             const ticketCount = data.tickets.length;
-                            // Default to deleting tickets too — otherwise the device reappears from ticket history
                             setDeleteDeviceRepairsToo(ticketCount > 0);
                             setDeviceToDelete({
                               device,
@@ -1173,33 +1008,26 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                               tickets: data.tickets,
                             });
                           }}
-                          title={`Delete phone "${device}" from customer`}
-                          style={{
-                            background: '#fee2e2',
-                            border: '1px solid #fca5a5',
-                            color: '#b91c1c',
-                            cursor: 'pointer',
-                            padding: '3px 7px',
-                            borderRadius: '5px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '3px',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                          }}
+                          title={`${t('common.delete', 'Delete')} ${device}`}
+                          className={styles.compactIconBtnDanger}
                         >
                           <Trash2 size={11} />
-                          <span>Delete</span>
                         </button>
                       </div>
                     </div>
+
+                    {data.notes && (
+                      <p style={{ fontSize: '11px', color: '#64748b', margin: '4px 0 0', fontStyle: 'italic' }}>
+                        📝 {data.notes}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          {/* Tab Segmented Controls */}
+          {/* Tab Segmented Controls — 3 Core Operational Tabs */}
           <div className={styles.tabBar}>
             {permissions.customers_debt && (
               <button
@@ -1208,7 +1036,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                 onClick={() => setActiveTab('debts')}
               >
                 <BookOpen size={14} />
-                <span>Credit Ledger</span>
+                <span>{t('customers.creditLedger', 'Credit Ledger')}</span>
                 <span className={styles.tabBadge} style={{ background: totalDebtBalance > 0 ? '#fee2e2' : undefined, color: totalDebtBalance > 0 ? '#dc2626' : undefined }}>
                   {customerDebts.length}
                 </span>
@@ -1221,7 +1049,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                 onClick={() => setActiveTab('repairs')}
               >
                 <Wrench size={14} />
-                <span>Repairs</span>
+                <span>{t('common.repairs', 'Repairs')}</span>
                 <span className={styles.tabBadge}>{customerTickets.length}</span>
               </button>
             )}
@@ -1231,26 +1059,8 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
               onClick={() => setActiveTab('purchases')}
             >
               <ShoppingBag size={14} />
-              <span>Purchases</span>
+              <span>{t('common.purchases', 'Purchases')}</span>
               <span className={styles.tabBadge}>{customerTxs.length}</span>
-            </button>
-            <button
-              type="button"
-              className={[styles.tabBtn, activeTab === 'timeline' && styles.tabBtnActive].filter(Boolean).join(' ')}
-              onClick={() => setActiveTab('timeline')}
-            >
-              <Clock size={14} />
-              <span>Timeline</span>
-              <span className={styles.tabBadge}>{customerTxs.length + customerTickets.length + customerDebts.length}</span>
-            </button>
-            <button
-              type="button"
-              className={[styles.tabBtn, activeTab === 'activity' && styles.tabBtnActive].filter(Boolean).join(' ')}
-              onClick={() => setActiveTab('activity')}
-            >
-              <FileText size={14} />
-              <span>Audit Log</span>
-              <span className={styles.tabBadge}>{customerLogs.length}</span>
             </button>
           </div>
 
@@ -1261,7 +1071,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
               <>
                 <div className={styles.debtSummaryBanner}>
                   <div className={styles.debtSummaryLeft}>
-                    <span className={styles.debtSummaryLabel}>Total Outstanding Debt</span>
+                    <span className={styles.debtSummaryLabel}>{t('customers.totalOutstandingDebt', 'Total Outstanding Debt')}</span>
                     <p className={styles.debtSummaryValue}>{formatPrivateCurrency(totalDebtBalance)}</p>
                   </div>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -1272,21 +1082,21 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                       style={{ background: '#ffffff', color: '#1e293b', border: '1px solid #cbd5e1' }}
                       title="Generate Full Account Statement & PDF"
                     >
-                      <FileText size={13} /> Statement / PDF
+                      <FileText size={13} /> {t('customers.statementPdf', 'Statement / PDF')}
                     </button>
                     <button
                       type="button"
                       className={styles.addDebtBtn}
                       onClick={() => handleAddDebtClick()}
                     >
-                      <Plus size={14} /> Add Debt Record
+                      <Plus size={14} /> {t('customers.addDebtRecord', '+ Add Debt Record')}
                     </button>
                   </div>
                 </div>
 
                 {customerDebts.length === 0 ? (
                   <div className={styles.emptyState}>
-                    No debt or credit records found for this customer. All settled!
+                    {t('customers.noDebtsFound', 'No debt or credit records found for this customer. All settled!')}
                   </div>
                 ) : (
                   customerDebts.map(debt => {
@@ -1877,23 +1687,6 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
               )
             )}
 
-            {/* Timeline Tab */}
-            {activeTab === 'timeline' && (
-              <Customer360Timeline
-                transactions={customerTxs}
-                tickets={customerTickets}
-                debts={customerDebts}
-                onViewReceipt={(tx) => setSelectedReceiptTx(tx)}
-              />
-            )}
-
-            {/* Append-only Customer Activity & Audit Log Tab */}
-            {activeTab === 'activity' && (
-              <CustomerActivityLogList
-                customer={customer}
-                logs={customerLogs}
-              />
-            )}
           </div>
         </div>
       </SlidePanel>
@@ -2091,7 +1884,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         isOpen={!!deviceToDelete}
         onClose={() => { setDeviceToDelete(null); setDeleteDeviceRepairsToo(false); }}
         onConfirm={confirmDeleteDevice}
-        title="Remove Phone / Device from Customer"
+        title={t('customers.removePhoneTitle', 'Remove Phone / Device from Customer')}
         message={
           <div>
             <p style={{ margin: '0 0 10px 0' }}>
@@ -2135,7 +1928,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
             </p>
           </div>
         }
-        confirmLabel={deleteDeviceRepairsToo ? 'Delete Device + Repairs' : 'Remove Device'}
+        confirmLabel={deleteDeviceRepairsToo ? t('customers.deleteDeviceAndRepairs', 'Delete Device + Repairs') : t('customers.removeDevice', 'Remove Device')}
         variant="danger"
         isLoading={isActionLoading}
       />
@@ -2378,6 +2171,22 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         onClose={() => setPrintingTicket(null)}
         ticket={printingTicket}
       />
+
+      {/* Customer Activity & Audit Log Modal (Clean Secondary Access) */}
+      <Modal
+        isOpen={isActivityModalOpen}
+        onClose={() => setIsActivityModalOpen(false)}
+        title={`Audit & Activity Log`}
+        subtitle={`${customer.name} · Chronological record of account events`}
+        size="lg"
+      >
+        <div style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '4px' }}>
+          <CustomerActivityLogList
+            customer={customer}
+            logs={customerLogs}
+          />
+        </div>
+      </Modal>
     </>
   );
 };

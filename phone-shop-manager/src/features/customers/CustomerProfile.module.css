@@ -805,3 +805,115 @@
   color: #334155;
 }
 
+/* More Actions Dropdown Menu */
+.moreMenuContainer {
+  position: relative;
+  display: inline-flex;
+}
+
+.moreMenuDropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 210px;
+  background: #ffffff;
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 10px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  padding: 6px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.moreMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.moreMenuItem:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.moreMenuItemDanger {
+  color: #dc2626;
+}
+
+.moreMenuItemDanger:hover {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+/* Compact Device Fleet */
+.compactDeviceBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.compactDeviceBtn:hover {
+  background: #dbeafe;
+}
+
+.compactIconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.compactIconBtn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.compactIconBtnDanger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: #fff5f5;
+  border: 1px solid #fed7d7;
+  color: #dc2626;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.compactIconBtnDanger:hover {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+

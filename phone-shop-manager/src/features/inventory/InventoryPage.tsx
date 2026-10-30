@@ -18,6 +18,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useAuthStore } from '../../store/authStore';
 import { usePermissions } from '../../hooks/usePermissions';
+import { useTranslation } from 'react-i18next';
 import { AddProductModal } from './AddProductModal';
 import { EditProductPanel } from './EditProductPanel';
 import { ProductDetailPanel } from './ProductDetailPanel';
@@ -46,6 +47,7 @@ const StockStatusDot: React.FC<{ status: PhoneModel['stockStatus'] }> = ({ statu
 };
 
 export const InventoryPage = () => {
+  const { t } = useTranslation();
   const { fetchProducts, searchQuery, setSearchQuery, isLoading, products, restockProduct } = useInventoryStore();
   const { user } = useAuthStore();
   const permissions = usePermissions();
@@ -379,33 +381,33 @@ export const InventoryPage = () => {
       {/* Modern Page Header */}
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Inventory Management</h1>
+          <h1 className={styles.title}>{t('inventory.title', 'Inventory Management')}</h1>
           <p className={styles.subtitle}>{filtered.length} products available · {roleFilteredProducts.reduce((sum, p) => sum + p.stock, 0)} units in stock</p>
         </div>
         <div className={styles.headerActions}>
           <Button variant="secondary" leftIcon={<FileSpreadsheet size={16} />} onClick={() => handleOpenExportLowStock()}>
-            Export Low Stock
+            {t('inventory.exportLowStock', 'Export Low Stock')}
           </Button>
           <Button variant="secondary" leftIcon={<ScanLine size={16} />} onClick={() => requirePermission('perform stock audit', () => setIsAuditOpen(true))}>
-            Stock Audit
+            {t('inventory.stockAudit', 'Stock Audit')}
           </Button>
           <Button variant="secondary" leftIcon={<ClipboardList size={16} />} onClick={() => requirePermission('view restock log', () => setIsRestockLogOpen(true))}>
-            Restock Log
+            {t('inventory.restockHistory', 'Restock Log')}
           </Button>
           <Button variant="secondary" leftIcon={<AlertTriangle size={16} />} onClick={() => requirePermission('view write-off log', () => setIsWriteOffLogOpen(true))}>
-            Write-Off Log
+            {t('inventory.writeOffLog', 'Write-Off Log')}
           </Button>
           <Button variant="secondary" leftIcon={<Package size={16} />} onClick={() => setIsPrintOpen(true)}>
-            Print Labels
+            {t('inventory.printLabels', 'Print Labels')}
           </Button>
           <Button variant="secondary" leftIcon={<Printer size={16} />} onClick={() => navigate('/custom-ticket')}>
-            Custom Ticket
+            {t('sidebar.customTicket', 'Custom Ticket')}
           </Button>
           <Button variant="secondary" leftIcon={<Upload size={16} />} onClick={() => requirePermission('add a new product', () => setIsBulkImportOpen(true))}>
-            Import CSV
+            {t('inventory.importProducts', 'Import CSV')}
           </Button>
           <Button leftIcon={<Plus size={16} />} onClick={() => requirePermission('add a new product', () => setIsAddOpen(true))}>
-            Add Product
+            {t('inventory.addProduct', 'Add Product')}
           </Button>
         </div>
       </div>

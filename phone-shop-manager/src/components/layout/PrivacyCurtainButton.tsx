@@ -2,6 +2,7 @@ import React from 'react';
 import { Eye, EyeOff, Shield } from 'lucide-react';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { useToast } from '../ui/Toast';
+import { useTranslation } from 'react-i18next';
 
 interface Props {
   variant?: 'icon' | 'badge' | 'sidebar';
@@ -11,6 +12,7 @@ interface Props {
 export const PrivacyCurtainButton: React.FC<Props> = ({ variant = 'badge', className }) => {
   const { isPrivacyActive, togglePrivacy } = usePrivacyStore();
   const toast = useToast();
+  const { t } = useTranslation();
 
   const handleToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -47,7 +49,7 @@ export const PrivacyCurtainButton: React.FC<Props> = ({ variant = 'badge', class
       >
         {isPrivacyActive ? <EyeOff size={16} /> : <Eye size={16} />}
         <span style={{ flex: 1, textAlign: 'left' }}>
-          {isPrivacyActive ? 'Curtain Active (Masked)' : 'Privacy Curtain'}
+          {isPrivacyActive ? t('common.curtainActive', 'Curtain Active (Masked)') : t('common.privacyCurtain', 'Privacy Curtain')}
         </span>
         <span
           style={{
@@ -136,7 +138,7 @@ export const PrivacyCurtainButton: React.FC<Props> = ({ variant = 'badge', class
       ) : (
         <>
           <Eye size={14} style={{ color: 'var(--color-primary)' }} />
-          <span>Privacy Curtain</span>
+          <span>{t('common.privacyCurtain', 'Privacy Curtain')}</span>
           <span
             style={{
               fontSize: '10px',

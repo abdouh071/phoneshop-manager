@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/authStore';
 import { useApprovalStore } from '../../store/approvalStore';
 import { AdminApprovalsModal } from './AdminApprovalsModal';
 import { useToast } from '../../components/ui/Toast';
+import { useTranslation } from 'react-i18next';
 
 interface ApprovalsNotificationButtonProps {
   variant?: 'badge' | 'sidebar' | 'icon' | 'mobile-tab';
@@ -15,6 +16,7 @@ export const ApprovalsNotificationButton: React.FC<ApprovalsNotificationButtonPr
   const { user } = useAuthStore();
   const { pendingRequests, pendingCount, isModalOpen, openModal, closeModal, subscribeToPending } = useApprovalStore();
   const toast = useToast();
+  const { t } = useTranslation();
   const prevPendingIdsRef = useRef<Set<string>>(new Set());
 
   const isAdmin = user?.role === 'admin' || user?.isSuperAdmin === true;
@@ -73,7 +75,7 @@ export const ApprovalsNotificationButton: React.FC<ApprovalsNotificationButtonPr
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <ShieldAlert size={18} style={{ color: pendingCount > 0 ? '#ef4444' : 'var(--color-primary, #4f46e5)' }} />
-          <span>Staff Approvals</span>
+          <span>{t('common.staffApprovals', 'Staff Approvals')}</span>
         </div>
 
         {pendingCount > 0 ? (

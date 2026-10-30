@@ -20,6 +20,7 @@ import { CustomerAutocompleteInput } from './CustomerAutocompleteInput';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
+import { useTranslation } from 'react-i18next';
 import type { PaymentMethod, SaleTransaction, SuspendedCart, PhoneModel } from '../../types';
 import { groupProductsByBaseModel } from '../../utils/productGrouping';
 import type { ProductGroup } from '../../utils/productGrouping';
@@ -233,6 +234,7 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
 ];
 
 export const POSPage = () => {
+  const { t } = useTranslation();
   const isPrivacyActive = usePrivacyStore((s) => s.isPrivacyActive);
   const { fetchProducts, products: allProducts } = useInventoryStore();
   const [searchQuery, setSearchQuery] = useState('');
@@ -839,13 +841,13 @@ export const POSPage = () => {
               className={[styles.tab, activeTab === 'products' && styles.tabActive].filter(Boolean).join(' ')}
               onClick={() => setActiveTab('products')}
             >
-              Point of Sale
+              {t('pos.title', 'Point of Sale')}
             </button>
             <button 
               className={[styles.tab, activeTab === 'history' && styles.tabActive].filter(Boolean).join(' ')}
               onClick={() => setActiveTab('history')}
             >
-              Transaction History
+              {t('pos.transactionHistory', 'Transaction History')}
             </button>
           </div>
           
@@ -876,7 +878,7 @@ export const POSPage = () => {
               title="View Cash Drawer & End-of-Day (Z-Report) Summary"
             >
               <BadgeDollarSign size={16} />
-              <span>Cash Drawer</span>
+              <span>{t('pos.cashDrawer', 'Cash Drawer')}</span>
               <span className={styles.cashDrawerAmount}>{formatCurrency(todayNetCash)}</span>
             </button>
 
@@ -884,7 +886,7 @@ export const POSPage = () => {
               <SearchInput
                 value={searchQuery}
                 onChange={setSearchQuery}
-                placeholder="Search products…"
+                placeholder={t('pos.searchProducts', 'Search products…')}
                 className={styles.search}
               />
             )}

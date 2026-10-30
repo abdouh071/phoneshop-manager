@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Printer } from 'lucide-react';
 import { usePrinterStatus } from '../../hooks/usePrinterStatus';
+import { useTranslation } from 'react-i18next';
 import styles from './PrinterStatusPill.module.css';
 
 export const PrinterStatusPill: React.FC = () => {
+  const { t } = useTranslation();
   const { isOnline, printer, labelPrinter, hasCutter, isChecking, refresh } = usePrinterStatus();
   const [showPopover, setShowPopover] = useState(false);
   const pillRef = useRef<HTMLDivElement>(null);
@@ -40,7 +42,7 @@ export const PrinterStatusPill: React.FC = () => {
     >
       <div className={[styles.dot, isOnline ? styles.dotOnline : styles.dotOffline].join(' ')} />
       <Printer size={13} />
-      <span>{isChecking ? 'Checking...' : isOnline ? 'Printers Ready' : 'Browser Print'}</span>
+      <span>{isChecking ? t('common.checking', 'Checking...') : isOnline ? t('common.printersReady', 'Printers Ready') : t('common.browserPrint', 'Browser Print')}</span>
 
       {/* Detail Popover */}
       {showPopover && (

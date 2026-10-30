@@ -16,6 +16,7 @@ import { StatusTablesView } from './StatusTablesView';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
+import { useTranslation } from 'react-i18next';
 import type { RepairTicket, Customer } from '../../types';
 import styles from './Kanban.module.css';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -295,6 +296,7 @@ const TicketCard: React.FC<{
 };
 
 export const RepairsPage = () => {
+  const { t } = useTranslation();
   const {
     fetchTickets,
     searchQuery,
@@ -859,7 +861,7 @@ export const RepairsPage = () => {
           {/* Header */}
           <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Repairs Management</h1>
+          <h1 className={styles.title}>{t('repairs.repairsManagement', 'Repairs Management')}</h1>
           <p className={styles.subtitle}>{tickets.length} total active tickets across workshop</p>
         </div>
 
@@ -877,7 +879,7 @@ export const RepairsPage = () => {
                 if (searchQuery.trim().length > 0) setIsSearchOpen(true);
               }}
               onKeyDown={handleSearchKeyDown}
-              placeholder="Search tickets… (↑↓ navigate, ↵ open)"
+              placeholder={t('repairs.searchPlaceholder', 'Search tickets… (↑↓ navigate, ↵ open)')}
               className={styles.search}
             />
 
@@ -973,7 +975,7 @@ export const RepairsPage = () => {
               title="4 Dedicated Status Tables"
             >
               <LayoutList size={15} />
-              <span>Tables</span>
+              <span>{t('repairs.tables', 'Tables')}</span>
             </button>
             <button
               type="button"
@@ -982,7 +984,7 @@ export const RepairsPage = () => {
               title="Kanban Board View"
             >
               <Columns size={15} />
-              <span>Board</span>
+              <span>{t('repairs.board', 'Board')}</span>
             </button>
             <button
               type="button"
@@ -992,7 +994,7 @@ export const RepairsPage = () => {
               style={{ position: 'relative' }}
             >
               <CheckCircle2 size={15} />
-              <span>Completed</span>
+              <span>{t('repairs.completed', 'Completed')}</span>
               {counts.completed > 0 && (
                 <span style={{
                   minWidth: '16px',
@@ -1017,7 +1019,7 @@ export const RepairsPage = () => {
               title="All History & Logs"
             >
               <Archive size={15} />
-              <span>History</span>
+              <span>{t('repairs.history', 'History')}</span>
             </button>
             <button
               type="button"
@@ -1027,7 +1029,7 @@ export const RepairsPage = () => {
               style={{ position: 'relative' }}
             >
               <XCircle size={15} />
-              <span>Cancelled</span>
+              <span>{t('repairs.cancelled', 'Cancelled')}</span>
               {counts.cancelled > 0 && (
                 <span style={{
                   position: 'absolute',
@@ -1055,13 +1057,13 @@ export const RepairsPage = () => {
               title="Technician Settlements"
             >
               <User size={15} />
-              <span>Settlements</span>
+              <span>{t('repairs.settlements', 'Settlements')}</span>
             </button>
           </div>
 
           <EndOfDayButton variant="compact" />
           <Button leftIcon={<Plus size={16} />} onClick={() => setIsNewOpen(true)} title="New Ticket (N)">
-            New Ticket
+            {t('ticket.newTicket', 'New Ticket')}
           </Button>
         </div>
       </div>

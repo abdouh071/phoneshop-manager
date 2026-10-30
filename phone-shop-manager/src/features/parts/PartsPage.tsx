@@ -16,6 +16,7 @@ import { usePartsCartStore } from '../../store/partsCartStore';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
+import { useTranslation } from 'react-i18next';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { groupProductsByBaseModel } from '../../utils/productGrouping';
@@ -113,6 +114,7 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────
 
 export const PartsPage = () => {
+  const { t } = useTranslation();
   const { fetchParts, parts, restockProduct } = useInventoryStore();
   const partsOnly = parts;
   const {
@@ -518,7 +520,7 @@ export const PartsPage = () => {
       {/* Modern Page Header */}
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Parts Management</h1>
+          <h1 className={styles.title}>{t('parts.title', 'Parts Management')}</h1>
           <p className={styles.subtitle}>{partsOnly.length} parts available · {partsOnly.reduce((s, p) => s + p.stock, 0)} units in stock</p>
         </div>
         <div className={styles.headerActions}>
@@ -529,19 +531,19 @@ export const PartsPage = () => {
             style={lowStockCount > 0 ? { background: '#d97706', borderColor: '#b45309' } : undefined}
             title="Smart Restock Assistant & Supplier PO Generator"
           >
-            Restock Assistant {lowStockCount > 0 && `(${lowStockCount})`}
+            {t('parts.restockAssistant', 'Restock Assistant')} {lowStockCount > 0 && `(${lowStockCount})`}
           </Button>
           <Button variant="secondary" leftIcon={<ClipboardList size={16} />} onClick={() => requirePermission('view restock log', () => setIsRestockLogOpen(true))}>
-            Restock Log
+            {t('inventory.restockHistory', 'Restock Log')}
           </Button>
           <Button variant="secondary" leftIcon={<AlertTriangle size={16} />} onClick={() => requirePermission('view write-off log', () => setIsWriteOffLogOpen(true))}>
-            Write-Off Log
+            {t('inventory.writeOffLog', 'Write-Off Log')}
           </Button>
           <Button variant="secondary" leftIcon={<Package size={16} />} onClick={() => setIsPrintOpen(true)}>
-            Print Labels
+            {t('parts.printLabels', 'Print Labels')}
           </Button>
           <Button leftIcon={<Plus size={16} />} onClick={() => requirePermission('add a new part', () => setIsAddOpen(true))}>
-            Add Part
+            {t('parts.addPart', 'Add Part')}
           </Button>
         </div>
       </div>
@@ -553,7 +555,7 @@ export const PartsPage = () => {
           className={[styles.categoryTab, activeTab === 'inventory' && styles.categoryTabActive].filter(Boolean).join(' ')}
           onClick={() => setActiveTab('inventory')}
         >
-          <span>📦 Parts Inventory</span>
+          <span>📦 {t('parts.title', 'Parts Inventory')}</span>
           <span className={styles.tabCount}>{partsOnly.length}</span>
         </button>
         {permissions.parts_sell && (
@@ -562,7 +564,7 @@ export const PartsPage = () => {
             className={[styles.categoryTab, activeTab === 'pos' && styles.categoryTabActive].filter(Boolean).join(' ')}
             onClick={() => setActiveTab('pos')}
           >
-            <span>🛒 Sell Parts (POS)</span>
+            <span>🛒 {t('sidebar.pos', 'Sell Parts (POS)')}</span>
             <span className={styles.tabCount}>{getItemCount() > 0 ? `${getItemCount()} in cart` : 'POS'}</span>
           </button>
         )}

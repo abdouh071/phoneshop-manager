@@ -30,6 +30,7 @@ import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { useAuthStore } from '../../store/authStore';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { usePermissions } from '../../hooks/usePermissions';
+import { useTranslation } from 'react-i18next';
 import type { Customer, RepairTicket } from '../../types';
 import { isShopCustomer, isRetailCustomer } from '../../types';
 import styles from './Customers.module.css';
@@ -72,6 +73,7 @@ export const CustomersPage = () => {
   const toast = useToast();
   const { user } = useAuthStore();
   const permissions = usePermissions();
+  const { t } = useTranslation();
   const [customerRequiringUnlock, setCustomerRequiringUnlock] = useState<Customer | null>(null);
 
   // Duplication detection
@@ -695,10 +697,10 @@ export const CustomersPage = () => {
         <div className={styles.titleGroup}>
           <h1 className={styles.title}>
             {effectiveScope === 'retail'
-              ? 'Retail Customer Directory'
+              ? t('customers.retailCustomerDirectory', 'Retail Customer Directory')
               : effectiveScope === 'shop'
-              ? 'B2B Shops & Parts Accounts'
-              : 'Customer Directory'}
+              ? t('customers.shopAccounts', 'B2B Shops & Parts Accounts')
+              : t('customers.customerDirectory', 'Customer Directory')}
             <span className={styles.titleBadge}>{scopedCustomers.length} total</span>
           </h1>
           <p className={styles.subtitle}>
@@ -716,7 +718,7 @@ export const CustomersPage = () => {
               setIsMergeOpen(true);
             }}
           >
-            Merge Accounts
+            {t('customers.mergeCustomers', 'Merge Accounts')}
           </Button>
           {pendingSyncCount > 0 && (
             <Button
@@ -733,7 +735,7 @@ export const CustomersPage = () => {
             </Button>
           )}
           <Button variant="secondary" leftIcon={<Download size={16} />} onClick={handleExportCSV}>
-            Export CSV
+            {t('common.export', 'Export CSV')}
           </Button>
           {pageTab === 'walkin' ? (
             <Button
@@ -744,7 +746,7 @@ export const CustomersPage = () => {
                 setIsNewTicketOpen(true);
               }}
             >
-              New Repair Ticket
+              {t('ticket.newTicket', 'New Repair Ticket')}
             </Button>
           ) : (
             <Button
@@ -752,10 +754,10 @@ export const CustomersPage = () => {
               onClick={() => { setCustomerToEdit(null); setIsAddOpen(true); }}
             >
               {effectiveScope === 'shop'
-                ? 'Add Shop / Client'
+                ? t('customers.addCustomer', 'Add Shop / Client')
                 : effectiveScope === 'retail'
-                ? 'Add Retail Customer'
-                : 'Add Customer'}
+                ? t('customers.addCustomer', 'Add Retail Customer')
+                : t('customers.addCustomer', 'Add Customer')}
             </Button>
           )}
         </div>
@@ -843,7 +845,7 @@ export const CustomersPage = () => {
           onClick={() => handleTabChange('accounts')}
         >
           <Users size={17} />
-          <span>Customer Accounts</span>
+          <span>{t('customers.customerAccounts', 'Customer Accounts')}</span>
           <span className={[
             styles.primaryTabCount,
             pageTab === 'accounts' ? styles.primaryTabCountActiveAccounts : '',
@@ -861,7 +863,7 @@ export const CustomersPage = () => {
           onClick={() => handleTabChange('walkin')}
         >
           <Wrench size={17} />
-          <span>Walk-in Customers</span>
+          <span>{t('customers.walkInCustomers', 'Walk-in Customers')}</span>
           <span className={[
             styles.primaryTabCount,
             pageTab === 'walkin' ? styles.primaryTabCountActiveWalkIn : '',
@@ -910,7 +912,7 @@ export const CustomersPage = () => {
             onClick={() => { setAdminScope('all'); setCurrentPage(1); }}
           >
             <Users size={14} />
-            <span>All Accounts ({accountCustomers.length})</span>
+            <span>{t('customers.allAccounts', 'All Accounts')} ({accountCustomers.length})</span>
           </button>
 
           <button
@@ -933,7 +935,7 @@ export const CustomersPage = () => {
             onClick={() => { setAdminScope('retail'); setCurrentPage(1); }}
           >
             <User size={14} />
-            <span>👤 Retail Customers ({accountCustomers.filter(isRetailCustomer).length})</span>
+            <span>👤 {t('customers.retailCustomers', 'Retail Customers')} ({accountCustomers.filter(isRetailCustomer).length})</span>
           </button>
 
           <button
@@ -956,7 +958,7 @@ export const CustomersPage = () => {
             onClick={() => { setAdminScope('shop'); setCurrentPage(1); }}
           >
             <Store size={14} />
-            <span>🏪 Shops & Parts Buyers ({accountCustomers.filter(isShopCustomer).length})</span>
+            <span>🏪 {t('customers.shopsB2B', 'Shops & Parts Buyers')} ({accountCustomers.filter(isShopCustomer).length})</span>
           </button>
         </div>
       )}
@@ -1128,25 +1130,25 @@ export const CustomersPage = () => {
               <thead>
                 <tr>
                   <th className={styles.th} onClick={() => handleSort('name')}>
-                    Customer <SortIcon col="name" />
+                    {t('customers.customer', 'Customer')} <SortIcon col="name" />
                   </th>
-                  <th className={styles.th}>Contact Info</th>
-                  <th className={styles.th}>Account Tier</th>
+                  <th className={styles.th}>{t('customers.contactInfo', 'Contact Info')}</th>
+                  <th className={styles.th}>{t('customers.tier', 'Account Tier')}</th>
                   <th className={styles.th} onClick={() => handleSort('totalPurchases')} style={{ textAlign: 'center' }}>
-                    Orders <SortIcon col="totalPurchases" />
+                    {t('common.orders', 'Orders')} <SortIcon col="totalPurchases" />
                   </th>
                   <th className={styles.th} onClick={() => handleSort('totalSpent')}>
-                    Total Spent <SortIcon col="totalSpent" />
+                    {t('common.totalSpent', 'Total Spent')} <SortIcon col="totalSpent" />
                   </th>
                   {permissions.customers_debt && (
                     <th className={styles.th} onClick={() => handleSort('totalDebt')}>
-                      Debt Balance <SortIcon col="totalDebt" />
+                      {t('common.debtBalance', 'Debt Balance')} <SortIcon col="totalDebt" />
                     </th>
                   )}
                   <th className={styles.th} onClick={() => handleSort('lastVisitDate')}>
-                    Last Visit <SortIcon col="lastVisitDate" />
+                    {t('customers.lastVisit', 'Last Visit')} <SortIcon col="lastVisitDate" />
                   </th>
-                  <th className={styles.th} style={{ textAlign: 'right', minWidth: '220px' }}>Actions</th>
+                  <th className={styles.th} style={{ textAlign: 'right', minWidth: '220px' }}>{t('common.actions', 'Actions')}</th>
                 </tr>
               </thead>
               <tbody>
