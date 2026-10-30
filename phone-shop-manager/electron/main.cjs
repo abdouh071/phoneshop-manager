@@ -468,18 +468,31 @@ function createWindow() {
     mainWindow.focus();
   });
 
-  // Load the app — always use the live deployed version
+  // Load the app — prefer the live deployed version so updates and bug fixes apply instantly
   const DEPLOYED_URL = 'https://phoneshop-mgr-pro-2026.web.app';
 
   function loadDeployedSite() {
-    mainWindow.loadURL(DEPLOYED_URL).catch(() => showNoInternetPage());
+    logToFile('[Electron] 🌐 Loading app via deployed site: ' + DEPLOYED_URL);
+    mainWindow.loadURL(DEPLOYED_URL).catch((err) => {
+      logToFile(`[Electron] ⚠️ Remote load failed (${err ? err.message : ''}), trying local fallback`);
+      if (localAppPort) {
+        mainWindow.loadURL(`http://127.0.0.1:${localAppPort}`).catch(() => showNoInternetPage());
+      } else {
+        showNoInternetPage();
+      }
+    });
   }
 
-  // Handle page load failures (e.g. lost connection mid-use)
+  // Handle page load failures (e.g. lost connection mid-use or initial load timeout)
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
     // Ignore aborted loads (user navigated away) and cache-related errors
     if (errorCode === -3 || errorCode === 0) return;
-    showNoInternetPage();
+    logToFile(`[Electron] ⚠️ did-fail-load (code=${errorCode}: ${errorDescription}), falling back to local server`);
+    if (localAppPort) {
+      mainWindow.loadURL(`http://127.0.0.1:${localAppPort}`).catch(() => showNoInternetPage());
+    } else {
+      showNoInternetPage();
+    }
   });
 
   function showNoInternetPage() {
@@ -519,18 +532,9 @@ function createWindow() {
     });
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    // In production: Prefer the local embedded fast-path server (zero latency, 100% offline).
-    // If local files are present, boot immediately from localhost; fallback to remote only if dist missing.
-    if (localAppPort) {
-      logToFile(`[Electron] 🚀 Loading app via local fast-path: http://127.0.0.1:${localAppPort}`);
-      mainWindow.loadURL(`http://127.0.0.1:${localAppPort}`).catch((err) => {
-        logToFile(`[Electron] ⚠️ Local app load failed: ${err.message}, falling back to remote`);
-        loadDeployedSite();
-      });
-    } else {
-      logToFile('[Electron] 🌐 Loading app via deployed site: ' + DEPLOYED_URL);
-      loadDeployedSite();
-    }
+    // In production: Prefer the live deployed version so cloud bugfixes apply immediately.
+    // Falls back seamlessly to the local embedded fast-path server if offline.
+    loadDeployedSite();
   }
 
   // Open external links in the default browser (keep deployed site + localhost in-app)
