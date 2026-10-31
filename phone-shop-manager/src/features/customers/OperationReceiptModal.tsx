@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Printer, MessageCircle, CheckCircle2, Wrench, ShoppingBag, FileText, CreditCard } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
@@ -29,6 +30,7 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
   customer,
   currentTotalDebt = 0,
 }) => {
+  const { t } = useTranslation();
   const toast = useToast();
   const [isPrinting, setIsPrinting] = useState(false);
 
@@ -48,7 +50,7 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
       }
     } catch (err: any) {
       console.error('Print failure:', err);
-      toast.error('Erreur d\'impression', err?.message || 'Échec de transmission au serveur d\'impression.');
+      toast.error(t('statementModal.printError', 'Print error'), err?.message || 'Failed to send to print server.');
     } finally {
       setIsPrinting(false);
     }
@@ -64,19 +66,19 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={`Aperçu du Reçu #${receiptData.referenceNumber}`}
-      subtitle="Vérifiez les informations avant l'envoi vers l'imprimante thermique"
+      title={`${t('statementModal.receiptPreview', 'Receipt Preview #')}${receiptData.referenceNumber}`}
+      subtitle={t('statementModal.checkBeforePrint', 'Check details before sending to thermal printer')}
       size="sm"
       footer={
         <div style={{ display: 'flex', gap: '8px', width: '100%', justifyContent: 'flex-end', alignItems: 'center' }}>
           <Button variant="ghost" onClick={onClose}>
-            Fermer
+            {t('statementModal.close', 'Close')}
           </Button>
           <Button
             variant="outline"
             onClick={handleWhatsApp}
             leftIcon={<MessageCircle size={15} style={{ color: '#25D366' }} />}
-            title="Envoyer le résumé du ticket par WhatsApp"
+            title={t('statementModal.sendWhatsApp', 'Send receipt summary via WhatsApp')}
           >
             WhatsApp
           </Button>
@@ -86,7 +88,7 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
             isLoading={isPrinting}
             disabled={isPrinting}
           >
-            Imprimer Reçu
+            {t('statementModal.printReceipt', 'Print Receipt')}
           </Button>
         </div>
       }
@@ -115,12 +117,12 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
         {/* Customer Information */}
         <div className={styles.metaBox}>
           <div className={styles.metaRow}>
-            <span className={styles.metaLabel}>Client :</span>
+            <span className={styles.metaLabel}>{t('statementModal.customerLabel', 'Customer:')}</span>
             <span className={styles.metaValue}>{receiptData.customerDisplayName}</span>
           </div>
           {receiptData.customerPhone && (
             <div className={styles.metaRow}>
-              <span className={styles.metaLabel}>Téléphone :</span>
+              <span className={styles.metaLabel}>{t('statementModal.phone', 'Phone:')}</span>
               <span className={styles.metaValue}>{receiptData.customerPhone}</span>
             </div>
           )}
@@ -135,12 +137,12 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
             </div>
             {receiptData.repairDetails.issueDescription && (
               <div className={styles.repairIssue}>
-                🔧 <strong>Panne :</strong> {receiptData.repairDetails.issueDescription}
+                🔧 <strong>{t('statementModal.issueLabel', 'Issue:')}</strong> {receiptData.repairDetails.issueDescription}
               </div>
             )}
             {receiptData.repairDetails.status && (
               <span className={styles.repairStatusTag}>
-                Statut : {receiptData.repairDetails.status}
+                {t('statementModal.status', 'Status:')} {receiptData.repairDetails.status}
               </span>
             )}
           </div>
@@ -150,11 +152,11 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
         {receiptData.debtDetails?.productOrService && (
           <div className={styles.repairCard}>
             <div className={styles.repairDeviceTitle}>
-              📝 Motif : {receiptData.debtDetails.productOrService}
+              📝 {t('statementModal.reason', 'Reason:')} {receiptData.debtDetails.productOrService}
             </div>
             {receiptData.debtDetails.dueDate && (
               <div className={styles.repairIssue}>
-                ⏳ Échéance : {receiptData.debtDetails.dueDate}
+                ⏳ {t('statementModal.dueDate2', 'Due Date:')} {receiptData.debtDetails.dueDate}
               </div>
             )}
           </div>
@@ -165,8 +167,8 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
         {/* Items Section */}
         <div className={styles.itemsSection}>
           <div className={styles.itemsHeader}>
-            <span>Désignation / Prestation</span>
-            <span>Total</span>
+            <span>{t('statementModal.designation', 'Designation / Service')}</span>
+            <span>{t('statementModal.totalSale', 'Total')}</span>
           </div>
           {receiptData.items.map((it, idx) => (
             <div key={idx} className={styles.itemRow}>
@@ -194,7 +196,7 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
         <div className={styles.totalsSection}>
           {receiptData.discount && receiptData.discount > 0 && (
             <div className={styles.totalRow}>
-              <span>Remise :</span>
+              <span>{t('statementModal.discount', 'Discount:')}</span>
               <strong style={{ color: '#16a34a' }}>
                 -{formatCurrency(receiptData.discount, receiptData.currency)}
               </strong>
@@ -202,12 +204,12 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
           )}
 
           <div className={styles.grandTotalRow}>
-            <span>TOTAL :</span>
+            <span>{t('statementModal.total', 'TOTAL:')}</span>
             <span>{formatCurrency(receiptData.total, receiptData.currency)}</span>
           </div>
 
           <div className={styles.totalRow} style={{ marginTop: 4 }}>
-            <span>Règlement ({receiptData.paymentMethod}) :</span>
+            <span>{t('statementModal.paymentLine', 'Payment')} ({receiptData.paymentMethod}) :</span>
             <strong>{formatCurrency(receiptData.paidAmount, receiptData.currency)}</strong>
           </div>
         </div>
@@ -219,7 +221,7 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
             receiptData.currentTotalDebt > 0 ? styles.balancePending : styles.balanceSettled,
           ].join(' ')}
         >
-          <span>SOLDE ACTUEL DU COMPTE :</span>
+          <span>{t('statementModal.currentBalance', 'CURRENT ACCOUNT BALANCE:')}</span>
           <span className={styles.balanceAmount}>
             {formatCurrency(receiptData.currentTotalDebt, receiptData.currency)}
           </span>
@@ -229,14 +231,14 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
 
         {/* Signatures Row */}
         <div className={styles.signatures}>
-          <div className={styles.sigBlock}>Cachet Magasin</div>
-          <div className={styles.sigBlock}>Signature Client</div>
+          <div className={styles.sigBlock}>{t('statementModal.storeStamp', 'Store Stamp')}</div>
+          <div className={styles.sigBlock}>{t('statementModal.customerSignature', 'Customer Signature')}</div>
         </div>
 
         {/* Footer Text */}
         <div className={styles.footerText}>
-          Merci de votre confiance !<br />
-          À conserver pour tout suivi ou garantie.
+          {t('statementModal.thankYou', 'Thank you for your trust!')}<br />
+          {t('statementModal.keepForReference', 'Keep this receipt for warranty and follow-up.')}
         </div>
       </div>
     </Modal>

@@ -1472,7 +1472,7 @@ export const CustomersPage = () => {
                             <button
                               type="button"
                               className={`${styles.quickActionBtn} ${styles.statementBtn}`}
-                              title="Account Statement / Relevé de Compte"
+                              title={t('customers.accountStatement', 'Account Statement')}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setStatementCustomer(customer);
@@ -1742,7 +1742,7 @@ export const CustomersPage = () => {
                   <thead>
                     <tr>
                       <th className={styles.th}>Ticket / Date</th>
-                      <th className={styles.th}>Walk-in Client</th>
+                      <th className={styles.th}>{t('customers.walkInCustomers', 'Walk-in Customer')}</th>
                       <th className={styles.th}>Device & Problem</th>
                       <th className={styles.th}>Status & Tech</th>
                       <th className={styles.th}>Cost & Balance</th>

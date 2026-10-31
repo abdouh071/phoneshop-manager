@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -74,7 +75,8 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
   const [debtNotes, setDebtNotes] = useState('');
   const [debtError, setDebtError] = useState<string | null>(null);
 
-  const { addCustomer, addCustomerWithDebt, updateCustomer, customers } = useCustomerStore();
+  const { t } = useTranslation();
+ const { addCustomer, addCustomerWithDebt, updateCustomer, customers } = useCustomerStore();
   const toast = useToast();
 
   const [skipDuplicateCheck, setSkipDuplicateCheck] = useState(false);
@@ -612,7 +614,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
                 style={{ width: '16px', height: '16px', accentColor: '#d97706' }}
               />
               <BookOpen size={16} />
-              <span>Record Opening Debt / Unpaid Item ("Dette / Carnet")</span>
+              <span>{t('statementModal.debtLedgerLabel', 'Debt / Credit Tab')}</span>
             </label>
 
             {hasOpeningDebt && (

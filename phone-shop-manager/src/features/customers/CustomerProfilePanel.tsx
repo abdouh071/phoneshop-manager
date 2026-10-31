@@ -721,7 +721,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                   className={styles.actionBtn}
                   onClick={() => setIsStatementOpen(true)}
                   style={{ background: '#f8fafc', color: '#0f172a', borderColor: '#cbd5e1' }}
-                  title="Generate Account Statement (Relevé de Compte)"
+                  title={t('customers.accountStatement', 'Account Statement')}
                 >
                   <FileText size={14} /> {t('common.statement', 'Statement')}
                 </button>

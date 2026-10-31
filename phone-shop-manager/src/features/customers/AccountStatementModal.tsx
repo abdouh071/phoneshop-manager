@@ -455,13 +455,13 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
 
   const handleShareWhatsApp = () => {
     const shopDisplayName = customer.shopName || customer.name;
-    const text = `🏪 *${t('statementModal.simplifiedTitle', 'Relevé de compte client')}*
-*Client:* ${shopDisplayName}
-*Période:* ${dateRangeLabel}
+    const text = `🏪 *${t('statementModal.simplifiedTitle', 'Customer Account Statement')}*
+*${t('statementModal.customerLabel', 'Customer:')}* ${shopDisplayName}
+*${t('statementModal.period', 'Period:')}* ${dateRangeLabel}
 ━━━━━━━━━━━━━━━━━━━
-💰 *${t('statementModal.closingBalanceLabel', 'SOLDE RESTANT DÛ')}:* ${formatCurrency(statementData.closingBalance)}
-📦 ${t('statementModal.totalBilled', 'Total facturé')}: ${formatCurrency(statementData.periodDebits)}
-💳 ${t('statementModal.totalPaid', 'Total réglé')}: ${formatCurrency(statementData.periodCredits)}
+💰 *${t('statementModal.closingBalanceLabel', 'Total Balance Due')}:* ${formatCurrency(statementData.closingBalance)}
+📦 ${t('statementModal.totalBilled', 'Total Billed')}: ${formatCurrency(statementData.periodDebits)}
+💳 ${t('statementModal.totalPaid', 'Total Paid')}: ${formatCurrency(statementData.periodCredits)}
 ━━━━━━━━━━━━━━━━━━━
 ${settings.storeName ? `${settings.storeName}\n` : ''}`;
 
@@ -475,7 +475,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
         isOpen={isOpen}
       onClose={onClose}
       title={`${customer.shopName || customer.name}`}
-      subtitle={`${t('statementModal.simplifiedTitle', 'Relevé de compte client')} • ${dateRangeLabel}`}
+      subtitle={`${t('statementModal.simplifiedTitle', 'Customer Account Statement')} • ${dateRangeLabel}`}
       size="lg"
       footer={
         <div className={styles.actionsBar}>
@@ -493,10 +493,10 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
               WhatsApp ({formatPrivateCurrency(statementData.closingBalance)})
             </Button>
             <Button variant="ghost" onClick={onClose}>
-              {t('statementModal.close', 'Fermer')}
+              {t('statementModal.close', 'Close')}
             </Button>
             <Button onClick={handlePrint} leftIcon={<Printer size={15} />}>
-              {t('statementModal.printPdf', 'Imprimer / PDF')}
+              {t('statementModal.printPdf', 'Print / Save PDF')}
             </Button>
           </div>
         </div>
@@ -507,7 +507,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
         <div className={styles.printHeader}>
           <h2 className={styles.printStoreTitle}>{settings.storeName || 'PHONE SHOP MANAGER PRO'}</h2>
           <p className={styles.printMeta}>
-            {t('statementModal.simplifiedTitle', 'Relevé de compte client')} — {customer.shopName || customer.name} ({customer.phone}) • {dateRangeLabel}
+            {t('statementModal.simplifiedTitle', 'Customer Account Statement')} — {customer.shopName || customer.name} ({customer.phone}) • {dateRangeLabel}
           </p>
         </div>
 
@@ -574,17 +574,17 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
         {/* 2. Hero Balance Card */}
         <div className={[styles.heroCard, isDebt ? styles.heroCardDebt : styles.heroCardSettled].join(' ')}>
           <div className={styles.heroHeader}>
-            <span className={styles.heroSubtitle}>{t('statementModal.closingBalanceLabel', 'Solde restant dû')}</span>
+            <span className={styles.heroSubtitle}>{t('statementModal.closingBalanceLabel', 'Total Balance Due')}</span>
             <span className={[styles.statusBadge, isDebt ? styles.statusBadgeUnpaid : styles.statusBadgePaid].join(' ')}>
               {isDebt ? (
                 <>
                   <AlertCircle size={13} />
-                  {t('statementModal.unpaidStatus', 'En attente de règlement')}
+                  {t('statementModal.unpaidStatus', 'Payment Pending')}
                 </>
               ) : (
                 <>
                   <CheckCircle2 size={13} />
-                  {t('statementModal.paidStatus', 'Compte à jour')}
+                  {t('statementModal.paidStatus', 'Account Settled')}
                 </>
               )}
             </span>
@@ -621,10 +621,10 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
           <div className={styles.sectionHeader}>
             <h4 className={styles.sectionTitle}>
               <History size={15} />
-              {t('statementModal.transactionsTitle', 'Historique des opérations')}
+              {t('statementModal.transactionsTitle', 'Transaction History')}
             </h4>
             <span className={styles.countBadge}>
-              {statementData.periodJournal.length} {t('statementModal.operation', 'opérations')}
+              {statementData.periodJournal.length} {t('statementModal.operation', 'operations')}
             </span>
           </div>
 
@@ -643,7 +643,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                   <tr>
                     <td className={styles.colDate}>{startDate ? formatDateStr(startDate.toISOString()) : '---'}</td>
                     <td className={styles.colDesc}>
-                      <div className={styles.opMainTitle}>{t('statementModal.balanceFwd', 'Solde initial (Report)')}</div>
+                      <div className={styles.opMainTitle}>{t('statementModal.balanceFwd', 'Balance Fwd')}</div>
                       <div className={styles.opMetaRow}>
                         <span className={[styles.typeBadge, styles.typeOpening].join(' ')}>
                           {t('statementModal.openingBalanceDesc', 'Report antérieur')}
@@ -670,7 +670,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                         <tr
                           className={[styles.clickableRow, isExpanded && styles.clickableRowActive].filter(Boolean).join(' ')}
                           onClick={() => setExpandedEventId(prev => prev === item.id ? null : item.id)}
-                          title="Cliquez pour afficher les détails"
+                          title={t('statementModal.clickToExpand', 'Click to expand details')}
                         >
                           <td className={styles.colDate}>{formatDateStr(item.date)}</td>
                           <td className={styles.colDesc}>
@@ -686,11 +686,11 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                 item.type === 'payment' ? styles.typePayment :
                                 item.type === 'refund' ? styles.typeRefund : styles.typeTab
                               ].join(' ')}>
-                                {item.type === 'repair' ? t('statementModal.repair', 'Réparation') :
-                                 item.type === 'invoice' ? t('statementModal.invoice', 'Pièce') :
-                                 item.type === 'payment' ? t('statementModal.payment', 'Paiement') :
-                                 item.type === 'refund' ? t('statementModal.refund', 'Remboursement') :
-                                 t('statementModal.creditTab', 'Dette')}
+                                {item.type === 'repair' ? t('statementModal.repair', 'Repair') :
+                                 item.type === 'invoice' ? t('statementModal.invoice', 'Invoice') :
+                                 item.type === 'payment' ? t('statementModal.payment', 'Payment') :
+                                 item.type === 'refund' ? t('statementModal.refund', 'Refund') :
+                                 t('statementModal.creditTab', 'Credit Tab')}
                               </span>
                               {item.refNumber && (
                                 <span className={styles.opRefCode}>#{item.refNumber}</span>
@@ -716,7 +716,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                     <div className={styles.detailCardHeader}>
                                       <div className={styles.detailCardTitle}>
                                         <Wrench size={16} className={styles.detailIconRepair} />
-                                        <span>Fiche Réparation #{item.rawTicket.ticketNumber || item.refNumber}</span>
+                                        <span>{t('statementModal.repairSheet', 'Repair Sheet #')}{item.rawTicket.ticketNumber || item.refNumber}</span>
                                         <span className={styles.statusPill}>{item.rawTicket.status}</span>
                                       </div>
                                       <Button
@@ -728,39 +728,39 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                         }}
                                         leftIcon={<Printer size={13} />}
                                       >
-                                        Imprimer Reçu
+                                        {t('statementModal.printReceipt', 'Print Receipt')}
                                       </Button>
                                     </div>
 
                                     <div className={styles.detailGrid}>
                                       <div>
-                                        <span className={styles.detailLabel}>Appareil</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.device', 'Device')}</span>
                                         <p className={styles.detailValue}>
                                           <strong>{item.rawTicket.deviceBrand} {item.rawTicket.deviceModel}</strong>
                                           {item.rawTicket.imei ? ` (IMEI: ${item.rawTicket.imei})` : ''}
                                         </p>
                                       </div>
                                       <div>
-                                        <span className={styles.detailLabel}>Panne déclarée</span>
-                                        <p className={styles.detailValue}>{item.rawTicket.issueDescription || 'Non spécifiée'}</p>
+                                        <span className={styles.detailLabel}>{t('statementModal.declaredIssue', 'Declared Issue')}</span>
+                                        <p className={styles.detailValue}>{item.rawTicket.issueDescription || t('statementModal.notSpecified', 'Not specified')}</p>
                                       </div>
                                       <div>
-                                        <span className={styles.detailLabel}>Date prise en charge</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.intakeDate', 'Intake Date')}</span>
                                         <p className={styles.detailValue}>{formatDateStr(item.rawTicket.createdAt)}</p>
                                       </div>
                                       <div>
-                                        <span className={styles.detailLabel}>Décomposition financière</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.financialBreakdown', 'Financial Breakdown')}</span>
                                         <p className={styles.detailValue}>
-                                          Coût : <strong>{formatPrivateCurrency(item.rawTicket.actualCost ?? item.rawTicket.estimatedCost ?? 0)}</strong>
-                                          {' • '}Acompte : {formatPrivateCurrency(item.rawTicket.depositAmount || 0)}
-                                          {' • '}Payé : {formatPrivateCurrency(item.rawTicket.paidAmount || 0)}
+                                          {t('statementModal.cost', 'Cost:')} <strong>{formatPrivateCurrency(item.rawTicket.actualCost ?? item.rawTicket.estimatedCost ?? 0)}</strong>
+                                          {' • '}{t('statementModal.deposit', 'Deposit:')} {formatPrivateCurrency(item.rawTicket.depositAmount || 0)}
+                                          {' • '}{t('statementModal.paid', 'Paid:')} {formatPrivateCurrency(item.rawTicket.paidAmount || 0)}
                                         </p>
                                       </div>
                                     </div>
 
                                     {item.rawTicket.partsUsed && item.rawTicket.partsUsed.length > 0 && (
                                       <div className={styles.partsUsedBox}>
-                                        <span className={styles.detailLabel}>Pièces installées :</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.partsInstalled', 'Parts Installed')}:</span>
                                         <div className={styles.partsList}>
                                           {item.rawTicket.partsUsed.map((p, pIdx) => (
                                             <span key={pIdx} className={styles.partTag}>
@@ -773,7 +773,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
 
                                     {item.rawTicket.notes && (
                                       <div className={styles.notesBox}>
-                                        <span className={styles.detailLabel}>Remarques / Diagnostic :</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.remarksLabel', 'Remarks / Diagnostic')}:</span>
                                         <p className={styles.notesText}>{item.rawTicket.notes}</p>
                                       </div>
                                     )}
@@ -787,7 +787,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                       <div className={styles.detailCardTitle}>
                                         <ShoppingBag size={16} className={styles.detailIconInvoice} />
                                         <span>
-                                          {item.rawTransaction.saleType === 'parts_b2b' ? 'Facture Commerciale Pièces' : 'Vente Caisse POS'} #{item.rawTransaction.invoiceNumber || item.refNumber}
+                                          {item.rawTransaction.saleType === 'parts_b2b' ? t('statementModal.commercialInvoice', 'Commercial Parts Invoice') : t('statementModal.posSale', 'POS Cash Sale')} #{item.rawTransaction.invoiceNumber || item.refNumber}
                                         </span>
                                         <span className={styles.statusPill}>{item.rawTransaction.paymentStatus || item.rawTransaction.status}</span>
                                       </div>
@@ -801,7 +801,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                           }}
                                           leftIcon={<Printer size={13} />}
                                         >
-                                          Imprimer Reçu
+                                          {t('statementModal.printReceipt', 'Print Receipt')}
                                         </Button>
                                         <Button
                                           size="sm"
@@ -812,7 +812,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                           }}
                                           leftIcon={<FileText size={13} />}
                                         >
-                                          Voir Reçu
+                                          {t('statementModal.viewReceipt', 'View Receipt')}
                                         </Button>
                                       </div>
                                     </div>
@@ -821,10 +821,10 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                       <table className={styles.itemsTable}>
                                         <thead>
                                           <tr>
-                                            <th>Article</th>
-                                            <th style={{ textAlign: 'center' }}>Qté</th>
-                                            <th style={{ textAlign: 'right' }}>Prix unitaire</th>
-                                            <th style={{ textAlign: 'right' }}>Total</th>
+                                            <th>{t('statementModal.item', 'Item')}</th>
+                                            <th style={{ textAlign: 'center' }}>{t('statementModal.qty', 'Qty')}</th>
+                                            <th style={{ textAlign: 'right' }}>{t('statementModal.unitPrice', 'Unit Price')}</th>
+                                            <th style={{ textAlign: 'right' }}>{t('statementModal.totalSale', 'Total')}</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -842,18 +842,18 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
 
                                     <div className={styles.detailGrid} style={{ marginTop: 10 }}>
                                       <div>
-                                        <span className={styles.detailLabel}>Total Vente</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.totalSale', 'Sale Total')}</span>
                                         <p className={styles.detailValue}><strong>{formatPrivateCurrency(item.rawTransaction.total)}</strong></p>
                                       </div>
                                       <div>
-                                        <span className={styles.detailLabel}>Règlement</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.settlement', 'Settlement')}</span>
                                         <p className={styles.detailValue}>
-                                          {item.rawTransaction.payments?.map(p => `${p.method.toUpperCase()} (${formatPrivateCurrency(p.amount)})`).join(' + ') || 'Comptant'}
+                                          {item.rawTransaction.payments?.map(p => `${p.method.toUpperCase()} (${formatPrivateCurrency(p.amount)})`).join(' + ') || t('statementModal.cashPayment', 'Cash')}
                                         </p>
                                       </div>
                                       {item.rawTransaction.notes && (
                                         <div style={{ gridColumn: 'span 2' }}>
-                                          <span className={styles.detailLabel}>Notes</span>
+                                          <span className={styles.detailLabel}>{t('statementModal.notes', 'Notes')}</span>
                                           <p className={styles.notesText}>{item.rawTransaction.notes}</p>
                                         </div>
                                       )}
@@ -867,7 +867,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                     <div className={styles.detailCardHeader}>
                                       <div className={styles.detailCardTitle}>
                                         <FileText size={16} className={styles.detailIconTab} />
-                                        <span>Carnet de Dette #{item.refNumber}</span>
+                                        <span>{t('statementModal.debtLedger', 'Debt Ledger #')}{item.refNumber}</span>
                                         <span className={styles.statusPill}>{item.rawDebt.status || 'Active'}</span>
                                       </div>
                                       <Button
@@ -885,26 +885,26 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
 
                                     <div className={styles.detailGrid}>
                                       <div>
-                                        <span className={styles.detailLabel}>Motif / Désignation</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.reasonLabel', 'Reason / Description')}</span>
                                         <p className={styles.detailValue}><strong>{item.rawDebt.productOrService}</strong></p>
                                       </div>
                                       <div>
-                                        <span className={styles.detailLabel}>Date d'enregistrement</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.recordDate', 'Record Date')}</span>
                                         <p className={styles.detailValue}>{formatDateStr(item.rawDebt.date || item.rawDebt.createdAt)}</p>
                                       </div>
                                       <div>
-                                        <span className={styles.detailLabel}>Montant Initial</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.initialAmount', 'Initial Amount')}</span>
                                         <p className={styles.detailValue}><strong>{formatPrivateCurrency(item.rawDebt.totalAmount)}</strong></p>
                                       </div>
                                       <div>
-                                        <span className={styles.detailLabel}>Date d'échéance</span>
-                                        <p className={styles.detailValue}>{item.rawDebt.dueDate ? formatDateStr(item.rawDebt.dueDate) : 'Non définie'}</p>
+                                        <span className={styles.detailLabel}>{t('statementModal.dueDate', 'Due Date')}</span>
+                                        <p className={styles.detailValue}>{item.rawDebt.dueDate ? formatDateStr(item.rawDebt.dueDate) : t('statementModal.notSet', 'Not set')}</p>
                                       </div>
                                     </div>
 
                                     {item.rawDebt.payments && item.rawDebt.payments.length > 0 && (
                                       <div className={styles.partsUsedBox}>
-                                        <span className={styles.detailLabel}>Versements enregistrés sur ce bon ({item.rawDebt.payments.length}) :</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.paymentsOnVoucher', 'Payments on this voucher')} ({item.rawDebt.payments.length}) :</span>
                                         <div style={{ marginTop: 4 }}>
                                           {item.rawDebt.payments.map((p, pIdx) => (
                                             <div key={pIdx} style={{ fontSize: 11.5, display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
@@ -918,7 +918,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
 
                                     {item.rawDebt.notes && (
                                       <div className={styles.notesBox}>
-                                        <span className={styles.detailLabel}>Remarques :</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.remarks', 'Remarks:')}</span>
                                         <p className={styles.notesText}>{item.rawDebt.notes}</p>
                                       </div>
                                     )}
@@ -931,8 +931,8 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                     <div className={styles.detailCardHeader}>
                                       <div className={styles.detailCardTitle}>
                                         <CreditCard size={16} className={styles.detailIconPayment} />
-                                        <span>Règlement / Versement #{item.refNumber}</span>
-                                        <span className={[styles.statusPill, styles.statusPillSuccess].join(' ')}>Encaissé</span>
+                                        <span>{t('statementModal.paymentRecord', 'Payment / Settlement #')}{item.refNumber}</span>
+                                        <span className={[styles.statusPill, styles.statusPillSuccess].join(' ')}>{t('statementModal.collected', 'Collected')}</span>
                                       </div>
                                       <Button
                                         size="sm"
@@ -943,32 +943,32 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                         }}
                                         leftIcon={<Printer size={13} />}
                                       >
-                                        Imprimer Reçu
+                                        {t('statementModal.printReceipt', 'Print Receipt')}
                                       </Button>
                                     </div>
 
                                     <div className={styles.detailGrid}>
                                       <div>
-                                        <span className={styles.detailLabel}>Montant versé</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.amountPaid', 'Amount Paid')}</span>
                                         <p className={styles.detailValue} style={{ color: '#16a34a', fontSize: 15 }}>
                                           <strong>{formatPrivateCurrency(item.rawPayment.amount)}</strong>
                                         </p>
                                       </div>
                                       <div>
-                                        <span className={styles.detailLabel}>Mode de paiement</span>
-                                        <p className={styles.detailValue}><strong>{item.rawPayment.method?.toUpperCase() || 'ESPÈCES'}</strong></p>
+                                        <span className={styles.detailLabel}>{t('statementModal.paymentMethod', 'Payment Method')}</span>
+                                        <p className={styles.detailValue}><strong>{item.rawPayment.method?.toUpperCase() || 'CASH'}</strong></p>
                                       </div>
                                       <div>
-                                        <span className={styles.detailLabel}>Date</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.date', 'Date')}</span>
                                         <p className={styles.detailValue}>{formatDateStr(item.rawPayment.date)}</p>
                                       </div>
                                       <div>
-                                        <span className={styles.detailLabel}>Affecté au dossier</span>
-                                        <p className={styles.detailValue}>{item.rawDebt?.productOrService || 'Compte client'}</p>
+                                        <span className={styles.detailLabel}>{t('statementModal.appliedTo', 'Applied To')}</span>
+                                        <p className={styles.detailValue}>{item.rawDebt?.productOrService || t('statementModal.customerAccount', 'Customer Account')}</p>
                                       </div>
                                       {item.rawPayment.note && (
                                         <div style={{ gridColumn: 'span 2' }}>
-                                          <span className={styles.detailLabel}>Note / Observation</span>
+                                          <span className={styles.detailLabel}>{t('statementModal.noteLabel', 'Note / Observation')}</span>
                                           <p className={styles.notesText}>{item.rawPayment.note}</p>
                                         </div>
                                       )}
@@ -981,19 +981,19 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                   <div className={styles.detailCard}>
                                     <div className={styles.detailGrid}>
                                       <div>
-                                        <span className={styles.detailLabel}>Référence</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.reference', 'Reference')}</span>
                                         <p className={styles.detailValue}><code>{item.refNumber}</code></p>
                                       </div>
                                       <div>
-                                        <span className={styles.detailLabel}>Description</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.description', 'Description')}</span>
                                         <p className={styles.detailValue}>{item.description}</p>
                                       </div>
                                       <div>
-                                        <span className={styles.detailLabel}>Débit / Facturé</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.debitBilled', 'Debit / Billed')}</span>
                                         <p className={styles.detailValue}>+{formatPrivateCurrency(item.debit)}</p>
                                       </div>
                                       <div>
-                                        <span className={styles.detailLabel}>Crédit / Réglé</span>
+                                        <span className={styles.detailLabel}>{t('statementModal.creditSettled', 'Credit / Settled')}</span>
                                         <p className={styles.detailValue}>-{formatPrivateCurrency(item.credit)}</p>
                                       </div>
                                     </div>
