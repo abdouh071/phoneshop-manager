@@ -528,9 +528,9 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       const newDebt = await debtService.addDebt(debtData);
       set(state => {
         const updatedDebts = [newDebt, ...state.debts];
-        const targetCust = state.customers.find(c => c.id === debtData.customerId);
+        // Strict customerId match only — avoids inflating debt via loose matchesCustomer heuristics
         const newTotalDebt = updatedDebts
-          .filter(d => (d.customerId === debtData.customerId || (targetCust && matchesCustomer(targetCust, d))) && d.status !== 'paid')
+          .filter(d => d.customerId === debtData.customerId && d.status !== 'paid' && d.remainingBalance > 0)
           .reduce((sum, d) => sum + d.remainingBalance, 0);
 
         return {

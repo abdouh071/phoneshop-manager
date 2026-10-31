@@ -242,3 +242,4 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
     </Modal>
   );
 };
+

@@ -291,6 +291,25 @@ export const CustomersPage = () => {
     return map;
   }, [customers, tickets]);
 
+  // Pre-computed device count per customer (avoids recomputing per rendered row)
+  const customerDeviceCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const c of customers) {
+      const cTickets = customerTicketsMap.get(c.id) || [];
+      const distinctDevices = new Set<string>();
+      (c.registeredDevices || []).forEach(d => {
+        if (d.imei) distinctDevices.add(`imei:${d.imei.toLowerCase()}`);
+        else if (d.brand || d.model) distinctDevices.add(`dev:${d.brand || ''} ${d.model || ''}`.toLowerCase().trim());
+      });
+      cTickets.forEach(t => {
+        if (t.deviceImei) distinctDevices.add(`imei:${t.deviceImei.toLowerCase()}`);
+        else if (t.deviceBrand || t.deviceModel) distinctDevices.add(`dev:${t.deviceBrand || ''} ${t.deviceModel || ''}`.toLowerCase().trim());
+      });
+      map.set(c.id, distinctDevices.size);
+    }
+    return map;
+  }, [customers, customerTicketsMap]);
+
   // ── Derived metrics ─────────────────────────────────────────────────
   const metrics = useMemo(() => {
     const now = Date.now();
@@ -330,16 +349,7 @@ export const CustomersPage = () => {
 
       const cTickets = customerTicketsMap.get(c.id) || [];
       totalRepairsCount += cTickets.length;
-      const distinctPhones = new Set<string>();
-      (c.registeredDevices || []).forEach(d => {
-        if (d.imei) distinctPhones.add(`imei:${d.imei.toLowerCase()}`);
-        else if (d.brand || d.model) distinctPhones.add(`dev:${d.brand || ''} ${d.model || ''}`.toLowerCase().trim());
-      });
-      cTickets.forEach(t => {
-        if (t.deviceImei) distinctPhones.add(`imei:${t.deviceImei.toLowerCase()}`);
-        else if (t.deviceBrand || t.deviceModel) distinctPhones.add(`dev:${t.deviceBrand || ''} ${t.deviceModel || ''}`.toLowerCase().trim());
-      });
-      totalPhonesTracked += distinctPhones.size;
+      totalPhonesTracked += customerDeviceCountMap.get(c.id) || 0;
     }
 
     return {
@@ -358,7 +368,7 @@ export const CustomersPage = () => {
       totalPhonesTracked,
       avgRevenue: scopedCustomers.length > 0 ? totalLtv / scopedCustomers.length : 0,
     };
-  }, [scopedCustomers, debts, customerTicketsMap]);
+  }, [scopedCustomers, debts, customerTicketsMap, customerDeviceCountMap]);
 
   // ── Walk-in Repairs (Tickets with missing or invalid phone number OR linked to legacy phoneless accounts) ────
   const walkInTickets = useMemo(() => {
@@ -541,7 +551,8 @@ export const CustomersPage = () => {
         };
 
         const filteredMatches = allMatches.filter(testSubFilter);
-        return filteredMatches.length > 0 ? filteredMatches : allMatches;
+        // Always return filtered results (even if empty) — don't silently fall back to unfiltered
+        return filteredMatches;
       }
 
       return allMatches;
@@ -979,10 +990,10 @@ export const CustomersPage = () => {
           <p className={styles.summaryValue}>{metrics.total}</p>
           <p className={styles.summarySub}>
             {effectiveScope === 'retail'
-              ? `${metrics.repeat} repeat · ${metrics.totalRepairsCount} repairs · ${metrics.totalPhonesTracked} phones`
+              ? `${metrics.repeat} repeat · ${metrics.totalRepairsCount} repairs · ${metrics.totalPhonesTracked} devices`
               : effectiveScope === 'shop'
               ? `${metrics.repeat} active workshops · ${metrics.totalRepairsCount} repairs`
-              : `${metrics.b2b} B2B · ${metrics.totalRepairsCount} repairs · ${metrics.totalPhonesTracked} phones`}
+              : `${metrics.b2b} B2B · ${metrics.totalRepairsCount} repairs · ${metrics.totalPhonesTracked} devices`}
           </p>
         </div>
 
@@ -1157,16 +1168,8 @@ export const CustomersPage = () => {
                   const overdueInfo = getCustomerOverdueInfo(debts, customer.id);
                   const cTickets = customerTicketsMap.get(customer.id) || [];
                   const cRepairsCount = cTickets.length;
-                  const distinctPhones = new Set<string>();
-                  (customer.registeredDevices || []).forEach(d => {
-                    if (d.imei) distinctPhones.add(`imei:${d.imei.toLowerCase()}`);
-                    else if (d.brand || d.model) distinctPhones.add(`dev:${d.brand || ''} ${d.model || ''}`.toLowerCase().trim());
-                  });
-                  cTickets.forEach(t => {
-                    if (t.deviceImei) distinctPhones.add(`imei:${t.deviceImei.toLowerCase()}`);
-                    else if (t.deviceBrand || t.deviceModel) distinctPhones.add(`dev:${t.deviceBrand || ''} ${t.deviceModel || ''}`.toLowerCase().trim());
-                  });
-                  const distinctPhonesCount = distinctPhones.size;
+                  // Use pre-computed device count map (no per-row Set rebuild)
+                  const distinctPhonesCount = customerDeviceCountMap.get(customer.id) || 0;
 
                   return (
                     <tr
@@ -1236,9 +1239,9 @@ export const CustomersPage = () => {
                                     alignItems: 'center',
                                     gap: '3px',
                                   }}
-                                  title={`${distinctPhonesCount} distinct phone(s) tracked`}
+                                  title={`${distinctPhonesCount} distinct device(s) tracked`}
                                 >
-                                  <Smartphone size={11} /> {distinctPhonesCount} {distinctPhonesCount === 1 ? 'Phone' : 'Phones'}
+                                  <Smartphone size={11} /> {distinctPhonesCount} {distinctPhonesCount === 1 ? 'Device' : 'Devices'}
                                 </span>
                               )}
                               {cRepairsCount > 0 && (
