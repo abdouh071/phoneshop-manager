@@ -612,6 +612,8 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
           const { useRepairStore } = await import('./repairStore');
           const repairStore = useRepairStore.getState();
           const matchingTicket = repairStore.tickets.find(t =>
+            // Priority: explicit linkedTicketId → debtEntryId on ticket → legacy string match
+            (updatedDebt.linkedTicketId && updatedDebt.linkedTicketId === t.id) ||
             (t.debtEntryId && t.debtEntryId === debtId) ||
             (t.ticketNumber && updatedDebt.productOrService?.includes(t.ticketNumber))
           );

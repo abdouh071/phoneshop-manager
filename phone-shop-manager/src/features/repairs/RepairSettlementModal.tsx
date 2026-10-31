@@ -257,6 +257,8 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
             date: new Date().toISOString(),
             dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
             type: 'repair' as const,
+            linkedTicketId: ticket.id,
+            linkedTicketNumber: ticket.ticketNumber,
             notes: settlementNotes.trim()
               ? settlementNotes.trim()
               : `Repair #${ticket.ticketNumber} handed over with ${formatCurrency(effectiveRemainingDebt)} remaining debt.`,

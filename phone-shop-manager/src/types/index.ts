@@ -274,6 +274,11 @@ export interface CustomerDebtEntry {
   invoiceNumber?: string;
   itemsSummary?: string;
   type?: 'general' | 'parts_b2b' | 'repair';
+  /** Explicit link to the RepairTicket Firestore document ID that originated this debt.
+   *  Preferred over productOrService string-match for ticket↔debt resolution. */
+  linkedTicketId?: string;
+  /** Human-readable ticket number copy (e.g. "TKT-0169") stored for display / legacy fallback. */
+  linkedTicketNumber?: string;
   payments: CustomerDebtPayment[];
   createdAt: string;
   updatedAt?: string;

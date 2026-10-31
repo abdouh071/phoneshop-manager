@@ -509,6 +509,8 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
               amountPaid: totalPaid,
               date: new Date().toISOString(),
               type: 'repair',
+              linkedTicketId: ticketToEdit.id,
+              linkedTicketNumber: ticketToEdit.ticketNumber,
               notes: `Repair #${ticketToEdit.ticketNumber} price adjusted to ${formatCurrency(newCost)} (${formatCurrency(unpaidRemainder)} balance due)`,
               payments: totalPaid > 0 ? [{
                 id: `pay_${Date.now()}`,

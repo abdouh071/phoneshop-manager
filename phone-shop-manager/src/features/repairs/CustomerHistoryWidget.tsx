@@ -166,6 +166,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
     const linkedDebt = debts.find(
       d =>
         (t.debtEntryId && d.id === t.debtEntryId) ||
+        (d.linkedTicketId && d.linkedTicketId === t.id) ||
         (d.type === 'repair' &&
           (d.productOrService.includes(t.ticketNumber) ||
             (t.customerId && d.customerId === t.customerId && d.date.slice(0, 10) === t.createdAt.slice(0, 10))))
@@ -264,6 +265,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
         !debts.some(
           d =>
             (t.debtEntryId && d.id === t.debtEntryId) ||
+            (d.linkedTicketId && d.linkedTicketId === t.id) ||
             (d.type === 'repair' && d.productOrService.includes(t.ticketNumber))
         )
       ) {

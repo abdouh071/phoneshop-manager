@@ -174,9 +174,10 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
     custDebts.forEach(debt => {
       if (debt.type === 'repair' || (debt.productOrService && debt.productOrService.toLowerCase().includes('repair'))) {
         const matchingTicket = custTickets.find(t =>
+          (debt.linkedTicketId && debt.linkedTicketId === t.id) ||
+          (t.debtEntryId && t.debtEntryId === debt.id) ||
           (t.ticketNumber && debt.productOrService.includes(t.ticketNumber)) ||
-          (debt.notes && t.ticketNumber && debt.notes.includes(t.ticketNumber)) ||
-          (t.debtEntryId && t.debtEntryId === debt.id)
+          (debt.notes && t.ticketNumber && debt.notes.includes(t.ticketNumber))
         );
         if (matchingTicket) linkedDebtIds.add(debt.id);
       }

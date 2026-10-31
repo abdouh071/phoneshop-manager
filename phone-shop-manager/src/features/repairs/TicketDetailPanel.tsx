@@ -279,6 +279,8 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
             amountPaid: totalPaid,
             date: new Date().toISOString(),
             type: 'repair',
+            linkedTicketId: ticket.id,
+            linkedTicketNumber: ticket.ticketNumber,
             notes: `Repair #${ticket.ticketNumber} price adjusted to ${formatCurrency(finalCost)} (${formatCurrency(unpaidRemainder)} balance due)`,
             payments: totalPaid > 0 ? [{
               id: `pay_${Date.now()}`,

@@ -236,8 +236,9 @@ export const calculateCustomerFinancials = (
     }
 
     // Check for linked debt in debts collection
-    const linkedDebt = matchedDebts.find(d => 
-      (d.metadata && (d.metadata as any).ticketId === tk.id) ||
+    // Priority: explicit linkedTicketId → debtEntryId on ticket → legacy string match (fallback for old records)
+    const linkedDebt = matchedDebts.find(d =>
+      (d.linkedTicketId && d.linkedTicketId === tk.id) ||
       d.id === tk.debtEntryId ||
       (d.productOrService && tk.ticketNumber && d.productOrService.includes(tk.ticketNumber))
     );
