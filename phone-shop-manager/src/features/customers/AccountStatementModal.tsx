@@ -59,6 +59,53 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
   const toast = useToast();
   const locale = i18n.language === 'ar' ? 'ar-DZ' : i18n.language === 'fr' ? 'fr-FR' : 'en-US';
 
+  const getPaymentMethodLabel = (method: string) => {
+    switch (method?.toLowerCase()) {
+      case 'cash':
+        return t('statementModal.cashPayment', 'Cash');
+      case 'card':
+        return t('pos.card', 'Card');
+      case 'transfer':
+        return t('common.paymentMethods.transfer', 'Bank Transfer');
+      case 'check':
+        return t('common.paymentMethods.check', 'Check');
+      case 'debt':
+        return t('statementModal.creditTab', 'Credit Tab');
+      default:
+        return method?.toUpperCase() || t('statementModal.cashPayment', 'Cash');
+    }
+  };
+
+  const getDebtStatusLabel = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'paid':
+        return t('customers.paid', 'Paid');
+      case 'partially_paid':
+        return t('customers.partiallyPaid', 'Partially Paid');
+      case 'unpaid':
+        return t('customers.unpaid', 'Unpaid');
+      default:
+        return status?.toUpperCase() || t('common.active', 'Active');
+    }
+  };
+
+  const getTicketStatusLabel = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'completed':
+        return t('repairs.status.completed', 'Completed');
+      case 'in_progress':
+        return t('repairs.status.in_progress', 'In Progress');
+      case 'pending':
+        return t('repairs.status.pending', 'Pending');
+      case 'cancelled':
+        return t('repairs.status.cancelled', 'Cancelled');
+      case 'ready':
+        return t('repairs.status.ready', 'Ready for Pickup');
+      default:
+        return status?.toUpperCase() || '';
+    }
+  };
+
   const formatDateStr = (iso: string) =>
     new Date(iso).toLocaleDateString(locale, {
       month: 'short',
@@ -209,22 +256,31 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
       }
 
       const chargedAmount = Math.max(0, totalBilled - paidUpfront);
-      const paymentMethodsStr = tx.payments?.map(p => p.method.toUpperCase()).join('+') || 'CASH';
+      const paymentMethodsStr = tx.payments?.map(p => getPaymentMethodLabel(p.method)).join('+') || getPaymentMethodLabel('cash');
 
       let description = '';
       if (isB2B) {
         if (chargedAmount === 0) {
-          description = `Parts Commercial Invoice (${itemsDesc}) — Paid Full via ${paymentMethodsStr}`;
+          description = t('statementModal.partsInvoicePaidFull', 'Parts Commercial Invoice ({{items}}) — Paid Full via {{methods}}', { items: itemsDesc, methods: paymentMethodsStr });
         } else if (paidUpfront === 0) {
-          description = `Parts Commercial Invoice (${itemsDesc}) — 100% Charged to Account`;
+          description = t('statementModal.partsInvoice100Charged', 'Parts Commercial Invoice ({{items}}) — 100% Charged to Account', { items: itemsDesc });
         } else {
-          description = `Parts Commercial Invoice (${itemsDesc}) — Paid ${formatCurrency(paidUpfront)} via ${paymentMethodsStr}, ${formatCurrency(chargedAmount)} on Credit Tab`;
+          description = t('statementModal.partsInvoicePartial', 'Parts Commercial Invoice ({{items}}) — Paid {{paid}} via {{methods}}, {{charged}} on Credit Tab', {
+            items: itemsDesc,
+            paid: formatCurrency(paidUpfront),
+            methods: paymentMethodsStr,
+            charged: formatCurrency(chargedAmount)
+          });
         }
       } else {
         if (chargedAmount === 0) {
-          description = `POS Sale (${itemsDesc}) — Paid Full via ${paymentMethodsStr}`;
+          description = t('statementModal.posSalePaidFull', 'POS Sale ({{items}}) — Paid Full via {{methods}}', { items: itemsDesc, methods: paymentMethodsStr });
         } else {
-          description = `POS Sale (${itemsDesc}) — Paid ${formatCurrency(paidUpfront)}, ${formatCurrency(chargedAmount)} on Credit Tab`;
+          description = t('statementModal.posSalePartial', 'POS Sale ({{items}}) — Paid {{paid}}, {{charged}} on Credit Tab', {
+            items: itemsDesc,
+            paid: formatCurrency(paidUpfront),
+            charged: formatCurrency(chargedAmount)
+          });
         }
       }
 
@@ -248,7 +304,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
           date: tx.date,
           type: 'refund',
           refNumber: `REF-${refNumber}`,
-          description: `Full Refund Credit for Order #${refNumber} (${itemsDesc})`,
+          description: t('statementModal.refundCredit', 'Full Refund Credit for Order #{{ref}} ({{items}})', { ref: refNumber, items: itemsDesc }),
           debit: 0,
           credit: totalBilled,
           netChange: -totalBilled,
@@ -276,7 +332,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
           date: debt.date || debt.createdAt,
           type: 'debt_tab',
           refNumber: debt.invoiceNumber || `TAB-${debt.id.slice(0, 6)}`,
-          description: `Credit Tab / Debt Entry: ${debt.productOrService}${debt.dueDate ? ` (Due: ${debt.dueDate.slice(0, 10)})` : ''}${initialDownPayment > 0 ? ` (Down payment: ${formatCurrency(initialDownPayment)})` : ''}`,
+          description: t('statementModal.debtEntryDesc', 'Credit Tab / Debt Entry: {{product}}', { product: debt.productOrService }) + (debt.dueDate ? ` (${t('statementModal.dueDate', 'Due Date')}: ${debt.dueDate.slice(0, 10)})` : '') + (initialDownPayment > 0 ? ` (${t('statementModal.deposit', 'Deposit:')} ${formatCurrency(initialDownPayment)})` : ''),
           debit: debt.totalAmount,
           credit: initialDownPayment,
           netChange: debt.totalAmount - initialDownPayment,
@@ -292,7 +348,11 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
           date: pay.date,
           type: 'payment',
           refNumber: `PAY-${pay.id.slice(-6)}`,
-          description: `Debt Settlement Payment on "${debt.productOrService}" via ${pay.method.toUpperCase()}${pay.note ? ` (${pay.note})` : ''}`,
+          description: t('statementModal.debtPaymentDesc', 'Debt Settlement Payment on "{{product}}" via {{method}}{{note}}', {
+            product: debt.productOrService,
+            method: getPaymentMethodLabel(pay.method),
+            note: pay.note ? ` (${pay.note})` : ''
+          }),
           debit: 0,
           credit: pay.amount,
           netChange: -pay.amount,
@@ -309,7 +369,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
       const isCompleted = t.status === 'completed';
       const deposit = t.depositAmount || 0;
       const refNumber = t.ticketNumber || `REP-${t.id.slice(0, 6)}`;
-      const deviceDesc = `${t.deviceBrand || ''} ${t.deviceModel || ''}`.trim() || 'Device';
+      const deviceDesc = `${t.deviceBrand || ''} ${t.deviceModel || ''}`.trim() || t('statementModal.device', 'Device');
       const issueSummary = t.issueDescription ? ` (${t.issueDescription.slice(0, 35)})` : '';
 
       // 1. Intake Deposit (credited at creation date if paid)
@@ -319,7 +379,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
           date: t.createdAt,
           type: 'payment',
           refNumber: `DEP-${refNumber}`,
-          description: `Intake Deposit for Repair #${refNumber} (${deviceDesc})`,
+          description: t('statementModal.repairDepositDesc', 'Intake Deposit for Repair #{{ref}} ({{device}})', { ref: refNumber, device: deviceDesc }),
           debit: 0,
           credit: deposit,
           netChange: -deposit,
@@ -335,18 +395,26 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
         const handoverPaid = Math.max(0, t.handoverAmountPaid ?? (totalPaid - deposit));
 
         const partsDesc = t.partsUsed && t.partsUsed.length > 0
-          ? ` [Parts: ${t.partsUsed.map(p => `${p.quantity}× ${p.name}`).join(', ')}]`
+          ? ` [${t('statementModal.partsInstalled', 'Parts Installed')}: ${t.partsUsed.map(p => `${p.quantity}× ${p.name}`).join(', ')}]`
           : '';
 
-        let repairDesc = `Repair Service #${refNumber} (${deviceDesc}${issueSummary})${partsDesc}`;
+        let repairDesc = t('statementModal.repairServiceDesc', 'Repair Service #{{ref}} ({{device}}{{issue}}){{parts}}', {
+          ref: refNumber,
+          device: deviceDesc,
+          issue: issueSummary,
+          parts: partsDesc
+        });
         if (finalCost === 0) {
-          repairDesc += ' — Free / Warranty Service';
+          repairDesc += ` — ${t('statementModal.repairFree', 'Free / Warranty Service')}`;
         } else if (totalPaid >= finalCost) {
-          repairDesc += ' — Paid in Full';
+          repairDesc += ` — ${t('statementModal.repairPaidFull', 'Paid in Full')}`;
         } else if (totalPaid > 0) {
-          repairDesc += ` — Paid ${formatCurrency(totalPaid)}, ${formatCurrency(finalCost - totalPaid)} on Credit Tab`;
+          repairDesc += ` — ${t('statementModal.repairPartial', 'Paid {{paid}}, {{remaining}} on Credit Tab', {
+            paid: formatCurrency(totalPaid),
+            remaining: formatCurrency(finalCost - totalPaid)
+          })}`;
         } else {
-          repairDesc += ' — 100% Charged to Account Credit';
+          repairDesc += ` — ${t('statementModal.repair100Charged', '100% Charged to Account Credit')}`;
         }
 
         events.push({
@@ -366,7 +434,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
 
     // Sort strictly chronologically ascending
     return events.sort((a, b) => a.rawTimestamp - b.rawTimestamp);
-  }, [customer, transactions, invoices, debts, tickets]);
+  }, [customer, transactions, invoices, debts, tickets, t, i18n.language]);
 
   // Compute Opening Balance, Period Journal, and Closing Balance atomically
   const statementData = useMemo(() => {
@@ -717,7 +785,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                       <div className={styles.detailCardTitle}>
                                         <Wrench size={16} className={styles.detailIconRepair} />
                                         <span>{t('statementModal.repairSheet', 'Repair Sheet #')}{item.rawTicket.ticketNumber || item.refNumber}</span>
-                                        <span className={styles.statusPill}>{item.rawTicket.status}</span>
+                                        <span className={styles.statusPill}>{getTicketStatusLabel(item.rawTicket.status)}</span>
                                       </div>
                                       <Button
                                         size="sm"
@@ -868,7 +936,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                       <div className={styles.detailCardTitle}>
                                         <FileText size={16} className={styles.detailIconTab} />
                                         <span>{t('statementModal.debtLedger', 'Debt Ledger #')}{item.refNumber}</span>
-                                        <span className={styles.statusPill}>{item.rawDebt.status || 'Active'}</span>
+                                        <span className={styles.statusPill}>{getDebtStatusLabel(item.rawDebt.status)}</span>
                                       </div>
                                       <Button
                                         size="sm"
@@ -879,7 +947,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                         }}
                                         leftIcon={<Printer size={13} />}
                                       >
-                                        Imprimer Bon
+                                        {t('statementModal.printVoucher', 'Print Voucher')}
                                       </Button>
                                     </div>
 
@@ -908,7 +976,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                         <div style={{ marginTop: 4 }}>
                                           {item.rawDebt.payments.map((p, pIdx) => (
                                             <div key={pIdx} style={{ fontSize: 11.5, display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                                              <span>• {formatDateStr(p.date)} via <strong>{p.method.toUpperCase()}</strong> {p.note ? `(${p.note})` : ''}</span>
+                                              <span>• {formatDateStr(p.date)} {t('statementModal.via', 'via')} <strong>{getPaymentMethodLabel(p.method)}</strong> {p.note ? `(${p.note})` : ''}</span>
                                               <strong style={{ color: '#16a34a' }}>-{formatPrivateCurrency(p.amount)}</strong>
                                             </div>
                                           ))}
@@ -956,7 +1024,7 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                       </div>
                                       <div>
                                         <span className={styles.detailLabel}>{t('statementModal.paymentMethod', 'Payment Method')}</span>
-                                        <p className={styles.detailValue}><strong>{item.rawPayment.method?.toUpperCase() || 'CASH'}</strong></p>
+                                        <p className={styles.detailValue}><strong>{getPaymentMethodLabel(item.rawPayment.method || 'cash')}</strong></p>
                                       </div>
                                       <div>
                                         <span className={styles.detailLabel}>{t('statementModal.date', 'Date')}</span>

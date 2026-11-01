@@ -83,16 +83,16 @@ export const CustomersPage = () => {
   const handleAutoResolveAll = async () => {
     if (detectedDuplicates.length === 0) return;
     setIsAutoResolving(true);
-    toast.info('Auto-Resolving Duplicates', `Consolidating ${detectedDuplicates.length} duplicate pairs... Preserving all debts, repair tickets, and orders.`);
+    toast.info(t('customers.autoResolvingTitle', 'Auto-Resolving Duplicates'), t('customers.autoResolvingDesc', 'Consolidating {{count}} duplicate pairs... Preserving all debts, repair tickets, and orders.', { count: detectedDuplicates.length }));
     try {
       const { mergedCount, deletedCount } = await autoResolveAllDuplicates({ deleteSecondary: true });
       toast.success(
-        'Duplicates Cleanly Resolved',
-        `Successfully consolidated ${mergedCount} duplicate pairs. Cleaned up ${deletedCount} duplicate accounts from database while preserving all records (debts, repairs, sales).`
+        t('customers.duplicatesResolvedTitle', 'Duplicates Cleanly Resolved'),
+        t('customers.duplicatesResolvedDesc', 'Successfully consolidated {{merged}} duplicate pairs. Cleaned up {{deleted}} duplicate accounts while preserving all records.', { merged: mergedCount, deleted: deletedCount })
       );
     } catch (err) {
       console.error('Failed to auto-resolve duplicates:', err);
-      toast.error('Auto-Resolve Failed', 'An error occurred while merging duplicate accounts.');
+      toast.error(t('customers.autoResolveFailedTitle', 'Auto-Resolve Failed'), t('customers.autoResolveFailedDesc', 'An error occurred while merging duplicate accounts.'));
     } finally {
       setIsAutoResolving(false);
     }
@@ -135,10 +135,10 @@ export const CustomersPage = () => {
     setIsDeletingLoading(true);
     try {
       await deleteCustomer(customerToDelete.id, { deleteDebts: true });
-      toast.success('Customer Deleted', `${customerToDelete.name} has been removed.`);
+      toast.success(t('customers.customerDeletedTitle', 'Customer Deleted'), t('customers.customerDeletedDesc', '{{name}} has been removed.', { name: customerToDelete.name }));
       setCustomerToDelete(null);
     } catch (err) {
-      toast.error('Failed to delete customer', 'An error occurred while deleting customer.');
+      toast.error(t('customers.deleteCustomerError', 'Failed to delete customer'), t('customers.deleteCustomerErrorDesc', 'An error occurred while deleting customer.'));
     } finally {
       setIsDeletingLoading(false);
     }
@@ -631,7 +631,7 @@ export const CustomersPage = () => {
   const handleExportCSV = useCallback(() => {
     // Problem 6 fix: Export the filtered/sorted array, not all customers
     if (sorted.length === 0) {
-      toast.error('No Data', 'There are no customers matching the current filter to export.');
+      toast.error(t('customers.noDataToExportTitle', 'No Data'), t('customers.noDataToExportDesc', 'There are no customers matching the current filter to export.'));
       return;
     }
 
@@ -666,21 +666,21 @@ export const CustomersPage = () => {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    toast.success('CSV Exported', `${sorted.length} customers exported successfully.`);
-  }, [sorted, debts, activeFilter, toast]);
+    toast.success(t('customers.csvExportedTitle', 'CSV Exported'), t('customers.csvExportedDesc', '{{count}} customers exported successfully.', { count: sorted.length }));
+  }, [sorted, debts, activeFilter, toast, t]);
 
   // ── Loyalty badge helper ────────────────────────────────────────────
   const getLoyaltyBadge = (c: Customer) => {
     if (c.accountType === 'shop_repairer' || c.accountType === 'b2b' || c.shopName) {
-      return <span className={`${styles.loyaltyBadge} ${styles.loyaltyB2B}`}>🏪 B2B Shop</span>;
+      return <span className={`${styles.loyaltyBadge} ${styles.loyaltyB2B}`}>{t('customers.tierB2B', '🏪 B2B Shop')}</span>;
     }
     if (c.totalSpent >= 1000) {
-      return <span className={`${styles.loyaltyBadge} ${styles.loyaltyVIP}`}>⭐ VIP Tier</span>;
+      return <span className={`${styles.loyaltyBadge} ${styles.loyaltyVIP}`}>{t('customers.tierVIP', '⭐ VIP Tier')}</span>;
     }
     if (c.totalPurchases >= 2) {
-      return <span className={`${styles.loyaltyBadge} ${styles.loyaltyRepeat}`}>🔄 Repeat</span>;
+      return <span className={`${styles.loyaltyBadge} ${styles.loyaltyRepeat}`}>{t('customers.tierRepeat', '🔄 Repeat')}</span>;
     }
-    return <span className={`${styles.loyaltyBadge} ${styles.loyaltyNew}`}>🌱 New</span>;
+    return <span className={`${styles.loyaltyBadge} ${styles.loyaltyNew}`}>{t('customers.tierNew', '🌱 New')}</span>;
   };
 
   return (
@@ -712,11 +712,11 @@ export const CustomersPage = () => {
               : effectiveScope === 'shop'
               ? t('customers.shopAccounts', 'B2B Shops & Parts Accounts')
               : t('customers.customerDirectory', 'Customer Directory')}
-            <span className={styles.titleBadge}>{scopedCustomers.length} total</span>
+            <span className={styles.titleBadge}>{scopedCustomers.length} {t('common.total', 'total')}</span>
           </h1>
           <p className={styles.subtitle}>
-            {formatPrivateCurrency(metrics.totalLtv)} total lifetime value · {metrics.repeat} repeat buyers
-            {permissions.customers_debt && metrics.totalDebt > 0 && ` · ${formatPrivateCurrency(metrics.totalDebt)} active credit balance`}
+            {formatPrivateCurrency(metrics.totalLtv)} {t('customers.totalLifetimeValue', 'total lifetime value')} · {metrics.repeat} {t('customers.repeatBuyers', 'repeat buyers')}
+            {permissions.customers_debt && metrics.totalDebt > 0 && ` · ${formatPrivateCurrency(metrics.totalDebt)} ${t('customers.activeCreditBalance', 'active credit balance')}`}
           </p>
         </div>
         <div className={styles.headerActions}>
@@ -737,12 +737,12 @@ export const CustomersPage = () => {
               leftIcon={<RefreshCw size={15} />}
               style={{ background: '#fef3c7', color: '#b45309', borderColor: '#fde68a', fontWeight: 600 }}
               onClick={() => {
-                toast.info('Syncing Offline Queue', 'Sending offline customer profiles to cloud...');
+                toast.info(t('customers.syncingQueueTitle', 'Syncing Offline Queue'), t('customers.syncingQueueDesc', 'Sending offline customer profiles to cloud...'));
                 offlineCustomerSyncService.syncPendingCustomers();
               }}
-              title="Offline customers are waiting in queue. Click to trigger cloud sync immediately."
+              title={t('customers.offlineSyncTooltip', 'Offline customers are waiting in queue. Click to trigger cloud sync immediately.')}
             >
-              Sync Queue ({pendingSyncCount})
+              {t('customers.syncQueue', 'Sync Queue ({{count}})', { count: pendingSyncCount })}
             </Button>
           )}
           <Button variant="secondary" leftIcon={<Download size={16} />} onClick={handleExportCSV}>
@@ -805,10 +805,10 @@ export const CustomersPage = () => {
             </div>
             <div>
               <h4 style={{ margin: '0 0 2px 0', fontSize: '13.5px', fontWeight: 700, color: '#854d0e' }}>
-                {detectedDuplicates.length} Duplicate Account{detectedDuplicates.length !== 1 ? 's' : ''} Detected
+                {t('customers.duplicatesDetectedTitle', '{{count}} Duplicate Account(s) Detected', { count: detectedDuplicates.length })}
               </h4>
               <p style={{ margin: 0, fontSize: '12px', color: '#a16207' }}>
-                Matching customer accounts detected (including walk-ins & phoneless records). Click Auto Resolve to safely consolidate all debts, repairs, and orders into primary accounts and delete duplicate customer records.
+                {t('customers.duplicatesDetectedDesc', 'Matching customer accounts detected (including walk-ins & phoneless records). Click Auto Resolve to safely consolidate all debts, repairs, and orders into primary accounts and delete duplicate customer records.')}
               </p>
             </div>
           </div>
@@ -824,7 +824,7 @@ export const CustomersPage = () => {
               disabled={isAutoResolving}
               style={{ background: '#ffffff', borderColor: '#ca8a04', color: '#854d0e' }}
             >
-              Review Individually
+              {t('customers.reviewIndividually', 'Review Individually')}
             </Button>
             <Button
               size="sm"
@@ -839,7 +839,7 @@ export const CustomersPage = () => {
                 fontWeight: 700,
               }}
             >
-              ⚡ Auto Resolve All ({detectedDuplicates.length})
+              {t('customers.autoResolveAll', '⚡ Auto Resolve All ({{count}})', { count: detectedDuplicates.length })}
             </Button>
           </div>
         </div>
@@ -883,7 +883,7 @@ export const CustomersPage = () => {
           </span>
           {walkInTickets.length > 0 && (
             <span className={styles.walkinTag}>
-              No Phone Registered
+              {t('customers.noPhoneRegistered', 'No Phone Registered')}
             </span>
           )}
         </button>
@@ -979,21 +979,21 @@ export const CustomersPage = () => {
         <div
           className={[styles.summaryCard, activeFilter === 'all' && styles.summaryCardActive].filter(Boolean).join(' ')}
           onClick={() => { setActiveFilter('all'); setCurrentPage(1); }}
-          title="Click to view all customers"
+          title={t('customers.viewAllCustomers', 'Click to view all customers')}
         >
           <div className={styles.summaryCardTop}>
             <span className={styles.summaryLabel}>
-              {effectiveScope === 'retail' ? 'Retail Customers' : effectiveScope === 'shop' ? 'B2B Shops' : 'Total Accounts'}
+              {effectiveScope === 'retail' ? t('customers.retailCustomers', 'Retail Customers') : effectiveScope === 'shop' ? t('customers.b2bShops', 'B2B Shops') : t('customers.totalAccounts', 'Total Accounts')}
             </span>
             <div className={[styles.summaryIconWrap, styles.iconTotal].join(' ')}><Users size={16} /></div>
           </div>
           <p className={styles.summaryValue}>{metrics.total}</p>
           <p className={styles.summarySub}>
             {effectiveScope === 'retail'
-              ? `${metrics.repeat} repeat · ${metrics.totalRepairsCount} repairs · ${metrics.totalPhonesTracked} devices`
+              ? `${metrics.repeat} ${t('customers.repeat', 'repeat')} · ${metrics.totalRepairsCount} ${t('customers.repairs', 'repairs')} · ${metrics.totalPhonesTracked} ${t('customers.devices', 'devices')}`
               : effectiveScope === 'shop'
-              ? `${metrics.repeat} active workshops · ${metrics.totalRepairsCount} repairs`
-              : `${metrics.b2b} B2B · ${metrics.totalRepairsCount} repairs · ${metrics.totalPhonesTracked} devices`}
+              ? `${metrics.repeat} ${t('customers.activeWorkshops', 'active workshops')} · ${metrics.totalRepairsCount} ${t('customers.repairs', 'repairs')}`
+              : t('customers.b2bStats', 'B2B · {{repairs}} repairs · {{devices}} devices', { repairs: metrics.totalRepairsCount, devices: metrics.totalPhonesTracked })}
           </p>
         </div>
 
@@ -1005,12 +1005,12 @@ export const CustomersPage = () => {
               activeFilter === 'overdue' && styles.summaryCardActive
             ].filter(Boolean).join(' ')}
             onClick={() => { setActiveFilter(activeFilter === 'overdue' ? 'all' : 'overdue'); setCurrentPage(1); }}
-            title="Click to filter customers with OVERDUE debts"
+            title={t('customers.filterOverdueTooltip', 'Click to filter customers with OVERDUE debts')}
             style={metrics.overdueCount > 0 ? { borderColor: '#fca5a5', background: '#fff5f5' } : undefined}
           >
             <div className={styles.summaryCardTop}>
               <span className={styles.summaryLabel} style={{ color: metrics.overdueCount > 0 ? '#b91c1c' : undefined, fontWeight: 700 }}>
-                🔴 Overdue Debts
+                🔴 {t('customers.overdueDebts', 'Overdue Debts')}
               </span>
               <div className={[styles.summaryIconWrap, styles.iconOverdue].join(' ')}><AlertTriangle size={16} /></div>
             </div>
@@ -1018,7 +1018,7 @@ export const CustomersPage = () => {
               {formatPrivateCurrency(metrics.overdueTotalAmount)}
             </p>
             <p className={styles.summarySub} style={{ color: metrics.overdueCount > 0 ? '#b91c1c' : '#64748b', fontWeight: 600 }}>
-              {metrics.overdueCount} customer{metrics.overdueCount !== 1 ? 's' : ''} ({metrics.totalOverdueDebtsCount} record{metrics.totalOverdueDebtsCount !== 1 ? 's' : ''})
+              {t('customers.overdueRecordsCount', '{{customers}} customer(s) ({{records}} record(s))', { customers: metrics.overdueCount, records: metrics.totalOverdueDebtsCount })}
             </p>
           </div>
         )}
@@ -1027,12 +1027,12 @@ export const CustomersPage = () => {
           <div
             className={[styles.summaryCard, activeFilter === 'debt' && styles.summaryCardActive].filter(Boolean).join(' ')}
             onClick={() => { setActiveFilter(activeFilter === 'debt' ? 'all' : 'debt'); setCurrentPage(1); }}
-            title="Click to filter customers with unpaid debt tabs"
+            title={t('customers.filterDebtTooltip', 'Click to filter customers with unpaid debt tabs')}
             style={metrics.totalDebt > 0 ? { borderColor: '#fed7aa' } : undefined}
           >
             <div className={styles.summaryCardTop}>
               <span className={styles.summaryLabel} style={{ color: metrics.totalDebt > 0 ? '#d97706' : undefined }}>
-                Total Outstanding
+                {t('customers.totalOutstanding', 'Total Outstanding')}
               </span>
               <div className={[styles.summaryIconWrap, styles.iconDebt].join(' ')}><BookOpen size={16} /></div>
             </div>
@@ -1040,7 +1040,7 @@ export const CustomersPage = () => {
               {formatPrivateCurrency(metrics.totalDebt)}
             </p>
             <p className={styles.summarySub}>
-              {metrics.withDebt} customer{metrics.withDebt !== 1 ? 's' : ''} with active tab
+              {t('customers.customersWithActiveTab', '{{count}} customer(s) with active tab', { count: metrics.withDebt })}
             </p>
           </div>
         )}
@@ -1048,23 +1048,23 @@ export const CustomersPage = () => {
         <div
           className={[styles.summaryCard, activeFilter === 'repeat' && styles.summaryCardActive].filter(Boolean).join(' ')}
           onClick={() => { setActiveFilter(activeFilter === 'repeat' ? 'all' : 'repeat'); setCurrentPage(1); }}
-          title="Click to filter repeat customers"
+          title={t('customers.filterRepeatTooltip', 'Click to filter repeat customers')}
         >
           <div className={styles.summaryCardTop}>
-            <span className={styles.summaryLabel}>Repeat Buyers</span>
+            <span className={styles.summaryLabel}>{t('customers.repeatBuyers', 'Repeat Buyers')}</span>
             <div className={[styles.summaryIconWrap, styles.iconRepeat].join(' ')}><RefreshCw size={16} /></div>
           </div>
           <p className={styles.summaryValue} style={{ color: '#16a34a' }}>{metrics.repeat}</p>
-          <p className={styles.summarySub}>{metrics.total > 0 ? ((metrics.repeat / metrics.total) * 100).toFixed(0) : 0}% retention rate</p>
+          <p className={styles.summarySub}>{t('customers.retentionRate', '{{rate}}% retention rate', { rate: metrics.total > 0 ? ((metrics.repeat / metrics.total) * 100).toFixed(0) : 0 })}</p>
         </div>
 
         <div className={styles.summaryCard} style={{ cursor: 'default' }}>
           <div className={styles.summaryCardTop}>
-            <span className={styles.summaryLabel}>Lifetime Value</span>
+            <span className={styles.summaryLabel}>{t('customers.lifetimeValue', 'Lifetime Value')}</span>
             <div className={[styles.summaryIconWrap, styles.iconLtv].join(' ')}><DollarSign size={16} /></div>
           </div>
           <p className={styles.summaryValue}>{formatPrivateCurrency(metrics.totalLtv)}</p>
-          <p className={styles.summarySub}>Avg {formatPrivateCurrency(metrics.avgRevenue)} / client</p>
+          <p className={styles.summarySub}>{t('customers.avgRevenuePerClient', 'Avg {{amount}} / client', { amount: formatPrivateCurrency(metrics.avgRevenue) })}</p>
         </div>
       </div>
 
@@ -1073,19 +1073,19 @@ export const CustomersPage = () => {
         {([
           {
             value: 'all' as CustomerFilter,
-            label: effectiveScope === 'shop' ? '🏪 All Shops' : effectiveScope === 'retail' ? '👤 All Retail Clients' : '👥 All Accounts',
+            label: effectiveScope === 'shop' ? `🏪 ${t('customers.allShops', 'All Shops')}` : effectiveScope === 'retail' ? `👤 ${t('customers.allRetailClients', 'All Retail Clients')}` : `👥 ${t('customers.allAccounts', 'All Accounts')}`,
             count: metrics.total
           },
           ...(effectiveScope === 'all'
-            ? [{ value: 'b2b' as CustomerFilter, label: '🏪 Shops / B2B', count: metrics.b2b }]
+            ? [{ value: 'b2b' as CustomerFilter, label: `🏪 ${t('customers.shopsB2BFilter', 'Shops / B2B')}`, count: metrics.b2b }]
             : []),
           ...(permissions.customers_debt ? [
-            { value: 'overdue' as CustomerFilter, label: '🔴 Overdue Debts', count: metrics.overdueCount, highlight: metrics.overdueCount > 0 },
-            { value: 'debt' as CustomerFilter, label: '📒 All Debt Tabs', count: metrics.withDebt }
+            { value: 'overdue' as CustomerFilter, label: `🔴 ${t('customers.overdueDebts', 'Overdue Debts')}`, count: metrics.overdueCount, highlight: metrics.overdueCount > 0 },
+            { value: 'debt' as CustomerFilter, label: `📒 ${t('customers.filterDebtTabs', 'All Debt Tabs')}`, count: metrics.withDebt }
           ] : []),
-          { value: 'repeat' as CustomerFilter, label: '🔄 Repeat (2+ Visits)', count: metrics.repeat },
-          { value: 'new' as CustomerFilter, label: '🌱 New Clients', count: metrics.new },
-          { value: 'recent' as CustomerFilter, label: '🕒 Recent (30 Days)', count: metrics.recent },
+          { value: 'repeat' as CustomerFilter, label: `🔄 ${t('customers.repeatVisits', 'Repeat (2+ Visits)')}`, count: metrics.repeat },
+          { value: 'new' as CustomerFilter, label: `🌱 ${t('customers.newClients', 'New Clients')}`, count: metrics.new },
+          { value: 'recent' as CustomerFilter, label: `🕒 ${t('customers.recentDays', 'Recent (30 Days)')}`, count: metrics.recent },
         ]).map(pill => (
           <button
             key={pill.value}
@@ -1113,13 +1113,13 @@ export const CustomersPage = () => {
       <div className={styles.catalogCard}>
         <div className={styles.tableHeader}>
           <div className={styles.headerLeft}>
-            <h2 className={styles.tableTitle}>Customer Directory</h2>
-            <span className={styles.itemCountBadge}>{sorted.length} results</span>
+            <h2 className={styles.tableTitle}>{t('customers.customerDirectory', 'Customer Directory')}</h2>
+            <span className={styles.itemCountBadge}>{t('customers.results', '{{count}} results', { count: sorted.length })}</span>
           </div>
           <SearchInput
             value={searchQuery}
             onChange={(v) => { setSearchQuery(v); setCurrentPage(1); }}
-            placeholder="Search by name, phone, device (e.g. iPhone, Oppo), ticket #, IMEI…"
+            placeholder={t('customers.searchPlaceholder', 'Search by name, phone, device (e.g. iPhone, Oppo), ticket #, IMEI…')}
             className={styles.search}
           />
         </div>
@@ -1132,8 +1132,8 @@ export const CustomersPage = () => {
           ) : sorted.length === 0 ? (
             <div style={{ padding: '48px 20px' }}>
               <EmptyState
-                title="No customers found"
-                description="Try adjusting your search or filters, or click 'Add Customer' to register a new one."
+                title={t('customers.noCustomersFoundTitle', 'No customers found')}
+                description={t('customers.noCustomersFoundDesc', 'Try adjusting your search or filters, or click \'Add Customer\' to register a new one.')}
               />
             </div>
           ) : (
@@ -1212,17 +1212,17 @@ export const CustomersPage = () => {
                                     alignItems: 'center',
                                     gap: '3px',
                                   }}
-                                  title="Created offline. Queued to sync to Firestore automatically when online."
+                                  title={t('customers.offlineQueuedTitle', 'Created offline. Queued to sync to Firestore automatically when online.')}
                                 >
-                                  ☁️ Offline (Queued)
+                                  {t('customers.offlineQueuedBadge', '☁️ Offline (Queued)')}
                                 </span>
                               )}
                             </div>
                             {customer.shopName && (
-                              <span className={styles.customerContactSub}>Contact: {customer.name}</span>
+                              <span className={styles.customerContactSub}>{t('customers.contactPrefix', 'Contact: {{name}}', { name: customer.name })}</span>
                             )}
                             <span className={styles.customerJoinDate}>
-                              Since {formatDate(customer.joinDate)}
+                              {t('customers.sinceDate', 'Since {{date}}', { date: formatDate(customer.joinDate) })}
                             </span>
                             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
                               {distinctPhonesCount > 0 && (
@@ -1241,7 +1241,7 @@ export const CustomersPage = () => {
                                   }}
                                   title={`${distinctPhonesCount} distinct device(s) tracked`}
                                 >
-                                  <Smartphone size={11} /> {distinctPhonesCount} {distinctPhonesCount === 1 ? 'Device' : 'Devices'}
+                                  <Smartphone size={11} /> {t('customers.deviceCount', '{{count}} Device(s)', { count: distinctPhonesCount })}
                                 </span>
                               )}
                               {cRepairsCount > 0 && (
@@ -1260,20 +1260,23 @@ export const CustomersPage = () => {
                                   }}
                                   title={`${cRepairsCount} repair ticket(s) recorded`}
                                 >
-                                  🛠️ {cRepairsCount} {cRepairsCount === 1 ? 'Repair' : 'Repairs'}
+                                  🛠️ {t('customers.repairCount', '{{count}} Repair(s)', { count: cRepairsCount })}
                                 </span>
                               )}
                             </div>
                             {permissions.customers_debt && (overdueInfo.hasOverdue ? (
                               <div>
                                 <span className={styles.overdueBadgeTag}>
-                                  🔴 OVERDUE: {formatPrivateCurrency(overdueInfo.totalOverdueAmount)} ({overdueInfo.maxDaysOverdue}d late)
+                                  {t('customers.overdueBadgeText', '🔴 OVERDUE: {{amount}} ({{days}}d late)', {
+                                    amount: formatPrivateCurrency(overdueInfo.totalOverdueAmount),
+                                    days: overdueInfo.maxDaysOverdue
+                                  })}
                                 </span>
                               </div>
                             ) : debt > 0 ? (
                               <div>
                                 <span className={styles.debtBadgeTag}>
-                                  🚨 Debt: {formatPrivateCurrency(debt)}
+                                  {t('customers.debtBadgeText', '🚨 Debt: {{amount}}', { amount: formatPrivateCurrency(debt) })}
                                 </span>
                               </div>
                             ) : null)}
@@ -1291,7 +1294,7 @@ export const CustomersPage = () => {
                               <Phone size={12} /> {customer.phone}
                             </a>
                           ) : (
-                            <span style={{ fontSize: '12px', color: '#94a3b8', fontStyle: 'italic' }}>No phone</span>
+                            <span style={{ fontSize: '12px', color: '#94a3b8', fontStyle: 'italic' }}>{t('customers.noPhone', 'No phone')}</span>
                           )}
                           {customer.email && (
                             <a
@@ -1312,7 +1315,7 @@ export const CustomersPage = () => {
                         <span className={styles.ordersCount}>{customer.totalPurchases}</span>
                         {cRepairsCount > 0 && (
                           <span style={{ display: 'block', fontSize: '10.5px', color: '#6b7280', fontWeight: 600, marginTop: '2px' }}>
-                            + {cRepairsCount} {cRepairsCount === 1 ? 'repair' : 'repairs'}
+                            {t('customers.moreRepairs', '+ {{count}} repair(s)', { count: cRepairsCount })}
                           </span>
                         )}
                       </td>
@@ -1336,17 +1339,17 @@ export const CustomersPage = () => {
                                 {formatPrivateCurrency(debt)}
                               </span>
                               <span style={{ fontSize: '11px', color: '#b45309', fontWeight: 600 }}>
-                                Active Tab
+                                {t('customers.activeTabBadge', 'Active Tab')}
                               </span>
                             </div>
                           ) : (
                             <span className={styles.settledBadge}>
-                              ✓ Settled
+                              {t('customers.settledBadge', '✓ Settled')}
                             </span>
                           )}
                           {(customer.storeCredit || 0) > 0 && (
                             <span style={{ fontSize: '10.5px', color: '#047857', fontWeight: 700, background: '#d1fae5', border: '1px solid #a7f3d0', borderRadius: '4px', padding: '1px 5px', display: 'inline-block', marginTop: '3px' }}>
-                              🎟️ Avoir: {formatPrivateCurrency(customer.storeCredit || 0)}
+                              {t('customers.storeCreditBadge', '🎟️ Avoir: {{amount}}', { amount: formatPrivateCurrency(customer.storeCredit || 0) })}
                             </span>
                           )}
                         </td>
@@ -1371,7 +1374,7 @@ export const CustomersPage = () => {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className={`${styles.quickActionBtn} ${styles.reminderBtn}`}
-                                title={overdueInfo.hasOverdue ? `Send WhatsApp Overdue Reminder (${overdueInfo.maxDaysOverdue}d late)` : 'Send WhatsApp Debt Balance Reminder'}
+                                title={overdueInfo.hasOverdue ? t('customers.sendOverdueReminder', 'Send WhatsApp Overdue Reminder ({{days}}d late)', { days: overdueInfo.maxDaysOverdue }) : t('customers.sendDebtReminder', 'Send WhatsApp Debt Balance Reminder')}
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <Send size={13} />
@@ -1387,7 +1390,7 @@ export const CustomersPage = () => {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className={`${styles.quickActionBtn} ${styles.whatsappBtn}`}
-                                title="WhatsApp Chat"
+                                title={t('customers.whatsappChat', 'WhatsApp Chat')}
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <MessageCircle size={14} />
@@ -1397,7 +1400,7 @@ export const CustomersPage = () => {
                                 type="button"
                                 disabled
                                 className={`${styles.quickActionBtn} ${styles.disabledActionBtn}`}
-                                title="No phone number registered"
+                                title={t('customers.noPhoneTooltip', 'No phone number registered')}
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <MessageCircle size={14} />
@@ -1409,7 +1412,7 @@ export const CustomersPage = () => {
                             <a
                               href={`tel:${customer.phone.replace(/\s+/g, '')}`}
                               className={`${styles.quickActionBtn} ${styles.phoneBtn}`}
-                              title={`Call ${customer.phone}`}
+                              title={t('customers.callCustomer', 'Call {{phone}}', { phone: customer.phone })}
                               onClick={(e) => e.stopPropagation()}
                             >
                               <Phone size={14} />
@@ -1419,7 +1422,7 @@ export const CustomersPage = () => {
                               type="button"
                               disabled
                               className={`${styles.quickActionBtn} ${styles.disabledActionBtn}`}
-                              title="No phone number registered"
+                              title={t('customers.noPhoneTooltip', 'No phone number registered')}
                               onClick={(e) => e.stopPropagation()}
                             >
                               <Phone size={14} />
@@ -1430,7 +1433,7 @@ export const CustomersPage = () => {
                             <button
                               type="button"
                               className={`${styles.quickActionBtn} ${styles.repairBtn}`}
-                              title="New Repair Ticket"
+                              title={t('customers.newRepairTicket', 'New Repair Ticket')}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 const cTickets = customerTicketsMap.get(customer.id) || [];
@@ -1456,12 +1459,12 @@ export const CustomersPage = () => {
                           <button
                             type="button"
                             className={`${styles.quickActionBtn} ${styles.posBtn}`}
-                            title="New POS Sale"
+                            title={t('customers.newPosSale', 'New POS Sale')}
                             onClick={(e) => {
                               e.stopPropagation();
                               setCustomerName(customer.name);
                               setCustomerPhone(customer.phone || '');
-                              toast.success('Customer Attached', `${customer.name} attached to next POS sale.`);
+                              toast.success(t('customers.customerAttachedToast', 'Customer Attached'), t('customers.customerAttachedDesc', '{{name}} attached to ticket / POS sale.', { name: customer.name }));
                               navigate('/pos');
                             }}
                           >
@@ -1596,13 +1599,13 @@ export const CustomersPage = () => {
               style={{ cursor: 'pointer' }}
             >
               <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>Total Walk-in Repairs</span>
+                <span className={styles.summaryLabel}>{t('customers.walkinTotalRepairs', 'Total Walk-in Repairs')}</span>
                 <div className={[styles.summaryIconWrap, styles.iconTotal].join(' ')}>
                   <Wrench size={16} />
                 </div>
               </div>
               <p className={styles.summaryValue}>{walkInMetrics.total}</p>
-              <p className={styles.summarySub}>Repairs without phone number</p>
+              <p className={styles.summarySub}>{t('customers.walkinNoPhoneSub', 'Repairs without phone number')}</p>
             </div>
 
             <div
@@ -1615,7 +1618,7 @@ export const CustomersPage = () => {
               style={{ cursor: 'pointer' }}
             >
               <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>Active in Workshop</span>
+                <span className={styles.summaryLabel}>{t('customers.activeInWorkshop', 'Active in Workshop')}</span>
                 <div className={[styles.summaryIconWrap, styles.iconRepeat].join(' ')}>
                   <Clock size={16} />
                 </div>
@@ -1636,18 +1639,18 @@ export const CustomersPage = () => {
               style={{ cursor: 'pointer' }}
             >
               <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>Completed & Picked Up</span>
+                <span className={styles.summaryLabel}>{t('customers.completedPickedUp', 'Completed & Picked Up')}</span>
                 <div className={[styles.summaryIconWrap, styles.iconNew].join(' ')}>
                   <CheckCircle2 size={16} />
                 </div>
               </div>
               <p className={styles.summaryValue}>{walkInMetrics.completed}</p>
-              <p className={styles.summarySub}>Picked up by walk-in clients</p>
+              <p className={styles.summarySub}>{t('customers.pickedUpByWalkIn', 'Picked up by walk-in clients')}</p>
             </div>
 
             <div className={styles.summaryCard} style={{ cursor: 'default' }}>
               <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>Total Billed</span>
+                <span className={styles.summaryLabel}>{t('customers.totalBilled', 'Total Billed')}</span>
                 <div className={[styles.summaryIconWrap, styles.iconLtv].join(' ')}>
                   <DollarSign size={16} />
                 </div>
@@ -1656,8 +1659,8 @@ export const CustomersPage = () => {
                 {formatPrivateCurrency(walkInMetrics.totalBilled)}
               </p>
               <p className={styles.summarySub}>
-                {formatPrivateCurrency(walkInMetrics.totalPaid)} collected
-                {walkInMetrics.unpaidBalance > 0 && ` · ${formatPrivateCurrency(walkInMetrics.unpaidBalance)} due`}
+                {formatPrivateCurrency(walkInMetrics.totalPaid)} {t('customers.collected', 'collected')}
+                {walkInMetrics.unpaidBalance > 0 && ` · ${formatPrivateCurrency(walkInMetrics.unpaidBalance)} ${t('customers.due', 'due')}`}
               </p>
             </div>
           </div>
@@ -1665,12 +1668,12 @@ export const CustomersPage = () => {
           {/* Walk-in Status Quick Filter Pills */}
           <div className={styles.filterPills}>
             {[
-              { label: 'All Walk-in Repairs', value: 'all', count: walkInTickets.length },
-              { label: 'Active in Workshop', value: 'active', count: walkInMetrics.active },
-              { label: 'Pending Intake', value: 'pending', count: walkInMetrics.pending },
-              { label: 'In Progress', value: 'in_progress', count: walkInMetrics.inProgress },
-              { label: 'Ready for Pickup', value: 'ready', count: walkInMetrics.ready },
-              { label: 'Completed', value: 'completed', count: walkInMetrics.completed },
+              { label: t('customers.allWalkInRepairs', 'All Walk-in Repairs'), value: 'all', count: walkInTickets.length },
+              { label: t('customers.activeInWorkshop', 'Active in Workshop'), value: 'active', count: walkInMetrics.active },
+              { label: t('customers.pendingIntake', 'Pending Intake'), value: 'pending', count: walkInMetrics.pending },
+              { label: t('customers.inProgress', 'In Progress'), value: 'in_progress', count: walkInMetrics.inProgress },
+              { label: t('customers.readyForPickup', 'Ready for Pickup'), value: 'ready', count: walkInMetrics.ready },
+              { label: t('customers.completed', 'Completed'), value: 'completed', count: walkInMetrics.completed },
             ].map((pill) => (
               <button
                 key={pill.value}
@@ -1694,16 +1697,16 @@ export const CustomersPage = () => {
           <div className={styles.catalogCard}>
             <div className={styles.tableHeader}>
               <div className={styles.headerLeft}>
-                <h2 className={styles.tableTitle}>Walk-in Repair Directory</h2>
+                <h2 className={styles.tableTitle}>{t('customers.walkinRepairDirectory', 'Walk-in Repair Directory')}</h2>
                 <span className={styles.itemCountBadge}>
-                  {sortedWalkInTickets.length} {sortedWalkInTickets.length === 1 ? 'repair' : 'repairs'}
+                  {t('customers.repairCount', '{{count}} Repair(s)', { count: sortedWalkInTickets.length })}
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <SearchInput
                   value={walkInSearch}
                   onChange={(v) => { setWalkInSearch(v); setWalkInPage(1); }}
-                  placeholder="Search by client, device, problem, technician, ticket #…"
+                  placeholder={t('customers.walkinSearchPlaceholder', 'Search by client, device, problem, technician, ticket #…')}
                   className={styles.search}
                 />
                 {walkInSearch && (
@@ -1712,7 +1715,7 @@ export const CustomersPage = () => {
                     size="sm"
                     onClick={() => { setWalkInSearch(''); setWalkInPage(1); }}
                   >
-                    Clear
+                    {t('customers.clear', 'Clear')}
                   </Button>
                 )}
               </div>
@@ -1722,7 +1725,7 @@ export const CustomersPage = () => {
               {sortedWalkInTickets.length === 0 ? (
                 <div style={{ padding: '48px 20px' }}>
                   <EmptyState
-                    title={walkInSearch ? 'No matching walk-in repairs' : 'No walk-in repairs found'}
+                    title={walkInSearch ? t('customers.noMatchingWalkIn', 'No matching walk-in repairs') : t('customers.noWalkInFound', 'No walk-in repairs found')}
                     description={
                       walkInSearch
                         ? `No walk-in repairs matched "${walkInSearch}". Try searching with a different term.`
@@ -1731,7 +1734,7 @@ export const CustomersPage = () => {
                     action={
                       walkInSearch ? (
                         <Button variant="secondary" size="sm" onClick={() => setWalkInSearch('')}>
-                          Clear Search
+                          {t('customers.clearSearch', 'Clear Search')}
                         </Button>
                       ) : undefined
                     }
@@ -1741,12 +1744,12 @@ export const CustomersPage = () => {
                 <table className={styles.table}>
                   <thead>
                     <tr>
-                      <th className={styles.th}>Ticket / Date</th>
-                      <th className={styles.th}>{t('customers.walkInCustomers', 'Walk-in Customer')}</th>
-                      <th className={styles.th}>Device & Problem</th>
-                      <th className={styles.th}>Status & Tech</th>
-                      <th className={styles.th}>Cost & Balance</th>
-                      <th className={styles.th} style={{ textAlign: 'right', minWidth: '180px' }}>Actions</th>
+                      <th className={styles.th}>{t('customers.thTicketDate', 'Ticket / Date')}</th>
+                      <th className={styles.th}>{t('customers.thWalkInCustomer', 'Walk-in Customer')}</th>
+                      <th className={styles.th}>{t('customers.thDeviceProblem', 'Device & Problem')}</th>
+                      <th className={styles.th}>{t('customers.thStatusTech', 'Status & Tech')}</th>
+                      <th className={styles.th}>{t('customers.thCostBalance', 'Cost & Balance')}</th>
+                      <th className={styles.th} style={{ textAlign: 'right', minWidth: '180px' }}>{t('common.actions', 'Actions')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1790,11 +1793,11 @@ export const CustomersPage = () => {
                               </div>
                               <div className={styles.customerInfoGroup}>
                                 <div className={styles.customerNameRow}>
-                                  <p className={styles.customerName}>{ticket.customerName || 'Anonymous Walk-in'}</p>
+                                  <p className={styles.customerName}>{ticket.customerName || t('customers.anonymousWalkIn', 'Anonymous Walk-in')}</p>
                                   <span className={styles.walkinTag}>Walk-in</span>
                                 </div>
                                 <span style={{ fontSize: '11px', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '3px', marginTop: '2px' }}>
-                                  <AlertTriangle size={11} /> No phone registered
+                                  <AlertTriangle size={11} /> {t('customers.noPhoneAlert', 'No phone registered')}
                                 </span>
                               </div>
                             </div>
@@ -1804,7 +1807,7 @@ export const CustomersPage = () => {
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxWidth: '260px' }}>
                               <div style={{ fontWeight: 700, fontSize: '13px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '5px' }}>
                                 <span>{brandIcon}</span>
-                                <span>{ticket.deviceModel || 'Unknown Device'}</span>
+                                <span>{ticket.deviceModel || t('customers.unknownDevice', 'Unknown Device')}</span>
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                 <span style={{
@@ -1844,7 +1847,7 @@ export const CustomersPage = () => {
                               <RepairStatusBadge status={ticket.status} />
                               <span style={{ fontSize: '11.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
                                 <User size={12} />
-                                {ticket.assignedTechnician || 'Unassigned'}
+                                {ticket.assignedTechnician || t('customers.unassigned', 'Unassigned')}
                               </span>
                             </div>
                           </td>
@@ -1856,11 +1859,11 @@ export const CustomersPage = () => {
                               </span>
                               {balance > 0 ? (
                                 <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: 700 }}>
-                                  Due: {formatPrivateCurrency(balance)}
+                                  {t('customers.dueBalance', 'Due: {{amount}}', { amount: formatPrivateCurrency(balance) })}
                                 </span>
                               ) : (
                                 <span className={styles.settledBadge}>
-                                  <CheckCircle2 size={11} /> Settled
+                                  <CheckCircle2 size={11} /> {t('customers.settledBadge', '✓ Settled')}
                                 </span>
                               )}
                             </div>
@@ -1871,7 +1874,7 @@ export const CustomersPage = () => {
                               <button
                                 type="button"
                                 className={styles.quickActionBtn}
-                                title="Print Ticket Label / Receipt"
+                                title={t('customers.printTicketTooltip', 'Print Ticket Label / Receipt')}
                                 onClick={() => setPrintingWalkInTicket(ticket)}
                               >
                                 <Printer size={14} />
@@ -1879,7 +1882,7 @@ export const CustomersPage = () => {
                               <button
                                 type="button"
                                 className={styles.quickActionBtn}
-                                title="Edit Repair / Add Phone Number (Converts to Account)"
+                                title={t('customers.editWalkInTooltip', 'Edit Repair / Add Phone Number (Converts to Account)')}
                                 onClick={() => {
                                   setTicketToEdit(ticket);
                                   setIsNewTicketOpen(true);
@@ -1893,7 +1896,7 @@ export const CustomersPage = () => {
                                 onClick={() => setSelectedWalkInTicket(ticket)}
                                 title="Open Sidebar Details Widget"
                               >
-                                <Eye size={14} /> Details
+                                <Eye size={14} /> {t('customers.details', 'Details')}
                               </Button>
                             </div>
                           </td>
@@ -2005,20 +2008,20 @@ export const CustomersPage = () => {
         isOpen={!!customerToDelete}
         onClose={() => setCustomerToDelete(null)}
         onConfirm={confirmDeleteCustomer}
-        title="Delete Customer Account"
+        title={t('customers.deleteCustomerConfirmTitle', 'Delete Customer Account')}
         message={
           <div>
             <p style={{ margin: '0 0 8px 0' }}>
-              Are you sure you want to permanently delete <strong>{customerToDelete?.name}</strong>?
+              {t('customers.deleteCustomerConfirmMsg', 'Are you sure you want to permanently delete {{name}}?', { name: customerToDelete?.name })}
             </p>
             {(customerToDelete?.totalDebt || 0) > 0 && (
               <p style={{ margin: 0, color: '#dc2626', fontWeight: 700, fontSize: '13px' }}>
-                ⚠️ Warning: This customer currently has an unpaid debt of {formatPrivateCurrency(customerToDelete?.totalDebt || 0)}. Deleting the account will also remove all associated debt records.
+                {t('customers.deleteCustomerDebtWarning', '⚠️ Warning: This customer currently has an unpaid debt of {{amount}}. Deleting the account will also remove all associated debt records.', { amount: formatPrivateCurrency(customerToDelete?.totalDebt || 0) })}
               </p>
             )}
           </div>
         }
-        confirmLabel="Delete Customer"
+        confirmLabel={t('customers.deleteCustomerConfirmBtn', 'Delete Customer')}
         variant="danger"
         isLoading={isDeletingLoading}
       />

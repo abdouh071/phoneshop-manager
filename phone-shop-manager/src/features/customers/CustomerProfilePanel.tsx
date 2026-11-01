@@ -148,7 +148,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
     if (user?.role === 'admin') {
       if (window.confirm(`Delete debt record for "${debt.productOrService}"?`)) {
         deleteDebt(debt.id);
-        toast.info('Debt Deleted', 'Record removed.');
+        toast.info(t('customers.debtDeletedTitle', 'Debt Deleted'), t('customers.debtDeletedDesc', 'Record removed.'));
       }
     } else {
       setDebtRequiringUnlock(debt);
@@ -160,11 +160,11 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
     setIsActionLoading(true);
     try {
       await deleteCustomer(customer.id, { deleteDebts: true });
-      toast.success('Customer Deleted', `${customer.name} has been removed.`);
+      toast.success(t('customers.customerDeletedTitle', 'Customer Deleted'), t('customers.customerDeletedDesc', '{{name}} has been removed.', { name: customer.name }));
       setIsDeleteCustomerOpen(false);
       onClose();
     } catch (err) {
-      toast.error('Failed to delete customer', 'An error occurred while deleting customer.');
+      toast.error(t('customers.deleteCustomerError', 'Failed to delete customer'), t('customers.deleteCustomerErrorDesc', 'An error occurred while deleting customer.'));
     } finally {
       setIsActionLoading(false);
     }
@@ -204,13 +204,13 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         ? ` ${deletedTicketCount} repair ticket(s) also deleted.`
         : ' Repair history preserved.';
       toast.success(
-        'Device Removed',
-        `${deviceToDelete.device} removed from ${customer.name}'s profile.${ticketMsg}`
+        t('customers.deviceRemovedTitle', 'Device Removed'),
+        t('customers.deviceRemovedDesc', '{{device}} removed from {{name}}\'s profile.{{ticketMsg}}', { device: deviceToDelete.device, name: customer.name, ticketMsg })
       );
       setDeviceToDelete(null);
       setDeleteDeviceRepairsToo(false);
     } catch (err) {
-      toast.error('Failed to remove device', 'An error occurred.');
+      toast.error(t('customers.removeDeviceError', 'Failed to remove device'), t('customers.anErrorOccurred', 'An error occurred.'));
     } finally {
       setIsActionLoading(false);
     }
@@ -220,7 +220,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
     if (!customer || !deviceToEdit) return;
     const { oldBrand, oldModel, brand, model, imei, notes } = deviceToEdit;
     if (!brand.trim() || !model.trim()) {
-      toast.error('Validation error', 'Both Brand and Model are required.');
+      toast.error(t('customers.validationError', 'Validation error'), t('customers.brandModelRequired', 'Both Brand and Model are required.'));
       return;
     }
     setIsActionLoading(true);
@@ -270,12 +270,16 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
       await updateCustomer(customer.id, { registeredDevices: updatedDevs });
 
       toast.success(
-        'Phone Device Updated',
-        `Updated to ${brand.trim()} ${model.trim()}${count > 0 ? ` (${count} repair records updated)` : ''}.`
+        t('customers.deviceUpdatedTitle', 'Phone Device Updated'),
+        t('customers.deviceUpdatedDesc', 'Updated to {{brand}} {{model}}{{countMsg}}.', {
+          brand: brand.trim(),
+          model: model.trim(),
+          countMsg: count > 0 ? ` (${count} repair records updated)` : ''
+        })
       );
       setDeviceToEdit(null);
     } catch (err) {
-      toast.error('Failed to update device', 'An error occurred.');
+      toast.error(t('customers.updateDeviceError', 'Failed to update device'), t('customers.anErrorOccurred', 'An error occurred.'));
     } finally {
       setIsActionLoading(false);
     }
@@ -284,7 +288,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
   const confirmAddPhone = async () => {
     if (!customer) return;
     if (!newPhoneBrand.trim() || !newPhoneModel.trim()) {
-      toast.error('Validation error', 'Please provide both phone brand and model.');
+      toast.error(t('customers.validationError', 'Validation error'), t('customers.provideBrandModel', 'Please provide both phone brand and model.'));
       return;
     }
     setIsActionLoading(true);
@@ -308,7 +312,14 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         registeredDevices: [...existingDevices, newDev],
       });
 
-      toast.success('Phone Added', `${brand} ${model} registered for ${customer.name}.`);
+      toast.success(
+        t('customers.phoneAddedTitle', 'Phone Added'),
+        t('customers.phoneAddedDesc', '{{brand}} {{model}} registered for {{name}}.', {
+          brand,
+          model,
+          name: customer.name
+        })
+      );
       setIsAddPhoneOpen(false);
       setNewPhoneBrand('');
       setNewPhoneModel('');
@@ -321,7 +332,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         setIsNewTicketOpen(true);
       }
     } catch (err) {
-      toast.error('Failed to add phone', 'An error occurred.');
+      toast.error(t('customers.addPhoneError', 'Failed to add phone'), t('customers.anErrorOccurred', 'An error occurred.'));
     } finally {
       setIsActionLoading(false);
     }
@@ -332,10 +343,13 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
     setIsActionLoading(true);
     try {
       await deleteTicket(ticketToDelete.id);
-      toast.success('Repair Ticket Deleted', `Ticket #${ticketToDelete.ticketNumber} was deleted.`);
+      toast.success(
+        t('customers.ticketDeletedTitle', 'Repair Ticket Deleted'),
+        t('customers.ticketDeletedDesc', 'Ticket #{{number}} was deleted.', { number: ticketToDelete.ticketNumber })
+      );
       setTicketToDelete(null);
     } catch (err) {
-      toast.error('Failed to delete ticket', 'An error occurred.');
+      toast.error(t('customers.deleteTicketError', 'Failed to delete ticket'), t('customers.anErrorOccurred', 'An error occurred.'));
     } finally {
       setIsActionLoading(false);
     }
@@ -568,9 +582,9 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
     setCustomerName(customer.name);
     if (customer.wholesaleDiscountPercent && customer.wholesaleDiscountPercent > 0) {
       useCartStore.getState().setDiscount(customer.wholesaleDiscountPercent);
-      toast.success('B2B Discount Applied', `${customer.name} attached with ${customer.wholesaleDiscountPercent}% wholesale discount.`);
+      toast.success(t('customers.b2bDiscountApplied', 'B2B Discount Applied'), t('customers.b2bDiscountDesc', '{{name}} attached with {{percent}}% wholesale discount.', { name: customer.name, percent: customer.wholesaleDiscountPercent }));
     } else {
-      toast.success('Customer Attached', `${customer.name} attached to the active cart.`);
+      toast.success(t('customers.customerAttachedToast', 'Customer Attached'), t('customers.customerAttachedCart', '{{name}} attached to the active cart.', { name: customer.name }));
     }
     onClose();
     navigate('/pos');
@@ -580,9 +594,9 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
     usePartsCartStore.getState().setSelectedCustomer(customer);
     if (customer.wholesaleDiscountPercent && customer.wholesaleDiscountPercent > 0) {
       usePartsCartStore.getState().setDiscount(customer.wholesaleDiscountPercent);
-      toast.success('B2B Discount Applied', `${customer.shopName || customer.name} attached with ${customer.wholesaleDiscountPercent}% wholesale discount.`);
+      toast.success(t('customers.b2bDiscountApplied', 'B2B Discount Applied'), t('customers.b2bDiscountDesc', '{{name}} attached with {{percent}}% wholesale discount.', { name: customer.shopName || customer.name, percent: customer.wholesaleDiscountPercent }));
     } else {
-      toast.success('B2B Account Attached', `${customer.shopName || customer.name} attached for parts order.`);
+      toast.success(t('customers.b2bAccountAttached', 'B2B Account Attached'), t('customers.b2bAccountAttachedDesc', '{{name}} attached for parts order.', { name: customer.shopName || customer.name }));
     }
     onClose();
     navigate(`/parts?b2bCustomer=${customer.id}`);
@@ -1110,7 +1124,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           /* ── Inline Edit Mode ── */
                           <div className={styles.debtEditForm}>
                             <div className={styles.debtEditField}>
-                              <label className={styles.debtEditLabel}>Item / Phone Name</label>
+                              <label className={styles.debtEditLabel}>{t('customers.itemOrPhoneName', 'Item / Phone Name')}</label>
                               <input
                                 type="text"
                                 className={styles.debtEditInput}
@@ -1121,7 +1135,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                               />
                             </div>
                             <div className={styles.debtEditField}>
-                              <label className={styles.debtEditLabel}>Total Amount (DH)</label>
+                              <label className={styles.debtEditLabel}>{t('customers.totalAmountDH', 'Total Amount (DH)')}</label>
                               <input
                                 type="number"
                                 className={`${styles.debtEditInput} privacy-cost-input`}
@@ -1139,26 +1153,26 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                                 onClick={async () => {
                                   const newAmount = parseFloat(editDebtAmount);
                                   const newName = editDebtName.trim();
-                                  if (!newName) { toast.error('Validation', 'Item name cannot be empty.'); return; }
-                                  if (isNaN(newAmount) || newAmount < 0) { toast.error('Validation', 'Amount must be a valid positive number.'); return; }
-                                  if (newAmount < debt.amountPaid) { toast.error('Validation', `Amount cannot be less than already paid (${formatPrivateCurrency(debt.amountPaid)}).`); return; }
+                                  if (!newName) { toast.error(t('customers.validationError', 'Validation error'), t('customers.specifyProductError', 'Item name cannot be empty.')); return; }
+                                  if (isNaN(newAmount) || newAmount < 0) { toast.error(t('customers.validationError', 'Validation error'), 'Amount must be a valid positive number.'); return; }
+                                  if (newAmount < debt.amountPaid) { toast.error(t('customers.validationError', 'Validation error'), `Amount cannot be less than already paid (${formatPrivateCurrency(debt.amountPaid)}).`); return; }
                                   try {
                                     await updateDebtAmount(debt.id, newAmount, newName);
-                                    toast.success('Debt Updated', `Updated to "${newName}" — ${formatPrivateCurrency(newAmount)}`);
+                                    toast.success(t('customers.debtUpdated', 'Debt Updated'), `Updated to "${newName}" — ${formatPrivateCurrency(newAmount)}`);
                                     setEditingDebtId(null);
                                   } catch {
-                                    toast.error('Error', 'Failed to update debt record.');
+                                    toast.error(t('common.error', 'Error'), 'Failed to update debt record.');
                                   }
                                 }}
                               >
-                                Save
+                                {t('common.save', 'Save')}
                               </button>
                               <button
                                 type="button"
                                 className={styles.debtEditCancelBtn}
                                 onClick={() => setEditingDebtId(null)}
                               >
-                                Cancel
+                                {t('common.cancel', 'Cancel')}
                               </button>
                             </div>
                           </div>
@@ -1169,23 +1183,23 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           <div>
                             <p className={styles.debtTitle}>{debt.productOrService}</p>
                             <span style={{ fontSize: '11.5px', color: '#64748b' }}>
-                              Taken on {formatDate(debt.date)}
+                              {t('customers.takenOn', 'Taken on {{date}}', { date: formatDate(debt.date) })}
                               {debt.dueDate ? (
                                 <strong style={{ color: overdue ? '#dc2626' : undefined }}>
-                                  {` · Due by ${formatDate(debt.dueDate)}`}
+                                  {t('customers.dueBy', ' · Due by {{date}}', { date: formatDate(debt.dueDate) })}
                                 </strong>
                               ) : ''}
                             </span>
                           </div>
                           <div>
                             {debt.status === 'paid' ? (
-                              <span className={styles.debtBadgePaid}>✅ Settled</span>
+                              <span className={styles.debtBadgePaid}>{t('customers.settledBadge', '✅ Settled')}</span>
                             ) : overdue ? (
-                              <span className={styles.debtBadgeOverdue}>🔴 OVERDUE ({daysLate}d late)</span>
+                              <span className={styles.debtBadgeOverdue}>{t('customers.overdueBadge', '🔴 OVERDUE ({{days}}d late)', { days: daysLate })}</span>
                             ) : debt.status === 'partially_paid' ? (
-                              <span className={styles.debtBadgePartial}>🟡 Partial ({formatPrivateCurrency(debt.remainingBalance)} left)</span>
+                              <span className={styles.debtBadgePartial}>{t('customers.partialBadge', '🟡 Partial ({{amount}} left)', { amount: formatPrivateCurrency(debt.remainingBalance) })}</span>
                             ) : (
-                              <span className={styles.debtBadgeUnpaid}>🚨 Unpaid</span>
+                              <span className={styles.debtBadgeUnpaid}>{t('customers.unpaidBadge', '🚨 Unpaid')}</span>
                             )}
                           </div>
                         </div>
@@ -1200,9 +1214,9 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                             <div className={styles.debtProgressBar} style={{ width: `${pct}%`, background: overdue ? '#dc2626' : '#16a34a' }} />
                           </div>
                           <div className={styles.debtNumbersRow} style={{ marginTop: '4px' }}>
-                            <span>Paid: {formatPrivateCurrency(debt.amountPaid)} ({Math.round(pct)}%)</span>
+                            <span>{t('customers.paidAmountProgress', 'Paid: {{amount}} ({{pct}}%)', { amount: formatPrivateCurrency(debt.amountPaid), pct: Math.round(pct) })}</span>
                             <span style={{ fontWeight: 700, color: debt.remainingBalance > 0 ? '#dc2626' : '#16a34a' }}>
-                              Balance Owed: {formatPrivateCurrency(debt.remainingBalance)}
+                              {t('customers.balanceOwed', 'Balance Owed: {{amount}}', { amount: formatPrivateCurrency(debt.remainingBalance) })}
                             </span>
                           </div>
                         </div>
@@ -1210,7 +1224,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                         {/* Payment History Log */}
                         {debt.payments && debt.payments.length > 0 && (
                           <div className={styles.paymentHistoryList}>
-                            <p className={styles.paymentHistoryTitle}>Payment History ({debt.payments.length})</p>
+                            <p className={styles.paymentHistoryTitle}>{t('customers.paymentHistoryCount', 'Payment History ({{count}})', { count: debt.payments.length })}</p>
                             {debt.payments.map(pay => (
                               <div key={pay.id} className={styles.paymentHistoryRow} data-privacy-client-financial="true">
                                 <span>{formatDate(pay.date)} · {pay.method.toUpperCase()} {pay.note ? `(${pay.note})` : ''}</span>
@@ -1242,7 +1256,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                                 style={{ background: '#25D366', textDecoration: 'none' }}
                                 title={overdue ? `Send WhatsApp Overdue Reminder (${daysLate}d late)` : 'Send WhatsApp Reminder'}
                               >
-                                <Send size={12} /> WhatsApp Reminder
+                                <Send size={12} /> {t('customers.whatsappReminder', 'WhatsApp Reminder')}
                               </a>
                             )}
                             {debt.remainingBalance > 0 && (
@@ -1251,7 +1265,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                                 className={styles.payDebtBtn}
                                 onClick={() => handleRecordPaymentClick(debt)}
                               >
-                                <DollarSign size={13} /> Record Payment
+                                <DollarSign size={13} /> {t('customers.recordPayment', 'Record Payment')}
                               </button>
                             )}
                             <button
@@ -1308,7 +1322,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                   <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>
-                    {customerTickets.length} {customerTickets.length === 1 ? 'ticket' : 'tickets'} linked to this customer
+                    {t('customers.ticketsLinkedToCustomer', '{{count}} ticket(s) linked to this customer', { count: customerTickets.length })}
                   </span>
                   <button
                     type="button"
@@ -1331,13 +1345,13 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                       cursor: 'pointer',
                     }}
                   >
-                    <Plus size={12} /> New Ticket
+                    <Plus size={12} /> {t('customers.newTicket', 'New Ticket')}
                   </button>
                 </div>
 
                 {customerTickets.length === 0 ? (
                   <div className={styles.emptyState}>
-                    No repair tickets logged for this customer yet.
+                    {t('customers.noRepairsLogged', 'No repair tickets logged for this customer yet.')}
                   </div>
                 ) : (
                   customerTickets.map(tk => {
@@ -1357,19 +1371,19 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                         navigate(`/repairs?focusId=${tk.ticketNumber}`);
                       }}
                       style={{ cursor: 'pointer', transition: 'transform 0.15s ease, box-shadow 0.15s ease' }}
-                      title="Click to view full repair ticket details on Workshop Board"
+                      title={t('customers.viewFullTicketOnBoard', 'Click to view full repair ticket details on Workshop Board')}
                     >
                       <div className={styles.ticketCardHeader}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                           <span className={styles.ticketNumber}>#{tk.ticketNumber}</span>
                           {tk.isReturn && (
                             <span style={{ background: '#fef08a', color: '#854d0e', fontSize: '10px', padding: '2px 5px', borderRadius: '4px', fontWeight: 600 }}>
-                              🔁 RETURN
+                              🔁 {t('customers.returnBadge', 'RETURN')}
                             </span>
                           )}
                           {tk.status === 'returned' && !isActivelyReturned && (
                             <span style={{ background: '#dcfce7', color: '#166534', fontSize: '10px', padding: '2px 5px', borderRadius: '4px', fontWeight: 600 }}>
-                              ✅ RETURN RESOLVED
+                              ✅ {t('customers.returnResolvedBadge', 'RETURN RESOLVED')}
                             </span>
                           )}
                         </div>
@@ -1381,7 +1395,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                               e.stopPropagation();
                               setPrintingTicket(tk);
                             }}
-                            title="Print label / intake receipt"
+                            title={t('customers.printLabelReceipt', 'Print label / intake receipt')}
                             style={{
                               background: '#f1f5f9',
                               border: '1px solid #cbd5e1',
@@ -1455,7 +1469,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           borderRadius: '4px',
                           margin: '4px 0',
                         }}>
-                          <strong>Tech Note / Findings:</strong> "{tk.remark}"
+                          <strong>{t('customers.techNote', 'Tech Note / Findings:')}</strong> "{tk.remark}"
                         </div>
                       )}
 
@@ -1475,7 +1489,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           alignItems: 'center',
                         }}>
                           <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                            <Wrench size={10} /> Spare Parts Used:
+                            <Wrench size={10} /> {t('customers.sparePartsUsed', 'Spare Parts Used:')}
                           </strong>
                           {tk.partsUsed.map((p: any, i: number) => (
                             <span key={i} style={{ background: '#ffffff', padding: '1px 5px', borderRadius: '3px', border: '1px solid #e0f2fe' }}>
@@ -1497,16 +1511,16 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           margin: '4px 0',
                           fontStyle: 'italic',
                         }}>
-                          <strong>Return Reason:</strong> "{tk.returnReason}"
+                          <strong>{t('customers.returnReason', 'Return Reason:')}</strong> "{tk.returnReason}"
                         </div>
                       )}
 
                       <div className={styles.ticketFooter}>
                         <span className={styles.ticketDate}>
-                          Brought: {formatDate(tk.createdAt)}
+                          {t('customers.broughtDate', 'Brought: {{date}}', { date: formatDate(tk.createdAt) })}
                           {tk.completedAt && (
                             <span style={{ color: '#059669', marginLeft: '5px' }}>
-                              · Taken: {formatDate(tk.completedAt)}
+                              · {t('customers.takenDate', 'Taken: {{date}}', { date: formatDate(tk.completedAt) })}
                             </span>
                           )}
                         </span>
@@ -1516,21 +1530,21 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           </span>
                           {deposit > 0 && (
                             <span style={{ fontSize: '10.5px', color: '#16a34a' }}>
-                              Deposit: {formatPrivateCurrency(deposit)}
+                              {t('customers.depositAmount', 'Deposit: {{amount}}', { amount: formatPrivateCurrency(deposit) })}
                             </span>
                           )}
                           {tk.handoverAmountPaid && tk.handoverAmountPaid > 0 ? (
                             <span style={{ fontSize: '10.5px', color: '#059669', fontWeight: 600 }}>
-                              Handover Paid: {formatPrivateCurrency(tk.handoverAmountPaid)}
+                              {t('customers.handoverPaidAmount', 'Handover Paid: {{amount}}', { amount: formatPrivateCurrency(tk.handoverAmountPaid) })}
                             </span>
                           ) : null}
                           {debt > 0 ? (
                             <span style={{ fontSize: '10.5px', color: '#dc2626', fontWeight: 600 }}>
-                              ⚠️ Dept: {formatPrivateCurrency(debt)}
+                              {t('customers.debtRemaining', '⚠️ Debt: {{amount}}', { amount: formatPrivateCurrency(debt) })}
                             </span>
                           ) : (effectiveStatus === 'completed' || tk.paymentStatus === 'paid') ? (
                             <span style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: 700 }}>
-                              ✅ Paid in Full
+                              {t('customers.paidInFull', '✅ Paid in Full')}
                             </span>
                           ) : null}
                         </div>
@@ -1545,9 +1559,9 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                         fontSize: '11px',
                         color: '#64748b'
                       }}>
-                        <span>{tk.assignedTechnician ? `Tech: ${tk.assignedTechnician}` : 'Unassigned'}</span>
+                        <span>{tk.assignedTechnician ? t('customers.techAssigned', 'Tech: {{name}}', { name: tk.assignedTechnician }) : t('customers.unassigned', 'Unassigned')}</span>
                         <span style={{ color: 'var(--color-primary)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                          View Ticket on Board →
+                          {t('customers.viewTicketOnBoard', 'View Ticket on Board →')}
                         </span>
                       </div>
                     </div>
@@ -1561,7 +1575,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
             {activeTab === 'purchases' && (
               customerTxs.length === 0 ? (
                 <div className={styles.emptyState}>
-                  No POS sales transactions recorded for this customer yet.
+                  {t('customers.noPurchasesLogged', 'No POS sales transactions recorded for this customer yet.')}
                 </div>
               ) : (
                 customerTxs.map(tx => (
@@ -1569,7 +1583,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                     <div className={styles.saleCardHeader}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span className={styles.saleTitle}>
-                          {tx.items.length} {tx.items.length === 1 ? 'Item' : 'Items'} Purchased
+                          {t('customers.itemsPurchased', '{{count}} Item(s) Purchased', { count: tx.items.length })}
                         </span>
                         {tx.saleType === 'parts_b2b' && (
                           <span style={{ fontSize: '10.5px', fontWeight: 700, background: '#eff6ff', color: '#1d4ed8', padding: '2px 6px', borderRadius: '4px' }}>
@@ -1584,7 +1598,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           onClick={() => setSelectedInvoiceTx(tx)}
                           style={{ background: '#eff6ff', color: '#1e40af', borderColor: '#bfdbfe' }}
                         >
-                          <FileText size={13} /> View Invoice
+                          <FileText size={13} /> {t('customers.viewInvoice', 'View Invoice')}
                         </button>
                       ) : (
                         <button
@@ -1592,7 +1606,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           className={styles.receiptBtn}
                           onClick={() => setSelectedReceiptTx(tx)}
                         >
-                          <Receipt size={13} /> View Receipt
+                          <Receipt size={13} /> {t('customers.viewReceipt', 'View Receipt')}
                         </button>
                       )}
                     </div>
@@ -1605,7 +1619,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                       ))}
                       {tx.discount && (typeof tx.discount === 'object' ? tx.discount.value > 0 : (tx.discount as any) > 0) && (
                         <div className={styles.saleItemRow} style={{ color: '#15803d', fontWeight: 600 }}>
-                          <span>🏷️ Discount Applied</span>
+                          <span>{t('customers.discountApplied', '🏷️ Discount Applied')}</span>
                           <span>-{formatPrivateCurrency(typeof tx.discount === 'object' ? (tx.discount.type === 'percent' ? ((tx.subtotal || tx.total) * tx.discount.value / 100) : tx.discount.value) : (tx.discount as any))}</span>
                         </div>
                       )}
@@ -1615,17 +1629,17 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                         <span className={styles.ticketDate}>{formatDate(tx.date)}</span>
                         {tx.payments && tx.payments.length > 0 && (
                           <span style={{ fontSize: '10.5px', color: '#475569', background: '#f1f5f9', padding: '1px 6px', borderRadius: '4px' }}>
-                            via {tx.payments.map(p => p.method.toUpperCase()).join('+')}
+                            {t('statementModal.via', 'via')} {tx.payments.map(p => p.method.toUpperCase()).join('+')}
                           </span>
                         )}
                         {tx.status === 'refunded' && (
                           <span style={{ fontSize: '10.5px', color: '#dc2626', background: '#fee2e2', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                            Refunded
+                            {t('customers.refundedBadge', 'Refunded')}
                           </span>
                         )}
                         {tx.status === 'partially_refunded' && (
                           <span style={{ fontSize: '10.5px', color: '#d97706', background: '#fef3c7', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                            Partial Return
+                            {t('customers.partialReturnBadge', 'Partial Return')}
                           </span>
                         )}
                       </div>
@@ -1650,10 +1664,10 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           }}
                           onClick={() => handleEditTx(tx)}
                           disabled={tx.status === 'refunded'}
-                          title={!canEditDirectly(tx) && tx.status !== 'refunded' ? 'Requires Admin Password to Edit' : 'Edit Items & Prices'}
+                          title={!canEditDirectly(tx) && tx.status !== 'refunded' ? t('customers.requiresAdminPasswordEdit', 'Requires Admin Password to Edit') : t('customers.editItemsPrices', 'Edit Items & Prices')}
                         >
                           <FileEdit size={12} />
-                          <span>Edit</span>
+                          <span>{t('common.edit', 'Edit')}</span>
                           {!canEditDirectly(tx) && tx.status !== 'refunded' && <span style={{ fontSize: '9px' }}>🔒</span>}
                         </button>
 
@@ -1674,10 +1688,10 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                           }}
                           onClick={() => handleRefundTx(tx)}
                           disabled={tx.status === 'refunded'}
-                          title={tx.status === 'refunded' ? 'Already refunded' : !canEditDirectly(tx) ? 'Requires Admin Password to Refund' : 'Full Refund'}
+                          title={tx.status === 'refunded' ? t('customers.alreadyRefunded', 'Already refunded') : !canEditDirectly(tx) ? t('customers.requiresAdminPasswordRefund', 'Requires Admin Password to Refund') : t('customers.fullRefund', 'Full Refund')}
                         >
                           <RotateCcw size={12} />
-                          <span>Refund</span>
+                          <span>{t('customers.refund', 'Refund')}</span>
                           {!canEditDirectly(tx) && tx.status !== 'refunded' && <span style={{ fontSize: '9px' }}>🔒</span>}
                         </button>
                       </div>
@@ -1758,7 +1772,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         onSuccess={() => {
           if (debtRequiringUnlock) {
             deleteDebt(debtRequiringUnlock.id);
-            toast.info('Debt Deleted', 'Record removed.');
+            toast.info(t('customers.debtDeletedTitle', 'Debt Deleted'), t('customers.debtDeletedDesc', 'Record removed.'));
             setDebtRequiringUnlock(null);
           }
         }}
@@ -1861,20 +1875,20 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         isOpen={isDeleteCustomerOpen}
         onClose={() => setIsDeleteCustomerOpen(false)}
         onConfirm={confirmDeleteCustomer}
-        title="Delete Customer Account"
+        title={t('customers.deleteCustomerConfirmTitle', 'Delete Customer Account')}
         message={
           <div>
             <p style={{ margin: '0 0 8px 0' }}>
-              Are you sure you want to permanently delete <strong>{customer?.name}</strong>?
+              {t('customers.deleteCustomerConfirmMsg', 'Are you sure you want to permanently delete {{name}}?', { name: customer?.name })}
             </p>
             {totalDebtBalance > 0 && (
               <p style={{ margin: 0, color: '#dc2626', fontWeight: 700, fontSize: '13px' }}>
-                ⚠️ Warning: This customer currently has an unpaid debt of {formatPrivateCurrency(totalDebtBalance)}. Deleting the account will also remove all associated debt records.
+                {t('customers.deleteCustomerDebtWarning', '⚠️ Warning: This customer currently has an unpaid debt of {{amount}}. Deleting the account will also remove all associated debt records.', { amount: formatPrivateCurrency(totalDebtBalance) })}
               </p>
             )}
           </div>
         }
-        confirmLabel="Delete Customer"
+        confirmLabel={t('customers.deleteCustomerConfirmBtn', 'Delete Customer')}
         variant="danger"
         isLoading={isActionLoading}
       />
@@ -1888,7 +1902,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         message={
           <div>
             <p style={{ margin: '0 0 10px 0' }}>
-              Remove <strong>{deviceToDelete?.device}</strong> from <strong>{customer?.name}</strong>'s profile?
+              {t('customers.deletePhoneConfirmMsg', 'Remove {{device}} from {{name}}\'s profile?', { device: deviceToDelete?.device, name: customer?.name })}
             </p>
             {deviceToDelete && deviceToDelete.tickets.length > 0 && (
               <div
@@ -1914,17 +1928,17 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                   onClick={e => e.stopPropagation()}
                 />
                 <label htmlFor="deleteRepairsCheck" style={{ fontSize: '12.5px', color: '#991b1b', fontWeight: 600, cursor: 'pointer' }}>
-                  Also delete the {deviceToDelete.tickets.length} linked repair ticket(s)
+                  {t('customers.deletePhoneWithRepairsCheck', 'Also delete the {{count}} linked repair ticket(s)', { count: deviceToDelete.tickets.length })}
                   <span style={{ display: 'block', fontWeight: 400, color: '#b91c1c', fontSize: '11.5px', marginTop: '2px' }}>
-                    ⚠️ Required to fully remove the device — if unchecked, it will reappear because repair history still references it.
+                    {t('customers.deletePhoneRepairsCheckWarning', '⚠️ Required to fully remove the device — if unchecked, it will reappear because repair history still references it.')}
                   </span>
                 </label>
               </div>
             )}
             <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>
               {deleteDeviceRepairsToo
-                ? `This will remove the device and delete all ${deviceToDelete?.tickets.length} repair record(s) permanently.`
-                : '⚠️ The device will still appear in the list because it has linked repair tickets. To fully remove it, check the box above.'}
+                ? t('customers.deletePhoneWillRemoveMsg', 'This will remove the device and delete all {{count}} repair record(s) permanently.', { count: deviceToDelete?.tickets.length })
+                : t('customers.deletePhoneWillKeepMsg', '⚠️ The device will still appear in the list because it has linked repair tickets. To fully remove it, check the box above.')}
             </p>
           </div>
         }
@@ -1938,13 +1952,16 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         isOpen={!!ticketToDelete}
         onClose={() => setTicketToDelete(null)}
         onConfirm={confirmDeleteSingleTicket}
-        title="Delete Repair Ticket"
+        title={t('customers.deleteTicketConfirmTitle', 'Delete Repair Ticket')}
         message={
           <p style={{ margin: 0 }}>
-            Are you sure you want to delete repair ticket <strong>#{ticketToDelete?.ticketNumber}</strong> ({ticketToDelete?.deviceBrand} {ticketToDelete?.deviceModel})?
+            {t('customers.deleteTicketConfirmMsg', 'Are you sure you want to delete repair ticket #{{number}} ({{device}})?', {
+              number: ticketToDelete?.ticketNumber,
+              device: `${ticketToDelete?.deviceBrand} ${ticketToDelete?.deviceModel}`
+            })}
           </p>
         }
-        confirmLabel="Delete Ticket"
+        confirmLabel={t('customers.deleteTicketConfirmBtn', 'Delete Ticket')}
         variant="danger"
         isLoading={isActionLoading}
       />
@@ -1953,16 +1970,16 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
       <Modal
         isOpen={isAddPhoneOpen}
         onClose={() => setIsAddPhoneOpen(false)}
-        title={`Register Phone for ${customer?.name}`}
-        subtitle="Add a customer device to their registered fleet"
+        title={t('customers.registerPhoneTitle', 'Register Phone for {{name}}', { name: customer?.name })}
+        subtitle={t('customers.registerPhoneSubtitle', 'Add a customer device to their registered fleet')}
         size="md"
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', width: '100%' }}>
             <Button variant="ghost" onClick={() => setIsAddPhoneOpen(false)} disabled={isActionLoading}>
-              Cancel
+              {t('common.cancel', 'Cancel')}
             </Button>
             <Button variant="primary" onClick={confirmAddPhone} isLoading={isActionLoading} leftIcon={<Smartphone size={15} />}>
-              Save Phone
+              {t('customers.savePhone', 'Save Phone')}
             </Button>
           </div>
         }
@@ -1970,7 +1987,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div>
             <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--color-on-surface)' }}>
-              Phone Brand <span style={{ color: '#ef4444' }}>*</span>
+              {t('customers.phoneBrand', 'Phone Brand')} <span style={{ color: '#ef4444' }}>*</span>
             </label>
             <Input
               placeholder="e.g. Apple, Samsung, Xiaomi..."
@@ -2004,7 +2021,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
 
           <div>
             <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--color-on-surface)' }}>
-              Phone Model <span style={{ color: '#ef4444' }}>*</span>
+              {t('customers.phoneModel', 'Phone Model')} <span style={{ color: '#ef4444' }}>*</span>
             </label>
             <Input
               placeholder="e.g. Galaxy A54 5G, iPhone 13 Pro Max..."
@@ -2015,7 +2032,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
 
           <div>
             <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--color-on-surface)' }}>
-              IMEI / Serial Number (Optional)
+              {t('customers.imeiOptional', 'IMEI / Serial Number (Optional)')}
             </label>
             <Input
               placeholder="e.g. 356789123456789"
@@ -2026,7 +2043,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
 
           <div>
             <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--color-on-surface)' }}>
-              Device Notes / Condition / Color (Optional)
+              {t('customers.deviceNotesOptional', 'Device Notes / Condition / Color (Optional)')}
             </label>
             <Input
               placeholder="e.g. Midnight Black, cracked back glass"
@@ -2056,7 +2073,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
               style={{ cursor: 'pointer' }}
             />
             <label htmlFor="createTicketCheck" style={{ fontSize: '12px', fontWeight: 600, cursor: 'pointer', color: '#1e293b' }}>
-              Immediately open a new repair ticket for this phone
+              {t('customers.createTicketForPhoneCheck', 'Immediately open a new repair ticket for this phone')}
             </label>
           </div>
         </div>
@@ -2066,16 +2083,16 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
       <Modal
         isOpen={!!deviceToEdit}
         onClose={() => setDeviceToEdit(null)}
-        title={`Edit Phone: ${deviceToEdit?.oldBrand} ${deviceToEdit?.oldModel}`}
-        subtitle={`Updates this phone and its records for ${customer?.name}`}
+        title={t('customers.editPhoneTitle', 'Edit Phone: {{device}}', { device: `${deviceToEdit?.oldBrand} ${deviceToEdit?.oldModel}` })}
+        subtitle={t('customers.editPhoneSubtitle', 'Updates this phone and its records for {{name}}', { name: customer?.name })}
         size="md"
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', width: '100%' }}>
             <Button variant="ghost" onClick={() => setDeviceToEdit(null)} disabled={isActionLoading}>
-              Cancel
+              {t('common.cancel', 'Cancel')}
             </Button>
             <Button variant="primary" onClick={confirmEditDevice} isLoading={isActionLoading}>
-              Update Phone
+              {t('customers.updatePhone', 'Update Phone')}
             </Button>
           </div>
         }
@@ -2084,7 +2101,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--color-on-surface)' }}>
-                Brand <span style={{ color: '#ef4444' }}>*</span>
+                {t('customers.phoneBrand', 'Brand')} <span style={{ color: '#ef4444' }}>*</span>
               </label>
               <Input
                 value={deviceToEdit.brand}
@@ -2114,7 +2131,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--color-on-surface)' }}>
-                Model <span style={{ color: '#ef4444' }}>*</span>
+                {t('customers.phoneModel', 'Model')} <span style={{ color: '#ef4444' }}>*</span>
               </label>
               <Input
                 value={deviceToEdit.model}
@@ -2123,7 +2140,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--color-on-surface)' }}>
-                IMEI / Serial Number (Optional)
+                {t('customers.imeiOptional', 'IMEI / Serial Number (Optional)')}
               </label>
               <Input
                 placeholder="e.g. 356789123456789"
@@ -2133,7 +2150,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--color-on-surface)' }}>
-                Device Notes / Condition / Color (Optional)
+                {t('customers.deviceNotesOptional', 'Device Notes / Condition / Color (Optional)')}
               </label>
               <Input
                 placeholder="e.g. Midnight Black, cracked back glass"
@@ -2142,7 +2159,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
               />
             </div>
             <p style={{ fontSize: '11.5px', color: '#64748b' }}>
-              Note: Changing the brand/model here updates all repair records and registered fleet info linked to this device for this customer.
+              {t('customers.editPhoneWarning', 'Note: Changing the brand/model here updates all repair records and registered fleet info linked to this device for this customer.')}
             </p>
           </div>
         )}
@@ -2176,8 +2193,8 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
       <Modal
         isOpen={isActivityModalOpen}
         onClose={() => setIsActivityModalOpen(false)}
-        title={`Audit & Activity Log`}
-        subtitle={`${customer.name} · Chronological record of account events`}
+        title={t('customers.auditLogTitle', 'Audit & Activity Log')}
+        subtitle={t('customers.auditLogSubtitle', '{{name}} · Chronological record of account events', { name: customer.name })}
         size="lg"
       >
         <div style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '4px' }}>

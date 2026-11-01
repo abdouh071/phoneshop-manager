@@ -519,7 +519,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
               if (Object.keys(updates).length > 0) {
                 try {
                   currentCust = await updateCustomer(matchedDuplicateCustomer.id, updates);
-                  toast.success('Profile Auto-Enriched', `Enriched ${matchedDuplicateCustomer.name}'s profile with new details.`);
+                  toast.success(t('customers.profileAutoEnrichedTitle', 'Profile Auto-Enriched'), t('customers.profileAutoEnrichedDesc', 'Enriched {{name}}\'s profile with new details.', { name: matchedDuplicateCustomer.name }));
                 } catch (e) {
                   console.warn('Failed to auto-enrich on use existing:', e);
                 }
@@ -543,7 +543,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
               if (currentCust.rc || currentCust.nif || currentCust.nis || currentCust.art) {
                 setShowCommercialDetails(true);
               }
-              toast.info('Existing Profile Loaded', `Loaded ${currentCust.name}'s profile.`);
+              toast.info(t('customers.existingProfileLoadedTitle', 'Existing Profile Loaded'), t('customers.existingProfileLoadedDesc', 'Loaded {{name}}\'s profile.', { name: currentCust.name }));
             }}
             onUpdateToNewName={async () => {
               if (!form.name.trim()) {
@@ -569,17 +569,17 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
                   art: form.art.trim() || matchedDuplicateCustomer.art,
                   notes: form.notes.trim() || matchedDuplicateCustomer.notes,
                 });
-                toast.success('Customer Profile Updated', `Updated ${form.name.trim()}'s profile.`);
+                toast.success(t('customers.customerProfileUpdatedTitle', 'Customer Profile Updated'), t('customers.customerProfileUpdatedDesc', 'Updated {{name}}\'s profile.', { name: form.name.trim() }));
                 handleClose();
               } catch (err: any) {
-                toast.error('Update Failed', err.message || 'Could not update customer');
+                toast.error(t('customers.updateFailedTitle', 'Update Failed'), err.message || 'Could not update customer');
               } finally {
                 setIsUpdatingExisting(false);
               }
             }}
             onSaveAsSeparate={() => {
               setSkipDuplicateCheck(true);
-              toast.info('Separate Contact Allowed', `You can now save "${form.name.trim() || 'this contact'}" as a separate customer sharing this phone number.`);
+              toast.info(t('customers.separateContactAllowedTitle', 'Separate Contact Allowed'), t('customers.separateContactAllowedDesc', 'You can now save "{{name}}" as a separate customer sharing this phone number.', { name: form.name.trim() || 'this contact' }));
             }}
           />
         )}

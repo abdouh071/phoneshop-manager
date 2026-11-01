@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   BookOpen, DollarSign, Wrench, ShoppingBag, User,
   FileText, Plus, Send, UserCheck, Shield
@@ -16,19 +17,22 @@ interface Props {
 
 type FilterCategory = 'all' | 'debt' | 'repairs' | 'sales' | 'profile' | 'notes';
 
-const formatLogTime = (iso: string) => {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
-  
-  const datePart = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  const timePart = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  return `${datePart} at ${timePart}`;
-};
-
 export const CustomerActivityLogList: React.FC<Props> = ({ customer, logs }) => {
+  const { t, i18n } = useTranslation();
   const { addCustomerAuditLog } = useCustomerStore();
   const { user } = useAuthStore();
   const toast = useToast();
+
+  const locale = i18n.language === 'ar' ? 'ar-DZ' : i18n.language === 'fr' ? 'fr-FR' : 'en-GB';
+
+  const formatLogTime = (iso: string) => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    
+    const datePart = d.toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' });
+    const timePart = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+    return `${datePart} ${t('common.at', 'at')} ${timePart}`;
+  };
 
   const [filter, setFilter] = useState<FilterCategory>('all');
   const [newNote, setNewNote] = useState('');
@@ -52,10 +56,10 @@ export const CustomerActivityLogList: React.FC<Props> = ({ customer, logs }) => 
         metadata: { note: newNote.trim() },
       });
       setNewNote('');
-      toast.success('Note Logged', 'Staff audit note recorded on customer timeline.');
+      toast.success(t('customers.noteLoggedToast', 'Note Logged'), t('customers.noteLoggedToastDesc', 'Staff audit note recorded on customer timeline.'));
     } catch (err) {
       console.error(err);
-      toast.error('Failed to log note');
+      toast.error(t('customers.failedToLogNote', 'Failed to log note'));
     } finally {
       setIsSubmitting(false);
     }
@@ -102,29 +106,29 @@ export const CustomerActivityLogList: React.FC<Props> = ({ customer, logs }) => 
       <form onSubmit={handleAddNote} className={styles.addNoteBox}>
         <div className={styles.addNoteHeader}>
           <span className={styles.addNoteTitle}>
-            <Plus size={13} /> Append Staff Action Note / Log
+            <Plus size={13} /> {t('customers.auditAppendNote', 'Append Staff Action Note / Log')}
           </span>
           <span className={styles.authorHint}>
-            Author: <strong>{user?.name || 'Staff'}</strong> ({user?.role || 'user'})
+            {t('customers.auditAuthor', 'Author:')} <strong>{user?.name || 'Staff'}</strong> ({user?.role || 'user'})
           </span>
         </div>
         <textarea
           className={styles.noteTextarea}
-          placeholder="Record staff observation, phone call agreement, special discount agreed, or dispute note..."
+          placeholder={t('customers.auditPlaceholder', 'Record staff observation, phone call agreement, special discount agreed, or dispute note...')}
           value={newNote}
           onChange={e => setNewNote(e.target.value)}
           disabled={isSubmitting}
         />
         <div className={styles.noteSubmitRow}>
           <span style={{ fontSize: '11px', color: '#94a3b8' }}>
-            🔒 Append-only: Stamped with author and timestamp for audit trail
+            {t('customers.auditAppendOnly', '🔒 Append-only: Stamped with author and timestamp for audit trail')}
           </span>
           <button
             type="submit"
             className={styles.submitNoteBtn}
             disabled={isSubmitting || !newNote.trim()}
           >
-            <Send size={11} /> Save Log
+            <Send size={11} /> {t('customers.auditSaveLog', 'Save Log')}
           </button>
         </div>
       </form>
@@ -132,12 +136,12 @@ export const CustomerActivityLogList: React.FC<Props> = ({ customer, logs }) => 
       {/* Filter Row */}
       <div className={styles.filterRow}>
         {([
-          { key: 'all' as FilterCategory, label: 'All Actions' },
-          { key: 'debt' as FilterCategory, label: '📒 Debts & Payments' },
-          { key: 'repairs' as FilterCategory, label: '🔧 Repairs' },
-          { key: 'sales' as FilterCategory, label: '🛒 Sales' },
-          { key: 'profile' as FilterCategory, label: '👤 Profile Edits' },
-          { key: 'notes' as FilterCategory, label: '📝 Staff Notes' },
+          { key: 'all' as FilterCategory, label: t('customers.auditAllActions', 'All Actions') },
+          { key: 'debt' as FilterCategory, label: t('customers.auditDebtsPayments', '📒 Debts & Payments') },
+          { key: 'repairs' as FilterCategory, label: t('customers.auditRepairs', '🔧 Repairs') },
+          { key: 'sales' as FilterCategory, label: t('customers.auditSales', '🛒 Sales') },
+          { key: 'profile' as FilterCategory, label: t('customers.auditProfileEdits', '👤 Profile Edits') },
+          { key: 'notes' as FilterCategory, label: t('customers.auditStaffNotes', '📝 Staff Notes') },
         ]).map(f => (
           <button
             key={f.key}
@@ -153,9 +157,9 @@ export const CustomerActivityLogList: React.FC<Props> = ({ customer, logs }) => 
       {/* Audit Logs List */}
       {filteredLogs.length === 0 ? (
         <div className={styles.emptyLogs}>
-          <p style={{ margin: 0, fontWeight: 600, color: '#64748b' }}>No activity records found.</p>
+          <p style={{ margin: 0, fontWeight: 600, color: '#64748b' }}>{t('customers.auditNoRecords', 'No activity records found.')}</p>
           <span style={{ fontSize: '11.5px', color: '#94a3b8' }}>
-            Staff actions on debts, repairs, sales, and notes will be stamped here automatically.
+            {t('customers.auditNoRecordsDesc', 'Staff actions on debts, repairs, sales, and notes will be stamped here automatically.')}
           </span>
         </div>
       ) : (
@@ -172,10 +176,10 @@ export const CustomerActivityLogList: React.FC<Props> = ({ customer, logs }) => 
               <p className={styles.logDesc}>{log.actionDescription}</p>
               <div className={styles.logFooter}>
                 <span className={styles.actorTag}>
-                  <UserCheck size={12} /> Logged by: {log.actorName} {log.actorRole ? `(${log.actorRole})` : ''}
+                  <UserCheck size={12} /> {t('customers.auditLoggedBy', 'Logged by:')} {log.actorName} {log.actorRole ? `(${log.actorRole})` : ''}
                 </span>
                 <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>
-                  Audit ID: {log.id.slice(0, 10)}
+                  {t('customers.auditId', 'Audit ID:')} {log.id.slice(0, 10)}
                 </span>
               </div>
             </div>
