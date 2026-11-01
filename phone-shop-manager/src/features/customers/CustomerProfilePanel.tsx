@@ -731,7 +731,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                     type="button"
                     className={[styles.actionBtn, styles.actionBtnPrimary].join(' ')}
                     onClick={handleStartRepair}
-                    title="New Repair Ticket"
+                    title={t('customers.newRepair', 'New Repair Ticket')}
                   >
                     <Wrench size={14} /> {t('common.repair', 'Repair')}
                   </button>
@@ -743,7 +743,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                     className={styles.actionBtn}
                     onClick={handleStartPartsOrder}
                     style={{ background: '#eff6ff', color: '#1d4ed8', borderColor: '#bfdbfe' }}
-                    title="New Parts Order"
+                    title={t('common.parts', 'New Parts Order')}
                   >
                     <Store size={14} /> {t('common.parts', 'Parts')}
                   </button>
@@ -753,7 +753,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
                   type="button"
                   className={styles.actionBtn}
                   onClick={handleStartSale}
-                  title="New POS Sale"
+                  title={t('common.pos', 'New POS Sale')}
                 >
                   <ShoppingCart size={14} /> {t('common.pos', 'POS')}
                 </button>

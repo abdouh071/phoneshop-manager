@@ -1,5 +1,6 @@
 import { useSettingsStore } from '../store/settingsStore';
 import { formatCurrency } from './formatCurrency';
+import i18n from '../i18n';
 import type { Customer, CustomerDebtEntry, RepairTicket, SaleTransaction } from '../types';
 import type { LedgerEvent } from '../features/customers/AccountStatementModal';
 
@@ -85,19 +86,22 @@ export function buildOperationReceiptData({
   const customerDisplayName = customer.shopName || customer.name;
   const customerPhone = customer.phone || '';
 
+  const lang = i18n.language || 'en';
+  const locale = lang.startsWith('ar') ? 'ar-DZ' : lang.startsWith('fr') ? 'fr-FR' : 'en-US';
+
   let transactionData: any = null;
-  let headerMessage = "REÇU D'OPÉRATION";
-  let footerMessage = `Solde actuel du compte : ${formatCurrency(currentTotalDebt, currency)}\nMerci de votre confiance !`;
+  let headerMessage = i18n.t('statementModal.operationReceipt', "TRANSACTION RECEIPT");
+  let footerMessage = `${i18n.t('statementModal.currentAccountBalance', 'Current Account Balance')} : ${formatCurrency(currentTotalDebt, currency)}\n${i18n.t('statementModal.thankYouTrust', 'Thank you for your business!')}`;
   const items: OperationReceiptItem[] = [];
   let subtotal = 0;
   let discount: number | undefined = undefined;
   let total = 0;
   let paidAmount = 0;
-  let paymentMethod = 'ESPÈCES';
+  let paymentMethod = i18n.t('statementModal.cashPayment', 'Cash');
   let repairDetails: OperationReceiptPreviewData['repairDetails'] = undefined;
   let debtDetails: OperationReceiptPreviewData['debtDetails'] = undefined;
 
-  const dateStr = new Date(event.date).toLocaleDateString('fr-FR', {
+  const dateStr = new Date(event.date).toLocaleDateString(locale, {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
@@ -108,16 +112,18 @@ export function buildOperationReceiptData({
   // 1. REPAIR TICKET
   if (event.rawTicket || event.type === 'repair') {
     const t = event.rawTicket;
-    headerMessage = 'REÇU DE RÉPARATION / LIVRAISON';
+    headerMessage = i18n.t('statementModal.repairDeliveryReceipt', 'REPAIR / DELIVERY RECEIPT');
     const totalCost = t ? (t.actualCost ?? t.estimatedCost ?? event.debit) : event.debit;
     paidAmount = t?.paidAmount ?? (event.credit || totalCost);
     total = totalCost;
     subtotal = totalCost;
 
-    const deviceName = t ? `${t.deviceBrand || ''} ${t.deviceModel || ''}`.trim() : 'Appareil';
+    const deviceName = t ? `${t.deviceBrand || ''} ${t.deviceModel || ''}`.trim() : i18n.t('statementModal.device', 'Device');
     const issueSummary = t?.issueDescription ? `(${t.issueDescription})` : '';
 
-    paymentMethod = paidAmount >= totalCost ? 'CASH (COMPTANT)' : (paidAmount > 0 ? 'PARTIEL + CRÉDIT' : 'CARNET DETTE');
+    paymentMethod = paidAmount >= totalCost
+      ? i18n.t('statementModal.cashPaid', 'CASH (PAID)')
+      : (paidAmount > 0 ? i18n.t('statementModal.partialCredit', 'PARTIAL + CREDIT') : i18n.t('statementModal.creditTabReceipt', 'CREDIT TAB'));
 
     if (t) {
       repairDetails = {
@@ -126,7 +132,7 @@ export function buildOperationReceiptData({
         imei: t.imei,
         issueDescription: t.issueDescription,
         status: t.status,
-        intakeDate: t.createdAt ? new Date(t.createdAt).toLocaleDateString('fr-FR') : undefined,
+        intakeDate: t.createdAt ? new Date(t.createdAt).toLocaleDateString(locale) : undefined,
         notes: t.notes,
       };
     }
@@ -140,7 +146,7 @@ export function buildOperationReceiptData({
         const lineTotal = pCost * pQty;
         partsCostSum += lineTotal;
         items.push({
-          name: `Pièce: ${p.name}`,
+          name: `${i18n.t('statementModal.partPrefix', 'Part:')} ${p.name}`,
           quantity: pQty,
           price: pCost,
           total: lineTotal,
@@ -150,7 +156,7 @@ export function buildOperationReceiptData({
       const laborCost = Math.max(0, totalCost - partsCostSum);
       items.unshift({
         name: deviceName,
-        detail: `${issueSummary} - Main d'œuvre`.trim(),
+        detail: `${issueSummary} - ${i18n.t('statementModal.labor', 'Labor')}`.trim(),
         quantity: 1,
         price: laborCost,
         total: laborCost,
@@ -188,7 +194,9 @@ export function buildOperationReceiptData({
   // 2. POS SALE OR WHOLESALE INVOICE
   else if (event.rawTransaction || event.type === 'invoice') {
     const tx = event.rawTransaction;
-    headerMessage = tx?.saleType === 'parts_b2b' ? 'FACTURE COMMERCIALE PIÈCES' : 'TICKET DE CAISSE';
+    headerMessage = tx?.saleType === 'parts_b2b'
+      ? i18n.t('statementModal.commercialPartsInvoice', 'COMMERCIAL PARTS INVOICE')
+      : i18n.t('statementModal.cashReceipt', 'POS CASH RECEIPT');
 
     if (tx) {
       subtotal = tx.subtotal;
@@ -201,7 +209,7 @@ export function buildOperationReceiptData({
 
       tx.items.forEach(it => {
         items.push({
-          name: it.product?.name || 'Article',
+          name: it.product?.name || i18n.t('statementModal.item', 'Item'),
           detail: it.product?.model || '',
           quantity: it.quantity,
           price: it.unitPrice,
@@ -225,7 +233,7 @@ export function buildOperationReceiptData({
       total = event.debit;
       subtotal = event.debit;
       paidAmount = event.credit || 0;
-      paymentMethod = event.credit > 0 ? 'CASH' : 'CARNET DETTE';
+      paymentMethod = event.credit > 0 ? 'CASH' : i18n.t('statementModal.creditTabReceipt', 'CREDIT TAB');
       items.push({
         name: event.description,
         quantity: 1,
@@ -247,22 +255,22 @@ export function buildOperationReceiptData({
   // 3. CREDIT TAB / DEBT ENTRY
   else if (event.rawDebt && !event.rawPayment) {
     const d = event.rawDebt;
-    headerMessage = 'BON DE CARNET DE CRÉDIT (DETTE)';
+    headerMessage = i18n.t('statementModal.creditTabReceipt', 'CREDIT TAB VOUCHER (DEBT)');
     const totalAmount = d.totalAmount || event.debit;
     subtotal = totalAmount;
     total = totalAmount;
     paidAmount = 0;
-    paymentMethod = 'CARNET DE CRÉDIT';
+    paymentMethod = i18n.t('statementModal.creditTabReceipt', 'CREDIT TAB');
 
     debtDetails = {
       productOrService: d.productOrService,
-      dueDate: d.dueDate ? new Date(d.dueDate).toLocaleDateString('fr-FR') : undefined,
+      dueDate: d.dueDate ? new Date(d.dueDate).toLocaleDateString(locale) : undefined,
       notes: d.notes,
     };
 
     items.push({
-      name: d.productOrService || 'Dette au carnet',
-      detail: d.dueDate ? `Échéance: ${new Date(d.dueDate).toLocaleDateString('fr-FR')}` : undefined,
+      name: d.productOrService || i18n.t('statementModal.debtOnTab', 'Credit Tab Debt'),
+      detail: d.dueDate ? `${i18n.t('statementModal.dueDatePrefix', 'Due Date:')} ${new Date(d.dueDate).toLocaleDateString(locale)}` : undefined,
       quantity: 1,
       price: totalAmount,
       total: totalAmount,
@@ -275,8 +283,8 @@ export function buildOperationReceiptData({
       items: [
         {
           product: {
-            name: d.productOrService || 'Dette au carnet',
-            model: d.dueDate ? `(Échéance: ${new Date(d.dueDate).toLocaleDateString('fr-FR')})` : '',
+            name: d.productOrService || i18n.t('statementModal.debtOnTab', 'Credit Tab Debt'),
+            model: d.dueDate ? `(${i18n.t('statementModal.dueDatePrefix', 'Due Date:')} ${new Date(d.dueDate).toLocaleDateString(locale)})` : '',
             price: totalAmount,
           },
           quantity: 1,
@@ -285,13 +293,13 @@ export function buildOperationReceiptData({
       subtotal: totalAmount,
       total: totalAmount,
       payments: [
-        { method: 'CARNET DE CRÉDIT', amount: totalAmount },
+        { method: paymentMethod, amount: totalAmount },
       ],
     };
   }
   // 4. PAYMENT SETTLEMENT
   else {
-    headerMessage = 'REÇU DE VERSEMENT / PAIEMENT';
+    headerMessage = i18n.t('statementModal.paymentReceiptTitle', 'PAYMENT RECEIPT');
     const pay = event.rawPayment;
     const amount = event.credit || pay?.amount || 0;
     const methodStr = (event.method || pay?.method || 'CASH').toUpperCase();
@@ -301,8 +309,8 @@ export function buildOperationReceiptData({
     paymentMethod = methodStr;
 
     items.push({
-      name: 'Règlement / Versement en compte',
-      detail: event.rawDebt?.productOrService ? `Pour: ${event.rawDebt.productOrService}` : undefined,
+      name: i18n.t('statementModal.paymentOnAccount', 'Payment / Settlement on Account'),
+      detail: event.rawDebt?.productOrService ? `${i18n.t('statementModal.forPrefix', 'For:')} ${event.rawDebt.productOrService}` : undefined,
       quantity: 1,
       price: amount,
       total: amount,
@@ -315,8 +323,8 @@ export function buildOperationReceiptData({
       items: [
         {
           product: {
-            name: 'Règlement / Versement en compte',
-            model: event.rawDebt?.productOrService ? `(Pour: ${event.rawDebt.productOrService})` : '',
+            name: i18n.t('statementModal.paymentOnAccount', 'Payment / Settlement on Account'),
+            model: event.rawDebt?.productOrService ? `(${i18n.t('statementModal.forPrefix', 'For:')} ${event.rawDebt.productOrService})` : '',
             price: amount,
           },
           quantity: 1,
@@ -380,20 +388,26 @@ export async function sendPayloadToPrintServer(
       const data = await electronAPI.printReceipt(payload);
       if (data?.ok) {
         toast?.success(
-          'Reçu imprimé',
-          `Ticket #${payload.transaction?.id || ''} imprimé sur l'imprimante thermique.`
+          i18n.t('statementModal.receiptPrinted', 'Receipt Printed'),
+          i18n.t('statementModal.receiptPrintedDesc', {
+            id: payload.transaction?.id || '',
+            defaultValue: `Ticket #${payload.transaction?.id || ''} printed on thermal printer.`,
+          })
         );
         return { success: true };
       }
       console.warn('[Print Server IPC] error:', data?.error);
       toast?.error(
-        'Erreur imprimante',
-        data?.error || 'Le serveur d\'impression a renvoyé une erreur.'
+        i18n.t('statementModal.printerError', 'Printer Error'),
+        data?.error || i18n.t('statementModal.printerErrorDesc', 'Print server returned an error.')
       );
       return { success: false, error: data?.error };
     } catch (e: any) {
       console.warn('[Print Server IPC] failed:', e);
-      toast?.error('Erreur imprimante', e?.message || 'Échec de communication avec l\'imprimante.');
+      toast?.error(
+        i18n.t('statementModal.printerError', 'Printer Error'),
+        e?.message || i18n.t('statementModal.printerErrorDesc', 'Print server communication failed.')
+      );
       return { success: false, error: e?.message };
     }
   }
@@ -410,18 +424,24 @@ export async function sendPayloadToPrintServer(
     const data = await res.json();
     if (data.ok) {
       toast?.success(
-        'Reçu imprimé',
-        `Ticket #${payload.transaction?.id || ''} imprimé sur l'imprimante thermique.`
+        i18n.t('statementModal.receiptPrinted', 'Receipt Printed'),
+        i18n.t('statementModal.receiptPrintedDesc', {
+          id: payload.transaction?.id || '',
+          defaultValue: `Ticket #${payload.transaction?.id || ''} printed on thermal printer.`,
+        })
       );
       return { success: true };
     }
-    toast?.error('Erreur imprimante', data.error || 'Erreur serveur d\'impression.');
+    toast?.error(
+      i18n.t('statementModal.printerError', 'Printer Error'),
+      data.error || i18n.t('statementModal.printerErrorDesc', 'Print server error.')
+    );
     return { success: false, error: data.error };
   } catch (err: any) {
     console.error('[Print Server Error]', err);
     toast?.error(
-      'Serveur d\'impression inaccessible',
-      'Veuillez vérifier que l\'imprimante thermique est connectée.'
+      i18n.t('statementModal.printerUnreachable', 'Print Server Unreachable'),
+      i18n.t('statementModal.printerCheckConnection', 'Please verify that the thermal printer is connected.')
     );
     return { success: false, error: 'Serveur d\'impression non disponible.' };
   }
@@ -455,35 +475,35 @@ export function buildReceiptWhatsAppText(data: OperationReceiptPreviewData): str
   const lines = [
     `🧾 *${data.storeName.toUpperCase()}*`,
     `*${data.headerMessage}*`,
-    `Réf: *#${data.referenceNumber}*`,
-    `Date: ${data.dateStr}`,
-    `Client: ${data.customerDisplayName}`,
+    `${i18n.t('statementModal.refPrefix', 'Ref:')} *#${data.referenceNumber}*`,
+    `${i18n.t('common.date', 'Date')}: ${data.dateStr}`,
+    `${i18n.t('statementModal.customerLabel', 'Customer:')} ${data.customerDisplayName}`,
     `────────────────────────`,
   ];
 
   if (data.repairDetails) {
-    lines.push(`📱 *Appareil:* ${data.repairDetails.deviceBrand || ''} ${data.repairDetails.deviceModel || ''}`.trim());
+    lines.push(`📱 *${i18n.t('statementModal.device', 'Device')}:* ${data.repairDetails.deviceBrand || ''} ${data.repairDetails.deviceModel || ''}`.trim());
     if (data.repairDetails.imei) lines.push(`🔢 *IMEI:* ${data.repairDetails.imei}`);
-    if (data.repairDetails.issueDescription) lines.push(`🔧 *Panne:* ${data.repairDetails.issueDescription}`);
-    if (data.repairDetails.status) lines.push(`📌 *Statut:* ${data.repairDetails.status.toUpperCase()}`);
+    if (data.repairDetails.issueDescription) lines.push(`🔧 *${i18n.t('statementModal.issueLabel', 'Issue:')}* ${data.repairDetails.issueDescription}`);
+    if (data.repairDetails.status) lines.push(`📌 *${i18n.t('statementModal.status', 'Status:')}* ${data.repairDetails.status.toUpperCase()}`);
     lines.push(`────────────────────────`);
   }
 
-  lines.push(`*Détails des prestations :*`);
+  lines.push(`*${i18n.t('statementModal.serviceDetails', 'Service Details:')}*`);
   data.items.forEach(it => {
     lines.push(`• ${it.name}${it.detail ? ` (${it.detail})` : ''} x${it.quantity} — ${formatCurrency(it.total, data.currency)}`);
   });
 
   lines.push(`────────────────────────`);
-  lines.push(`*Total:* *${formatCurrency(data.total, data.currency)}*`);
-  lines.push(`*Règlement:* ${data.paymentMethod} (${formatCurrency(data.paidAmount, data.currency)})`);
+  lines.push(`*${i18n.t('statementModal.total', 'TOTAL:')}* *${formatCurrency(data.total, data.currency)}*`);
+  lines.push(`*${i18n.t('statementModal.settlement', 'Settlement:')}* ${data.paymentMethod} (${formatCurrency(data.paidAmount, data.currency)})`);
 
   if (data.currentTotalDebt !== undefined) {
     lines.push(`────────────────────────`);
-    lines.push(`*Solde actuel restant dû:* *${formatCurrency(data.currentTotalDebt, data.currency)}*`);
+    lines.push(`*${i18n.t('statementModal.closingBalanceLabel', 'Total Balance Due')}:* *${formatCurrency(data.currentTotalDebt, data.currency)}*`);
   }
 
   lines.push(``);
-  lines.push(data.footerMessage || 'Merci de votre confiance !');
+  lines.push(data.footerMessage || i18n.t('statementModal.thankYouTrust', 'Thank you for your business!'));
   return lines.join('\n');
 }

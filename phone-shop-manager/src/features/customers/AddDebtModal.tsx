@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -19,6 +20,7 @@ interface AddDebtModalProps {
 }
 
 export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, customer }) => {
+  const { t } = useTranslation();
   const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
   const [productOrService, setProductOrService] = useState('');
   const [totalAmount, setTotalAmount] = useState('');
@@ -59,15 +61,15 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
 
   const handleSubmit = async () => {
     if (!productOrService.trim()) {
-      setError('Please specify the product or service taken');
+      setError(t('customers.specifyProductError', 'Please specify the product or service taken'));
       return;
     }
     if (isNaN(totalNum) || totalNum <= 0) {
-      setError('Please enter a valid total amount');
+      setError(t('customers.enterValidTotalAmount', 'Please enter a valid total amount'));
       return;
     }
     if (isLimitExceeded && !allowOverride && user?.role !== 'admin') {
-      setError(`Cannot exceed customer credit limit of ${formatCurrency(customer.creditLimit!)}. Admin approval required.`);
+      setError(t('customers.creditLimitExceededError', { limit: formatCurrency(customer.creditLimit!), defaultValue: `Cannot exceed customer credit limit of ${formatCurrency(customer.creditLimit!)}. Admin approval required.` }));
       return;
     }
     setError(null);
@@ -87,12 +89,15 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
         allowCreditLimitOverride: allowOverride || user?.role === 'admin',
       });
 
-      toast.success('Debt Recorded', `Logged ${formatCurrency(remainingNum)} debt for ${customer.name}.`);
+      toast.success(
+        t('customers.debtBalance', 'Debt Recorded'),
+        t('customers.debtLoggedSuccess', { amount: formatCurrency(remainingNum), name: customer.name, defaultValue: `Logged ${formatCurrency(remainingNum)} debt for ${customer.name}.` })
+      );
       onClose();
     } catch (err: any) {
       const msg = err?.message || 'An error occurred while saving.';
       setError(msg);
-      toast.error('Failed to Record Debt', msg);
+      toast.error(t('customers.failedToRecordDebt', 'Failed to Record Debt'), msg);
     } finally {
       setIsSubmitting(false);
     }
@@ -102,13 +107,13 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Add New Debt / Credit Item"
-      subtitle={`Record unpaid item for ${customer.name}`}
+      title={t('customers.addNewDebtItem', 'Add New Debt / Credit Item')}
+      subtitle={t('customers.recordUnpaidItemFor', { name: customer.name, defaultValue: `Record unpaid item for ${customer.name}` })}
       size="md"
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>Cancel</Button>
-          <Button onClick={handleSubmit} isLoading={isSubmitting}>Record Debt</Button>
+          <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>{t('common.cancel', 'Cancel')}</Button>
+          <Button onClick={handleSubmit} isLoading={isSubmitting}>{t('customers.addDebt', 'Record Debt')}</Button>
         </>
       }
     >
@@ -132,15 +137,15 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
         )}
 
         <Input
-          label="Product / Service Taken *"
-          placeholder="e.g. Samsung A54 128GB, Screen replacement, Case"
+          label={t('customers.productServiceTaken', 'Product / Service Taken *')}
+          placeholder={t('customers.productServicePlaceholder', 'e.g. Samsung A54 128GB, Screen replacement, Case')}
           value={productOrService}
           onChange={e => { setProductOrService(e.target.value); setError(null); }}
         />
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
           <Input
-            label="Total Value / Price *"
+            label={t('customers.totalValuePrice', 'Total Value / Price *')}
             type="number"
             min="0"
             placeholder="e.g. 24000"
@@ -149,10 +154,10 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
             className="privacy-cost-input"
           />
           <Input
-            label="Amount Paid Upfront"
+            label={t('customers.amountPaidUpfront', 'Amount Paid Upfront')}
             type="number"
             min="0"
-            placeholder="0 if nothing"
+            placeholder={t('customers.zeroIfNothing', '0 if nothing')}
             value={amountPaid}
             onChange={e => setAmountPaid(e.target.value)}
             className="privacy-cost-input"
@@ -171,13 +176,13 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
           fontSize: '13px',
           fontWeight: 600,
         }}>
-          <span style={{ color: '#78350f' }}>Remaining Balance Owed:</span>
+          <span style={{ color: '#78350f' }}>{t('customers.remainingBalanceOwed', 'Remaining Balance Owed:')}</span>
           <span style={{ fontSize: '15px', fontWeight: 800, color: '#dc2626' }}>
             {formatPrivateCurrency(remainingNum)}
           </span>
         </div>
 
-        {/* Credit Limit Callout & Warning (Problem 3 fix) */}
+        {/* Credit Limit Callout & Warning */}
         {customer.creditLimit ? (
           <div style={{
             padding: '10px 14px',
@@ -191,10 +196,10 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ color: isLimitExceeded ? '#991b1b' : '#166534', fontWeight: 700 }}>
-                Credit Limit: {formatPrivateCurrency(customer.creditLimit)}
+                {t('customers.creditLimit', { limit: formatPrivateCurrency(customer.creditLimit), defaultValue: `Credit Limit: ${formatPrivateCurrency(customer.creditLimit)}` })}
               </span>
               <span style={{ color: isLimitExceeded ? '#dc2626' : '#15803d', fontWeight: 600 }}>
-                Projected: {formatPrivateCurrency(projectedBalance)}
+                {t('customers.projectedBalance', { amount: formatPrivateCurrency(projectedBalance), defaultValue: `Projected: ${formatPrivateCurrency(projectedBalance)}` })}
               </span>
             </div>
 
@@ -202,7 +207,7 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
               <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', color: '#991b1b', marginTop: '2px' }}>
                 <ShieldAlert size={16} style={{ flexShrink: 0, marginTop: '2px', color: '#dc2626' }} />
                 <div style={{ flex: 1, fontSize: '12px', lineHeight: 1.4 }}>
-                  This item will cause {customer.name} to exceed their authorized limit by {formatPrivateCurrency(projectedBalance - customer.creditLimit)}.
+                  {t('customers.limitExceededWarning', { name: customer.name, amount: formatPrivateCurrency(projectedBalance - customer.creditLimit), defaultValue: `This item will cause ${customer.name} to exceed their authorized limit by ${formatPrivateCurrency(projectedBalance - customer.creditLimit)}.` })}
                   {user?.role === 'admin' ? (
                     <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', cursor: 'pointer', fontWeight: 700, color: '#b91c1c' }}>
                       <input
@@ -210,11 +215,11 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
                         checked={allowOverride}
                         onChange={e => setAllowOverride(e.target.checked)}
                       />
-                      <span>Approve admin override for this transaction</span>
+                      <span>{t('customers.approveAdminOverride', 'Approve admin override for this transaction')}</span>
                     </label>
                   ) : (
                     <div style={{ color: '#b91c1c', fontWeight: 700, marginTop: '4px' }}>
-                      Admin override required to proceed.
+                      {t('customers.adminOverrideRequired', 'Admin override required to proceed.')}
                     </div>
                   )}
                 </div>
@@ -225,13 +230,13 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
           <Input
-            label="Date Taken"
+            label={t('customers.dateTaken', 'Date Taken')}
             type="date"
             value={date}
             onChange={e => setDate(e.target.value)}
           />
           <Input
-            label="Payment Due Date (Optional)"
+            label={t('customers.paymentDueDateOptional', 'Payment Due Date (Optional)')}
             type="date"
             value={dueDate}
             onChange={e => setDueDate(e.target.value)}
@@ -239,8 +244,8 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
         </div>
 
         <Textarea
-          label="Notes / Terms (Optional)"
-          placeholder="e.g. Promised to bring cash on Saturday"
+          label={t('customers.notesTermsOptional', 'Notes / Terms (Optional)')}
+          placeholder={t('customers.notesTermsPlaceholder', 'e.g. Promised to bring cash on Saturday')}
           value={notes}
           onChange={e => setNotes(e.target.value)}
           rows={2}

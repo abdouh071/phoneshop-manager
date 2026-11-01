@@ -1485,7 +1485,7 @@ export const CustomersPage = () => {
                           <button
                             type="button"
                             className={styles.quickActionBtn}
-                            title={isShopCustomer(customer) ? 'Switch to Retail Client' : 'Switch to B2B Shop'}
+                            title={isShopCustomer(customer) ? t('customers.switchToRetail', 'Switch to Retail Client') : t('customers.switchToShop', 'Switch to B2B Shop')}
                             style={{
                               background: isShopCustomer(customer) ? '#eff6ff' : '#fef3c7',
                               color: isShopCustomer(customer) ? '#1e40af' : '#b45309',
@@ -1502,7 +1502,7 @@ export const CustomersPage = () => {
                           <button
                             type="button"
                             className={styles.quickActionBtn}
-                            title="Merge with another account"
+                            title={t('customers.mergeAccount', 'Merge with another account')}
                             style={{
                               background: '#f8fafc',
                               color: '#475569',
@@ -1521,7 +1521,7 @@ export const CustomersPage = () => {
                           <button
                             type="button"
                             className={styles.quickActionBtn}
-                            title={user?.role === 'admin' ? 'Delete customer account' : 'Delete customer account (Requires Admin Password)'}
+                            title={user?.role === 'admin' ? t('customers.deleteCustomer', 'Delete customer account') : `${t('customers.deleteCustomer', 'Delete customer account')} (Requires Admin Password)`}
                             style={{
                               background: '#fff5f5',
                               color: '#dc2626',
@@ -1541,7 +1541,7 @@ export const CustomersPage = () => {
                               e.stopPropagation();
                               handleEditCustomerClick(customer);
                             }}
-                            title={user?.role === 'admin' ? 'Edit Customer Details' : 'Edit Customer Details (Requires Admin Password)'}
+                            title={user?.role === 'admin' ? t('customers.editCustomer', 'Edit Customer Details') : `${t('customers.editCustomer', 'Edit Customer Details')} (Requires Admin Password)`}
                           >
                             <Edit size={14} />
                             {user?.role !== 'admin' && <span style={{ fontSize: '9px', marginLeft: '2px' }}>🔒</span>}
@@ -1553,9 +1553,9 @@ export const CustomersPage = () => {
                               e.stopPropagation();
                               setSelectedCustomer(customer);
                             }}
-                            title="View Customer 360° Profile"
+                            title={t('customers.openProfile', 'View Customer 360° Profile')}
                           >
-                            <Eye size={14} /> View
+                            <Eye size={14} /> {t('common.view', 'View')}
                           </Button>
                         </div>
                       </td>

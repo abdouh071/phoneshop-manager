@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -37,6 +38,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
   initialAccountB,
   initialReason,
 }) => {
+  const { t } = useTranslation();
   const { customers, debts, mergeCustomers, findDuplicates, autoResolveAllDuplicates } = useCustomerStore();
   // Only show active (non-merged) customers in the selectors
   const activeCustomers = useMemo(() => customers.filter(c => !c.mergedIntoId), [customers]);
@@ -168,19 +170,31 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
 
   const handleConfirmMerge = async () => {
     if (!accountA || !accountB || !primaryAccount || !secondaryAccount) {
-      toast.error('Invalid Selection', 'Please select two different accounts to merge.');
+      toast.error(
+        t('customers.invalidSelection', 'Invalid Selection'),
+        t('customers.selectTwoDifferentAccounts', 'Please select two different accounts to merge.')
+      );
       return;
     }
     if (accountA.id === accountB.id) {
-      toast.error('Duplicate Selection', 'Cannot merge an account into itself.');
+      toast.error(
+        t('customers.duplicateSelection', 'Duplicate Selection'),
+        t('customers.cannotMergeSelf', 'Cannot merge an account into itself.')
+      );
       return;
     }
     if (!finalName.trim()) {
-      toast.error('Name Required', 'Please enter a name for the merged account.');
+      toast.error(
+        t('customers.nameRequired', 'Name Required'),
+        t('customers.enterNameForMerged', 'Please enter a name for the merged account.')
+      );
       return;
     }
     if (keepAs === 'shop_repairer' && !finalShopName.trim()) {
-      toast.error('Shop Name Required', 'Please enter a shop name for the B2B account.');
+      toast.error(
+        t('customers.shopNameRequired', 'Shop Name Required'),
+        t('customers.enterShopNameForB2B', 'Please enter a shop name for the B2B account.')
+      );
       return;
     }
 
@@ -197,15 +211,21 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
       });
 
       toast.success(
-        'Accounts Merged Successfully',
-        `Merged "${secondaryAccount.name}" into "${finalName.trim()}" (Kept as ${
-          keepAs === 'shop_repairer' ? 'B2B Shop' : 'Retail Client'
-        }). All debts, repairs, and orders combined into primary account; duplicate customer profile deleted.`
+        t('customers.accountsMergedSuccess', 'Accounts Merged Successfully'),
+        t('customers.accountsMergedDesc', {
+          secondary: secondaryAccount.name,
+          primary: finalName.trim(),
+          type: keepAs === 'shop_repairer' ? t('common.b2bShop', 'B2B Shop') : t('common.retailCustomer', 'Retail Client'),
+          defaultValue: `Merged "${secondaryAccount.name}" into "${finalName.trim()}" (Kept as ${keepAs === 'shop_repairer' ? 'B2B Shop' : 'Retail Client'}). All debts, repairs, and orders combined into primary account; duplicate customer profile deleted.`
+        })
       );
       onClose();
     } catch (err) {
       console.error(err);
-      toast.error('Merge Failed', 'Could not complete the account merge.');
+      toast.error(
+        t('customers.mergeFailed', 'Merge Failed'),
+        t('customers.couldNotCompleteMerge', 'Could not complete the account merge.')
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -218,13 +238,20 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
       const { mergedCount, deletedCount } = await autoResolveAllDuplicates({ deleteSecondary: true });
 
       toast.success(
-        'Batch Safe Fusion Completed',
-        `Successfully merged ${mergedCount} duplicate accounts. Cleaned up ${deletedCount} duplicate accounts from database. All debts, repair history, and orders safely consolidated into single accounts.`
+        t('customers.batchFusionCompleted', 'Batch Safe Fusion Completed'),
+        t('customers.batchFusionDesc', {
+          merged: mergedCount,
+          deleted: deletedCount,
+          defaultValue: `Successfully merged ${mergedCount} duplicate accounts. Cleaned up ${deletedCount} duplicate accounts from database. All debts, repair history, and orders safely consolidated into single accounts.`
+        })
       );
       onClose();
     } catch (err) {
       console.error('Batch merge error:', err);
-      toast.error('Batch Merge Incomplete', 'An error occurred during batch account fusion.');
+      toast.error(
+        t('customers.batchMergeIncomplete', 'Batch Merge Incomplete'),
+        t('customers.batchMergeError', 'An error occurred during batch account fusion.')
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -234,7 +261,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Merge & Deduplicate Customer Accounts"
+      title={t('customers.mergeDeduplicateTitle', 'Merge & Deduplicate Customer Accounts')}
       size="md"
       footer={
         <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
@@ -252,13 +279,13 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
                   fontWeight: 600,
                 }}
               >
-                ⚡ Safe Fusion All ({detectedDuplicates.length})
+                ⚡ {t('customers.autoResolveAll', { count: detectedDuplicates.length, defaultValue: `Auto-Resolve All (${detectedDuplicates.length})` })}
               </Button>
             )}
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>
-              Cancel
+              {t('common.cancel', 'Cancel')}
             </Button>
             <Button
               variant="primary"
@@ -266,7 +293,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
               isLoading={isSubmitting}
               leftIcon={<GitMerge size={16} />}
             >
-              Declare as One & Merge
+              {t('customers.mergeRetainPrimary', 'Merge & Retain Primary')}
             </Button>
           </div>
         </div>
@@ -277,8 +304,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
         <div className={styles.banner}>
           <GitMerge size={22} className={styles.bannerIcon} />
           <p className={styles.bannerText}>
-            Declare two accounts as the same entity. All debts, purchases, and repair phones will be
-            safely consolidated into the primary account. Redundant duplicate customer accounts are deleted from the database.
+            {t('customers.step1ChooseAccounts', 'Step 1: Choose Two Customer Accounts to Merge')}
           </p>
         </div>
 
@@ -287,7 +313,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
           <div className={styles.duplicateSelectorBar}>
             <div className={styles.duplicateBarHeader}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontWeight: 600 }}>⚡ Detected Duplicate Accounts ({detectedDuplicates.length})</span>
+                <span style={{ fontWeight: 600 }}>⚡ {t('customers.detectedDuplicatesTitle', 'Detected Duplicate Accounts')} ({detectedDuplicates.length})</span>
                 <span style={{ fontSize: '11px', color: '#a16207' }}>Match: Name or Phone Number</span>
               </div>
               <Button
@@ -304,7 +330,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
                   fontWeight: 600,
                 }}
               >
-                ⚡ Safe Fusion All ({detectedDuplicates.length})
+                ⚡ {t('customers.autoResolveAll', { count: detectedDuplicates.length, defaultValue: `Auto-Resolve All (${detectedDuplicates.length})` })}
               </Button>
             </div>
             <select
@@ -312,7 +338,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
               value={selectedPairIndex}
               onChange={(e) => handleDuplicateSelect(Number(e.target.value))}
             >
-              <option value={-1}>-- Choose a detected duplicate or select manually below --</option>
+              <option value={-1}>-- {t('customers.resolveThisPair', 'Choose a detected duplicate or select manually below')} --</option>
               {detectedDuplicates.map((dup, idx) => (
                 <option key={`${dup.retail.id}_${dup.shop.id}`} value={idx}>
                   {isShopCustomer(dup.retail) ? '🏪' : '👤'} {dup.retail.shopName ? `${dup.retail.shopName} (${dup.retail.name})` : dup.retail.name} ({dup.retail.phone || 'No phone'}) ➔ {isShopCustomer(dup.shop) ? '🏪' : '👤'} {dup.shop.shopName ? `${dup.shop.shopName} (${dup.shop.name})` : dup.shop.name} ({dup.shop.phone || 'No phone'}) — [{dup.reason}]
@@ -327,7 +353,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
           {/* Account A Card */}
           <div className={`${styles.accountCard} ${styles.accountCardActive}`}>
             <div className={styles.searchSelectWrap}>
-              <label className={styles.selectLabel}>Account 1:</label>
+              <label className={styles.selectLabel}>{t('customers.accountA', 'Account A')}:</label>
               <select
                 style={{
                   width: '100%',
@@ -362,32 +388,32 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
                     )}
                   </div>
                   <span className={isShopCustomer(accountA) ? styles.accountBadgeShop : styles.accountBadgeRetail}>
-                    {isShopCustomer(accountA) ? '🏪 B2B Shop' : '👤 Retail'}
+                    {isShopCustomer(accountA) ? `🏪 ${t('common.b2bShop', 'B2B Shop')}` : `👤 ${t('common.retailCustomer', 'Retail')}`}
                   </span>
                 </div>
 
                 <div className={styles.accountMeta}>
-                  <span>📞 {accountA.phone || 'No phone'}</span>
+                  <span>📞 {accountA.phone || t('common.none', 'No phone')}</span>
                   {accountA.email && <span>✉️ {accountA.email}</span>}
                 </div>
 
                 <div className={styles.statRow}>
                   <div className={styles.statItem}>
-                    <span className={styles.statLabel}>Debt Balance</span>
+                    <span className={styles.statLabel}>{t('customers.debtBalance', 'Debt Balance')}</span>
                     <span className={styles.statValue} style={{ color: statsA.debt > 0 ? '#dc2626' : '#16a34a' }}>
                       {formatCurrency(statsA.debt)}
                     </span>
                   </div>
                   <div className={styles.statItem}>
-                    <span className={styles.statLabel}>Repair Phones</span>
-                    <span className={styles.statValue}>{statsA.repairsCount} tickets</span>
+                    <span className={styles.statLabel}>{t('customers.repairs', 'Repair Phones')}</span>
+                    <span className={styles.statValue}>{statsA.repairsCount}</span>
                   </div>
                   <div className={styles.statItem}>
-                    <span className={styles.statLabel}>Orders</span>
+                    <span className={styles.statLabel}>{t('customers.orders', 'Orders')}</span>
                     <span className={styles.statValue}>{statsA.orders}</span>
                   </div>
                   <div className={styles.statItem}>
-                    <span className={styles.statLabel}>Spent</span>
+                    <span className={styles.statLabel}>{t('customers.totalSpent', 'Spent')}</span>
                     <span className={styles.statValue}>{formatCurrency(statsA.spent)}</span>
                   </div>
                 </div>
@@ -415,7 +441,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
           {/* Account B Card */}
           <div className={`${styles.accountCard} ${styles.accountCardActive}`}>
             <div className={styles.searchSelectWrap}>
-              <label className={styles.selectLabel}>Account 2:</label>
+              <label className={styles.selectLabel}>{t('customers.accountB', 'Account B')}:</label>
               <select
                 style={{
                   width: '100%',
@@ -450,32 +476,32 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
                     )}
                   </div>
                   <span className={isShopCustomer(accountB) ? styles.accountBadgeShop : styles.accountBadgeRetail}>
-                    {isShopCustomer(accountB) ? '🏪 B2B Shop' : '👤 Retail'}
+                    {isShopCustomer(accountB) ? `🏪 ${t('common.b2bShop', 'B2B Shop')}` : `👤 ${t('common.retailCustomer', 'Retail')}`}
                   </span>
                 </div>
 
                 <div className={styles.accountMeta}>
-                  <span>📞 {accountB.phone || 'No phone'}</span>
+                  <span>📞 {accountB.phone || t('common.none', 'No phone')}</span>
                   {accountB.email && <span>✉️ {accountB.email}</span>}
                 </div>
 
                 <div className={styles.statRow}>
                   <div className={styles.statItem}>
-                    <span className={styles.statLabel}>Debt Balance</span>
+                    <span className={styles.statLabel}>{t('customers.debtBalance', 'Debt Balance')}</span>
                     <span className={styles.statValue} style={{ color: statsB.debt > 0 ? '#dc2626' : '#16a34a' }}>
                       {formatCurrency(statsB.debt)}
                     </span>
                   </div>
                   <div className={styles.statItem}>
-                    <span className={styles.statLabel}>Repair Phones</span>
-                    <span className={styles.statValue}>{statsB.repairsCount} tickets</span>
+                    <span className={styles.statLabel}>{t('customers.repairs', 'Repair Phones')}</span>
+                    <span className={styles.statValue}>{statsB.repairsCount}</span>
                   </div>
                   <div className={styles.statItem}>
-                    <span className={styles.statLabel}>Orders</span>
+                    <span className={styles.statLabel}>{t('customers.orders', 'Orders')}</span>
                     <span className={styles.statValue}>{statsB.orders}</span>
                   </div>
                   <div className={styles.statItem}>
-                    <span className={styles.statLabel}>Spent</span>
+                    <span className={styles.statLabel}>{t('customers.totalSpent', 'Spent')}</span>
                     <span className={styles.statValue}>{formatCurrency(statsB.spent)}</span>
                   </div>
                 </div>
@@ -487,7 +513,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
         {/* Destination Decision */}
         <div className={styles.decisionSection}>
           <span className={styles.decisionTitle}>
-            <CheckCircle2 size={16} color="#2563eb" /> Choose Where to Keep the Final Account:
+            <CheckCircle2 size={16} color="#2563eb" /> {t('customers.step2ChooseDetails', 'Step 2: Choose Merged Account Type & Details')}
           </span>
 
           <div className={styles.optionCards}>
@@ -500,7 +526,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
             >
               <div className={styles.optionCardHeader}>
                 <span className={styles.optionTitle} style={{ color: '#b45309' }}>
-                  <Store size={16} /> Keep in B2B Shop Side
+                  <Store size={16} /> {t('customers.keepAsShop', 'Keep as B2B Shop Account')}
                 </span>
                 <div
                   className={`${styles.optionRadio} ${
@@ -511,8 +537,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
                 </div>
               </div>
               <p className={styles.optionDesc}>
-                Will remain listed in <strong>Shops & Parts Accounts</strong>. Retains B2B wholesale pricing.
-                All retail orders, debts, and repair phones are moved here.
+                {t('customers.upgradeClientToShopDesc', { name: finalName, defaultValue: 'Will remain listed in Shops & Parts Accounts. Retains B2B wholesale pricing.' })}
               </p>
             </div>
 
@@ -525,7 +550,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
             >
               <div className={styles.optionCardHeader}>
                 <span className={styles.optionTitle} style={{ color: '#1d4ed8' }}>
-                  <User size={16} /> Keep in Retail Client Side
+                  <User size={16} /> {t('customers.keepAsRetail', 'Keep as Retail Client')}
                 </span>
                 <div
                   className={`${styles.optionRadio} ${
@@ -536,8 +561,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
                 </div>
               </div>
               <p className={styles.optionDesc}>
-                Will remain listed in <strong>Retail Customer Directory</strong>. All shop debt, orders,
-                and repair phones are moved here. Shop name is converted to personal client.
+                {t('customers.convertShopToRetailDesc', { name: finalName, defaultValue: 'Will remain listed in Retail Customer Directory.' })}
               </p>
             </div>
           </div>
@@ -546,7 +570,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
         {/* Final Account Fields Confirmation */}
         <div className={styles.fieldsGrid}>
           <div>
-            <label className={styles.selectLabel}>Final Customer / Contact Name:</label>
+            <label className={styles.selectLabel}>{t('customers.finalName', 'Final Contact / Customer Name *')}</label>
             <Input
               value={finalName}
               onChange={setFinalName}
@@ -554,7 +578,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
             />
           </div>
           <div>
-            <label className={styles.selectLabel}>Final Phone Number:</label>
+            <label className={styles.selectLabel}>{t('customers.finalPhone', 'Final Phone Number *')}</label>
             <Input
               value={finalPhone}
               onChange={setFinalPhone}
@@ -563,7 +587,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
           </div>
           {keepAs === 'shop_repairer' && (
             <div style={{ gridColumn: 'span 2' }}>
-              <label className={styles.selectLabel}>Final Workshop / Shop Name:</label>
+              <label className={styles.selectLabel}>{t('customers.shopWorkshopNameRequired', 'Shop / Workshop Name *')}</label>
               <Input
                 value={finalShopName}
                 onChange={setFinalShopName}
@@ -575,10 +599,10 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
 
         {/* Consolidation Summary Box */}
         <div className={styles.summaryBox}>
-          <span className={styles.summaryTitle}>Consolidated Outcome</span>
+          <span className={styles.summaryTitle}>{t('customers.summaryConsolidated', 'Summary of Consolidated Account')}</span>
           <div className={styles.summaryGrid}>
             <div className={styles.summaryItem}>
-              <span className={styles.summaryItemLabel}>Combined Debt</span>
+              <span className={styles.summaryItemLabel}>{t('customers.activeDebt', 'Combined Debt')}</span>
               <span
                 className={styles.summaryItemValue}
                 style={{ color: combinedDebt > 0 ? '#d97706' : '#16a34a' }}
@@ -587,18 +611,18 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
               </span>
             </div>
             <div className={styles.summaryItem}>
-              <span className={styles.summaryItemLabel}>Total Orders</span>
-              <span className={styles.summaryItemValue}>{combinedOrders} orders</span>
+              <span className={styles.summaryItemLabel}>{t('customers.totalOrders', 'Total Orders')}</span>
+              <span className={styles.summaryItemValue}>{combinedOrders}</span>
             </div>
             <div className={styles.summaryItem}>
-              <span className={styles.summaryItemLabel}>Repair Phones Preserved</span>
-              <span className={styles.summaryItemValue}>{combinedRepairs} tickets</span>
+              <span className={styles.summaryItemLabel}>{t('customers.totalRepairs', 'Repair Phones Preserved')}</span>
+              <span className={styles.summaryItemValue}>{combinedRepairs}</span>
             </div>
           </div>
           {secondaryAccount && (
             <p style={{ margin: 0, fontSize: '12px', color: '#92400e', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <AlertTriangle size={13} />
-              Duplicate account <strong>"{secondaryAccount.shopName || secondaryAccount.name}"</strong> will be deleted from the database after merging all records into <strong>"{finalName}"</strong>.
+              {secondaryAccount.shopName || secondaryAccount.name} ➔ {finalName}
             </p>
           )}
         </div>

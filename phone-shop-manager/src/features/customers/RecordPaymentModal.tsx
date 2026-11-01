@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -18,6 +19,7 @@ interface RecordPaymentModalProps {
 }
 
 export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, onClose, debt }) => {
+  const { t } = useTranslation();
   const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
   const user = useAuthStore(s => s.user);
   const [amount, setAmount] = useState('');
@@ -48,11 +50,11 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
 
   const handleSubmit = async () => {
     if (isNaN(payAmount) || payAmount <= 0) {
-      setError('Please enter a valid payment amount');
+      setError(t('customers.enterValidPaymentAmount', 'Please enter a valid payment amount'));
       return;
     }
     if (payAmount > debt.remainingBalance) {
-      setError(`Payment cannot exceed remaining debt of ${formatCurrency(debt.remainingBalance)}`);
+      setError(t('customers.paymentCannotExceed', { amount: formatCurrency(debt.remainingBalance), defaultValue: `Payment cannot exceed remaining debt of ${formatCurrency(debt.remainingBalance)}` }));
       return;
     }
     setError(null);
@@ -68,12 +70,15 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
       });
 
       toast.success(
-        isFullPayment ? 'Debt Fully Settled! 🎉' : 'Payment Recorded',
-        `${formatCurrency(payAmount)} paid against ${debt.productOrService}.`
+        isFullPayment ? t('customers.debtFullySettled', 'Debt Fully Settled! 🎉') : t('customers.paymentRecorded', 'Payment Recorded'),
+        t('customers.paymentRecordedDesc', { amount: formatCurrency(payAmount), item: debt.productOrService, defaultValue: `${formatCurrency(payAmount)} paid against ${debt.productOrService}.` })
       );
       onClose();
     } catch (err) {
-      toast.error('Payment Failed', 'An error occurred while saving payment.');
+      toast.error(
+        t('customers.paymentFailed', 'Payment Failed'),
+        t('customers.paymentFailedDesc', 'An error occurred while saving payment.')
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -83,14 +88,14 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Record Debt Repayment"
-      subtitle={`Payment for ${debt.productOrService} (${debt.customerName})`}
+      title={t('customers.recordDebtRepayment', 'Record Debt Repayment')}
+      subtitle={t('customers.paymentForDebt', { item: debt.productOrService, customer: debt.customerName, defaultValue: `Payment for ${debt.productOrService} (${debt.customerName})` })}
       size="sm"
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>{t('common.cancel', 'Cancel')}</Button>
           <Button onClick={handleSubmit} isLoading={isSubmitting}>
-            {isFullPayment ? 'Settle Debt Fully' : 'Record Payment'}
+            {isFullPayment ? t('customers.settleDebtFully', 'Settle Debt Fully') : t('customers.recordPayment', 'Record Payment')}
           </Button>
         </>
       }
@@ -126,7 +131,9 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
           fontSize: '13px',
         }}>
           <div>
-            <span style={{ color: '#64748b', fontSize: '11.5px', textTransform: 'uppercase', fontWeight: 700 }}>Current Balance Owed</span>
+            <span style={{ color: '#64748b', fontSize: '11.5px', textTransform: 'uppercase', fontWeight: 700 }}>
+              {t('customers.currentBalanceOwed', 'Current Balance Owed')}
+            </span>
             <p style={{ margin: '2px 0 0', fontWeight: 800, fontSize: '18px', color: '#dc2626' }}>
               {formatPrivateCurrency(debt.remainingBalance)}
             </p>
@@ -145,12 +152,12 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
               color: '#0f172a',
             }}
           >
-            Pay in Full
+            {t('customers.payInFull', 'Pay in Full')}
           </button>
         </div>
 
         <Input
-          label="Payment Amount (DA) *"
+          label={t('customers.paymentAmountDA', 'Payment Amount (DA) *')}
           type="number"
           min="1"
           max={debt.remainingBalance}
@@ -171,14 +178,14 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
           fontWeight: 600,
           color: isFullPayment ? '#15803d' : '#854d0e',
         }}>
-          <span>Remaining after this payment:</span>
-          <span>{isFullPayment ? '✅ 0 DA (Fully Paid)' : formatPrivateCurrency(newRemaining)}</span>
+          <span>{t('customers.remainingAfterPayment', 'Remaining after this payment:')}</span>
+          <span>{isFullPayment ? t('customers.zeroDaFullyPaid', '✅ 0 DA (Fully Paid)') : formatPrivateCurrency(newRemaining)}</span>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
           <div>
             <label style={{ fontSize: '12px', fontWeight: 600, color: '#475569', display: 'block', marginBottom: '6px' }}>
-              Payment Method
+              {t('customers.paymentMethod', 'Payment Method')}
             </label>
             <select
               value={method}
@@ -192,14 +199,14 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
                 background: '#ffffff',
               }}
             >
-              <option value="cash">💵 Cash</option>
-              <option value="card">💳 Card</option>
-              <option value="other">📱 Mobile / Transfer</option>
+              <option value="cash">{t('customers.methodCash', '💵 Cash')}</option>
+              <option value="card">{t('customers.methodCard', '💳 Card')}</option>
+              <option value="other">{t('customers.methodOther', '📱 Mobile / Transfer')}</option>
             </select>
           </div>
 
           <Input
-            label="Payment Date"
+            label={t('customers.paymentDate', 'Payment Date')}
             type="date"
             value={date}
             onChange={e => setDate(e.target.value)}
@@ -207,8 +214,8 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
         </div>
 
         <Input
-          label="Note (Optional)"
-          placeholder="e.g. Paid in cash at shop counter"
+          label={t('customers.noteOptional', 'Note (Optional)')}
+          placeholder={t('customers.notePlaceholder', 'e.g. Paid in cash at shop counter')}
           value={note}
           onChange={e => setNote(e.target.value)}
         />

@@ -104,7 +104,7 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
             <p className={styles.storeSub}>{receiptData.storeAddress}</p>
           )}
           {receiptData.storePhone && (
-            <p className={styles.storeSub}>Tél: {receiptData.storePhone}</p>
+            <p className={styles.storeSub}>{t('statementModal.phone', 'Phone:')} {receiptData.storePhone}</p>
           )}
 
           <div className={styles.badgePill}>{receiptData.headerMessage}</div>

@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ShoppingBag, Wrench, BookOpen, DollarSign, Receipt,
   ChevronDown, ChevronUp, Calendar
@@ -29,17 +30,18 @@ interface Props {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const fmt = (iso: string) =>
-  new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+const fmt = (iso: string, locale = 'en-GB') =>
+  new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: 'short', year: 'numeric' });
 
-const fmtTime = (iso: string) =>
-  new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+const fmtTime = (iso: string, locale = 'en-GB') =>
+  new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
 
-const monthKey = (iso: string) =>
-  new Date(iso).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+const monthKey = (iso: string, locale = 'en-US') =>
+  new Date(iso).toLocaleDateString(locale, { month: 'long', year: 'numeric' });
 
 // ─── Event sub-cards ──────────────────────────────────────────────────────────
 const SaleCard: React.FC<{ event: SaleEvent; onViewReceipt?: (tx: SaleTransaction) => void }> = ({ event, onViewReceipt }) => {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const tx = event.data;
   const isB2B = tx.saleType === 'parts_b2b' || Boolean(tx.invoiceNumber);
@@ -48,28 +50,28 @@ const SaleCard: React.FC<{ event: SaleEvent; onViewReceipt?: (tx: SaleTransactio
   const paymentMethods = tx.payments && tx.payments.length > 0
     ? tx.payments.map(p => {
         const m = p.method?.toLowerCase();
-        if (m === 'debt') return '📒 Credit Tab';
-        if (m === 'card') return '💳 Card';
-        if (m === 'transfer' || m === 'bank_transfer') return '🏦 Transfer';
-        if (m === 'store_credit') return '🎟️ Store Credit';
-        return '💵 Cash';
+        if (m === 'debt') return `📒 ${t('customers.creditTabOpened', 'Credit Tab')}`;
+        if (m === 'card') return `💳 ${t('common.card', 'Card')}`;
+        if (m === 'transfer' || m === 'bank_transfer') return `🏦 ${t('common.transfer', 'Transfer')}`;
+        if (m === 'store_credit') return `🎟️ ${t('common.storeCredit', 'Store Credit')}`;
+        return `💵 ${t('common.cash', 'Cash')}`;
       }).join(' + ')
-    : '💵 Cash';
+    : `💵 ${t('common.cash', 'Cash')}`;
 
   return (
     <div className={styles.card}>
       <div className={styles.cardHeader}>
         <div className={styles.cardTitle}>
-          {isB2B ? '📦 Parts Wholesale' : '🛒 Retail Sale'}
+          {isB2B ? t('customers.partsWholesale', '📦 Parts Wholesale') : t('customers.retailSale', '🛒 Retail Sale')}
           <span className={styles.cardMeta}>{refCode}</span>
           {tx.status === 'refunded' && (
             <span style={{ fontSize: '10px', color: '#dc2626', background: '#fee2e2', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>
-              Refunded
+              {t('customers.refunded', 'Refunded')}
             </span>
           )}
           {tx.status === 'partially_refunded' && (
             <span style={{ fontSize: '10px', color: '#d97706', background: '#fef3c7', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>
-              Partial Return
+              {t('customers.partialReturn', 'Partial Return')}
             </span>
           )}
         </div>
@@ -92,7 +94,7 @@ const SaleCard: React.FC<{ event: SaleEvent; onViewReceipt?: (tx: SaleTransactio
           </div>
           {tx.discount && (typeof tx.discount === 'object' ? tx.discount.value > 0 : (tx.discount as any) > 0) && (
             <div className={styles.debtRow} style={{ color: '#15803d', fontWeight: 600 }}>
-              <span>🏷️ Discount Applied</span>
+              <span>{t('customers.discountApplied', '🏷️ Discount Applied')}</span>
               <span>-{formatPrivateCurrency(typeof tx.discount === 'object' ? (tx.discount.type === 'percent' ? ((tx.subtotal || tx.total) * tx.discount.value / 100) : tx.discount.value) : (tx.discount as any))}</span>
             </div>
           )}
@@ -101,11 +103,11 @@ const SaleCard: React.FC<{ event: SaleEvent; onViewReceipt?: (tx: SaleTransactio
               {paymentMethods}
             </span>
             {tx.processedByName && (
-              <span className={styles.methodTag}>👤 Cashier: {tx.processedByName}</span>
+              <span className={styles.methodTag}>{t('customers.cashier', { name: tx.processedByName, defaultValue: `👤 Cashier: ${tx.processedByName}` })}</span>
             )}
             {onViewReceipt && (
               <button type="button" className={styles.linkBtn} onClick={() => onViewReceipt(tx)}>
-                <Receipt size={12} /> {isB2B ? 'View Invoice' : 'View Receipt'}
+                <Receipt size={12} /> {isB2B ? t('customers.viewInvoice', 'View Invoice') : t('customers.viewReceipt', 'View Receipt')}
               </button>
             )}
           </div>
@@ -116,6 +118,8 @@ const SaleCard: React.FC<{ event: SaleEvent; onViewReceipt?: (tx: SaleTransactio
 };
 
 const RepairCard: React.FC<{ event: RepairEvent }> = ({ event }) => {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language.startsWith('ar') ? 'ar-DZ' : i18n.language.startsWith('fr') ? 'fr-FR' : 'en-GB';
   const [open, setOpen] = useState(false);
   const tk = event.data;
   const isReturn = Boolean(tk.isReturn || tk.parentTicketId);
@@ -129,11 +133,11 @@ const RepairCard: React.FC<{ event: RepairEvent }> = ({ event }) => {
     <div className={styles.card}>
       <div className={styles.cardHeader}>
         <div className={styles.cardTitle}>
-          🔧 Repair Ticket
+          {t('customers.repairTicket', '🔧 Repair Ticket')}
           <span className={styles.cardMeta}>#{tk.ticketNumber}</span>
           {isReturn && (
             <span style={{ background: '#fef08a', color: '#854d0e', fontSize: '10px', padding: '1px 5px', borderRadius: '4px', fontWeight: 600 }}>
-              🔁 RETURN
+              {t('customers.returnTag', '🔁 RETURN')}
             </span>
           )}
         </div>
@@ -147,15 +151,15 @@ const RepairCard: React.FC<{ event: RepairEvent }> = ({ event }) => {
       <p className={styles.cardSubtitle}>{tk.deviceBrand} {tk.deviceModel}</p>
       {open && (
         <div className={styles.cardBody}>
-          {tk.issueDescription && <p className={styles.issueText}><strong>Issue:</strong> {tk.issueDescription}</p>}
+          {tk.issueDescription && <p className={styles.issueText}><strong>{t('customers.issue', 'Issue:')}</strong> {tk.issueDescription}</p>}
           {tk.remark && (
             <div style={{ fontSize: '11.5px', color: '#475569', background: '#f8fafc', border: '1px dashed #cbd5e1', padding: '4px 8px', borderRadius: '4px' }}>
-              <strong>Tech Notes:</strong> "{tk.remark}"
+              <strong>{t('customers.techNotes', 'Tech Notes:')}</strong> "{tk.remark}"
             </div>
           )}
           {tk.partsUsed && tk.partsUsed.length > 0 && (
             <div style={{ fontSize: '11px', color: '#0369a1', background: '#f0f9ff', border: '1px solid #bae6fd', padding: '4px 8px', borderRadius: '4px' }}>
-              <strong>Spare Parts Installed:</strong>
+              <strong>{t('customers.sparePartsInstalled', 'Spare Parts Installed:')}</strong>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '3px' }}>
                 {tk.partsUsed.map((p: any, i: number) => (
                   <span key={i} style={{ background: '#ffffff', padding: '1px 5px', borderRadius: '3px', border: '1px solid #e0f2fe' }}>
@@ -166,42 +170,42 @@ const RepairCard: React.FC<{ event: RepairEvent }> = ({ event }) => {
             </div>
           )}
           <div className={styles.debtRow}>
-            <span>Total Cost</span>
+            <span>{t('customers.totalCost', 'Total Cost')}</span>
             <strong>{formatPrivateCurrency(totalCost)}</strong>
           </div>
           {deposit > 0 && (
             <div className={styles.debtRow}>
-              <span>Intake Deposit</span>
+              <span>{t('customers.intakeDeposit', 'Intake Deposit')}</span>
               <span style={{ color: '#16a34a' }}>+{formatPrivateCurrency(deposit)}</span>
             </div>
           )}
           {tk.handoverAmountPaid && tk.handoverAmountPaid > 0 ? (
             <div className={styles.debtRow}>
-              <span>Handover Collection</span>
+              <span>{t('customers.handoverCollection', 'Handover Collection')}</span>
               <span style={{ color: '#059669', fontWeight: 600 }}>+{formatPrivateCurrency(tk.handoverAmountPaid)}</span>
             </div>
           ) : null}
           {debt > 0 ? (
             <div className={styles.debtRow}>
-              <span>Remaining Repair Debt</span>
+              <span>{t('customers.remainingRepairDebt', 'Remaining Repair Debt')}</span>
               <span style={{ color: '#dc2626', fontWeight: 700 }}>{formatPrivateCurrency(debt)}</span>
             </div>
           ) : (tk.status === 'completed' || tk.paymentStatus === 'paid') ? (
             <div className={styles.debtRow}>
-              <span>Settlement</span>
-              <span style={{ color: '#16a34a', fontWeight: 700 }}>✅ Paid in Full</span>
+              <span>{t('customers.settlement', 'Settlement')}</span>
+              <span style={{ color: '#16a34a', fontWeight: 700 }}>✅ {t('common.paidInFull', 'Paid in Full')}</span>
             </div>
           ) : null}
           <div className={styles.cardFooter}>
             {tk.assignedTechnician && (
-              <span className={styles.methodTag}>👨‍🔧 Tech: {tk.assignedTechnician}</span>
+              <span className={styles.methodTag}>{t('customers.tech', { name: tk.assignedTechnician, defaultValue: `👨‍🔧 Tech: ${tk.assignedTechnician}` })}</span>
             )}
             {tk.createdByName && (
-              <span className={styles.methodTag}>Intake: {tk.createdByName}</span>
+              <span className={styles.methodTag}>{t('customers.intake', { name: tk.createdByName, defaultValue: `Intake: ${tk.createdByName}` })}</span>
             )}
             {tk.completedAt && (
               <span className={styles.methodTag} style={{ color: '#059669' }}>
-                Claimed: {fmt(tk.completedAt)}
+                {t('customers.claimed', { date: fmt(tk.completedAt, locale), defaultValue: `Claimed: ${fmt(tk.completedAt, locale)}` })}
               </span>
             )}
           </div>
@@ -212,6 +216,8 @@ const RepairCard: React.FC<{ event: RepairEvent }> = ({ event }) => {
 };
 
 const DebtOpenCard: React.FC<{ event: DebtOpenEvent }> = ({ event }) => {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language.startsWith('ar') ? 'ar-DZ' : i18n.language.startsWith('fr') ? 'fr-FR' : 'en-GB';
   const [open, setOpen] = useState(false);
   const debt = event.data;
   const isRepairDebt = debt.type === 'repair' || debt.productOrService?.toLowerCase().includes('repair');
@@ -221,7 +227,7 @@ const DebtOpenCard: React.FC<{ event: DebtOpenEvent }> = ({ event }) => {
     <div className={styles.card}>
       <div className={styles.cardHeader}>
         <div className={styles.cardTitle}>
-          {isRepairDebt ? '🔧 Repair Credit Tab' : isPartsDebt ? '📦 Wholesale Parts Tab' : '📒 Credit Tab Opened'}
+          {isRepairDebt ? t('customers.repairCreditTab', '🔧 Repair Credit Tab') : isPartsDebt ? t('customers.wholesalePartsTab', '📦 Wholesale Parts Tab') : t('customers.creditTabOpened', '📒 Credit Tab Opened')}
           <span className={styles.cardMeta}>{debt.invoiceNumber || debt.productOrService}</span>
         </div>
         <div className={styles.cardRight}>
@@ -235,38 +241,38 @@ const DebtOpenCard: React.FC<{ event: DebtOpenEvent }> = ({ event }) => {
       {open && (
         <div className={styles.cardBody}>
           <div className={styles.debtRow}>
-            <span>Original Value</span>
+            <span>{t('customers.originalValue', 'Original Value')}</span>
             <strong>{formatPrivateCurrency(debt.totalAmount)}</strong>
           </div>
           {debt.amountPaid > 0 && (
             <div className={styles.debtRow}>
-              <span>Total Paid Towards Debt</span>
+              <span>{t('customers.totalPaidTowardsDebt', 'Total Paid Towards Debt')}</span>
               <span style={{ color: '#16a34a', fontWeight: 600 }}>{formatPrivateCurrency(debt.amountPaid)}</span>
             </div>
           )}
           <div className={styles.debtRow}>
-            <span>Balance Owed</span>
+            <span>{t('statementModal.closingBalanceLabel', 'Balance Owed')}</span>
             <span style={{ fontWeight: 700, color: debt.remainingBalance > 0 ? '#dc2626' : '#16a34a' }}>
               {formatPrivateCurrency(debt.remainingBalance)}
             </span>
           </div>
           {debt.dueDate && (
             <div className={styles.debtRow}>
-              <span>Due Date</span>
+              <span>{t('statementModal.dueDate', 'Due Date')}</span>
               <span style={{ color: isDebtOverdue(debt) ? '#dc2626' : undefined, fontWeight: isDebtOverdue(debt) ? 700 : undefined }}>
-                {fmt(debt.dueDate)} {isDebtOverdue(debt) ? `(${getDaysOverdue(debt.dueDate)}d late)` : ''}
+                {fmt(debt.dueDate, locale)} {isDebtOverdue(debt) ? t('customers.daysLate', { count: getDaysOverdue(debt.dueDate), defaultValue: `(${getDaysOverdue(debt.dueDate)}d late)` }) : ''}
               </span>
             </div>
           )}
           {debt.notes && <p className={styles.noteText}>{debt.notes}</p>}
           <div className={styles.cardFooter}>
             {debt.status === 'paid'
-              ? <span className={styles.badgePaid}>✅ Fully Settled</span>
+              ? <span className={styles.badgePaid}>{t('customers.badgePaid', '✅ Fully Settled')}</span>
               : isDebtOverdue(debt)
-                ? <span className={styles.badgeOverdue}>🔴 Overdue ({getDaysOverdue(debt.dueDate)}d late)</span>
+                ? <span className={styles.badgeOverdue}>{t('customers.badgeOverdue', { count: getDaysOverdue(debt.dueDate), defaultValue: `🔴 Overdue (${getDaysOverdue(debt.dueDate)}d late)` })}</span>
                 : debt.status === 'partially_paid'
-                  ? <span className={styles.badgePartial}>🟡 Partially Paid ({formatPrivateCurrency(debt.remainingBalance)} left)</span>
-                  : <span className={styles.badgeUnpaid}>🚨 Unpaid</span>
+                  ? <span className={styles.badgePartial}>{t('customers.badgePartial', { amount: formatPrivateCurrency(debt.remainingBalance), defaultValue: `🟡 Partially Paid (${formatPrivateCurrency(debt.remainingBalance)} left)` })}</span>
+                  : <span className={styles.badgeUnpaid}>{t('customers.badgeUnpaid', '🚨 Unpaid')}</span>
             }
           </div>
         </div>
@@ -276,6 +282,7 @@ const DebtOpenCard: React.FC<{ event: DebtOpenEvent }> = ({ event }) => {
 };
 
 const DebtPayCard: React.FC<{ event: DebtPayEvent }> = ({ event }) => {
+  const { t } = useTranslation();
   const payment = event.data.payments[event.paymentIndex];
   if (!payment) return null;
   const debt = event.data;
@@ -284,29 +291,29 @@ const DebtPayCard: React.FC<{ event: DebtPayEvent }> = ({ event }) => {
     <div className={styles.card}>
       <div className={styles.cardHeader}>
         <div className={styles.cardTitle}>
-          💚 Debt Repayment
+          {t('customers.debtRepayment', '💚 Debt Repayment')}
           <span className={styles.cardMeta}>{debt.productOrService}</span>
         </div>
         <span className={`${styles.amount} ${styles.amountPaid}`}>+{formatPrivateCurrency(payment.amount)}</span>
       </div>
       <div className={styles.cardBody}>
         <div className={styles.debtRow}>
-          <span>Method</span>
+          <span>{t('customers.method', 'Method')}</span>
           <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{payment.method}</span>
         </div>
         {payment.receivedByName && (
           <div className={styles.debtRow}>
-            <span>Received by</span>
+            <span>{t('customers.receivedBy', 'Received by')}</span>
             <strong>{payment.receivedByName}</strong>
           </div>
         )}
         <div className={styles.debtRow}>
-          <span>Current Debt Balance</span>
+          <span>{t('customers.currentDebtBalance', 'Current Debt Balance')}</span>
           <span style={{ fontWeight: 700, color: debt.remainingBalance > 0 ? '#dc2626' : '#16a34a' }}>
             {formatPrivateCurrency(debt.remainingBalance)}
           </span>
         </div>
-        {payment.note && <p className={styles.noteText}>Note: {payment.note}</p>}
+        {payment.note && <p className={styles.noteText}>{t('customers.notes', 'Note')}: {payment.note}</p>}
       </div>
     </div>
   );
@@ -314,6 +321,10 @@ const DebtPayCard: React.FC<{ event: DebtPayEvent }> = ({ event }) => {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export const Customer360Timeline: React.FC<Props> = ({ transactions, tickets, debts, onViewReceipt }) => {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language.startsWith('ar') ? 'ar-DZ' : i18n.language.startsWith('fr') ? 'fr-FR' : 'en-GB';
+  const monthLocale = i18n.language.startsWith('ar') ? 'ar-DZ' : i18n.language.startsWith('fr') ? 'fr-FR' : 'en-US';
+
   const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
   const [filter, setFilter] = useState<FilterKind>('all');
 
@@ -339,12 +350,12 @@ export const Customer360Timeline: React.FC<Props> = ({ transactions, tickets, de
   const grouped = useMemo(() => {
     const map = new Map<string, TimelineEvent[]>();
     filtered.forEach(ev => {
-      const key = monthKey(ev.date);
+      const key = monthKey(ev.date, monthLocale);
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(ev);
     });
     return Array.from(map.entries());
-  }, [filtered]);
+  }, [filtered, monthLocale]);
 
   const counts = {
     all:     allEvents.length,
@@ -371,19 +382,19 @@ export const Customer360Timeline: React.FC<Props> = ({ transactions, tickets, de
   };
 
   const PILLS: { kind: FilterKind; label: string }[] = [
-    { kind: 'all',     label: 'All' },
-    { kind: 'sale',    label: '🛒 Sales' },
-    { kind: 'repair',  label: '🔧 Repairs' },
-    { kind: 'debt',    label: '📒 Debts' },
-    { kind: 'payment', label: '💚 Payments' },
+    { kind: 'all',     label: t('customers.pillAll', 'All') },
+    { kind: 'sale',    label: t('customers.pillSales', '🛒 Sales') },
+    { kind: 'repair',  label: t('customers.pillRepairs', '🔧 Repairs') },
+    { kind: 'debt',    label: t('customers.pillDebts', '📒 Debts') },
+    { kind: 'payment', label: t('customers.pillPayments', '💚 Payments') },
   ];
 
   if (allEvents.length === 0) {
     return (
       <div className={styles.emptyTimeline}>
         <Calendar size={32} strokeWidth={1.5} />
-        <p>No activity history yet.</p>
-        <span>Sales, repairs, and credit entries will appear here.</span>
+        <p>{t('customers.noActivityHistory', 'No activity history yet.')}</p>
+        <span>{t('customers.activityHistoryDesc', 'Sales, repairs, and credit entries will appear here.')}</span>
       </div>
     );
   }
@@ -405,7 +416,7 @@ export const Customer360Timeline: React.FC<Props> = ({ transactions, tickets, de
       </div>
 
       {filtered.length === 0 ? (
-        <div className={styles.emptyTimeline}><p>No events of this type.</p></div>
+        <div className={styles.emptyTimeline}><p>{t('customers.noEventsOfType', 'No events of this type.')}</p></div>
       ) : (
         <div className={styles.timeline}>
           {grouped.map(([month, events]) => (
@@ -420,7 +431,7 @@ export const Customer360Timeline: React.FC<Props> = ({ transactions, tickets, de
                     {idx < events.length - 1 && <div className={styles.line} />}
                   </div>
                   <div className={styles.eventContent}>
-                    <div className={styles.eventTime}>{fmt(ev.date)} · {fmtTime(ev.date)}</div>
+                    <div className={styles.eventTime}>{fmt(ev.date, locale)} · {fmtTime(ev.date, locale)}</div>
                     {ev.kind === 'sale'    && <SaleCard    event={ev} onViewReceipt={onViewReceipt} />}
                     {ev.kind === 'repair'  && <RepairCard  event={ev} />}
                     {ev.kind === 'debt'    && <DebtOpenCard event={ev} />}

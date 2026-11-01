@@ -179,7 +179,10 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
 
     // Check for duplicate phone on new customer creation using robust phone line matching
     if (!customerToEdit && !skipDuplicateCheck && matchedDuplicateCustomer) {
-      toast.warning('Existing Customer Found', 'Please use one of the actions on the card above, or click "Save as Separate Contact".');
+      toast.warning(
+        t('customers.existingCustomerFound', 'Existing Customer Found'),
+        t('customers.existingCustomerFoundDesc', 'Please use one of the actions on the card above, or click "Save as Separate Contact".')
+      );
       return;
     }
 
@@ -207,7 +210,10 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
 
       if (customerToEdit) {
         await updateCustomer(customerToEdit.id, customerPayload);
-        toast.success('Customer Updated', `${form.name}'s details have been saved.`);
+        toast.success(
+          t('customers.customerUpdated', 'Customer Updated'),
+          t('customers.customerUpdatedDesc', { name: form.name, defaultValue: `${form.name}'s details have been saved.` })
+        );
       } else if (hasOpeningDebt && parseFloat(debtAmount) > 0) {
         const total = parseFloat(debtAmount);
         const paid = parseFloat(debtPaid) || 0;
@@ -219,15 +225,24 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
           dueDate: debtDueDate || undefined,
           notes: debtNotes.trim() || undefined,
         });
-        toast.success('Customer Registered with Debt', `${form.name} created with ${formatCurrency(total - paid)} balance.`);
+        toast.success(
+          t('customers.customerRegisteredWithDebt', 'Customer Registered with Debt'),
+          t('customers.customerRegisteredWithDebtDesc', { name: form.name, amount: formatCurrency(total - paid), defaultValue: `${form.name} created with ${formatCurrency(total - paid)} balance.` })
+        );
       } else {
         await addCustomer(customerPayload);
-        toast.success('Customer Created', `${form.name} registered.`);
+        toast.success(
+          t('customers.customerCreated', 'Customer Created'),
+          t('customers.customerCreatedDesc', { name: form.name, defaultValue: `${form.name} registered.` })
+        );
       }
       
       handleClose();
     } catch (err: any) {
-      toast.error('Operation Failed', err.message || 'Could not save customer.');
+      toast.error(
+        t('customers.operationFailed', 'Operation Failed'),
+        err.message || t('customers.saveCustomerError', 'Could not save customer.')
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -260,26 +275,28 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
       onClose={handleClose}
       title={
         customerToEdit
-          ? 'Edit Customer Profile'
+          ? t('customers.editCustomerTitle', 'Edit Customer Profile')
           : lockedAccountType === 'shop_repairer'
-          ? 'Register B2B Phone Shop / Repairer'
+          ? t('customers.newB2BShopTitle', 'New B2B Partner Shop / Repairer')
           : lockedAccountType === 'retail'
-          ? 'Register Retail Customer'
-          : 'Register New Customer'
+          ? t('customers.newRetailClientTitle', 'New Retail Client')
+          : t('customers.addCustomer', 'Register New Customer')
       }
       subtitle={
-        lockedAccountType === 'shop_repairer'
-          ? 'Add a commercial phone store or repair workshop account'
+        customerToEdit
+          ? t('customers.editProfileSubtitle', { id: customerToEdit.id, defaultValue: `Updating account #${customerToEdit.id}` })
+          : lockedAccountType === 'shop_repairer'
+          ? t('customers.newB2BSubtitle', 'Add a commercial phone store or repair workshop account')
           : lockedAccountType === 'retail'
-          ? 'Add a standard retail walk-in customer profile'
-          : 'Configure contact, business account type, and credit ledger settings'
+          ? t('customers.newRetailSubtitle', 'Add a standard retail walk-in customer profile')
+          : t('customers.newRetailSubtitle', 'Configure contact, business account type, and credit ledger settings')
       }
       size="md"
       footer={
         <>
-          <Button variant="ghost" onClick={handleClose} disabled={isSubmitting}>Cancel</Button>
+          <Button variant="ghost" onClick={handleClose} disabled={isSubmitting}>{t('common.cancel', 'Cancel')}</Button>
           <Button onClick={handleSubmit} isLoading={isSubmitting}>
-            {customerToEdit ? 'Save Changes' : hasOpeningDebt ? 'Create & Log Debt' : 'Add Customer'}
+            {customerToEdit ? t('common.save', 'Save Changes') : hasOpeningDebt ? t('customers.addDebtRecord', 'Create & Log Debt') : t('customers.addCustomer', 'Add Customer')}
           </Button>
         </>
       }
@@ -300,11 +317,11 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
             fontWeight: 600,
           }}>
             {lockedAccountType === 'shop_repairer' ? <Store size={18} /> : <User size={18} />}
-            <span>Account Category: <strong>{lockedAccountType === 'shop_repairer' ? '🏪 B2B Phone Shop / Repairer' : '👤 Retail Customer'}</strong></span>
+            <span>{t('customers.tier', 'Account Category')}: <strong>{lockedAccountType === 'shop_repairer' ? `🏪 ${t('common.b2bShop', 'B2B Phone Shop / Repairer')}` : `👤 ${t('common.retailCustomer', 'Retail Customer')}`}</strong></span>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '12.5px', fontWeight: 700, color: '#334155' }}>Account Category</label>
+            <label style={{ fontSize: '12.5px', fontWeight: 700, color: '#334155' }}>{t('customers.tier', 'Account Category')}</label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
               <button
                 type="button"
@@ -326,7 +343,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
                 onClick={() => set('accountType', 'retail')}
               >
                 <User size={16} />
-                <span>👤 Retail Customer</span>
+                <span>👤 {t('common.retailCustomer', 'Retail Customer')}</span>
               </button>
 
               <button
@@ -349,7 +366,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
                 onClick={() => set('accountType', 'shop_repairer')}
               >
                 <Store size={16} />
-                <span>🏪 Shop / Repairer (B2B)</span>
+                <span>🏪 {t('common.b2bShop', 'Shop / Repairer (B2B)')}</span>
               </button>
             </div>
           </div>
@@ -358,8 +375,8 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
         {form.accountType === 'shop_repairer' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', background: '#f8fafc', padding: '14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
             <Input
-              label="Shop / Business Name *"
-              placeholder="e.g. AP Phone, QuickFix 31"
+              label={t('customers.shopBusinessName', 'Shop / Business Name *')}
+              placeholder={t('customers.shopBusinessPlaceholder', 'e.g. AP Phone, QuickFix 31')}
               value={form.shopName}
               onChange={e => set('shopName', e.target.value)}
               error={errors.shopName}
@@ -367,19 +384,19 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               <Input
-                label="Credit Limit (DZD, Optional)"
+                label={t('customers.creditLimitOptional', 'Credit Limit (DZD, Optional)')}
                 type="number"
                 min="0"
-                placeholder="e.g. 50000"
+                placeholder={t('customers.creditLimitPlaceholder', 'e.g. 50000')}
                 value={form.creditLimit}
                 onChange={e => set('creditLimit', e.target.value)}
               />
               <Input
-                label="Wholesale Discount (% Optional)"
+                label={t('customers.wholesaleDiscountOptional', 'Wholesale Discount (% Optional)')}
                 type="number"
                 min="0"
                 max="100"
-                placeholder="e.g. 10 (auto-applied in POS)"
+                placeholder={t('customers.wholesaleDiscountPlaceholder', 'e.g. 10 (auto-applied in POS)')}
                 value={form.wholesaleDiscountPercent}
                 onChange={e => set('wholesaleDiscountPercent', e.target.value)}
               />
@@ -403,32 +420,32 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
                   padding: '2px 0',
                 }}
               >
-                <span>{showCommercialDetails ? '▼ Hide' : '▶ Show'} Commercial Invoicing Details (RC, NIF, NIS, Art) — Optional</span>
+                <span>{showCommercialDetails ? '▼' : '▶'} {t('customers.tradeRegistryRC', 'Registre de Commerce (RC)')}, NIF, NIS — {t('common.optional', 'Optional')}</span>
               </button>
 
               {showCommercialDetails && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
                   <Input
-                    label="Registre de Commerce (RC)"
-                    placeholder="e.g. 16/00-1234567B19"
+                    label={t('customers.tradeRegistryRC', 'Registre de Commerce (RC)')}
+                    placeholder={t('customers.tradeRegistryPlaceholder', 'e.g. 16/00-1234567B19')}
                     value={form.rc}
                     onChange={e => set('rc', e.target.value)}
                   />
                   <Input
-                    label="NIF (Identifiant Fiscal)"
-                    placeholder="e.g. 000123456789012"
+                    label={t('customers.taxIdNIF', 'NIF (Identifiant Fiscal)')}
+                    placeholder={t('customers.taxIdPlaceholder', 'e.g. 000123456789012')}
                     value={form.nif}
                     onChange={e => set('nif', e.target.value)}
                   />
                   <Input
-                    label="NIS (Identifiant Statistique)"
-                    placeholder="e.g. 099123456789012"
+                    label={t('customers.statIdNIS', 'NIS (Identifiant Statistique)')}
+                    placeholder={t('customers.statIdPlaceholder', 'e.g. 099123456789012')}
                     value={form.nis}
                     onChange={e => set('nis', e.target.value)}
                   />
                   <Input
-                    label="Article d'Imposition (AI)"
-                    placeholder="e.g. 16012345678"
+                    label={t('customers.taxArticleAI', "Article d'Imposition (AI)")}
+                    placeholder={t('customers.taxArticlePlaceholder', 'e.g. 16012345678')}
                     value={form.art}
                     onChange={e => set('art', e.target.value)}
                   />
@@ -439,15 +456,15 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
         )}
 
         <Input 
-          label={form.accountType === 'shop_repairer' ? "Contact Person / Owner Name *" : "Full Name *"} 
-          placeholder={form.accountType === 'shop_repairer' ? "e.g. Ahmed Benali" : "e.g. Karim Benz"} 
+          label={form.accountType === 'shop_repairer' ? t('customers.contactPersonOwnerName', "Contact Person / Owner Name *") : t('customers.fullName', "Full Name *")} 
+          placeholder={form.accountType === 'shop_repairer' ? t('customers.contactPersonPlaceholder', "e.g. Ahmed Benali") : t('customers.fullNamePlaceholder', "e.g. Karim Benz")} 
           value={form.name}
           onChange={e => set('name', e.target.value)} 
           error={errors.name} 
         />
         <Input 
-          label="Phone Number *" 
-          placeholder="e.g. 0550 12 34 56" 
+          label={t('customers.phoneNumber', "Phone Number *")} 
+          placeholder={t('customers.phonePlaceholder', "e.g. 0550 12 34 56")} 
           value={form.phone}
           onChange={e => {
             set('phone', e.target.value);
@@ -567,22 +584,22 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
           />
         )}
         <Input 
-          label="Email Address (Optional)" 
-          placeholder="e.g. contact@example.com" 
+          label={t('customers.emailOptional', 'Email Address (Optional)')} 
+          placeholder={t('customers.emailPlaceholder', 'e.g. contact@example.com')} 
           type="email"
           value={form.email}
           onChange={e => set('email', e.target.value)} 
           error={errors.email} 
         />
         <Input 
-          label="Address / Wilaya (Optional)" 
-          placeholder="e.g. Alger Centre, Oran, etc." 
+          label={t('customers.addressWilayaOptional', 'Address / Wilaya (Optional)')} 
+          placeholder={t('customers.addressWilayaPlaceholder', 'e.g. Alger Centre, Oran, etc.')} 
           value={form.address}
           onChange={e => set('address', e.target.value)} 
         />
         <Textarea
-          label="Customer Notes / Remarks (Optional)"
-          placeholder="e.g. VIP client, preferred payment method, special discounts..."
+          label={t('customers.customerNotesOptional', 'Customer Notes / Remarks (Optional)')}
+          placeholder={t('customers.customerNotesPlaceholder', 'e.g. VIP client, preferred payment method, special discounts...')}
           value={form.notes}
           onChange={e => set('notes', e.target.value)}
           rows={2}
@@ -638,26 +655,26 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
                 )}
 
                 <Input
-                  label="Product / Item Taken *"
-                  placeholder="e.g. iPhone 11 128GB, Screen + Case, Airpods"
+                  label={t('customers.productItemTaken', 'Product / Item Taken *')}
+                  placeholder={t('customers.productItemPlaceholder', 'e.g. iPhone 11 128GB, Screen + Case, Airpods')}
                   value={debtProduct}
                   onChange={e => { setDebtProduct(e.target.value); setDebtError(null); }}
                 />
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   <Input
-                    label="Total Value / Price *"
+                    label={t('customers.totalValuePrice', 'Total Value / Price *')}
                     type="number"
                     min="0"
-                    placeholder="e.g. 35000"
+                    placeholder={t('customers.pricePlaceholder', 'e.g. 35000')}
                     value={debtAmount}
                     onChange={e => { setDebtAmount(e.target.value); setDebtError(null); }}
                   />
                   <Input
-                    label="Amount Paid Upfront"
+                    label={t('customers.amountPaidUpfront', 'Amount Paid Upfront')}
                     type="number"
                     min="0"
-                    placeholder="0 if nothing"
+                    placeholder={t('customers.zeroIfNothing', '0 if nothing')}
                     value={debtPaid}
                     onChange={e => setDebtPaid(e.target.value)}
                   />
@@ -675,7 +692,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
                   fontSize: '13px',
                   fontWeight: 600,
                 }}>
-                  <span style={{ color: '#78350f' }}>Remaining Balance Owed:</span>
+                  <span style={{ color: '#78350f' }}>{t('customers.remainingBalanceOwed', 'Remaining Balance Owed:')}</span>
                   <span style={{ fontSize: '15px', fontWeight: 800, color: '#dc2626' }}>
                     {formatCurrency(remainingNum)}
                   </span>
@@ -683,13 +700,13 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   <Input
-                    label="Date Taken"
+                    label={t('customers.dateTaken', 'Date Taken')}
                     type="date"
                     value={debtDate}
                     onChange={e => setDebtDate(e.target.value)}
                   />
                   <Input
-                    label="Payment Due Date (Optional)"
+                    label={t('customers.paymentDueDateOptional', 'Payment Due Date (Optional)')}
                     type="date"
                     value={debtDueDate}
                     onChange={e => setDebtDueDate(e.target.value)}
@@ -697,8 +714,8 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
                 </div>
 
                 <Textarea
-                  label="Notes / Terms (Optional)"
-                  placeholder="e.g. Agreed to pay remaining balance next week by cash"
+                  label={t('customers.notesTermsOptional', 'Notes / Terms (Optional)')}
+                  placeholder={t('customers.notesTermsPlaceholder', 'e.g. Agreed to pay remaining balance next week by cash')}
                   value={debtNotes}
                   onChange={e => setDebtNotes(e.target.value)}
                   rows={2}

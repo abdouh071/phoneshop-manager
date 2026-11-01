@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -19,6 +20,7 @@ export const SwitchAccountTypeModal: React.FC<SwitchAccountTypeModalProps> = ({
   onClose,
   customer,
 }) => {
+  const { t } = useTranslation();
   const { switchAccountType } = useCustomerStore();
   const toast = useToast();
 
@@ -40,7 +42,7 @@ export const SwitchAccountTypeModal: React.FC<SwitchAccountTypeModalProps> = ({
 
   const handleSwitch = async () => {
     if (targetType === 'shop_repairer' && !shopName.trim()) {
-      setError('Please provide a workshop or shop name');
+      setError(t('customers.provideShopNameError', 'Please provide a workshop or shop name'));
       return;
     }
 
@@ -48,14 +50,17 @@ export const SwitchAccountTypeModal: React.FC<SwitchAccountTypeModalProps> = ({
     try {
       await switchAccountType(customer.id, targetType, shopName.trim());
       toast.success(
-        'Account Converted',
+        t('customers.accountConverted', 'Account Converted'),
         targetType === 'shop_repairer'
-          ? `${customer.name} converted to B2B Shop "${shopName.trim()}".`
-          : `${customer.name} converted to Retail Customer.`
+          ? t('customers.convertedToShopSuccess', { name: customer.name, shopName: shopName.trim(), defaultValue: `${customer.name} converted to B2B Shop "${shopName.trim()}".` })
+          : t('customers.convertedToRetailSuccess', { name: customer.name, defaultValue: `${customer.name} converted to Retail Customer.` })
       );
       onClose();
     } catch (err) {
-      toast.error('Failed to convert account', 'An error occurred during account conversion.');
+      toast.error(
+        t('customers.failedToConvert', 'Failed to convert account'),
+        t('customers.convertAccountError', 'An error occurred during account conversion.')
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -65,12 +70,12 @@ export const SwitchAccountTypeModal: React.FC<SwitchAccountTypeModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={isCurrentShop ? 'Convert to Retail Client' : 'Convert to B2B Shop Account'}
+      title={isCurrentShop ? t('customers.convertToRetail', 'Convert to Retail Client') : t('customers.convertToShop', 'Convert to B2B Shop Account')}
       size="sm"
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>
-            Cancel
+            {t('common.cancel', 'Cancel')}
           </Button>
           <Button
             variant="primary"
@@ -78,7 +83,7 @@ export const SwitchAccountTypeModal: React.FC<SwitchAccountTypeModalProps> = ({
             isLoading={isSubmitting}
             leftIcon={<ArrowRightLeft size={16} />}
           >
-            {isCurrentShop ? 'Convert to Retail' : 'Convert to Shop'}
+            {isCurrentShop ? t('customers.btnConvertToRetail', 'Convert to Retail') : t('customers.btnConvertToShop', 'Convert to Shop')}
           </Button>
         </>
       }
@@ -107,13 +112,13 @@ export const SwitchAccountTypeModal: React.FC<SwitchAccountTypeModalProps> = ({
           <div>
             <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
               {isCurrentShop
-                ? 'Convert Shop to Retail Client'
-                : 'Upgrade Client to B2B Shop / Workshop'}
+                ? t('customers.convertShopToRetailTitle', 'Convert Shop to Retail Client')
+                : t('customers.upgradeClientToShopTitle', 'Upgrade Client to B2B Shop / Workshop')}
             </h4>
             <p style={{ margin: 0, fontSize: '13px', color: '#475569', lineHeight: 1.4 }}>
               {isCurrentShop
-                ? `Account "${customer.shopName || customer.name}" will be moved from the B2B Shops directory to the regular Retail Clients list. History & debts remain preserved.`
-                : `Account "${customer.name}" will gain B2B wholesale pricing, parts catalog ordering, and appear under Shops & Workshops.`}
+                ? t('customers.convertShopToRetailDesc', { name: customer.shopName || customer.name, defaultValue: `Account "${customer.shopName || customer.name}" will be moved from the B2B Shops directory to the regular Retail Clients list. History & debts remain preserved.` })
+                : t('customers.upgradeClientToShopDesc', { name: customer.name, defaultValue: `Account "${customer.name}" will gain B2B wholesale pricing, parts catalog ordering, and appear under Shops & Workshops.` })}
             </p>
           </div>
         </div>
@@ -121,12 +126,12 @@ export const SwitchAccountTypeModal: React.FC<SwitchAccountTypeModalProps> = ({
         {!isCurrentShop && (
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
-              Shop / Workshop Name <span style={{ color: '#dc2626' }}>*</span>
+              {t('customers.shopWorkshopNameRequired', 'Shop / Workshop Name *')}
             </label>
             <Input
               value={shopName}
               onChange={(v) => { setShopName(v); setError(null); }}
-              placeholder="e.g. AP Phone Repair, Benali GSM"
+              placeholder={t('customers.shopNamePlaceholder', 'e.g. AP Phone Repair, Benali GSM')}
               autoFocus
             />
             {error && (
@@ -146,17 +151,17 @@ export const SwitchAccountTypeModal: React.FC<SwitchAccountTypeModalProps> = ({
           color: '#64748b',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-            <span>Account:</span>
+            <span>{t('statementModal.customerAccount', 'Account:')}</span>
             <strong style={{ color: '#0f172a' }}>{customer.name}</strong>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-            <span>Phone:</span>
-            <span style={{ color: '#0f172a' }}>{customer.phone || 'None'}</span>
+            <span>{t('common.phone', 'Phone')}:</span>
+            <span style={{ color: '#0f172a' }}>{customer.phone || t('common.none', 'None')}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>Active Debt:</span>
+            <span>{t('customers.activeDebtLabel', 'Active Debt:')}</span>
             <span style={{ color: (customer.totalDebt || 0) > 0 ? '#d97706' : '#16a34a', fontWeight: 600 }}>
-              {(customer.totalDebt || 0) > 0 ? `${customer.totalDebt} DZD` : 'None'}
+              {(customer.totalDebt || 0) > 0 ? `${customer.totalDebt} DZD` : t('common.none', 'None')}
             </span>
           </div>
         </div>
