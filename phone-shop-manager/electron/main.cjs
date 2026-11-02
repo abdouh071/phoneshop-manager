@@ -15,11 +15,13 @@
  *           └── Windows: copy /b → \\COMPUTERNAME\printer (shared printers)
  */
 
-const { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog, ipcMain, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const http = require('http');
+const { createUpdater } = require('./updater.cjs');
+const { resolveStaticPath, isTrustedFrameOrigin, permissionAllowed } = require('./security.cjs');
 
 // ─── Logging to Disk ─────────────────────────────────────────────────────────
 function logToFile(msg) {
@@ -48,10 +50,26 @@ try {
   // Module not installed — not a Squirrel-based install, nothing to do.
 }
 
-// Allow Chromium to make requests from HTTPS (deployed app) to localhost (embedded print server)
-app.commandLine.appendSwitch('disable-web-security');
-app.commandLine.appendSwitch('disable-features', 'BlockInsecurePrivateNetworkRequests');
-app.commandLine.appendSwitch('allow-insecure-localhost');
+// ─── Renderer security ───────────────────────────────────────────────────────
+// No `disable-web-security`, no `allow-insecure-localhost`, no
+// `allowRunningInsecureContent`, and no Private Network Access opt-out. The
+// print server answers PNA preflights for allowlisted origins, Chromium already
+// treats http://127.0.0.1 as a trustworthy URL, and the desktop shell prints
+// over IPC — so the renderer keeps its same-origin policy.
+const DEPLOYED_URL = 'https://phoneshop-mgr-pro-2026.web.app';
+
+// Origins allowed to host the top frame, and therefore to reach the print IPC.
+// A Firebase preview channel (preview--<site>.web.app) or a custom domain needs
+// listing here, exactly as it does in PRINT_SERVER_ALLOWED_ORIGINS.
+const TRUSTED_RENDERER_ORIGINS = new Set([
+  new URL(DEPLOYED_URL).origin,
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  ...(process.env.PHONESHOP_TRUSTED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim().replace(/\/$/, ''))
+    .filter(Boolean),
+]);
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -69,27 +87,84 @@ let printServerModule = null; // in-process module reference for native IPC
 let localAppServer = null;
 let localAppPort = null;
 
+// ─── Frame trust ─────────────────────────────────────────────────────────────
+
+function localAppOrigin() {
+  return localAppPort ? `http://127.0.0.1:${localAppPort}` : null;
+}
+
+/**
+ * A frame may ask the shell to print only if it is the top frame of the window
+ * this process created, loaded from an origin the app is actually served from.
+ * Without that, any iframe the remote page pulled in could reach the printers.
+ */
+function isTrustedPrintSender(event) {
+  const frame = event.senderFrame;
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (!frame || event.sender.id !== mainWindow.webContents.id) return false;
+  if (frame !== frame.top) return false;
+  return isTrustedFrameOrigin(frame.url, {
+    allowedOrigins: TRUSTED_RENDERER_ORIGINS,
+    localOrigin: localAppOrigin(),
+  });
+}
+
+function refuseUntrusted(event, channel) {
+  const from = event.senderFrame ? event.senderFrame.url : '(frame gone)';
+  logToFile(`[IPC] Refused ${channel} from untrusted frame: ${from}`);
+  return { ok: false, error: 'Untrusted print request refused' };
+}
+
+// ─── Permission gate ─────────────────────────────────────────────────────────
+// Electron approves every permission request unless the app says otherwise.
+// This app needs exactly two: the camera for the barcode scanner, and clipboard
+// writes for the copy buttons. Anything else is denied and logged, so a real
+// future need shows up in the log instead of silently working or silently
+// breaking.
+const ALLOWED_PERMISSIONS = new Set(['media', 'clipboard-sanitized-write']);
+
+function configurePermissionGate() {
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    const allowed = permissionAllowed(permission, { allowed: ALLOWED_PERMISSIONS, details });
+    if (!allowed) logToFile(`[Permissions] Denied "${permission}"`);
+    callback(allowed);
+  });
+
+  session.defaultSession.setPermissionCheckHandler((_wc, permission, details) =>
+    permissionAllowed(permission, { allowed: ALLOWED_PERMISSIONS, details })
+  );
+}
+
+// ─── Shell updates ───────────────────────────────────────────────────────────
+const updater = createUpdater({ app, dialog, shell, log: logToFile });
+
 // ─── Print Server Embedding ──────────────────────────────────────────────────
 
 function getPrintServerPaths() {
+  // Absolute paths only — a relative one would resolve against the caller's
+  // cwd here and against node_modules semantics in require().
+  const absolute = (p) => (path.isAbsolute(p) ? p : null);
+  const resources = process.resourcesPath || '';
+
   const candidatePaths = [
-    path.join(process.resourcesPath || '', 'print-server', 'server.js'),
-    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'print-server', 'server.js'),
-    path.join(__dirname, '..', 'print-server', 'server.js'),
-    path.join(app.getAppPath(), 'print-server', 'server.js'),
-  ];
-  const serverPath = candidatePaths.find((p) => {
-    try { return fs.existsSync(p); } catch { return false; }
-  }) || null;
+    absolute(path.join(resources, 'print-server', 'server.js')),
+    absolute(path.join(resources, 'app.asar.unpacked', 'print-server', 'server.js')),
+    absolute(path.resolve(__dirname, '..', 'print-server', 'server.js')),
+    absolute(path.join(app.getAppPath(), 'print-server', 'server.js')),
+  ].filter(Boolean);
+  const serverPath =
+    candidatePaths.find((p) => {
+      try { return fs.existsSync(p); } catch { return false; }
+    }) || null;
 
   const candidateEnvPaths = [
-    path.join(process.resourcesPath || '', 'print-server', '.env'),
-    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'print-server', '.env'),
-    path.join(process.resourcesPath || '', '.env'),
-    path.join(__dirname, '..', 'print-server', '.env'),
-    path.join(__dirname, '.env'),
-    path.join(app.getAppPath(), 'print-server', '.env'),
-  ];
+    absolute(path.join(resources, 'print-server', '.env')),
+    absolute(path.join(resources, 'app.asar.unpacked', 'print-server', '.env')),
+    absolute(path.join(resources, '.env')),
+    absolute(path.resolve(__dirname, '..', 'print-server', '.env')),
+    absolute(path.join(__dirname, '.env')),
+    absolute(path.join(app.getAppPath(), 'print-server', '.env')),
+  ].filter(Boolean);
   const envPath = candidateEnvPaths.find((p) => {
     try { return fs.existsSync(p); } catch { return false; }
   }) || null;
@@ -153,13 +228,28 @@ function startPrintServerAsChildProcess(serverPath, envPath) {
   }
 }
 
+// Every channel the preload bridge exposes. `exportName` is the function on the
+// embedded print server module; the HTTP layer guards the same handlers.
+const PRINT_IPC_CHANNELS = [
+  ['print:receipt', 'handlePrintReceipt'],
+  ['print:repair-label', 'handlePrintRepairLabel'],
+  ['print:repair-ticket', 'handlePrintRepairTicket'],
+  ['print:z-report', 'handlePrintZReport'],
+  ['print:barcode', 'handlePrintBarcode'],
+  ['print:custom-ticket', 'handlePrintCustomTicket'],
+  ['print:calibrate-labels', 'handleCalibrateLabels'],
+  ['print:low-stock-report', 'handlePrintLowStockReport'],
+];
+
 function registerPrintIpcHandlers() {
-  ipcMain.handle('print:status', async () => {
+  ipcMain.handle('print:status', async (event) => {
+    if (!isTrustedPrintSender(event)) return refuseUntrusted(event, 'print:status');
     if (printServerModule && typeof printServerModule.handleStatus === 'function') {
       try {
+        // No payload: handleStatus() defaults to the trusted in-process caller.
         return printServerModule.handleStatus();
       } catch (err) {
-        logToFile(`[IPC print:status error] ${err.message}`);
+        logToFile(`[IPC print:status error] ${err.stack || err.message}`);
       }
     }
     return {
@@ -171,125 +261,31 @@ function registerPrintIpcHandlers() {
     };
   });
 
-  ipcMain.handle('print:receipt', async (_event, payload) => {
-    logToFile('[IPC] Received print:receipt request');
-    if (printServerModule && typeof printServerModule.handlePrintReceipt === 'function') {
-      try {
-        const res = await printServerModule.handlePrintReceipt(payload);
-        logToFile(`[IPC] print:receipt result: ${JSON.stringify(res)}`);
-        return res;
-      } catch (err) {
-        logToFile(`[IPC] print:receipt error: ${err.message}`);
-        return { ok: false, error: err.message };
-      }
-    }
-    return { ok: false, error: 'Print server module not initialized in main process' };
-  });
+  for (const [channel, exportName] of PRINT_IPC_CHANNELS) {
+    ipcMain.handle(channel, async (event, payload) => {
+      if (!isTrustedPrintSender(event)) return refuseUntrusted(event, channel);
 
-  ipcMain.handle('print:repair-label', async (_event, payload) => {
-    logToFile('[IPC] Received print:repair-label request');
-    if (printServerModule && typeof printServerModule.handlePrintRepairLabel === 'function') {
-      try {
-        const res = await printServerModule.handlePrintRepairLabel(payload);
-        logToFile(`[IPC] print:repair-label result: ${JSON.stringify(res)}`);
-        return res;
-      } catch (err) {
-        logToFile(`[IPC] print:repair-label error: ${err.message}`);
-        return { ok: false, error: err.message };
+      const handler = printServerModule && printServerModule[exportName];
+      if (typeof handler !== 'function') {
+        return { ok: false, error: 'Print server module not initialized in main process' };
       }
-    }
-    return { ok: false, error: 'Print server module not initialized in main process' };
-  });
 
-  ipcMain.handle('print:repair-ticket', async (_event, payload) => {
-    logToFile('[IPC] Received print:repair-ticket request');
-    if (printServerModule && typeof printServerModule.handlePrintRepairTicket === 'function') {
       try {
-        const res = await printServerModule.handlePrintRepairTicket(payload);
-        logToFile(`[IPC] print:repair-ticket result: ${JSON.stringify(res)}`);
+        // This path never goes through the HTTP body middleware, so the same
+        // control-byte and length guards have to be applied here.
+        const safe =
+          typeof printServerModule.sanitizeIpcPayload === 'function'
+            ? printServerModule.sanitizeIpcPayload(payload)
+            : payload;
+        const res = await handler(safe);
+        logToFile(`[IPC] ${channel} → ${JSON.stringify(res)}`);
         return res;
       } catch (err) {
-        logToFile(`[IPC] print:repair-ticket error: ${err.message}`);
+        logToFile(`[IPC] ${channel} error: ${err.stack || err.message}`);
         return { ok: false, error: err.message };
       }
-    }
-    return { ok: false, error: 'Print server module not initialized in main process' };
-  });
-
-  ipcMain.handle('print:z-report', async (_event, payload) => {
-    logToFile('[IPC] Received print:z-report request');
-    if (printServerModule && typeof printServerModule.handlePrintZReport === 'function') {
-      try {
-        const res = await printServerModule.handlePrintZReport(payload);
-        logToFile(`[IPC] print:z-report result: ${JSON.stringify(res)}`);
-        return res;
-      } catch (err) {
-        logToFile(`[IPC] print:z-report error: ${err.message}`);
-        return { ok: false, error: err.message };
-      }
-    }
-    return { ok: false, error: 'Print server module not initialized in main process' };
-  });
-
-  ipcMain.handle('print:barcode', async (_event, payload) => {
-    logToFile('[IPC] Received print:barcode request');
-    if (printServerModule && typeof printServerModule.handlePrintBarcode === 'function') {
-      try {
-        const res = await printServerModule.handlePrintBarcode(payload);
-        logToFile(`[IPC] print:barcode result: ${JSON.stringify(res)}`);
-        return res;
-      } catch (err) {
-        logToFile(`[IPC] print:barcode error: ${err.message}`);
-        return { ok: false, error: err.message };
-      }
-    }
-    return { ok: false, error: 'Print server module not initialized in main process' };
-  });
-
-  ipcMain.handle('print:custom-ticket', async (_event, payload) => {
-    logToFile('[IPC] Received print:custom-ticket request');
-    if (printServerModule && typeof printServerModule.handlePrintCustomTicket === 'function') {
-      try {
-        const res = await printServerModule.handlePrintCustomTicket(payload);
-        logToFile(`[IPC] print:custom-ticket result: ${JSON.stringify(res)}`);
-        return res;
-      } catch (err) {
-        logToFile(`[IPC] print:custom-ticket error: ${err.message}`);
-        return { ok: false, error: err.message };
-      }
-    }
-    return { ok: false, error: 'Print server module not initialized in main process' };
-  });
-
-  ipcMain.handle('print:calibrate-labels', async (_event, payload) => {
-    logToFile('[IPC] Received print:calibrate-labels request');
-    if (printServerModule && typeof printServerModule.handleCalibrateLabels === 'function') {
-      try {
-        const res = await printServerModule.handleCalibrateLabels(payload);
-        logToFile(`[IPC] print:calibrate-labels result: ${JSON.stringify(res)}`);
-        return res;
-      } catch (err) {
-        logToFile(`[IPC] print:calibrate-labels error: ${err.message}`);
-        return { ok: false, error: err.message };
-      }
-    }
-    return { ok: false, error: 'Print server module not initialized in main process' };
-  });
-
-  ipcMain.handle('print:low-stock-report', async (_event, payload) => {
-    logToFile('[IPC] Received print:low-stock-report request');
-    if (printServerModule && typeof printServerModule.handlePrintLowStockReport === 'function') {
-      try {
-        const res = await printServerModule.handlePrintLowStockReport(payload);
-        logToFile(`[IPC] print:low-stock-report result: ${JSON.stringify(res)}`);
-        return res;
-      } catch (err) {
-        logToFile(`[IPC] print:low-stock-report error: ${err.message}`);
-        return { ok: false, error: err.message };
-      }
-    }
-    return { ok: false, error: 'Print server module not initialized in main process' };
-  });
+    });
+  }
 }
 
 async function startEmbeddedPrintServer() {
@@ -304,13 +300,8 @@ async function startEmbeddedPrintServer() {
 
   // ── Attempt 1: require() the module in-process (primary, provides native IPC + HTTP) ──
   try {
-    const localPrintServer = path.join(__dirname, 'printServer.cjs');
-
-    if (fs.existsSync(localPrintServer)) {
-      logToFile(`[Electron] Requiring localPrintServer: ${localPrintServer}`);
-      printServerModule = require(localPrintServer);
-    } else if (serverPath) {
-      logToFile(`[Electron] Requiring serverPath: ${serverPath}`);
+    if (serverPath) {
+      logToFile(`[Electron] Requiring print server: ${serverPath}`);
       printServerModule = require(serverPath);
     }
 
@@ -382,15 +373,22 @@ function startLocalAppServer() {
 
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
+      const resolved = resolveStaticPath(distDir, req.url);
+      if (!resolved) {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('Bad request path');
+        return;
+      }
+
       try {
-        let reqPath = decodeURI(req.url.split('?')[0]);
-        let filePath = path.join(distDir, reqPath);
+        let filePath = resolved;
 
         let isFile = false;
         try {
           isFile = fs.existsSync(filePath) && fs.statSync(filePath).isFile();
         } catch (_) {}
 
+        // Anything that is not a real file falls back to the SPA entry point.
         if (!isFile) {
           filePath = path.join(distDir, 'index.html');
         }
@@ -405,6 +403,7 @@ function startLocalAppServer() {
           } else {
             res.writeHead(200, {
               'Content-Type': contentType,
+              'X-Content-Type-Options': 'nosniff',
               'Cache-Control': 'no-cache, no-store, must-revalidate',
             });
             res.end(content);
@@ -452,9 +451,6 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.cjs'),
-      // Allow the HTTPS renderer to access localhost:3355 print server without mixed-content blocks
-      webSecurity: false,
-      allowRunningInsecureContent: true,
     },
     // Platform-specific titlebar styling
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
@@ -469,8 +465,6 @@ function createWindow() {
   });
 
   // Load the app — prefer the live deployed version so updates and bug fixes apply instantly
-  const DEPLOYED_URL = 'https://phoneshop-mgr-pro-2026.web.app';
-
   function loadDeployedSite() {
     logToFile('[Electron] 🌐 Loading app via deployed site: ' + DEPLOYED_URL);
     mainWindow.loadURL(DEPLOYED_URL).catch((err) => {
@@ -623,6 +617,13 @@ function createTray() {
       },
       { type: 'separator' },
       {
+        label: 'Check for updates…',
+        click: () => {
+          updater.check({ interactive: true });
+        },
+      },
+      { type: 'separator' },
+      {
         label: 'Quit',
         click: () => {
           tray = null;
@@ -662,6 +663,9 @@ if (!gotTheLock) {
 }
 
 app.on('ready', async () => {
+  // Before anything loads: Electron approves every permission by default.
+  configurePermissionGate();
+
   // Start the embedded print server first
   await startEmbeddedPrintServer();
 
@@ -677,6 +681,9 @@ app.on('ready', async () => {
 
   // Create system tray (Windows only)
   createTray();
+
+  // Keep the shell itself updatable, not only the web UI it points at.
+  updater.start();
 });
 
 // macOS: Quit when all windows are closed
@@ -695,6 +702,7 @@ app.on('activate', () => {
 
 // Clean shutdown
 app.on('before-quit', () => {
+  updater.stop();
   // Allow window to actually close (bypass tray hide)
   if (mainWindow) {
     mainWindow.removeAllListeners('close');
