@@ -4,6 +4,7 @@ import { TextInput, Button, Title, Text, useTheme, Menu, Chip } from 'react-nati
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRepairStore } from '../store/repairStore';
 import { useAuthStore } from '../store/authStore';
+import { usePermissions } from '../hooks/usePermissions';
 import { customerService } from '../services/customerService';
 import { useTranslation } from 'react-i18next';
 import type { Customer } from '../types';
@@ -27,6 +28,7 @@ export const NewTicketScreen = ({ navigation }: any) => {
 
   const { createTicket } = useRepairStore();
   const { user, staff, fetchStaff } = useAuthStore();
+  const can = usePermissions();
   const theme = useTheme();
   const { t } = useTranslation();
 
@@ -292,7 +294,7 @@ export const NewTicketScreen = ({ navigation }: any) => {
         </View>
 
         {/* Technician Assignment */}
-        {(user?.role === 'admin' || user?.permissions?.repair_assign) && (
+        {can.repair_assign && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t('newTicket.assignment', 'Technician Assignment (Optional)')}</Text>
             <Menu

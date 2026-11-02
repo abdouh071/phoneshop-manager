@@ -4,6 +4,7 @@ import { Appbar, Card, Text, FAB, useTheme, ActivityIndicator, Searchbar } from 
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRepairStore } from '../store/repairStore';
 import { useAuthStore } from '../store/authStore';
+import { usePermissions } from '../hooks/usePermissions';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RoleBottomNav } from '../components/RoleBottomNav';
@@ -205,6 +206,9 @@ export const WorkbenchScreen = ({ navigation }: any) => {
   const insets = useSafeAreaInsets();
   const { tickets, isLoading, error, subscribeToTickets, updateTicketStatus } = useRepairStore();
   const { user } = useAuthStore();
+  // Capabilities, not roles: an admin who revoked `repair_add` from one
+  // technician must not leave that technician looking at the same FAB as before.
+  const can = usePermissions();
   const theme = useTheme();
   const { t } = useTranslation();
   
@@ -495,7 +499,7 @@ export const WorkbenchScreen = ({ navigation }: any) => {
         />
       )}
 
-      {(user?.role === 'admin' || user?.permissions?.repair_add) && (
+      {can.repair_add && (
         <FAB
           style={[styles.fab, { bottom: 68 + Math.max(insets.bottom, 0) }]}
           icon="plus"

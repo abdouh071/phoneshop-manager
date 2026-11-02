@@ -1,13 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, StyleSheet, ScrollView, Alert, TouchableOpacity, Linking, Modal } from 'react-native';
-import { Text, Card, Title, Paragraph, Button, Divider, TextInput, IconButton, Portal, Dialog, useTheme, Chip } from 'react-native-paper';
+import { Text, Card, Title, Paragraph, Button, TextInput, IconButton } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRepairStore } from '../store/repairStore';
 import { useAuthStore } from '../store/authStore';
 import { usePosStore } from '../store/posStore';
+import { usePermissions } from '../hooks/usePermissions';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useTranslation } from 'react-i18next';
+import { buildSearch, matchesSearch } from '../utils/search';
+import { colors, fontSize, radius, ramp, repairStatusColors, spacing, statusAppearance } from '../theme/tokens';
 import type { RepairTicket } from '../types';
 
 export const TicketDetailScreen = ({ route, navigation }: any) => {
@@ -16,7 +19,13 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
   const { user } = useAuthStore();
   const [loading, setLoading] = useState(false);
   const { t } = useTranslation();
-  const theme = useTheme();
+  const can = usePermissions();
+
+  // Handover is the money path, so the counter and the admin own it. `can.repair_status`
+  // is true for every technician by preset — that key covers moving a ticket between
+  // statuses, not collecting the balance — so settling needs the stored grant only.
+  const canSettle =
+    user?.role === 'admin' || user?.role === 'sales_agent' || user?.permissions?.repair_status === true;
 
   // Find live ticket state from store so edits refresh dynamically
   const ticket: RepairTicket = tickets.find(t => t.id === initialTicket.id) || initialTicket;
@@ -37,14 +46,22 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
     if (products.length === 0) void fetchProducts();
   }, [products.length, fetchProducts]);
 
+  // One normalized index per product-list change; typing only re-filters it.
+  const partIndex = useMemo(
+    () =>
+      products
+        .filter(p => p.category === 'repair_part')
+        .map(p => ({ product: p, search: buildSearch(p.name, p.brand, p.model) })),
+    [products]
+  );
+
   const partSuggestions = useMemo(() => {
-    const term = partName.trim().toLowerCase();
-    if (term.length < 2) return [];
-    return products
-      .filter(p => (p.category as string) === 'repair_part')
-      .filter(p => `${p.name} ${p.brand ?? ''} ${p.model ?? ''}`.toLowerCase().includes(term))
-      .slice(0, 6);
-  }, [partName, products]);
+    if (partName.trim().length < 2) return [];
+    return partIndex
+      .filter(({ search }) => matchesSearch(search, partName))
+      .slice(0, 6)
+      .map(({ product }) => product);
+  }, [partIndex, partName]);
 
   // Remark editing state
   const [remarkModalVisible, setRemarkModalVisible] = useState(false);
@@ -60,17 +77,6 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
   const depositAlreadyPaid = ticket.depositAmount || 0;
   const currentFinalPriceNum = parseFloat(finalPrice) || 0;
   const balanceDue = Math.max(0, currentFinalPriceNum - depositAlreadyPaid);
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending': return '#f59e0b';
-      case 'in_progress': return '#3b82f6';
-      case 'ready': return '#10b981';
-      case 'completed': return '#8b5cf6';
-      case 'returned': return '#ef4444';
-      default: return '#64748b';
-    }
-  };
 
   const handleAddPart = async () => {
     const cost = parseFloat(partCost);
@@ -258,22 +264,26 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
     return ticket.lockValue.split('').map(n => parseInt(n, 10)).filter(n => !isNaN(n) && n >= 1 && n <= 9);
   }, [ticket.lockType, ticket.lockValue]);
 
+  const status = statusAppearance(repairStatusColors, ticket.status);
+
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header Block with Status Tint */}
-        <View style={[styles.headerBlock, { backgroundColor: getStatusColor(ticket.status) + '0D' }]}>
+        <View style={[styles.headerBlock, { backgroundColor: status.tint }]}>
           <View style={styles.ticketBadgeContainer}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={styles.ticketBadgeRow}>
               <Text style={styles.ticketNumber}>{ticket.ticketNumber}</Text>
               {ticket.trackingPin && (
                 <View style={styles.pinPill}>
-                  <MaterialCommunityIcons name="shield-key-outline" size={13} color="#4f46e5" />
-                  <Text style={styles.pinPillText}>PIN: {ticket.trackingPin}</Text>
+                  <MaterialCommunityIcons name="shield-key-outline" size={13} color={colors.brand} />
+                  <Text style={styles.pinPillText}>
+                    {t('ticketDetail.trackingPin', 'PIN: {{pin}}', { pin: ticket.trackingPin })}
+                  </Text>
                 </View>
               )}
             </View>
-            <View style={[styles.statusBadgeLarge, { backgroundColor: getStatusColor(ticket.status) }]}>
+            <View style={[styles.statusBadgeLarge, { backgroundColor: status.ink }]}>
               <Text style={styles.statusTextLarge}>
                 {ticket.status.replace('_', ' ').toUpperCase()}
               </Text>
@@ -282,16 +292,16 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
           
           <Title style={styles.deviceTitle}>{ticket.deviceBrand} {ticket.deviceModel}</Title>
           
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+          <View style={styles.dateRow}>
             <Text style={styles.dateText}>
               {t('ticketDetail.receivedOn', 'Received on')} {new Date(ticket.createdAt).toLocaleDateString()}
             </Text>
-            <Button 
-              mode="contained-tonal" 
-              icon="printer" 
+            <Button
+              mode="contained-tonal"
+              icon="printer"
               onPress={handlePrintRemote}
-              buttonColor="#e0e7ff"
-              textColor="#4f46e5"
+              buttonColor={colors.brandSoftStrong}
+              textColor={colors.brand}
               compact
             >
               {t('ticketDetail.printSticker', 'Print Sticker')}
@@ -301,19 +311,19 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
           {/* Pricing & Deposit summary bar */}
           <View style={styles.priceSummaryBar}>
             <View>
-              <Text style={styles.priceSubLabel}>Est / Final</Text>
+              <Text style={styles.priceSubLabel}>{t('ticketDetail.estFinal', 'Est / Final')}</Text>
               <Text style={styles.priceValue}>{ticket.actualCost ?? ticket.estimatedCost ?? 0} DA</Text>
             </View>
             {ticket.depositAmount ? (
-              <View style={{ alignItems: 'center' }}>
-                <Text style={styles.priceSubLabel}>Deposit</Text>
-                <Text style={[styles.priceValue, { color: '#059669' }]}>{ticket.depositAmount} DA</Text>
+              <View style={styles.priceCenter}>
+                <Text style={styles.priceSubLabel}>{t('ticketDetail.deposit', 'Deposit')}</Text>
+                <Text style={[styles.priceValue, { color: ramp.green700 }]}>{ticket.depositAmount} DA</Text>
               </View>
             ) : null}
             {ticket.paymentStatus && (
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={styles.priceSubLabel}>Payment</Text>
-                <Text style={[styles.priceValue, { color: ticket.paymentStatus === 'paid' ? '#059669' : '#dc2626' }]}>
+              <View style={styles.priceEnd}>
+                <Text style={styles.priceSubLabel}>{t('ticketDetail.payment', 'Payment')}</Text>
+                <Text style={[styles.priceValue, { color: ticket.paymentStatus === 'paid' ? ramp.green700 : colors.danger }]}>
                   {ticket.paymentStatus.toUpperCase()}
                 </Text>
               </View>
@@ -325,21 +335,21 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
         <Card style={styles.card}>
           <Card.Content>
             <View style={styles.sectionHeader}>
-              <MaterialCommunityIcons name="account" size={20} color="#4f46e5" />
+              <MaterialCommunityIcons name="account" size={20} color={colors.brand} />
               <Text style={styles.sectionTitle}>{t('ticketDetail.customerDetails', 'Customer Details')}</Text>
             </View>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <View style={{ flex: 1 }}>
+            <View style={styles.customerRow}>
+              <View style={styles.customerTextBlock}>
                 <Text style={styles.detailText}>{ticket.customerName}</Text>
                 {ticket.customerPhone ? <Text style={styles.subDetailText}>{ticket.customerPhone}</Text> : null}
               </View>
               {ticket.customerPhone && (
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  <TouchableOpacity style={[styles.quickActionBtn, { backgroundColor: '#eff6ff' }]} onPress={handleCall}>
-                    <MaterialCommunityIcons name="phone" size={20} color="#2563eb" />
+                <View style={styles.quickActionRow}>
+                  <TouchableOpacity style={[styles.quickActionBtn, styles.callBtn]} onPress={handleCall}>
+                    <MaterialCommunityIcons name="phone" size={20} color={ramp.blue600} />
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.quickActionBtn, { backgroundColor: '#f0fdf4' }]} onPress={handleWhatsApp}>
-                    <MaterialCommunityIcons name="whatsapp" size={20} color="#16a34a" />
+                  <TouchableOpacity style={[styles.quickActionBtn, styles.whatsappBtn]} onPress={handleWhatsApp}>
+                    <MaterialCommunityIcons name="whatsapp" size={20} color={colors.success} />
                   </TouchableOpacity>
                 </View>
               )}
@@ -351,7 +361,7 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
         <Card style={styles.card}>
           <Card.Content>
             <View style={styles.sectionHeader}>
-              <MaterialCommunityIcons name="alert-circle" size={20} color="#f59e0b" />
+              <MaterialCommunityIcons name="alert-circle" size={20} color={colors.warning} />
               <Text style={styles.sectionTitle}>{t('ticketDetail.issueDescription', 'Issue Description')}</Text>
             </View>
             <Paragraph style={styles.issueText}>{ticket.issueDescription}</Paragraph>
@@ -361,22 +371,22 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
         {/* Remarks & Diagnostic Findings Card */}
         <Card style={styles.card}>
           <Card.Content>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View style={styles.findingsHeaderRow}>
               <View style={styles.sectionHeader}>
-                <MaterialCommunityIcons name="notebook-outline" size={20} color="#7c3aed" />
-                <Text style={styles.sectionTitle}>Condition & Technician Findings</Text>
+                <MaterialCommunityIcons name="notebook-outline" size={20} color={colors.violet} />
+                <Text style={styles.sectionTitle}>{t('ticketDetail.findings', 'Condition & Technician Findings')}</Text>
               </View>
-              <IconButton 
-                icon="pencil" 
-                size={18} 
-                iconColor="#7c3aed"
+              <IconButton
+                icon="pencil"
+                size={18}
+                iconColor={colors.violet}
                 onPress={() => { setEditedRemark(ticket.remark || ''); setRemarkModalVisible(true); }}
               />
             </View>
             {ticket.remark ? (
               <Paragraph style={styles.issueText}>{ticket.remark}</Paragraph>
             ) : (
-              <Text style={styles.subDetailText}>No remarks or findings recorded yet.</Text>
+              <Text style={styles.subDetailText}>{t('ticketDetail.noFindings', 'No remarks or findings recorded yet.')}</Text>
             )}
           </Card.Content>
         </Card>
@@ -385,13 +395,22 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
         <Card style={styles.card}>
           <Card.Content>
             <View style={styles.sectionHeader}>
-              <MaterialCommunityIcons name="lock" size={20} color="#ef4444" />
+              <MaterialCommunityIcons name="lock" size={20} color={colors.danger} />
               <Text style={styles.sectionTitle}>{t('ticketDetail.securityCode', 'Security / Lock Code')}</Text>
             </View>
             {ticket.lockType === 'pattern' ? (
               <View style={styles.patternContainer}>
                 <Text style={styles.patternSequenceText}>
-                  Pattern: {parsedPatternDots.length > 0 ? parsedPatternDots.join(' ➔ ') : (ticket.lockValue || 'Draw pattern')}
+                  {t(
+                    'ticketDetail.patternPrefix',
+                    'Pattern: {{sequence}}',
+                    {
+                      sequence:
+                        parsedPatternDots.length > 0
+                          ? parsedPatternDots.join(' ➔ ')
+                          : ticket.lockValue || t('ticketDetail.drawPattern', 'Draw pattern'),
+                    }
+                  )}
                 </Text>
                 {/* 3x3 Pattern Visualizer */}
                 <View style={styles.patternMiniGrid}>
@@ -411,7 +430,17 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
             ) : ticket.lockType && ticket.lockType !== 'none' ? (
               <View style={styles.lockBox}>
                 <Text style={styles.lockText}>
-                  {ticket.lockType === 'password' ? 'Password' : 'PIN'}: {ticket.lockValue}
+                  {t(
+                    'ticketDetail.lockValueLabel',
+                    '{{label}}: {{value}}',
+                    {
+                      label:
+                        ticket.lockType === 'password'
+                          ? t('ticketDetail.password', 'Password')
+                          : t('ticketDetail.pin', 'PIN'),
+                      value: ticket.lockValue,
+                    }
+                  )}
                 </Text>
               </View>
             ) : (
@@ -424,18 +453,18 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
         <Card style={styles.card}>
           <Card.Content>
             <View style={styles.sectionHeader}>
-              <MaterialCommunityIcons name="cog" size={20} color="#10b981" />
+              <MaterialCommunityIcons name="cog" size={20} color={colors.success} />
               <Text style={styles.sectionTitle}>{t('ticketDetail.partsUsed', 'Parts Used & Cost')}</Text>
             </View>
             
-            {(user?.role === 'repair_agent' || user?.role === 'admin' || user?.permissions?.repair_edit) && (
+            {can.repair_edit && (
               <View style={styles.addPartRow}>
                 <TextInput
                   label={t('ticketDetail.partName', 'Part Name')}
                   value={partName}
                   onChangeText={(v) => { setPartName(v); setPartProductId(null); }}
                   mode="outlined"
-                  style={[styles.partInput, { flex: 2 }]}
+                  style={styles.partNameInput}
                   dense
                 />
                 <TextInput
@@ -444,16 +473,16 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
                   onChangeText={setPartCost}
                   mode="outlined"
                   keyboardType="numeric"
-                  style={[styles.partInput, { flex: 1, marginLeft: 8 }]}
+                  style={styles.partCostInput}
                   dense
                 />
-                <IconButton 
-                  icon="plus" 
+                <IconButton
+                  icon="plus"
                   mode="contained"
-                  containerColor="#10b981"
-                  iconColor="#fff"
+                  containerColor={colors.success}
+                  iconColor={colors.onBrand}
                   size={24}
-                  style={{ marginTop: 6 }}
+                  style={styles.partAddBtn}
                   onPress={handleAddPart}
                 />
               </View>
@@ -470,7 +499,7 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
                     <MaterialCommunityIcons
                       name={p.stock > 0 ? 'warehouse' : 'alert-circle-outline'}
                       size={16}
-                      color={p.stock > 0 ? '#10b981' : '#ef4444'}
+                      color={p.stock > 0 ? colors.success : colors.danger}
                     />
                     <Text style={styles.suggestionName} numberOfLines={1}>{p.name}</Text>
                     <Text style={styles.suggestionStock}>{t('ticketDetail.inStockShort', { n: p.stock })}</Text>
@@ -487,20 +516,23 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
 
             {parts.map((p, idx) => (
               <View key={idx} style={styles.partItem}>
-                <Text style={{ flex: 1, fontSize: 15, color: '#1e293b' }}>
+                <Text style={styles.partName} numberOfLines={1}>
                   {p.quantity && p.quantity > 1 ? `${p.name} ×${p.quantity}` : p.name}
                 </Text>
-                {!p.productId || p.productId === 'custom-mobile-part' ? (
-                  <MaterialCommunityIcons name="link-off" size={16} color="#cbd5e1" style={{ marginRight: 6 }} />
-                ) : (
-                  <MaterialCommunityIcons name="link-variant" size={16} color="#10b981" style={{ marginRight: 6 }} />
-                )}
-                <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#0f172a' }}>
-                  {p.cost * Math.max(1, p.quantity || 1)} DA
-                </Text>
-                {(user?.role === 'repair_agent' || user?.role === 'admin' || user?.permissions?.repair_edit) && (
+                <MaterialCommunityIcons
+                  name={!p.productId || p.productId === 'custom-mobile-part' ? 'link-off' : 'link-variant'}
+                  size={16}
+                  color={
+                    !p.productId || p.productId === 'custom-mobile-part'
+                      ? colors.borderStrong
+                      : colors.success
+                  }
+                  style={styles.partLinkIcon}
+                />
+                <Text style={styles.partCost}>{p.cost * Math.max(1, p.quantity || 1)} DA</Text>
+                {can.repair_edit && (
                   <TouchableOpacity onPress={() => handleRemovePart(idx)}>
-                    <MaterialCommunityIcons name="delete" size={22} color="#ef4444" style={{ marginLeft: 12 }} />
+                    <MaterialCommunityIcons name="delete" size={22} color={colors.danger} style={styles.partDeleteBtn} />
                   </TouchableOpacity>
                 )}
               </View>
@@ -516,7 +548,7 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
             )}
 
             {parts.length === 0 && (
-              <Text style={{ color: '#94a3b8', fontSize: 14, marginTop: 4 }}>{t('ticketDetail.noPartsYet', 'No parts added yet.')}</Text>
+              <Text style={styles.noPartsText}>{t('ticketDetail.noPartsYet', 'No parts added yet.')}</Text>
             )}
           </Card.Content>
         </Card>
@@ -524,56 +556,56 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
 
       {/* Action Buttons Bar at bottom */}
       <View style={styles.actionContainer}>
-        {(ticket.status === 'pending' || ticket.status === 'returned') && (user?.role === 'repair_agent' || user?.role === 'admin' || user?.permissions?.repair_status) ? (
-          <Button 
-            mode="contained" 
-            onPress={handleStartRepair} 
+        {(ticket.status === 'pending' || ticket.status === 'returned') && can.repair_status && (
+          <Button
+            mode="contained"
+            onPress={handleStartRepair}
             loading={loading}
             disabled={loading}
-            style={[styles.actionButton, { backgroundColor: '#3b82f6' }]}
+            style={[styles.actionButton, { backgroundColor: repairStatusColors.in_progress.ink }]}
             contentStyle={styles.buttonContent}
             labelStyle={styles.buttonLabel}
             icon="wrench"
           >
             {t('ticketDetail.startRepair', 'Start Repair')}
           </Button>
-        ) : null}
+        )}
 
-        {ticket.status === 'in_progress' && (user?.role === 'repair_agent' || user?.role === 'admin' || user?.permissions?.repair_status) ? (
-          <Button 
-            mode="contained" 
-            onPress={handleMarkAsRepaired} 
+        {ticket.status === 'in_progress' && can.repair_status && (
+          <Button
+            mode="contained"
+            onPress={handleMarkAsRepaired}
             loading={loading}
             disabled={loading}
-            style={[styles.actionButton, { backgroundColor: '#10b981' }]}
+            style={[styles.actionButton, { backgroundColor: repairStatusColors.ready.ink }]}
             contentStyle={styles.buttonContent}
             labelStyle={styles.buttonLabel}
             icon="check-decagram"
           >
             {t('ticketDetail.markRepaired', 'Mark as Repaired')}
           </Button>
-        ) : null}
-        
-        {ticket.status === 'ready' && user?.role === 'repair_agent' && !user?.permissions?.repair_status && (
-          <Button 
-            mode="contained-tonal" 
-            disabled={true}
-            style={[styles.actionButton, { backgroundColor: '#e2e8f0' }]}
+        )}
+
+        {ticket.status === 'ready' && !canSettle && (
+          <Button
+            mode="contained-tonal"
+            disabled
+            style={[styles.actionButton, styles.actionButtonDisabled]}
             contentStyle={styles.buttonContent}
-            labelStyle={[styles.buttonLabel, { color: '#64748b' }]}
+            labelStyle={[styles.buttonLabel, styles.buttonLabelDisabled]}
             icon="check-all"
           >
             {t('ticketDetail.readyForCustomer', 'Ready For Customer')}
           </Button>
         )}
 
-        {ticket.status === 'ready' && (user?.role === 'sales_agent' || user?.role === 'admin' || user?.permissions?.repair_status) && (
-          <Button 
+        {ticket.status === 'ready' && canSettle && (
+          <Button
             mode="contained"
-            onPress={openSettlementModal} 
+            onPress={openSettlementModal}
             loading={loading}
             disabled={loading}
-            style={[styles.actionButton, { backgroundColor: '#059669' }]}
+            style={[styles.actionButton, { backgroundColor: ramp.green700 }]}
             contentStyle={styles.buttonContent}
             labelStyle={styles.buttonLabel}
             icon="account-cash"
@@ -592,23 +624,29 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Title style={styles.modalTitle}>Edit Findings & Remarks</Title>
+            <Title style={styles.modalTitle}>{t('ticketDetail.remarksTitle', 'Edit Findings & Remarks')}</Title>
             <TextInput
-              label="Technician Findings / Remarks"
+              label={t('ticketDetail.remarksLabel', 'Technician Findings / Remarks')}
               value={editedRemark}
               onChangeText={setEditedRemark}
               mode="outlined"
               multiline
               numberOfLines={4}
-              style={{ marginTop: 12, backgroundColor: '#fff' }}
-              placeholder="Enter diagnostic details, findings, or physical condition..."
+              style={styles.modalField}
+              placeholder={t('ticketDetail.remarksPlaceholder', 'Enter diagnostic details, findings, or physical condition...')}
             />
             <View style={styles.modalActions}>
-              <Button mode="text" onPress={() => setRemarkModalVisible(false)} textColor="#64748b">
-                Cancel
+              <Button mode="text" onPress={() => setRemarkModalVisible(false)} textColor={colors.textMuted}>
+                {t('common.cancel', 'Cancel')}
               </Button>
-              <Button mode="contained" onPress={handleSaveRemark} loading={loading} style={{ backgroundColor: '#7c3aed' }}>
-                Save Remark
+              <Button
+                mode="contained"
+                onPress={handleSaveRemark}
+                loading={loading}
+                buttonColor={colors.violet}
+                textColor={colors.onBrand}
+              >
+                {t('ticketDetail.saveRemark', 'Save Remark')}
               </Button>
             </View>
           </View>
@@ -623,16 +661,22 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
         onRequestClose={() => setSettlementModalVisible(false)}
       >
         <View style={styles.modalBackdrop}>
-          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
+          <ScrollView contentContainerStyle={styles.settleScroll} keyboardShouldPersistTaps="handled">
             <View style={styles.modalCard}>
-              <Title style={[styles.modalTitle, { color: '#059669' }]}>Handover & Settle Payment</Title>
-              <Text style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
-                Device: {ticket.deviceBrand} {ticket.deviceModel} (#{ticket.ticketNumber})
+              <Title style={[styles.modalTitle, styles.settleTitle]}>
+                {t('ticketDetail.settleTitle', 'Handover & Settle Payment')}
+              </Title>
+              <Text style={styles.settleSub}>
+                {t(
+                  'ticketDetail.settleDevice',
+                  'Device: {{brand}} {{model}} (#{{number}})',
+                  { brand: ticket.deviceBrand, model: ticket.deviceModel, number: ticket.ticketNumber }
+                )}
               </Text>
 
               {/* Price inputs */}
               <TextInput
-                label="Final Repair Price (DA)"
+                label={t('ticketDetail.finalPrice', 'Final Repair Price (DA)')}
                 value={finalPrice}
                 onChangeText={(val) => {
                   setFinalPrice(val);
@@ -641,56 +685,48 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
                 }}
                 keyboardType="numeric"
                 mode="outlined"
-                style={{ backgroundColor: '#fff', marginBottom: 8 }}
+                style={styles.modalFieldSm}
               />
 
               {depositAlreadyPaid > 0 && (
                 <View style={styles.depositRow}>
-                  <Text style={{ color: '#059669', fontWeight: '600', fontSize: 13 }}>
-                    Deposit already collected at intake:
-                  </Text>
-                  <Text style={{ color: '#059669', fontWeight: '700', fontSize: 14 }}>
-                    {depositAlreadyPaid} DA
-                  </Text>
+                  <Text style={styles.depositLabel}>{t('ticketDetail.depositCollected', 'Deposit already collected at intake:')}</Text>
+                  <Text style={styles.depositValue}>{depositAlreadyPaid} DA</Text>
                 </View>
               )}
 
               <View style={styles.balanceDueRow}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#0f172a' }}>
-                  Remaining Balance Due:
-                </Text>
-                <Text style={{ fontSize: 16, fontWeight: '800', color: '#4f46e5' }}>
-                  {balanceDue} DA
-                </Text>
+                <Text style={styles.balanceDueLabel}>{t('ticketDetail.balanceDue', 'Remaining Balance Due:')}</Text>
+                <Text style={styles.balanceDueValue}>{balanceDue} DA</Text>
               </View>
 
               <TextInput
-                label="Amount Paid at Handover (DA)"
+                label={t('ticketDetail.amountPaid', 'Amount Paid at Handover (DA)')}
                 value={handoverPaid}
                 onChangeText={setHandoverPaid}
                 keyboardType="numeric"
                 mode="outlined"
-                style={{ backgroundColor: '#fff', marginBottom: 8 }}
+                style={styles.modalFieldSm}
               />
 
               {/* Quick Amount Buttons */}
-              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-                <Button 
-                  mode="outlined" 
-                  compact 
+              <View style={styles.settleActionsRow}>
+                <Button
+                  mode="outlined"
+                  compact
                   onPress={() => setHandoverPaid(String(balanceDue))}
-                  style={{ flex: 1 }}
+                  style={styles.settleAction}
                 >
-                  Pay in Full
+                  {t('ticketDetail.payInFull', 'Pay in Full')}
                 </Button>
-                <Button 
-                  mode="outlined" 
-                  compact 
-                  textColor="#dc2626"
+                <Button
+                  mode="outlined"
+                  compact
+                  textColor={colors.danger}
                   onPress={() => setHandoverPaid('0')}
-                  style={{ flex: 1 }}
+                  style={styles.settleAction}
                 >
-                  Credit Debt
+                  {t('ticketDetail.creditDebt', 'Credit Debt')}
                 </Button>
               </View>
 
@@ -701,43 +737,48 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
                 if (remDebt > 0) {
                   return (
                     <View style={styles.debtNoticeBox}>
-                      <MaterialCommunityIcons name="alert" size={16} color="#dc2626" />
+                      <MaterialCommunityIcons name="alert" size={16} color={colors.danger} />
                       <Text style={styles.debtNoticeText}>
-                        Will record {remDebt} DA unpaid debt on customer profile.
+                        {t(
+                          'ticketDetail.debtWarning',
+                          'Will record {{amount}} DA unpaid debt on customer profile.',
+                          { amount: remDebt }
+                        )}
                       </Text>
                     </View>
                   );
                 }
                 return (
-                  <View style={[styles.debtNoticeBox, { backgroundColor: '#ecfdf5', borderColor: '#a7f3d0' }]}>
-                    <MaterialCommunityIcons name="check-circle" size={16} color="#059669" />
-                    <Text style={[styles.debtNoticeText, { color: '#065f46' }]}>
-                      Fully settled. No debt remaining.
+                  <View style={[styles.debtNoticeBox, styles.settledNoticeBox]}>
+                    <MaterialCommunityIcons name="check-circle" size={16} color={ramp.green700} />
+                    <Text style={[styles.debtNoticeText, styles.settledNoticeText]}>
+                      {t('ticketDetail.fullySettled', 'Fully settled. No debt remaining.')}
                     </Text>
                   </View>
                 );
               })()}
 
               <TextInput
-                label="Settlement Notes (Optional)"
+                label={t('ticketDetail.notesLabel', 'Settlement Notes (Optional)')}
                 value={settlementNotes}
                 onChangeText={setSettlementNotes}
-                placeholder="e.g. Paid cash at counter"
+                placeholder={t('ticketDetail.notesPlaceholder', 'e.g. Paid cash at counter')}
                 mode="outlined"
-                style={{ backgroundColor: '#fff', marginTop: 8 }}
+                style={styles.modalFieldTop}
               />
 
               <View style={styles.modalActions}>
-                <Button mode="text" onPress={() => setSettlementModalVisible(false)} textColor="#64748b">
-                  Cancel
+                <Button mode="text" onPress={() => setSettlementModalVisible(false)} textColor={colors.textMuted}>
+                  {t('common.cancel', 'Cancel')}
                 </Button>
-                <Button 
-                  mode="contained" 
-                  onPress={handleConfirmSettlement} 
+                <Button
+                  mode="contained"
+                  onPress={handleConfirmSettlement}
                   loading={loading}
-                  style={{ backgroundColor: '#059669' }}
+                  buttonColor={ramp.green700}
+                  textColor={colors.onBrand}
                 >
-                  Complete Handover
+                  {t('ticketDetail.completeHandover', 'Complete Handover')}
                 </Button>
               </View>
             </View>
@@ -751,154 +792,192 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: colors.background,
   },
   scrollContent: {
-    padding: 16,
+    padding: spacing.lg,
     paddingBottom: 110,
   },
   headerBlock: {
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    padding: spacing.lg,
+    borderRadius: radius.xl,
+    marginBottom: spacing.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   ticketBadgeContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: spacing.sm,
+  },
+  ticketBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   ticketNumber: {
-    fontSize: 20,
+    fontSize: fontSize.title,
     fontWeight: '800',
-    color: '#0f172a',
+    color: colors.textPrimary,
   },
   pinPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#e0e7ff',
-    paddingHorizontal: 8,
+    backgroundColor: colors.brandSoftStrong,
+    paddingHorizontal: spacing.sm,
     paddingVertical: 3,
-    borderRadius: 12,
-    gap: 4,
+    borderRadius: radius.pill,
+    gap: spacing.xs,
   },
   pinPillText: {
-    fontSize: 11,
+    fontSize: fontSize.caption,
     fontWeight: '700',
-    color: '#4338ca',
+    color: colors.brandPressed,
   },
   statusBadgeLarge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
   },
   statusTextLarge: {
-    color: '#fff',
+    color: colors.textInverse,
     fontWeight: '800',
-    fontSize: 12,
+    fontSize: fontSize.label,
     letterSpacing: 0.5,
   },
   deviceTitle: {
-    fontSize: 22,
+    fontSize: fontSize.headline,
     fontWeight: '700',
-    color: '#0f172a',
+    color: colors.textPrimary,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing.xs,
   },
   dateText: {
-    color: '#64748b',
-    fontSize: 13,
+    color: colors.textMuted,
+    fontSize: fontSize.body,
   },
   priceSummaryBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    backgroundColor: '#ffffff',
-    padding: 12,
-    borderRadius: 12,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: '#f1f5f9',
+    backgroundColor: colors.surface,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    marginTop: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  priceCenter: {
+    alignItems: 'center',
+  },
+  priceEnd: {
+    alignItems: 'flex-end',
   },
   priceSubLabel: {
-    fontSize: 11,
-    color: '#94a3b8',
+    fontSize: fontSize.caption,
+    color: colors.textFaint,
     textTransform: 'uppercase',
     fontWeight: '700',
   },
   priceValue: {
-    fontSize: 16,
+    fontSize: fontSize.subtitle,
     fontWeight: '800',
-    color: '#0f172a',
-    marginTop: 2,
+    color: colors.textPrimary,
+    marginTop: spacing.xxs,
   },
   card: {
-    marginBottom: 14,
-    backgroundColor: '#ffffff',
-    borderRadius: 14,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    marginBottom: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  findingsHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   sectionTitle: {
-    fontSize: 14,
+    fontSize: fontSize.body,
     fontWeight: '700',
-    color: '#334155',
+    color: colors.textSecondary,
+  },
+  customerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  customerTextBlock: {
+    flex: 1,
   },
   detailText: {
-    fontSize: 16,
+    fontSize: fontSize.subtitle,
     fontWeight: '700',
-    color: '#0f172a',
+    color: colors.textPrimary,
   },
   subDetailText: {
-    fontSize: 14,
-    color: '#64748b',
-    marginTop: 2,
+    fontSize: fontSize.bodyStrong,
+    color: colors.textMuted,
+    marginTop: spacing.xxs,
+  },
+  quickActionRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
   quickActionBtn: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: radius.pill,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  callBtn: {
+    backgroundColor: ramp.indigo50,
+  },
+  whatsappBtn: {
+    backgroundColor: colors.successSoft,
+  },
   issueText: {
-    fontSize: 15,
-    color: '#334155',
+    fontSize: fontSize.bodyStrong,
+    color: colors.textSecondary,
     lineHeight: 22,
   },
   lockBox: {
-    backgroundColor: '#fef2f2',
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#fecaca',
+    backgroundColor: colors.dangerSoft,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: ramp.red200,
   },
   lockText: {
-    color: '#b91c1c',
+    color: ramp.red900,
     fontWeight: '700',
-    fontSize: 16,
+    fontSize: fontSize.subtitle,
   },
   patternContainer: {
-    backgroundColor: '#f8fafc',
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    backgroundColor: colors.background,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     alignItems: 'center',
   },
   patternSequenceText: {
-    color: '#4f46e5',
+    color: colors.brand,
     fontWeight: '700',
-    fontSize: 15,
-    marginBottom: 8,
+    fontSize: fontSize.bodyStrong,
+    marginBottom: spacing.sm,
   },
   patternMiniGrid: {
     width: 120,
@@ -911,162 +990,263 @@ const styles = StyleSheet.create({
   patternMiniDot: {
     width: 32,
     height: 32,
-    borderRadius: 16,
-    backgroundColor: '#e2e8f0',
+    borderRadius: radius.pill,
+    backgroundColor: colors.border,
     justifyContent: 'center',
     alignItems: 'center',
   },
   patternMiniDotSelected: {
-    backgroundColor: '#4f46e5',
+    backgroundColor: colors.brand,
   },
   patternMiniText: {
-    fontSize: 12,
+    fontSize: fontSize.label,
     fontWeight: '700',
-    color: '#94a3b8',
+    color: colors.textFaint,
   },
   patternMiniTextSelected: {
-    color: '#ffffff',
+    color: colors.textInverse,
   },
   addPartRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
-  partInput: {
-    backgroundColor: '#fff',
+  partNameInput: {
+    flex: 2,
+    backgroundColor: colors.surface,
+  },
+  partCostInput: {
+    flex: 1,
+    marginStart: spacing.sm,
+    backgroundColor: colors.surface,
+  },
+  partAddBtn: {
+    marginTop: 6,
   },
   suggestions: {
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 10,
-    backgroundColor: '#f8fafc',
-    marginBottom: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.background,
+    marginBottom: spacing.sm,
     overflow: 'hidden',
   },
   suggestionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
     paddingVertical: 9,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e2e8f0',
+    borderBottomColor: colors.border,
   },
   suggestionName: {
     flex: 1,
-    fontSize: 13,
-    color: '#0f172a',
+    fontSize: fontSize.body,
+    color: colors.textPrimary,
     fontWeight: '600',
   },
   suggestionStock: {
-    fontSize: 12,
-    color: '#64748b',
+    fontSize: fontSize.label,
+    color: colors.textMuted,
   },
   unlinkedHint: {
-    fontSize: 12,
-    color: '#b45309',
-    marginBottom: 10,
+    fontSize: fontSize.label,
+    color: colors.warningText,
+    marginBottom: spacing.sm,
   },
   partItem: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.surfaceMuted,
+  },
+  partName: {
+    flex: 1,
+    fontSize: fontSize.bodyStrong,
+    color: ramp.slate800,
+  },
+  partLinkIcon: {
+    marginEnd: spacing.xs,
+  },
+  partCost: {
+    fontWeight: '700',
+    fontSize: fontSize.bodyStrong,
+    color: colors.textPrimary,
+  },
+  partDeleteBtn: {
+    marginStart: spacing.md,
   },
   partsTotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingTop: 12,
-    marginTop: 6,
+    paddingTop: spacing.md,
+    marginTop: spacing.xs,
   },
   partsTotalLabel: {
-    fontSize: 14,
+    fontSize: fontSize.bodyStrong,
     fontWeight: '700',
-    color: '#64748b',
+    color: colors.textMuted,
   },
   partsTotalValue: {
-    fontSize: 16,
+    fontSize: fontSize.subtitle,
     fontWeight: '800',
-    color: '#0f172a',
+    color: colors.textPrimary,
+  },
+  noPartsText: {
+    color: colors.textFaint,
+    fontSize: fontSize.bodyStrong,
+    marginTop: spacing.xs,
   },
   actionContainer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#ffffff',
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
+    backgroundColor: colors.surface,
+    padding: spacing.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
   actionButton: {
-    borderRadius: 12,
+    borderRadius: radius.lg,
+  },
+  actionButtonDisabled: {
+    backgroundColor: colors.surfaceMuted,
   },
   buttonContent: {
-    paddingVertical: 8,
+    paddingVertical: spacing.sm,
   },
   buttonLabel: {
-    fontSize: 16,
+    fontSize: fontSize.subtitle,
     fontWeight: '700',
+  },
+  buttonLabelDisabled: {
+    color: colors.textMuted,
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    backgroundColor: colors.backdrop,
     justifyContent: 'center',
-    padding: 16,
+    padding: spacing.lg,
+  },
+  settleScroll: {
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   modalCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 20,
-    elevation: 5,
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: fontSize.title,
     fontWeight: '800',
-    color: '#0f172a',
+    color: colors.textPrimary,
+  },
+  settleTitle: {
+    color: ramp.green700,
+  },
+  settleSub: {
+    fontSize: fontSize.body,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  modalField: {
+    marginTop: spacing.md,
+    minHeight: 120,
+    backgroundColor: colors.surface,
+  },
+  modalFieldSm: {
+    marginBottom: spacing.sm,
+    backgroundColor: colors.surface,
+  },
+  modalFieldTop: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.surface,
   },
   depositRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    backgroundColor: '#ecfdf5',
-    padding: 8,
-    borderRadius: 8,
-    marginBottom: 8,
+    alignItems: 'center',
+    backgroundColor: ramp.green50,
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  depositLabel: {
+    color: ramp.green700,
+    fontWeight: '600',
+    fontSize: fontSize.body,
+    flex: 1,
+  },
+  depositValue: {
+    color: ramp.green700,
+    fontWeight: '800',
+    fontSize: fontSize.bodyStrong,
   },
   balanceDueRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    backgroundColor: '#f8fafc',
+    alignItems: 'center',
+    backgroundColor: colors.background,
     padding: 10,
-    borderRadius: 8,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderRadius: radius.sm,
+    marginBottom: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    gap: spacing.sm,
+  },
+  balanceDueLabel: {
+    fontSize: fontSize.bodyStrong,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  balanceDueValue: {
+    fontSize: fontSize.title,
+    fontWeight: '800',
+    color: colors.brand,
+  },
+  settleActionsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  settleAction: {
+    flex: 1,
   },
   debtNoticeBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#fef2f2',
+    gap: spacing.sm,
+    backgroundColor: colors.dangerSoft,
     padding: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#fecaca',
-    marginBottom: 8,
+    borderRadius: radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: ramp.red200,
+    marginBottom: spacing.sm,
   },
   debtNoticeText: {
-    fontSize: 13,
-    color: '#991b1b',
+    fontSize: fontSize.body,
+    color: colors.dangerText,
     fontWeight: '600',
     flex: 1,
+  },
+  settledNoticeBox: {
+    backgroundColor: ramp.green50,
+    borderColor: ramp.green100,
+  },
+  settledNoticeText: {
+    color: ramp.green700,
   },
   modalActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    gap: 12,
+    gap: spacing.md,
     marginTop: 18,
-  }
+  },
 });
