@@ -46,8 +46,11 @@ export const ramp = {
   violet900: '#4c1d95',
 
   amber100: '#fef3c7',
+  amber200: '#fde68a',
   amber500: '#f59e0b',
+  amber600: '#d97706',
   amber700: '#b45309',
+  amber800: '#92400e',
 
   green50: '#f0fdf4',
   green100: '#dcfce7',
@@ -55,6 +58,7 @@ export const ramp = {
   green600: '#16a34a',
   green700: '#059669',
 
+  emerald100: '#d1fae5',
   emerald500: '#10b981',
 
   red100: '#fee2e2',
@@ -63,8 +67,14 @@ export const ramp = {
   red600: '#dc2626',
   red900: '#7f1d1d',
 
+  blue100: '#dbeafe',
   blue500: '#3b82f6',
   blue600: '#2563eb',
+
+  // Sky: the "for your information" note, distinct from the actionable blue.
+  sky100: '#e0f2fe',
+  sky200: '#bae6fd',
+  sky700: '#0369a1',
 } as const;
 
 /** Semantic colours. Reference these from screen styles. */
@@ -107,12 +117,20 @@ export const colors = {
   success: ramp.green600,
   successSoft: ramp.green100,
   warning: ramp.amber500,
+  /** For amber surfaces that carry white text — `warning` is too light for AA there. */
+  warningSolid: ramp.amber600,
   warningSoft: ramp.amber100,
+  warningBorder: ramp.amber200,
   warningText: ramp.amber700,
+  /** Deep amber for body copy sitting on `warningSoft`. */
+  warningInk: ramp.amber800,
   danger: ramp.red600,
   dangerSoft: ramp.red100,
   dangerText: ramp.red900,
   info: ramp.blue500,
+  infoSoft: ramp.sky100,
+  infoBorder: ramp.sky200,
+  infoText: ramp.sky700,
 
   /**
    * WhatsApp's own green. It stays on the share button because a green that is
@@ -182,8 +200,8 @@ export type StatusAppearance = {
 /** Repair ticket lifecycle. */
 export const repairStatusColors: Record<string, StatusAppearance> = {
   pending: { ink: ramp.amber500, tint: ramp.amber100 },
-  in_progress: { ink: ramp.blue500, tint: '#dbeafe' },
-  ready: { ink: ramp.emerald500, tint: '#d1fae5' },
+  in_progress: { ink: ramp.blue500, tint: ramp.blue100 },
+  ready: { ink: ramp.emerald500, tint: ramp.emerald100 },
   completed: { ink: ramp.violet700, tint: ramp.violet100 },
   returned: { ink: ramp.red500, tint: ramp.red100 },
   cancelled: { ink: ramp.slate400, tint: ramp.slate100 },

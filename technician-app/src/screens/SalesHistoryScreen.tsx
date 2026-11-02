@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   Modal,
   Alert,
-  Share,
   Linking,
   ScrollView,
   Vibration,
@@ -19,7 +18,6 @@ import {
   Button,
   TextInput,
   ActivityIndicator,
-  RadioButton,
 } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,11 +25,8 @@ import {
   collection,
   query,
   where,
-  getDocs,
   doc,
   updateDoc,
-  addDoc,
-  serverTimestamp,
   onSnapshot,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -39,25 +34,49 @@ import { useAuthStore } from '../store/authStore';
 import { usePosStore } from '../store/posStore';
 import { useApprovalStore } from '../store/approvalStore';
 import { activityLogService } from '../services/activityLogService';
-import { notificationService } from '../services/notificationService';
 import { applyStockLines } from '../services/stockService';
 import { RoleBottomNav } from '../components/RoleBottomNav';
+import { usePermissions } from '../hooks/usePermissions';
 import { useTranslation } from 'react-i18next';
+import { buildSearch, matchesSearch } from '../utils/search';
+import {
+  colors,
+  fontSize,
+  radius,
+  ramp,
+  saleStatusColors,
+  spacing,
+  statusAppearance,
+} from '../theme/tokens';
 import type { SaleTransaction } from '../types';
+
+/**
+ * Driven from a table so the row can scroll horizontally instead of clipping the
+ * fourth tab — and so Arabic, where every label is longer, fits the same screen.
+ */
+const FILTER_TABS = [
+  { id: 'today', labelKey: 'salesHistory.tabToday', fallback: "Today's Sales", icon: 'calendar-today' },
+  { id: 'past', labelKey: 'salesHistory.tabPast', fallback: 'Past Days (Locked)', icon: 'history' },
+  { id: 'all', labelKey: 'salesHistory.tabAll', fallback: 'All', icon: 'format-list-bulleted' },
+  { id: 'pending', labelKey: 'salesHistory.tabPending', fallback: 'Approvals', icon: 'clock-outline' },
+] as const;
+
+const REQUEST_TYPES = [
+  { id: 'void', labelKey: 'salesHistory.reqVoid', fallback: 'Void & Refund Sale', icon: 'undo-variant' },
+  { id: 'modify', labelKey: 'salesHistory.reqModify', fallback: 'Modify Items / Price', icon: 'playlist-edit' },
+] as const;
 
 export const SalesHistoryScreen = ({ navigation }: any) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
+  const can = usePermissions();
   const { addToCart, clearCart } = usePosStore();
 
   const [transactions, setTransactions] = useState<SaleTransaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'today' | 'past' | 'pending'>('today');
-
-  // Selected Tx for Details / Actions
-  const [selectedTx, setSelectedTx] = useState<SaleTransaction | null>(null);
 
   // Admin Approval Request Modal State
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
@@ -67,11 +86,8 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
   const [requestDetails, setRequestDetails] = useState('');
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
 
-  // Direct Void / Refund State for Today
-  const [isVoiding, setIsVoiding] = useState(false);
-
   useEffect(() => {
-    if (user?.role === 'repair_agent') {
+    if (!can.pos) {
       navigation.replace('Workbench');
       return;
     }
@@ -105,7 +121,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
     );
 
     return () => unsubscribe();
-  }, [user?.role]);
+  }, [can.pos]);
 
   // Check if a sale date is Today
   const isSaleToday = (dateStr: string): boolean => {
@@ -119,32 +135,38 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
     );
   };
 
+  // One haystack per invoice, rebuilt only when the snapshot changes. The old
+  // filter ran `i.product.name.toLowerCase()` on every keystroke and threw when
+  // a line was stored without a name — buildSearch tolerates the missing field.
+  const txIndex = useMemo(
+    () =>
+      transactions.map((tx) => ({
+        tx,
+        doc: buildSearch(
+          tx.invoiceNumber,
+          tx.id,
+          tx.customerName,
+          tx.customerPhone,
+          (tx.items || []).map((i) => i?.product?.name).join(' ')
+        ),
+      })),
+    [transactions]
+  );
+
   // Filtered list
   const filteredList = useMemo(() => {
-    let result = transactions;
+    let result = txIndex;
 
     if (filterTab === 'today') {
-      result = result.filter((tx) => isSaleToday(tx.date));
+      result = result.filter(({ tx }) => isSaleToday(tx.date));
     } else if (filterTab === 'past') {
-      result = result.filter((tx) => !isSaleToday(tx.date));
+      result = result.filter(({ tx }) => !isSaleToday(tx.date));
     } else if (filterTab === 'pending') {
-      result = result.filter((tx) => tx.status === 'pending_approval');
+      result = result.filter(({ tx }) => tx.status === 'pending_approval');
     }
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter(
-        (tx) =>
-          tx.id.toLowerCase().includes(q) ||
-          (tx.invoiceNumber || '').toLowerCase().includes(q) ||
-          (tx.customerName || '').toLowerCase().includes(q) ||
-          (tx.customerPhone || '').includes(q) ||
-          tx.items.some((i) => i.product.name.toLowerCase().includes(q))
-      );
-    }
-
-    return result;
-  }, [transactions, filterTab, searchQuery]);
+    return result.filter(({ doc }) => matchesSearch(doc, searchQuery)).map(({ tx }) => tx);
+  }, [txIndex, filterTab, searchQuery]);
 
   // Today's verified financial stats (strictly excluding voided/refunded)
   const { todayValidTotal, todayValidCount, todayVoidedCount } = useMemo(() => {
@@ -177,7 +199,6 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
           text: t('salesHistory.confirmVoid', 'Confirm Void'),
           style: 'destructive',
           onPress: async () => {
-            setIsVoiding(true);
             try {
               // 1. Restore inventory stock. Mirrors the quantities the POS took out and
               // goes through the same atomic primitive, so a count another till moved
@@ -216,8 +237,6 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
               Alert.alert(t('salesHistory.saleVoided', 'Sale Voided'), t('salesHistory.saleVoidedBody', 'Stock restored and transaction marked as voided.'));
             } catch (err: any) {
               Alert.alert(t('salesHistory.voidFailedTitle', 'Void Failed'), err.message || t('salesHistory.voidFailed', 'Could not void sale.'));
-            } finally {
-              setIsVoiding(false);
             }
           },
         },
@@ -275,7 +294,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
           originalDate: targetTxForApproval.date,
           customerName: targetTxForApproval.customerName || 'Walk-in',
           items: targetTxForApproval.items.map((i) => ({
-            name: i.product.name,
+            name: i.product?.name ?? '',
             qty: i.quantity,
             price: i.product.price,
           })),
@@ -309,34 +328,6 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
     }
   };
 
-  // Receipt Share
-  const handleShareReceipt = (tx: SaleTransaction) => {
-    const discountAmount = tx.subtotal && tx.total ? Math.max(0, tx.subtotal - tx.total) : 0;
-    const lines = [
-      `🧾 *PhoneShop Pro - Sales Receipt*`,
-      `Invoice: #${tx.invoiceNumber || tx.id.slice(-6)}`,
-      `Date: ${new Date(tx.date).toLocaleString()}`,
-      `Customer: ${tx.customerName || 'Walk-in'}`,
-      `─────────────────────────`,
-      ...tx.items.map(
-        (i) =>
-          `• ${i.product.name} ${i.product.model || ''} x${i.quantity} — ${(i.unitPrice || i.product.price) * i.quantity} DA`
-      ),
-      `─────────────────────────`,
-      `Subtotal: ${tx.subtotal} DA`,
-      ...(discountAmount > 0
-        ? [
-            `Discount (${tx.discount?.type === 'percent' ? `${tx.discount.value}%` : `${tx.discount?.value} DA`}): -${discountAmount} DA`,
-          ]
-        : []),
-      `*TOTAL: ${tx.total} DA*`,
-      `Payment: ${tx.payments?.[0]?.method.toUpperCase() || 'CASH'}`,
-      `Served By: ${tx.processedByName || 'Staff'}`,
-      `\nThank you for choosing us!`,
-    ];
-    Share.share({ message: lines.join('\n') });
-  };
-
   const handleWhatsAppCustomer = (tx: SaleTransaction) => {
     const phone = (tx.customerPhone || '').replace(/\D/g, '');
     if (!phone) {
@@ -355,21 +346,27 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
     );
   };
 
-  if (user?.role === 'repair_agent') {
+  // The till's history follows the till: whoever may sell may review what was
+  // sold, and neither is decided by a job title.
+  if (!can.pos) {
     return (
       <View style={styles.restrictedContainer}>
-        <MaterialCommunityIcons name="shield-lock-outline" size={64} color="#ef4444" />
-        <Text style={styles.restrictedTitle}>Access Restricted</Text>
+        <MaterialCommunityIcons name="shield-lock-outline" size={64} color={colors.danger} />
+        <Text style={styles.restrictedTitle}>{t('common.accessRestricted', 'Access Restricted')}</Text>
         <Text style={styles.restrictedSub}>
-          Sales History is only accessible to Sales Agents and Administrators.
+          {t(
+            'salesHistory.restrictedBody',
+            'Sales history needs the selling permission. Ask an administrator to grant it to your profile.'
+          )}
         </Text>
         <Button
           mode="contained"
-          buttonColor="#4f46e5"
-          style={{ marginTop: 20 }}
+          buttonColor={colors.brand}
+          textColor={colors.onBrand}
+          style={styles.restrictedButton}
           onPress={() => navigation.navigate('Workbench')}
         >
-          Return to Workbench
+          {t('salesHistory.returnToWorkbench', 'Return to Workbench')}
         </Button>
       </View>
     );
@@ -380,14 +377,14 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
       {/* Header */}
       <Appbar.Header style={styles.header}>
         <Appbar.Content
-          title="Sales History"
-          subtitle={`Agent: ${user?.name || 'Staff'}`}
+          title={t('salesHistory.title', 'Sales History')}
+          subtitle={t('pos.agent', 'Agent: {{name}}', { name: user?.name || t('common.staff', 'Staff') })}
           titleStyle={styles.headerTitle}
           subtitleStyle={styles.headerSub}
         />
         <Appbar.Action
           icon="plus-circle"
-          color="#ffffff"
+          color={colors.onBrand}
           onPress={() => navigation.navigate('POS')}
         />
       </Appbar.Header>
@@ -395,7 +392,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
       {/* Search Bar */}
       <View style={styles.searchWrap}>
         <Searchbar
-          placeholder="Search Invoice #, customer, item..."
+          placeholder={t('salesHistory.searchPlaceholder', 'Search invoice #, customer, item...')}
           value={searchQuery}
           onChangeText={setSearchQuery}
           style={styles.searchbar}
@@ -403,69 +400,68 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
       </View>
 
       {/* Filter Tabs */}
-      <View style={styles.filterTabsRow}>
-        <TouchableOpacity
-          style={[styles.filterTab, filterTab === 'today' && styles.filterTabActive]}
-          onPress={() => setFilterTab('today')}
-        >
-          <Text style={[styles.filterTabText, filterTab === 'today' && styles.filterTabTextActive]}>
-            📅 Today&#39;s Sales
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.filterTab, filterTab === 'past' && styles.filterTabActive]}
-          onPress={() => setFilterTab('past')}
-        >
-          <Text style={[styles.filterTabText, filterTab === 'past' && styles.filterTabTextActive]}>
-            📜 Past Days (Locked)
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.filterTab, filterTab === 'all' && styles.filterTabActive]}
-          onPress={() => setFilterTab('all')}
-        >
-          <Text style={[styles.filterTabText, filterTab === 'all' && styles.filterTabTextActive]}>
-            All
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.filterTab, filterTab === 'pending' && styles.filterTabActive]}
-          onPress={() => setFilterTab('pending')}
-        >
-          <Text style={[styles.filterTabText, filterTab === 'pending' && styles.filterTabTextActive]}>
-            ⏳ Approvals
-          </Text>
-        </TouchableOpacity>
-      </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.filterTabsRow}
+      >
+        {FILTER_TABS.map((tab) => {
+          const active = filterTab === tab.id;
+          return (
+            <TouchableOpacity
+              key={tab.id}
+              style={[styles.filterTab, active && styles.filterTabActive]}
+              onPress={() => setFilterTab(tab.id)}
+            >
+              <MaterialCommunityIcons
+                name={tab.icon}
+                size={14}
+                color={active ? colors.onBrand : colors.textSecondary}
+              />
+              <Text style={[styles.filterTabText, active && styles.filterTabTextActive]}>
+                {t(tab.labelKey, tab.fallback)}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
 
       {/* Today Notice Banner & Financial Summary */}
       {filterTab === 'today' && (
         <>
           <View style={styles.todaySummaryBar}>
             <View style={styles.todaySummaryItem}>
-              <Text style={styles.todaySummaryLabel}>Today&#39;s Revenue</Text>
+              <Text style={styles.todaySummaryLabel}>{t('salesHistory.todayRevenue', "Today's Revenue")}</Text>
               <Text style={styles.todaySummaryAmount}>{todayValidTotal.toLocaleString()} DA</Text>
             </View>
             <View style={styles.todaySummaryDivider} />
             <View style={styles.todaySummaryItem}>
-              <Text style={styles.todaySummaryLabel}>Valid Sales</Text>
-              <Text style={styles.todaySummaryCount}>{todayValidCount} completed</Text>
+              <Text style={styles.todaySummaryLabel}>{t('salesHistory.validSales', 'Valid Sales')}</Text>
+              <Text style={styles.todaySummaryCount}>
+                {t('salesHistory.completedCount', '{{n}} completed', { n: todayValidCount })}
+              </Text>
             </View>
             {todayVoidedCount > 0 && (
               <>
                 <View style={styles.todaySummaryDivider} />
                 <View style={styles.todaySummaryItem}>
-                  <Text style={styles.todaySummaryLabel}>Voided / Excluded</Text>
-                  <Text style={[styles.todaySummaryCount, { color: '#dc2626' }]}>{todayVoidedCount} voided</Text>
+                  <Text style={styles.todaySummaryLabel}>{t('salesHistory.voidedExcluded', 'Voided / Excluded')}</Text>
+                  <Text style={[styles.todaySummaryCount, { color: colors.danger }]}>
+                    {t('salesHistory.voidedCount', '{{n}} voided', { n: todayVoidedCount })}
+                  </Text>
                 </View>
               </>
             )}
           </View>
 
-          <View style={styles.infoBanner}>
-            <MaterialCommunityIcons name="information-outline" size={18} color="#0369a1" />
-            <Text style={styles.infoBannerText}>
-              You have full authorization to modify or void carts completed today.
+          <View style={[styles.infoBanner, styles.infoBannerNotice]}>
+            <MaterialCommunityIcons name="information-outline" size={18} color={colors.infoText} />
+            <Text style={[styles.infoBannerText, { color: colors.infoText }]}>
+              {t(
+                'salesHistory.todayNotice',
+                'You have full authorization to modify or void carts completed today.'
+              )}
             </Text>
           </View>
         </>
@@ -473,10 +469,13 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
 
       {/* Past Notice Banner */}
       {filterTab === 'past' && (
-        <View style={[styles.infoBanner, { backgroundColor: '#fef3c7', borderColor: '#fde68a' }]}>
-          <MaterialCommunityIcons name="lock-outline" size={18} color="#b45309" />
-          <Text style={[styles.infoBannerText, { color: '#92400e' }]}>
-            Past sales require Admin Approval before modifications or refunds can be processed.
+        <View style={[styles.infoBanner, styles.infoBannerWarning]}>
+          <MaterialCommunityIcons name="lock-outline" size={18} color={colors.warningText} />
+          <Text style={[styles.infoBannerText, { color: colors.warningInk }]}>
+            {t(
+              'salesHistory.pastNotice',
+              'Past sales require Admin Approval before modifications or refunds can be processed.'
+            )}
           </Text>
         </View>
       )}
@@ -484,70 +483,73 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
       {/* Transaction List */}
       {isLoading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color="#4f46e5" />
-          <Text style={{ marginTop: 12, color: '#64748b' }}>Loading sales history...</Text>
+          <ActivityIndicator size="large" color={colors.brand} />
+          <Text style={styles.loadingText}>{t('salesHistory.loading', 'Loading sales history...')}</Text>
         </View>
       ) : (
         <FlatList
           data={filteredList}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => {
             const isToday = isSaleToday(item.date);
             const isVoided = item.status === 'voided' || item.status === 'refunded';
             const isPendingApproval = item.status === 'pending_approval';
-            const totalQty = item.items.reduce((s, i) => s + i.quantity, 0);
+            const totalQty = (item.items || []).reduce((s, i) => s + (i.quantity || 0), 0);
+            const status = statusAppearance(saleStatusColors, item.status);
+            const items = item.items || [];
 
             return (
               <Card style={[styles.txCard, isVoided && styles.txCardVoided]}>
                 <Card.Content>
                   {/* Top Row: Invoice & Badges */}
                   <View style={styles.cardHeaderRow}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={styles.rowCenter}>
                       <MaterialCommunityIcons
                         name="receipt"
                         size={20}
-                        color={isVoided ? '#94a3b8' : '#4f46e5'}
+                        color={isVoided ? colors.textFaint : colors.brand}
                       />
                       <Text style={styles.invoiceNum}>
                         #{item.invoiceNumber || item.id.slice(-6)}
                       </Text>
                     </View>
 
-                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                    <View style={styles.rowCenter}>
                       {isToday && (
                         <View style={styles.todayPill}>
-                          <Text style={styles.todayPillText}>TODAY</Text>
+                          <Text style={styles.todayPillText}>{t('salesHistory.todayTag', 'TODAY')}</Text>
                         </View>
                       )}
-
-                      {isPendingApproval ? (
-                        <View style={styles.pendingPill}>
-                          <MaterialCommunityIcons name="clock-outline" size={12} color="#b45309" />
-                          <Text style={styles.pendingPillText}>Approval Pending</Text>
-                        </View>
-                      ) : isVoided ? (
-                        <View style={styles.voidedPill}>
-                          <Text style={styles.voidedPillText}>VOIDED</Text>
-                        </View>
-                      ) : (
-                        <View style={styles.completedPill}>
-                          <Text style={styles.completedPillText}>COMPLETED</Text>
-                        </View>
-                      )}
+                      {/* One pill style, the status table for the colour: the four
+                          hand-copied pills used to disagree with the desktop about
+                          what a refunded sale looks like. */}
+                      <View style={[styles.statusPill, { backgroundColor: status.tint }]}>
+                        {isPendingApproval && (
+                          <MaterialCommunityIcons name="clock-outline" size={12} color={status.ink} />
+                        )}
+                        <Text style={[styles.statusPillText, { color: status.ink }]}>
+                          {isPendingApproval
+                            ? t('salesHistory.statusPending', 'Approval Pending')
+                            : isVoided
+                            ? t('salesHistory.statusVoided', 'VOIDED')
+                            : t('salesHistory.statusCompleted', 'COMPLETED')}
+                        </Text>
+                      </View>
                     </View>
                   </View>
 
                   {/* Customer & Timestamp */}
                   <View style={styles.metaRow}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <MaterialCommunityIcons name="account" size={16} color="#64748b" />
+                    <View style={styles.rowCenter}>
+                      <MaterialCommunityIcons name="account" size={16} color={colors.textMuted} />
                       <Text style={styles.custName}>
-                        {item.customerName || 'Walk-in Customer'}
+                        {item.customerName || t('salesHistory.walkIn', 'Walk-in Customer')}
                       </Text>
                       {Boolean(item.customerPhone) && (
                         <TouchableOpacity onPress={() => handleWhatsAppCustomer(item)}>
-                          <MaterialCommunityIcons name="whatsapp" size={16} color="#22c55e" />
+                          <MaterialCommunityIcons name="whatsapp" size={16} color={colors.whatsapp} />
                         </TouchableOpacity>
                       )}
                     </View>
@@ -559,19 +561,22 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
 
                   {/* Items Preview */}
                   <View style={styles.itemsBox}>
-                    {item.items.slice(0, 3).map((cartItem, idx) => (
+                    {items.slice(0, 3).map((cartItem, idx) => (
                       <View key={idx} style={styles.itemRow}>
                         <Text style={styles.itemName} numberOfLines={1}>
-                          • {cartItem.product.name} {cartItem.product.model || ''}
+                          • {cartItem.product?.name} {cartItem.product?.model || ''}
                         </Text>
                         <Text style={styles.itemQtyPrice}>
-                          x{cartItem.quantity} ({(cartItem.unitPrice || cartItem.product.price) * cartItem.quantity} DA)
+                          x{cartItem.quantity} ({(cartItem.unitPrice || cartItem.product?.price || 0) * (cartItem.quantity || 1)} DA)
                         </Text>
                       </View>
                     ))}
-                    {item.items.length > 3 && (
+                    {items.length > 3 && (
                       <Text style={styles.moreItemsText}>
-                        +{item.items.length - 3} more items ({totalQty} total)
+                        {t('salesHistory.moreItems', '+{{n}} more items ({{total}} total)', {
+                          n: items.length - 3,
+                          total: totalQty,
+                        })}
                       </Text>
                     )}
                   </View>
@@ -580,11 +585,11 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
                   <View style={styles.financeRow}>
                     <View>
                       <Text style={styles.subtotalLabel}>
-                        Subtotal: {item.subtotal.toLocaleString()} DA
+                        {t('pos.subtotal', 'Subtotal')}: {(item.subtotal || 0).toLocaleString()} DA
                       </Text>
                       {Boolean(item.discount) && (
                         <Text style={styles.discountLabel}>
-                          Discount:{' '}
+                          {t('salesHistory.discountLabel', 'Discount:')}{' '}
                           {item.discount?.type === 'percent'
                             ? `-${item.discount.value}%`
                             : `-${item.discount?.value} DA`}
@@ -592,13 +597,13 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
                       )}
                     </View>
 
-                    <View style={{ alignItems: 'flex-end' }}>
+                    <View style={styles.columnEnd}>
                       <Text style={[styles.totalAmount, isVoided && styles.totalAmountVoided]}>
-                        {item.total.toLocaleString()} DA
+                        {(item.total || 0).toLocaleString()} DA
                       </Text>
                       <View style={styles.methodBadge}>
                         <Text style={styles.methodBadgeText}>
-                          {item.payments?.[0]?.method.toUpperCase() || 'CASH'}
+                          {item.payments?.[0]?.method?.toUpperCase() || t('salesHistory.cashTag', 'CASH')}
                         </Text>
                       </View>
                     </View>
@@ -613,9 +618,9 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
                           style={[styles.actionBtn, styles.editBtn]}
                           onPress={() => handleEditCartToday(item)}
                         >
-                          <MaterialCommunityIcons name="cart-arrow-down" size={16} color="#4f46e5" />
-                          <Text style={[styles.actionBtnText, { color: '#4f46e5' }]}>
-                            Edit Cart
+                          <MaterialCommunityIcons name="cart-arrow-down" size={16} color={colors.brand} />
+                          <Text style={[styles.actionBtnText, { color: colors.brand }]}>
+                            {t('salesHistory.editCart', 'Edit Cart')}
                           </Text>
                         </TouchableOpacity>
 
@@ -623,9 +628,9 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
                           style={[styles.actionBtn, styles.voidBtn]}
                           onPress={() => handleDirectVoidToday(item)}
                         >
-                          <MaterialCommunityIcons name="close-circle-outline" size={16} color="#dc2626" />
-                          <Text style={[styles.actionBtnText, { color: '#dc2626' }]}>
-                            Void / Refund
+                          <MaterialCommunityIcons name="close-circle-outline" size={16} color={colors.danger} />
+                          <Text style={[styles.actionBtnText, { color: colors.danger }]}>
+                            {t('salesHistory.voidRefund', 'Void / Refund')}
                           </Text>
                         </TouchableOpacity>
                       </>
@@ -637,7 +642,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
                         style={[
                           styles.actionBtn,
                           styles.requestBtn,
-                          isPendingApproval && { opacity: 0.6 },
+                          isPendingApproval && styles.actionBtnDisabled,
                         ]}
                         disabled={isPendingApproval}
                         onPress={() => {
@@ -648,10 +653,12 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
                         <MaterialCommunityIcons
                           name={isPendingApproval ? 'clock-check-outline' : 'shield-account'}
                           size={16}
-                          color="#b45309"
+                          color={colors.warningText}
                         />
-                        <Text style={[styles.actionBtnText, { color: '#b45309' }]}>
-                          {isPendingApproval ? 'Request Pending' : 'Request Admin Change'}
+                        <Text style={[styles.actionBtnText, { color: colors.warningText }]}>
+                          {isPendingApproval
+                            ? t('salesHistory.requestPending', 'Request Pending')
+                            : t('salesHistory.requestAdminChange', 'Request Admin Change')}
                         </Text>
                       </TouchableOpacity>
                     )}
@@ -662,22 +669,23 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
           }}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="receipt-text-outline" size={56} color="#cbd5e1" />
-              <Text style={styles.emptyTitle}>No Sales Found</Text>
+              <MaterialCommunityIcons name="receipt-text-outline" size={56} color={colors.borderStrong} />
+              <Text style={styles.emptyTitle}>{t('salesHistory.noSales', 'No Sales Found')}</Text>
               <Text style={styles.emptySub}>
                 {searchQuery
-                  ? 'No transactions matched your search criteria.'
+                  ? t('salesHistory.noSalesSearch', 'No transactions matched your search criteria.')
                   : filterTab === 'today'
-                  ? 'No sales completed today yet. Start one from Quick POS!'
-                  : 'No past transactions found.'}
+                  ? t('salesHistory.noSalesToday', 'No sales completed today yet. Start one from Quick POS!')
+                  : t('salesHistory.noSalesPast', 'No past transactions found.')}
               </Text>
               <Button
                 mode="contained"
-                buttonColor="#4f46e5"
-                style={{ marginTop: 16 }}
+                buttonColor={colors.brand}
+                textColor={colors.onBrand}
+                style={styles.emptyCta}
                 onPress={() => navigation.navigate('POS')}
               >
-                Go to Quick POS
+                {t('salesHistory.goToPos', 'Go to Quick POS')}
               </Button>
             </View>
           }
@@ -693,109 +701,98 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
           <View
             style={[
               styles.modalSheet,
-              { paddingBottom: Math.max(insets.bottom, 20) },
+              { paddingBottom: Math.max(insets.bottom, spacing.xl) },
             ]}
           >
             <View style={styles.modalHeader}>
-              <View>
-                <Text style={styles.modalTitle}>Request Admin Approval</Text>
+              <View style={styles.flexOne}>
+                <Text style={styles.modalTitle}>{t('salesHistory.requestTitle', 'Request Admin Approval')}</Text>
                 <Text style={styles.modalSub}>
-                  Invoice #{targetTxForApproval?.invoiceNumber || targetTxForApproval?.id.slice(-6)} ·{' '}
-                  {targetTxForApproval?.total.toLocaleString()} DA
+                  {t(
+                    'salesHistory.requestSub',
+                    'Invoice #{{invoice}} · {{total}} DA',
+                    {
+                      invoice: targetTxForApproval?.invoiceNumber || targetTxForApproval?.id.slice(-6) || '',
+                      total: (targetTxForApproval?.total || 0).toLocaleString(),
+                    }
+                  )}
                 </Text>
               </View>
               <TouchableOpacity onPress={() => setIsRequestModalOpen(false)}>
-                <MaterialCommunityIcons name="close" size={24} color="#64748b" />
+                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ maxHeight: 380 }}>
-              <Text style={styles.requestSectionTitle}>Request Action</Text>
+            <ScrollView style={styles.requestScroll} keyboardShouldPersistTaps="handled">
+              <Text style={styles.requestSectionTitle}>{t('salesHistory.requestAction', 'Request Action')}</Text>
               <View style={styles.requestTypeRow}>
-                <TouchableOpacity
-                  style={[
-                    styles.requestTypeChip,
-                    requestType === 'void' && styles.requestTypeChipActive,
-                  ]}
-                  onPress={() => setRequestType('void')}
-                >
-                  <MaterialCommunityIcons
-                    name="undo-variant"
-                    size={18}
-                    color={requestType === 'void' ? '#ffffff' : '#475569'}
-                  />
-                  <Text
-                    style={[
-                      styles.requestTypeChipText,
-                      requestType === 'void' && styles.requestTypeChipTextActive,
-                    ]}
-                  >
-                    Void & Refund Sale
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.requestTypeChip,
-                    requestType === 'modify' && styles.requestTypeChipActive,
-                  ]}
-                  onPress={() => setRequestType('modify')}
-                >
-                  <MaterialCommunityIcons
-                    name="playlist-edit"
-                    size={18}
-                    color={requestType === 'modify' ? '#ffffff' : '#475569'}
-                  />
-                  <Text
-                    style={[
-                      styles.requestTypeChipText,
-                      requestType === 'modify' && styles.requestTypeChipTextActive,
-                    ]}
-                  >
-                    Modify Items / Price
-                  </Text>
-                </TouchableOpacity>
+                {REQUEST_TYPES.map((req) => {
+                  const active = requestType === req.id;
+                  return (
+                    <TouchableOpacity
+                      key={req.id}
+                      style={[styles.requestTypeChip, active && styles.requestTypeChipActive]}
+                      onPress={() => setRequestType(req.id)}
+                    >
+                      <MaterialCommunityIcons
+                        name={req.icon}
+                        size={18}
+                        color={active ? colors.onBrand : colors.textSecondary}
+                      />
+                      <Text style={[styles.requestTypeChipText, active && styles.requestTypeChipTextActive]}>
+                        {t(req.labelKey, req.fallback)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               <TextInput
-                label="Reason for Admin (Required) *"
-                placeholder="e.g. Customer returned phone case, wrong quantity charged..."
+                label={t('salesHistory.reasonLabel', 'Reason for Admin (Required) *')}
+                placeholder={t(
+                  'salesHistory.reasonPlaceholder',
+                  'e.g. Customer returned phone case, wrong quantity charged...'
+                )}
                 value={requestReason}
                 onChangeText={setRequestReason}
                 mode="outlined"
                 multiline
                 numberOfLines={3}
-                style={{ backgroundColor: '#ffffff', marginBottom: 12 }}
+                style={styles.requestInput}
               />
 
               <TextInput
-                label="Requested Changes / Specifics"
-                placeholder="e.g. Refund 1,500 DA, remove item 2, change to cash..."
+                label={t('salesHistory.detailsLabel', 'Requested Changes / Specifics')}
+                placeholder={t('salesHistory.detailsPlaceholder', 'e.g. Refund 1,500 DA, remove item 2, change to cash...')}
                 value={requestDetails}
                 onChangeText={setRequestDetails}
                 mode="outlined"
                 multiline
                 numberOfLines={2}
-                style={{ backgroundColor: '#ffffff', marginBottom: 16 }}
+                style={styles.requestInputWide}
               />
 
               <View style={styles.warningBox}>
-                <MaterialCommunityIcons name="shield-alert-outline" size={20} color="#b45309" />
+                <MaterialCommunityIcons name="shield-alert-outline" size={20} color={colors.warningText} />
                 <Text style={styles.warningBoxText}>
-                  This submission will alert the desktop manager in real-time. Once approved, the adjustments will be automatically processed.
+                  {t(
+                    'salesHistory.requestWarning',
+                    'This submission will alert the desktop manager in real-time. Once approved, the adjustments will be automatically processed.'
+                  )}
                 </Text>
               </View>
             </ScrollView>
 
             <Button
               mode="contained"
-              buttonColor="#d97706"
+              buttonColor={colors.warningSolid}
+              textColor={colors.onBrand}
               loading={isSubmittingRequest}
               disabled={isSubmittingRequest}
               onPress={handleSubmitApprovalRequest}
-              style={{ marginTop: 12, paddingVertical: 4 }}
+              style={styles.submitRequestBtn}
             >
-              Submit Approval Request
+              {t('salesHistory.submitRequest', 'Submit Approval Request')}
             </Button>
           </View>
         </View>
@@ -807,152 +804,149 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: colors.background,
+  },
+  flexOne: {
+    flex: 1,
+  },
+  rowCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  columnEnd: {
+    alignItems: 'flex-end',
   },
   header: {
-    backgroundColor: '#4f46e5',
+    backgroundColor: colors.brand,
   },
   headerTitle: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 20,
+    color: colors.onBrand,
+    fontWeight: '700',
+    fontSize: fontSize.title,
   },
   headerSub: {
-    color: '#c7d2fe',
-    fontSize: 12,
+    color: colors.brandBorder,
+    fontSize: fontSize.label,
   },
   searchWrap: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm + 2,
   },
   searchbar: {
     height: 44,
-    backgroundColor: '#ffffff',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   filterTabsRow: {
     flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
   },
   filterTab: {
-    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
     paddingVertical: 7,
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    backgroundColor: colors.surface,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   filterTabActive: {
-    backgroundColor: '#4f46e5',
-    borderColor: '#4f46e5',
+    backgroundColor: colors.brand,
+    borderColor: colors.brand,
   },
   filterTabText: {
-    fontSize: 12,
+    fontSize: fontSize.label,
     fontWeight: '600',
-    color: '#475569',
+    color: colors.textSecondary,
   },
   filterTabTextActive: {
-    color: '#ffffff',
+    color: colors.onBrand,
     fontWeight: '700',
   },
   infoBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#e0f2fe',
-    borderWidth: 1,
-    borderColor: '#bae6fd',
-    marginHorizontal: 12,
-    marginBottom: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+    gap: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  infoBannerNotice: {
+    backgroundColor: colors.infoSoft,
+    borderColor: colors.infoBorder,
+  },
+  infoBannerWarning: {
+    backgroundColor: colors.warningSoft,
+    borderColor: colors.warningBorder,
   },
   infoBannerText: {
-    fontSize: 12,
-    color: '#0369a1',
+    fontSize: fontSize.label,
     fontWeight: '600',
     flex: 1,
     lineHeight: 16,
   },
+  loadingText: {
+    marginTop: spacing.md,
+    color: colors.textMuted,
+  },
   listContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 24,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xxl,
   },
   txCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    marginBottom: spacing.sm + 2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   txCardVoided: {
     opacity: 0.65,
-    backgroundColor: '#f1f5f9',
+    backgroundColor: colors.surfaceMuted,
   },
   cardHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: spacing.xs + 2,
   },
   invoiceNum: {
-    fontSize: 15,
+    fontSize: fontSize.bodyStrong,
     fontWeight: '800',
-    color: '#0f172a',
+    color: colors.textPrimary,
   },
   todayPill: {
-    backgroundColor: '#dbeafe',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    backgroundColor: colors.brandSoft,
+    paddingHorizontal: spacing.xs + 2,
+    paddingVertical: spacing.xxs,
+    borderRadius: radius.xs / 1.5,
   },
   todayPillText: {
-    color: '#1d4ed8',
+    color: colors.brand,
     fontSize: 10,
     fontWeight: '800',
   },
-  completedPill: {
-    backgroundColor: '#dcfce7',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  completedPillText: {
-    color: '#16a34a',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  voidedPill: {
-    backgroundColor: '#fee2e2',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  voidedPillText: {
-    color: '#dc2626',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  pendingPill: {
+  /* One pill shape; `saleStatusColors` supplies the tint and the ink. */
+  statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    backgroundColor: '#fef3c7',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    gap: spacing.xs / 2,
+    paddingHorizontal: spacing.xs + 2,
+    paddingVertical: spacing.xxs,
+    borderRadius: radius.xs / 1.5,
   },
-  pendingPillText: {
-    color: '#b45309',
+  statusPillText: {
     fontSize: 10,
     fontWeight: '700',
   },
@@ -960,179 +954,161 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   custName: {
-    fontSize: 13,
+    fontSize: fontSize.body,
     fontWeight: '700',
-    color: '#334155',
+    color: ramp.slate700,
   },
   timestamp: {
-    fontSize: 11,
-    color: '#94a3b8',
+    fontSize: fontSize.caption,
+    color: colors.textFaint,
   },
   itemsBox: {
-    backgroundColor: '#f8fafc',
-    padding: 8,
-    borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#f1f5f9',
+    backgroundColor: colors.background,
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+    marginBottom: spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.surfaceMuted,
   },
   itemRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 2,
+    paddingVertical: spacing.xxs,
   },
   itemName: {
-    fontSize: 12,
-    color: '#1e293b',
+    fontSize: fontSize.label,
+    color: ramp.slate800,
     flex: 1,
   },
   itemQtyPrice: {
-    fontSize: 12,
+    fontSize: fontSize.label,
     fontWeight: '600',
-    color: '#475569',
+    color: colors.textSecondary,
   },
   moreItemsText: {
-    fontSize: 11,
-    color: '#64748b',
+    fontSize: fontSize.caption,
+    color: colors.textMuted,
     fontStyle: 'italic',
-    marginTop: 2,
+    marginTop: spacing.xxs,
   },
   financeRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
-    paddingTop: 4,
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
-    marginBottom: 10,
+    paddingTop: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.surfaceMuted,
+    marginBottom: spacing.sm + 2,
   },
   subtotalLabel: {
-    fontSize: 11,
-    color: '#64748b',
+    fontSize: fontSize.caption,
+    color: colors.textMuted,
   },
   discountLabel: {
-    fontSize: 11,
-    color: '#16a34a',
+    fontSize: fontSize.caption,
+    color: colors.success,
     fontWeight: '600',
   },
   totalAmount: {
-    fontSize: 16,
+    fontSize: fontSize.bodyStrong,
     fontWeight: '900',
-    color: '#0f172a',
+    color: colors.textPrimary,
   },
   totalAmountVoided: {
     textDecorationLine: 'line-through',
-    color: '#94a3b8',
+    color: colors.textFaint,
   },
   todaySummaryBar: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 12,
-    marginHorizontal: 16,
-    marginBottom: 10,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm + 2,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    elevation: 2,
-    shadowColor: '#0f172a',
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   todaySummaryItem: {
     alignItems: 'center',
     flex: 1,
   },
   todaySummaryDivider: {
-    width: 1,
+    width: StyleSheet.hairlineWidth,
     height: 28,
-    backgroundColor: '#e2e8f0',
+    backgroundColor: colors.border,
   },
   todaySummaryLabel: {
     fontSize: 10,
-    color: '#64748b',
+    color: colors.textMuted,
     fontWeight: '600',
     textTransform: 'uppercase',
   },
   todaySummaryAmount: {
-    fontSize: 15,
+    fontSize: fontSize.bodyStrong,
     fontWeight: '800',
-    color: '#0f172a',
-    marginTop: 2,
+    color: colors.textPrimary,
+    marginTop: spacing.xxs,
   },
   todaySummaryCount: {
-    fontSize: 12,
+    fontSize: fontSize.label,
     fontWeight: '700',
-    color: '#16a34a',
-    marginTop: 2,
+    color: colors.success,
+    marginTop: spacing.xxs,
   },
   methodBadge: {
-    backgroundColor: '#f1f5f9',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginTop: 2,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: spacing.xs + 2,
+    paddingVertical: spacing.xxs,
+    borderRadius: radius.xs / 1.5,
+    marginTop: spacing.xxs,
   },
   methodBadgeText: {
     fontSize: 10,
     fontWeight: '700',
-    color: '#475569',
+    color: colors.textSecondary,
   },
   cardActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 8,
-    paddingTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
-  },
-  actionIconBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 6,
-    backgroundColor: '#f1f5f9',
-  },
-  actionBtnLabel: {
-    fontSize: 12,
-    color: '#475569',
-    fontWeight: '600',
+    gap: spacing.sm,
+    paddingTop: spacing.xs + 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.surfaceMuted,
   },
   actionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: spacing.xs,
     paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.xs,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   actionBtnText: {
-    fontSize: 12,
+    fontSize: fontSize.label,
     fontWeight: '700',
   },
+  actionBtnDisabled: {
+    opacity: 0.6,
+  },
   editBtn: {
-    backgroundColor: '#eef2ff',
-    borderWidth: 1,
-    borderColor: '#c7d2fe',
+    backgroundColor: colors.brandSoft,
+    borderColor: colors.brandBorder,
   },
   voidBtn: {
-    backgroundColor: '#fee2e2',
-    borderWidth: 1,
-    borderColor: '#fecaca',
+    backgroundColor: colors.dangerSoft,
+    borderColor: ramp.red200,
   },
   requestBtn: {
-    backgroundColor: '#fef3c7',
-    borderWidth: 1,
-    borderColor: '#fde68a',
+    backgroundColor: colors.warningSoft,
+    borderColor: colors.warningBorder,
   },
   center: {
     flex: 1,
@@ -1144,115 +1120,137 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingTop: 60,
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing.xxl,
   },
   emptyTitle: {
-    fontSize: 17,
+    fontSize: fontSize.subtitle,
     fontWeight: '700',
-    color: '#0f172a',
-    marginTop: 12,
+    color: colors.textPrimary,
+    marginTop: spacing.md,
   },
   emptySub: {
-    fontSize: 13,
-    color: '#64748b',
+    fontSize: fontSize.body,
+    color: colors.textMuted,
     textAlign: 'center',
-    marginTop: 6,
+    marginTop: spacing.xs + 2,
     lineHeight: 18,
+  },
+  emptyCta: {
+    marginTop: spacing.lg,
   },
   restrictedContainer: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: spacing.xxl,
   },
   restrictedTitle: {
-    fontSize: 20,
+    fontSize: fontSize.title,
     fontWeight: '800',
-    color: '#0f172a',
-    marginTop: 16,
+    color: colors.textPrimary,
+    marginTop: spacing.lg,
   },
   restrictedSub: {
-    fontSize: 14,
-    color: '#64748b',
+    fontSize: fontSize.bodyStrong,
+    color: colors.textMuted,
     textAlign: 'center',
-    marginTop: 8,
+    marginTop: spacing.sm,
     lineHeight: 20,
+  },
+  restrictedButton: {
+    marginTop: spacing.xl,
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.backdrop,
     justifyContent: 'flex-end',
   },
   modalSheet: {
-    backgroundColor: '#ffffff',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    padding: 18,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl + 2,
+    borderTopRightRadius: radius.xl + 2,
+    padding: spacing.lg - 2,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 14,
+    marginBottom: spacing.md - 2,
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: fontSize.subtitle,
     fontWeight: '800',
-    color: '#0f172a',
+    color: colors.textPrimary,
   },
   modalSub: {
-    fontSize: 12,
-    color: '#64748b',
-    marginTop: 2,
+    fontSize: fontSize.label,
+    color: colors.textMuted,
+    marginTop: spacing.xxs,
+  },
+  requestScroll: {
+    maxHeight: 380,
   },
   requestSectionTitle: {
-    fontSize: 13,
+    fontSize: fontSize.body,
     fontWeight: '700',
-    color: '#334155',
-    marginBottom: 8,
+    color: ramp.slate700,
+    marginBottom: spacing.sm,
   },
   requestTypeRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 14,
+    gap: spacing.sm,
+    marginBottom: spacing.md - 2,
   },
   requestTypeChip: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: spacing.xs + 2,
     paddingVertical: 10,
-    backgroundColor: '#f1f5f9',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   requestTypeChipActive: {
-    backgroundColor: '#d97706',
-    borderColor: '#d97706',
+    backgroundColor: colors.warningSolid,
+    borderColor: colors.warningSolid,
   },
   requestTypeChipText: {
-    fontSize: 12,
+    fontSize: fontSize.label,
     fontWeight: '700',
-    color: '#475569',
+    color: colors.textSecondary,
   },
   requestTypeChipTextActive: {
-    color: '#ffffff',
+    color: colors.onBrand,
+  },
+  requestInput: {
+    backgroundColor: colors.surface,
+    marginBottom: spacing.md,
+  },
+  requestInputWide: {
+    backgroundColor: colors.surface,
+    marginBottom: spacing.lg,
+  },
+  submitRequestBtn: {
+    marginTop: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.md,
   },
   warningBox: {
     flexDirection: 'row',
-    gap: 8,
-    backgroundColor: '#fef3c7',
-    padding: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#fde68a',
+    gap: spacing.sm,
+    backgroundColor: colors.warningSoft,
+    padding: spacing.sm + 2,
+    borderRadius: radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.warningBorder,
   },
   warningBoxText: {
-    fontSize: 11,
-    color: '#92400e',
+    fontSize: fontSize.caption,
+    color: colors.warningInk,
     flex: 1,
     lineHeight: 16,
   },
