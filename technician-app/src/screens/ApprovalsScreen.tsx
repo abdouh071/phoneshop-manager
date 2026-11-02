@@ -459,11 +459,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 12,
     marginBottom: 14,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#e2e8f0',
   },
   cardHeader: {
     flexDirection: 'row',

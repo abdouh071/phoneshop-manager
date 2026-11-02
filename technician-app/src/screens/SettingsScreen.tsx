@@ -220,11 +220,8 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: '#ffffff',
     borderRadius: 16,
-    elevation: 1,
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#e2e8f0',
     marginBottom: 16,
   },
   // Account Row

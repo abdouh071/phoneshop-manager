@@ -126,11 +126,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
-    shadowColor: '#4f46e5',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
   },
   title: {
     fontSize: 28,
@@ -157,11 +152,6 @@ const styles = StyleSheet.create({
   button: {
     marginTop: 12,
     borderRadius: 12,
-    shadowColor: '#4f46e5',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
   },
   buttonContent: {
     paddingVertical: 10,
