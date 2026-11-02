@@ -330,7 +330,7 @@
     "subtitle": "{{products}} products · {{units}} units",
     "searchPlaceholder": "Search name, model, barcode...",
     "loading": "Loading inventory...",
-    "restrictedBody": "Inventory management is restricted to Sales Agents and Administrators.",
+    "restrictedBody": "Stock management needs the inventory permission. Ask an administrator to grant it to your profile.",
     "returnToWorkbench": "Return to Workbench",
     "catLowStock": "Low Stock",
     "catPhones": "Phones",

@@ -330,7 +330,7 @@
     "subtitle": "{{products}} produits · {{units}} unités",
     "searchPlaceholder": "Rechercher nom, modèle, code-barres...",
     "loading": "Chargement de l'inventaire...",
-    "restrictedBody": "La gestion de l'inventaire est réservée aux agents commerciaux et aux administrateurs.",
+    "restrictedBody": "La gestion du stock nécessite la permission d'inventaire. Demandez à un administrateur de l'accorder à votre profil.",
     "returnToWorkbench": "Retour à l'atelier",
     "catLowStock": "Stock faible",
     "catPhones": "Téléphones",

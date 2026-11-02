@@ -17,7 +17,6 @@ import {
   Button,
   TextInput,
   ActivityIndicator,
-  FAB,
 } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,6 +34,7 @@ import { useAuthStore } from '../store/authStore';
 import { usePosStore } from '../store/posStore';
 import { activityLogService } from '../services/activityLogService';
 import { RoleBottomNav } from '../components/RoleBottomNav';
+import { usePermissions } from '../hooks/usePermissions';
 import { useTranslation } from 'react-i18next';
 import type { PhoneModel, ProductCategory, StockStatus } from '../types';
 import { buildSearch, matchesSearch } from '../utils/search';
@@ -184,6 +184,7 @@ export const InventoryScreen = ({ navigation }: any) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
+  const can = usePermissions();
   const { addToCart } = usePosStore();
 
   const [products, setProducts] = useState<PhoneModel[]>([]);
@@ -221,7 +222,7 @@ export const InventoryScreen = ({ navigation }: any) => {
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   useEffect(() => {
-    if (user?.role === 'repair_agent') {
+    if (!can.inventory_products) {
       navigation.replace('Workbench');
       return;
     }
@@ -248,7 +249,7 @@ export const InventoryScreen = ({ navigation }: any) => {
     );
 
     return () => unsubscribe();
-  }, [user?.role]);
+  }, [can.inventory_products]);
 
   // Inventory KPI metrics
   const metrics = useMemo(() => {
@@ -521,13 +522,16 @@ export const InventoryScreen = ({ navigation }: any) => {
     }
   };
 
-  if (user?.role === 'repair_agent') {
+  if (!can.inventory_products) {
     return (
       <View style={styles.restrictedContainer}>
         <MaterialCommunityIcons name="shield-lock-outline" size={64} color={colors.danger} />
         <Text style={styles.restrictedTitle}>{t('common.accessRestricted', 'Access Restricted')}</Text>
         <Text style={styles.restrictedSub}>
-          {t('inventory.restrictedBody', 'Inventory management is restricted to Sales Agents and Administrators.')}
+          {t(
+            'inventory.restrictedBody',
+            'Stock management needs the inventory permission. Ask an administrator to grant it to your profile.'
+          )}
         </Text>
         <Button
           mode="contained"
@@ -556,7 +560,9 @@ export const InventoryScreen = ({ navigation }: any) => {
           subtitleStyle={styles.headerSub}
         />
         <Appbar.Action icon="barcode-scan" color={colors.onBrand} onPress={handleOpenScanner} />
-        <Appbar.Action icon="plus-box" color={colors.onBrand} onPress={() => setIsAddModalOpen(true)} />
+        {can.inventory_edit && (
+          <Appbar.Action icon="plus-box" color={colors.onBrand} onPress={() => setIsAddModalOpen(true)} />
+        )}
       </Appbar.Header>
 
       {/* Product List */}
@@ -637,34 +643,40 @@ export const InventoryScreen = ({ navigation }: any) => {
 
                   {/* Quick Action Buttons */}
                   <View style={styles.cardActionsRow}>
-                    <TouchableOpacity
-                      style={styles.actionChip}
-                      onPress={() => handleOpenEditModal(item)}
-                    >
-                      <MaterialCommunityIcons name="pencil-outline" size={16} color={colors.textSecondary} />
-                      <Text style={styles.actionChipText}>{t('inventory.editPrice', 'Edit Price')}</Text>
-                    </TouchableOpacity>
+                    {can.inventory_edit && (
+                      <TouchableOpacity
+                        style={styles.actionChip}
+                        onPress={() => handleOpenEditModal(item)}
+                      >
+                        <MaterialCommunityIcons name="pencil-outline" size={16} color={colors.textSecondary} />
+                        <Text style={styles.actionChipText}>{t('inventory.editPrice', 'Edit Price')}</Text>
+                      </TouchableOpacity>
+                    )}
 
-                    <TouchableOpacity
-                      style={[styles.actionChip, styles.stockAdjustBtn]}
-                      onPress={() => openStockAdjustModal(item)}
-                    >
-                      <MaterialCommunityIcons name="swap-vertical" size={16} color={colors.brand} />
-                      <Text style={[styles.actionChipText, styles.actionChipTextBrand]}>
-                        {t('inventory.adjustStock', 'Adjust Stock')}
-                      </Text>
-                    </TouchableOpacity>
+                    {can.inventory_edit && (
+                      <TouchableOpacity
+                        style={[styles.actionChip, styles.stockAdjustBtn]}
+                        onPress={() => openStockAdjustModal(item)}
+                      >
+                        <MaterialCommunityIcons name="swap-vertical" size={16} color={colors.brand} />
+                        <Text style={[styles.actionChipText, styles.actionChipTextBrand]}>
+                          {t('inventory.adjustStock', 'Adjust Stock')}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
 
-                    <TouchableOpacity
-                      disabled={isOut}
-                      style={[styles.actionChip, styles.posAddBtn, isOut && styles.actionChipDisabled]}
-                      onPress={() => handleAddToCart(item)}
-                    >
-                      <MaterialCommunityIcons name="cart-plus" size={16} color={colors.onBrand} />
-                      <Text style={[styles.actionChipText, styles.actionChipTextInverse]}>
-                        {t('inventory.sellInPos', 'Sell in POS')}
-                      </Text>
-                    </TouchableOpacity>
+                    {can.pos && (
+                      <TouchableOpacity
+                        disabled={isOut}
+                        style={[styles.actionChip, styles.posAddBtn, isOut && styles.actionChipDisabled]}
+                        onPress={() => handleAddToCart(item)}
+                      >
+                        <MaterialCommunityIcons name="cart-plus" size={16} color={colors.onBrand} />
+                        <Text style={[styles.actionChipText, styles.actionChipTextInverse]}>
+                          {t('inventory.sellInPos', 'Sell in POS')}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </Card.Content>
               </Card>
@@ -679,16 +691,18 @@ export const InventoryScreen = ({ navigation }: any) => {
                   ? t('inventory.noProductsSearch', 'No products matched your search.')
                   : t('inventory.addFirstProduct', 'Add your first inventory product below.')}
               </Text>
-              <Button
-                mode="contained"
-                buttonColor={colors.brand}
-                textColor={colors.onBrand}
-                style={styles.emptyButton}
-                icon="plus"
-                onPress={() => setIsAddModalOpen(true)}
-              >
-                {t('inventory.addProduct', 'Add Product')}
-              </Button>
+              {can.inventory_edit && (
+                <Button
+                  mode="contained"
+                  buttonColor={colors.brand}
+                  textColor={colors.onBrand}
+                  style={styles.emptyButton}
+                  icon="plus"
+                  onPress={() => setIsAddModalOpen(true)}
+                >
+                  {t('inventory.addProduct', 'Add Product')}
+                </Button>
+              )}
             </View>
           }
         />
