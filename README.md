@@ -470,13 +470,18 @@ For production cashier and counter setups, **PhoneShop Manager Pro** is distribu
 > [!TIP]
 > **No manual terminal commands required!** When you run any of the desktop applications below, the hardware thermal print server automatically boots in the background on port `3355`, ready to dispatch receipt and barcode label jobs directly to USB, Network, and Windows shared printers.
 
-Pre-compiled standalone packages are located in the [`releases/`](file:///Users/Abdouh71/Phones-workspace/releases) folder:
+Pre-compiled standalone packages are located in the [`releases/`](file:///Users/Abdouh71/Phones-workspace/releases) folder. File names are generated from the app version, so a new build can never overwrite an old one:
 
 | Operating System | Package File | Architecture | Compatibility Notes |
 |---|---|---|---|
-| 🍏 **macOS** | `PhoneShop Manager Pro-1.0.0-arm64.dmg` | ARM64 | Apple Silicon (M1/M2/M3/M4) |
-| 🪟 **Windows 64-bit** | `PhoneShop Manager Pro Setup 1.0.0.exe` | x64 | Windows 10 & Windows 11 |
-| 🪟 **Windows Legacy / 32-bit** | `PhoneShop-Manager-Pro-Setup-1.0.0-win7-32bit.exe` | ia32 / x64 | **Windows 7**, 8, 8.1, 10 & 11 (32 & 64-bit) |
+| 🍏 **macOS (Apple Silicon)** | `PhoneShopPro-1.1.0-mac-arm64.dmg` | arm64 | M1/M2/M3/M4 |
+| 🍏 **macOS (Intel)** | `PhoneShopPro-1.1.0-mac-x64.dmg` | x86_64 | Intel Macs |
+| 🪟 **Windows 64-bit** | `PhoneShopPro-Setup-1.1.0-win-x64.exe` | x64 | Windows 10 & Windows 11 |
+| 🪟 **Windows Legacy / 32-bit** | `releases/win7-ia32/PhoneShopPro-Setup-1.1.0-win-ia32.exe` | ia32 | **Windows 7**, 8, 8.1, 10 & 11 (32 & 64-bit). Built on Electron 22, kept in its own folder so it is not installed by mistake. |
+
+Build them with `npm run electron:build:mac:arm64`, `:mac:intel`, `:win` or `:win7` (run `npm run build` first). Every installer carries the print server in `Contents/Resources/print-server/` on macOS and `resources/print-server/` on Windows.
+
+> The `1.0.0` installers from October 2026 are kept in [`releases/_archive-2026-10/`](file:///Users/Abdouh71/Phones-workspace/releases/_archive-2026-10) for reference only — do not hand one of those to a till.
 
 #### Features of Desktop Packages:
 - **Instant Launch**: Connects directly to the official production database (`phoneshop-mgr-pro-2026`).
@@ -541,29 +546,24 @@ You have two simple ways to get the app onto technicians' phones or tablets:
    - **iOS**: Open the native iOS Camera app, point it at the QR code, and tap the "Open in Expo Go" banner.
    - The app will load onto the device immediately!
 
-##### Method B: Direct Pre-Built Android APK Download (Recommended)
-You do **not** need to compile or build the app from source code! A ready-to-install Android APK is available directly:
+##### Method B: Install a Published Expo Build (Recommended)
+Staff install a build published from this project rather than running Expo Go. Build it once with:
 
-- **From GitHub Releases**:
-  [![Download Technician APK](https://img.shields.io/badge/Download-Auto--Manager.apk-10b981?style=for-the-badge&logo=android&logoColor=white)](https://github.com/YOUR_USERNAME/phoneshop-manager/releases/latest/download/Auto-Manager.apk)
-  
-  👉 **[Download Latest APK Release (Auto-Manager.apk)](https://github.com/YOUR_USERNAME/phoneshop-manager/releases/latest/download/Auto-Manager.apk)**
+```bash
+cd technician-app && eas build -p android --profile production
+```
 
-- **From the Running Web Dashboard**:
-  When running the web manager app, you can download the APK directly at:
-  ```
-  http://localhost:5173/downloads/Auto-Manager.apk
-  ```
-  Or simply click the **"Download Technician App (.APK)"** button located directly inside **Settings → Staff & Users**.
+then point the dashboard at your Expo builds page:
 
-> [!TIP]
-> **For the Repository Owner (Publishing the APK on GitHub)**:
-> Because GitHub limits individual git commits to 100MB, large installer packages like Android APKs (102MB) are distributed via **GitHub Releases** (which supports up to 2GB per file):
-> 1. Push your repository to GitHub.
-> 2. On your GitHub repository page, click **Releases** (on the right sidebar) → **Draft a new release**.
-> 3. Enter a tag name (e.g. `v1.0.0`) and title `v1.0.0 — PhoneShop Manager Pro`.
-> 4. Drag and drop the APK file (`Auto-Manager.apk` located in `phone-shop-manager/public/downloads/`) into the release binaries box.
-> 5. Click **Publish release**. The permanent download link above will immediately start serving the file to all users!
+```bash
+# phone-shop-manager/.env  — no URL, no button
+VITE_APK_DOWNLOAD_URL=https://expo.dev/accounts/<your-account>/builds
+```
+
+**Settings → Staff & Users** shows **Get the Technician App**, which opens that URL. When the variable is unset the button stays disabled on purpose: it used to link to `/downloads/Auto-Manager.apk`, a 102 MB snapshot of the October build that was shipped inside every desktop installer and went stale the day it was added. Installers no longer carry an APK.
+
+> [!NOTE]
+> A sideloaded APK has to be re-installed on each phone after a new `eas build`; `eas update` only ships JavaScript changes, never a new native binary.
 
 ---
 
