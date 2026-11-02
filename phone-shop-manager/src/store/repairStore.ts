@@ -74,6 +74,10 @@ interface RepairState {
   getFilteredTickets: () => RepairTicket[];
 }
 
+// The auto-heal below corrects tickets once; the server then returns them already completed, so
+// re-issuing the write on every mount only bills Firestore for a no-op.
+let staleHealRunThisSession = false;
+
 export const useRepairStore = create<RepairState>((set, get) => ({
   tickets: [],
   isLoading: false,
@@ -85,16 +89,19 @@ export const useRepairStore = create<RepairState>((set, get) => ({
   heldDrafts: loadHeldDrafts(),
 
   fetchTickets: async () => {
-    set({ isLoading: true, error: null });
+    // Keep the existing list on screen when re-visiting the tab; a spinner over data that is
+    // already loaded is what made the switch feel like a cold start.
+    if (get().tickets.length === 0) set({ isLoading: true });
+    set({ error: null });
     try {
       const tickets = await repairService.getAll();
       const deduped = deduplicateTickets(tickets);
 
       // Auto-heal historical tickets stuck in 'returned' whose return child was completed
+      const staleToHeal: string[] = [];
       const healedTickets = deduped.map(t => {
         if (t.status === 'returned' && !isTicketActiveReturnPending(t, deduped)) {
-          // Asynchronously persist to server so database is permanently clean
-          repairService.updateStatus(t.id, 'completed').catch(console.warn);
+          staleToHeal.push(t.id);
           return {
             ...t,
             status: 'completed' as const,
@@ -103,6 +110,14 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         }
         return t;
       });
+
+      // Asynchronously persist to server so database is permanently clean
+      if (staleToHeal.length > 0 && !staleHealRunThisSession) {
+        staleHealRunThisSession = true;
+        staleToHeal.forEach(id => {
+          repairService.updateStatus(id, 'completed').catch(console.warn);
+        });
+      }
 
       set({ tickets: healedTickets, isLoading: false });
     } catch {
@@ -669,17 +684,17 @@ export const useRepairStore = create<RepairState>((set, get) => ({
 
     // 3. Audit log
     const actor = useAuthStore.getState().user;
-    activityLogService.logActivity({
-      type: 'repair_status_change',
-      description: `Duplicate repair ticket #${secondary.ticketNumber} safely merged into #${primary.ticketNumber} by ${actor?.name || 'Staff'}.`,
-      performedBy: actor?.name || 'Staff',
-      details: {
-        primaryTicketId: primary.id,
-        primaryTicketNumber: primary.ticketNumber,
-        secondaryTicketId: secondary.id,
-        secondaryTicketNumber: secondary.ticketNumber,
-      },
-    }).catch(console.warn);
+    activityLogService.log(
+      'repairs',
+      `Duplicate repair ticket #${secondary.ticketNumber} safely merged into #${primary.ticketNumber} by ${actor?.name || 'Staff'}.`,
+      {
+        detail: `secondaryTicketId=${secondary.id} secondaryTicketNumber=${secondary.ticketNumber}`,
+        entityId: primary.id,
+        entityType: 'repair',
+        userName: actor?.name,
+        userId: actor?.id,
+      }
+    ).catch(console.error);
 
     return finalPrimary;
   },

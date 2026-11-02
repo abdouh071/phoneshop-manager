@@ -11,7 +11,7 @@
 import { offlineQueue } from './offlineQueue';
 import { repairService } from './repairService';
 import { transactionService } from './transactionService';
-import type { RepairTicket, SaleTransaction } from '../types';
+import type { PhoneModel, RepairStatusHistoryEntry, RepairTicket, SaleTransaction } from '../types';
 
 let registered = false;
 
@@ -29,7 +29,7 @@ export function registerOfflineHandlers(): void {
   offlineQueue.registerHandler('UPDATE_REPAIR_STATUS', async (payload: {
     id: string;
     status: RepairTicket['status'];
-    history?: any[];
+    history?: RepairStatusHistoryEntry[];
   }) => {
     await repairService.updateStatus(payload.id, payload.status, payload.history, { throwOnError: true });
   });
@@ -98,7 +98,7 @@ export function registerOfflineHandlers(): void {
    */
   offlineQueue.registerHandler('UPDATE_PRODUCT', async (payload: {
     id: string;
-    updates: any;
+    updates: Partial<Omit<PhoneModel, 'id'>>;
   }) => {
     const { inventoryService } = await import('./inventoryService');
     await inventoryService.updateProduct(payload.id, payload.updates);
@@ -120,7 +120,7 @@ export function registerOfflineHandlers(): void {
    * Fired when a new product is added while offline.
    */
   offlineQueue.registerHandler('CREATE_PRODUCT', async (payload: {
-    product: any;
+    product: Omit<PhoneModel, 'id'>;
   }) => {
     const { inventoryService } = await import('./inventoryService');
     await inventoryService.addProduct(payload.product);

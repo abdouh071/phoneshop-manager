@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { reportsService } from '../services/reportsService';
 import { useSettingsStore } from './settingsStore';
 import type { ReportData, ReportFilterOptions } from '../services/reportsService';
+import { errorMessage } from '../utils/errorUtils';
 
 interface ReportState {
   data: ReportData | null;
@@ -35,9 +36,9 @@ export const useReportStore = create<ReportState>((set, get) => ({
     try {
       const data = await reportsService.getDashboardData(active);
       set({ data, isLoading: false });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      set({ error: err.message || 'Failed to load business reports', isLoading: false });
+      set({ error: errorMessage(err) || 'Failed to load business reports', isLoading: false });
     }
   },
 

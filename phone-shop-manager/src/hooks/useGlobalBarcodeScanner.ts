@@ -42,7 +42,7 @@ export function useGlobalBarcodeScanner() {
 
           const matchedProduct = products.find(p =>
             p.sku?.toLowerCase() === cleanCode ||
-            (p as any).barcode?.toLowerCase() === cleanCode ||
+            p.barcode?.toLowerCase() === cleanCode ||
             p.id.toLowerCase() === cleanCode
           );
 

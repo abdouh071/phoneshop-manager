@@ -1,17 +1,20 @@
 import { create } from 'zustand';
-import { endOfDayService, type EndOfDayRecord } from '../services/endOfDayService';
+import {
+  endOfDayService,
+  EOD_SEAL_VERSION,
+  type EndOfDayRecord,
+} from '../services/endOfDayService';
+import { serverEnforcement } from '../services/serverEnforcement';
 import { useCartStore } from './cartStore';
 import { usePartsCartStore } from './partsCartStore';
 import { useRepairStore } from './repairStore';
 import { useCustomerStore } from './customerStore';
 import { useAuthStore } from './authStore';
-import {
-  isClaimedAndPaidRepair,
-  getClaimedRepairRevenue,
-  getClaimedRepairHandoverCash,
-  getClaimedRepairPartsCost,
-  getClaimedRepairDebt,
-} from '../utils/repairFinancials';
+import { computeDayFigures } from '../utils/dayFigures';
+import { isSameLocalDate, toDateStr } from '../utils/localDate';
+
+// The day helpers live in utils now; re-exported so existing importers of this store keep working.
+export { isSameLocalDate, toDateStr };
 
 interface EndOfDayState {
   records: EndOfDayRecord[];
@@ -30,6 +33,8 @@ interface EndOfDayState {
 
   /**
    * Permanently close the day and persist the record.
+   * A date is only ever sealed once: closing an already-sealed day returns that seal
+   * instead of writing a second, different one for the same day.
    */
   closeDay: (isAutoClose?: boolean, notes?: string, targetDate?: string | Date) => Promise<EndOfDayRecord>;
 
@@ -41,28 +46,26 @@ interface EndOfDayState {
   updateNotes: (id: string, notes: string) => Promise<void>;
 }
 
-/** Returns YYYY-MM-DD in local time for a given Date or string */
-export const toDateStr = (d: Date | string = new Date()): string => {
-  const dateObj = typeof d === 'string' ? new Date(d) : d;
-  if (isNaN(dateObj.getTime())) {
-    return new Date().toISOString().slice(0, 10);
-  }
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
+/** This till's loaded documents, plus how much of each collection it actually holds. */
+const readLiveDaySources = () => {
+  const posTx = useCartStore.getState().transactions || [];
+  const partsInvoices = usePartsCartStore.getState().invoices || [];
+  const tickets = useRepairStore.getState().tickets || [];
+  const debts = useCustomerStore.getState().debts || [];
 
-/** Checks if an ISO timestamp falls on the target local date YYYY-MM-DD */
-export const isSameLocalDate = (iso: string | undefined | null, targetLocalDateStr: string): boolean => {
-  if (!iso) return false;
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return false;
-    return toDateStr(d) === targetLocalDateStr;
-  } catch {
-    return false;
-  }
+  const txMap = new Map<string, (typeof posTx)[0]>();
+  posTx.forEach(t => txMap.set(t.id, t));
+  partsInvoices.forEach(t => txMap.set(t.id, t));
+
+  return {
+    sources: { transactions: Array.from(txMap.values()), repairs: tickets, debts },
+    scope: {
+      posTransactions: posTx.length,
+      partsInvoices: partsInvoices.length,
+      repairTickets: tickets.length,
+      customerDebts: debts.length,
+    },
+  };
 };
 
 export const useEndOfDayStore = create<EndOfDayState>((set, get) => ({
@@ -79,157 +82,112 @@ export const useEndOfDayStore = create<EndOfDayState>((set, get) => ({
 
   checkTodayRecord: async () => {
     const today = toDateStr();
-    const existing = await endOfDayService.getTodayRecord(today);
+    const existing = await endOfDayService.getByDate(today);
     set({ todayRecord: existing });
   },
 
   buildPreview: (targetDate?: string | Date) => {
     const targetDateObj = targetDate ? (typeof targetDate === 'string' ? new Date(targetDate) : targetDate) : new Date();
     const targetDateStr = toDateStr(targetDateObj);
-
-    // ---- 1. Sales (POS & Parts B2B) ----
-    const posTx = useCartStore.getState().transactions || [];
-    const partsInvoices = usePartsCartStore.getState().invoices || [];
-    const txMap = new Map<string, typeof posTx[0]>();
-    posTx.forEach(t => txMap.set(t.id, t));
-    partsInvoices.forEach(t => txMap.set(t.id, t));
-    const allTx = Array.from(txMap.values());
-
-    const todayTx = allTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval' && t.saleType !== 'parts_b2b' && isSameLocalDate(t.date, targetDateStr));
-    const refundedTx = allTx.filter(t => t.status === 'refunded' && isSameLocalDate(t.date, targetDateStr));
-    const partsTx = allTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval' && t.saleType === 'parts_b2b' && isSameLocalDate(t.date, targetDateStr));
-
-    const sumPayment = (txList: typeof allTx, method: string) =>
-      txList.reduce((s, tx) => s + (tx.payments || []).filter(p => p.method === method).reduce((a, p) => a + p.amount, 0), 0);
-
-    const salesCash     = sumPayment(todayTx, 'cash');
-    const salesCard     = sumPayment(todayTx, 'card');
-    const salesMobile   = sumPayment(todayTx, 'mobile');
-    const salesTransfer = sumPayment(todayTx, 'transfer');
-    const salesDebt     = sumPayment(todayTx, 'debt');
-    const salesTotalRevenue = todayTx.reduce((s, t) => s + t.total, 0);
-    const salesCogs = todayTx.reduce(
-      (s, t) => s + t.items.reduce((a, i) => a + (i.product.costPrice || 0) * i.quantity, 0), 0
-    );
-
-    // Cash refunds paid out today
-    const refundsCash = sumPayment(refundedTx, 'cash');
-
-    // ---- 2. Repairs ----
-    const allTickets = useRepairStore.getState().tickets || [];
-
-    // Only tickets completed ON this day
-    const completedRepairs = allTickets.filter(t =>
-      t.status === 'completed' &&
-      isSameLocalDate(t.completedAt || t.updatedAt, targetDateStr)
-    );
-
-    // CLAIMED & PAID/PARTLY-PAID repairs = recognized revenue
-    // Phones with status 'completed' but paymentStatus 'debt' (0 paid) are NOT counted
-    // until the customer makes a payment (tracked via debt repayments).
-    // Phones with paymentStatus 'partial' ONLY count the paid amount, NOT the full price!
-    const claimedPaidRepairs = completedRepairs.filter(r => isClaimedAndPaidRepair(r));
-
-    // RECOGNIZED revenue: paid amount for partial, full price for paid
-    const repairsTotalRevenue = claimedPaidRepairs.reduce(
-      (s, r) => s + getClaimedRepairRevenue(r), 0
-    );
-
-    // Handover cash received today upon completion (excludes intake deposits)
-    const repairHandoversCash = claimedPaidRepairs.reduce(
-      (s, r) => s + getClaimedRepairHandoverCash(r), 0
-    );
-
-    // Deposits collected today on newly received phones (regardless of completion)
-    const ticketsCreatedToday = allTickets.filter(t => isSameLocalDate(t.createdAt, targetDateStr));
-    const repairDepositsCash = ticketsCreatedToday.reduce((s, t) => s + (t.depositAmount || 0), 0);
-
-    // Unpaid debt on completed repairs (phones claimed but not fully paid)
-    const repairsDebt = completedRepairs.reduce(
-      (s, r) => s + getClaimedRepairDebt(r), 0
-    );
-
-    // Parts cost only for recognized (claimed & paid) repairs
-    const repairsPartsCost = claimedPaidRepairs.reduce(
-      (s, r) => s + getClaimedRepairPartsCost(r), 0
-    );
-
-    // Total cash from repairs = handover collections + intake deposits
-    const repairsCash = repairHandoversCash + repairDepositsCash;
-
-    // ---- 3. Customer Debt Collections (Dette repayments made today) ----
-    const allDebts = useCustomerStore.getState().debts || [];
-    const todayDebtPayments = allDebts.flatMap(d =>
-      (d.payments || []).filter(p => isSameLocalDate(p.date, targetDateStr))
-    );
-    const debtCollectedCash = todayDebtPayments
-      .filter(p => p.method === 'cash')
-      .reduce((s, p) => s + p.amount, 0);
-
-    // ---- 4. Parts B2B ----
-    const partsSalesRevenue = partsTx.reduce((s, t) => s + t.total, 0);
-    const partsSalesCash    = sumPayment(partsTx, 'cash');
-    const partsSalesCard    = sumPayment(partsTx, 'card');
-    const partsSalesMobile  = sumPayment(partsTx, 'mobile');
-
-    // ---- 5. Grand Totals ----
-    const partsCogs = partsTx.reduce(
-      (s, t) => s + t.items.reduce((a, i) => a + (i.product.costPrice || 0) * i.quantity, 0), 0
-    );
-    const partsSalesNetProfit = partsSalesRevenue - partsCogs;
-
-    // Recognized revenue strictly from earned sales, claimed repairs, and parts invoices (debt repayment is cash inflow, not double-counted revenue)
-    const totalRevenue = salesTotalRevenue + repairsTotalRevenue + partsSalesRevenue;
-    // Exact physical cash in drawer: POS cash + Parts B2B cash + Repair handover + Repair deposit + Debt payments (refunded sales contribute 0 cash)
-    const totalCash    = Math.max(0, salesCash + partsSalesCash + repairsCash + debtCollectedCash);
-    const totalCard    = salesCard + partsSalesCard;
-    const totalMobile  = salesMobile + partsSalesMobile;
-    const totalNetProfit = (salesTotalRevenue - salesCogs) + (repairsTotalRevenue - repairsPartsCost) + partsSalesNetProfit;
+    const { sources, scope } = readLiveDaySources();
+    const figures = computeDayFigures(sources, targetDateStr);
 
     const { user } = useAuthStore.getState();
+    const closedAt = new Date().toISOString();
 
     return {
       date: targetDateStr,
-      closedAt: new Date().toISOString(),
+      closedAt,
       closedById: user?.id,
       closedByName: user?.name || user?.email || 'System',
       isAutoClose: false,
 
-      salesCount: todayTx.length,
-      salesCash, salesCard, salesMobile, salesTransfer, salesDebt,
-      salesTotalRevenue,
-      salesCogs,
-      salesNetProfit: salesTotalRevenue - salesCogs,
+      salesCount: figures.salesCount,
+      salesCash: figures.salesCash,
+      salesCard: figures.salesCard,
+      salesMobile: figures.salesMobile,
+      salesTransfer: figures.salesTransfer,
+      salesStoreCredit: figures.salesStoreCredit,
+      salesDebt: figures.salesDebt,
+      salesTotalRevenue: figures.salesGrossRevenue,
+      salesCogs: figures.salesCOGS,
+      salesNetProfit: figures.salesNetProfit,
 
-      repairsCompleted: completedRepairs.length,
-      repairsCash,
+      repairsCompleted: figures.repairsCompletedCount,
+      repairsCash: figures.repairsCash,
       repairsCard: 0,
       repairsMobile: 0,
-      repairsDebt,
-      repairsTotalRevenue,
-      repairsPartsCost,
-      repairsNetProfit: repairsTotalRevenue - repairsPartsCost,
+      repairsDebt: figures.repairsDebt,
+      repairsTotalRevenue: figures.repairsRevenue,
+      repairsPartsCost: figures.repairsPartsCost,
+      repairsNetProfit: figures.repairsNetProfit,
 
-      partsSalesCount: partsTx.length,
-      partsSalesRevenue,
+      partsSalesCount: figures.partsCount,
+      partsSalesRevenue: figures.partsRevenue,
+      partsCash: figures.partsCash,
+      partsCard: figures.partsCard,
+      partsMobile: figures.partsMobile,
+      partsTransfer: figures.partsTransfer,
+      partsCogs: figures.partsCOGS,
 
-      repairDepositsCash,
-      repairHandoversCash,
-      debtCollectedCash,
-      refundsCash,
+      repairDepositsCash: figures.repairsDepositCash,
+      repairHandoversCash: figures.repairsHandoverCash,
+      debtCollectedCash: figures.debtCollectedCash,
+      refundsCash: figures.refundsCash,
 
-      totalRevenue,
-      totalNetProfit,
-      totalCash,
-      totalCard,
-      totalMobile,
+      totalRevenue: figures.totalRevenue,
+      totalNetProfit: figures.totalNetProfit,
+      totalCash: figures.totalCash,
+      totalCard: figures.totalCard,
+      totalMobile: figures.totalMobile,
+
+      sealVersion: EOD_SEAL_VERSION,
+      sealedAt: closedAt,
+      // The preview reads this till's loaded data, so say how much of it there was: a day
+      // sealed from a half-loaded till looks different from one sealed on the full ledger.
+      sealScope: scope,
     };
   },
 
   closeDay: async (isAutoClose = false, notes = '', targetDate?: string | Date) => {
+    const targetDateStr = toDateStr(targetDate ?? new Date());
+
+    const alreadySealed = await endOfDayService.getByDate(targetDateStr);
+    if (alreadySealed) {
+      set(s => ({
+        records: s.records.some(r => r.id === alreadySealed.id)
+          ? s.records
+          : [alreadySealed, ...s.records.filter(r => r.date !== alreadySealed.date)],
+        todayRecord: alreadySealed.date === toDateStr() ? alreadySealed : s.todayRecord,
+        isSaving: false,
+      }));
+      return alreadySealed;
+    }
+
     set({ isSaving: true });
-    const preview = get().buildPreview(targetDate);
-    const record = await endOfDayService.save({ ...preview, isAutoClose, notes: notes || undefined });
+    const preview = get().buildPreview(targetDateStr);
+    const payload = { ...preview, isAutoClose, notes: notes || undefined };
+
+    // Ask the server to write the seal when the callables are deployed: a per-date lock is
+    // the only thing that keeps two tills closing the same day from producing two seals.
+    const server = await serverEnforcement.sealEndOfDay(payload);
+    if (server.status === 'ok') {
+      const sealed =
+        (await endOfDayService.getByDate(targetDateStr)) ?? { ...payload, id: server.data.sealId };
+      set(s => ({
+        records: [sealed, ...s.records.filter(r => r.date !== sealed.date)],
+        todayRecord: sealed.date === toDateStr() ? sealed : s.todayRecord,
+        isSaving: false,
+      }));
+      return sealed;
+    }
+    if (server.status === 'rejected') {
+      // The shop still has to close its day, so a refusal degrades to the local write - but
+      // out loud, because a rejected seal means something the next report will disagree with.
+      console.warn('Server refused this seal, closing the day locally:', server.message);
+    }
+
+    const record = await endOfDayService.save(payload);
     set(s => ({
       records: [record, ...s.records.filter(r => r.date !== record.date)],
       todayRecord: record.date === toDateStr() ? record : s.todayRecord,
@@ -242,7 +200,7 @@ export const useEndOfDayStore = create<EndOfDayState>((set, get) => ({
     await get().fetchRecords();
     const { records } = get();
     const now = new Date();
-    let lastClosedRecord: any = null;
+    let lastClosedRecord: EndOfDayRecord | null = null;
 
     // Check up to 7 days backward (from oldest to yesterday) to close all unclosed days with activity
     const MAX_LOOKBACK_DAYS = 7;
@@ -255,7 +213,6 @@ export const useEndOfDayStore = create<EndOfDayState>((set, get) => ({
         const prev = get().buildPreview(pastDateStr);
         // If there was any activity on that day, seal it automatically
         if (prev.totalRevenue > 0 || prev.totalCash > 0 || prev.salesCount > 0 || prev.repairsCompleted > 0) {
-          console.log(`[EndOfDay] Automatically closing unclosed past day: ${pastDateStr}`);
           lastClosedRecord = await get().closeDay(true, `Auto-closed for ${pastDateStr} on shop open`, pastDateStr);
         }
       }

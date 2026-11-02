@@ -365,7 +365,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
 
     const discNum = typeof target.discount === 'number'
       ? target.discount
-      : ((target.discount as any)?.value || 0);
+      : (target.discount?.value || 0);
 
     set({
       suspendedCarts: updatedSuspended,

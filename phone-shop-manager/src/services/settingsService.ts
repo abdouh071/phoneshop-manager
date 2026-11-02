@@ -16,6 +16,8 @@ export interface StoreSettings {
   // Customer Tracking Portal settings
   trackingBaseUrl?: string;
   storePhone?: string;
+  /** Legacy alias for storePhone on older settings documents */
+  phone?: string;
   storeAddress?: string;
   // Technician profit percentage
   technicianProfitPercentage?: number;

@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 import type { Supplier, PurchaseOrder } from '../types';
-import { purchasingService } from '../services/purchasingService';
+import { purchasingService, receivePurchaseOrder } from '../services/purchasingService';
+import type { PurchaseOrderReceiptLine, ReceivedPurchaseOrderResult } from '../services/purchasingService';
 import { useActivityStore } from './activityStore';
 import { useAuthStore } from './authStore';
+import { useInventoryStore } from './inventoryStore';
 
 interface PurchasingState {
   suppliers: Supplier[];
@@ -21,6 +23,7 @@ interface PurchasingState {
 
   addPO: (po: Omit<PurchaseOrder, 'id' | 'poNumber' | 'createdAt' | 'updatedAt'>) => Promise<void>;
   updatePO: (id: string, updates: Partial<Omit<PurchaseOrder, 'id' | 'poNumber' | 'createdAt'>>) => Promise<void>;
+  receivePO: (id: string, receipts: PurchaseOrderReceiptLine[]) => Promise<ReceivedPurchaseOrderResult>;
   deletePO: (id: string) => Promise<void>;
   
   // Derived
@@ -112,6 +115,35 @@ export const usePurchasingStore = create<PurchasingState>((set, get) => ({
       }));
     } catch (error) {
       set({ error: 'Failed to update PO' });
+      throw error;
+    }
+  },
+
+  receivePO: async (id, receipts) => {
+    const user = useAuthStore.getState().user;
+    try {
+      const result = await receivePurchaseOrder(id, receipts, {
+        performedById: user?.id,
+        performedByName: user?.name,
+      });
+      set(state => ({
+        purchaseOrders: state.purchaseOrders.map(p =>
+          p.id === id ? { ...p, items: result.items, status: result.status } : p
+        ),
+      }));
+      // The transaction wrote stock straight to Firestore, so this till's inventory mirror and
+      // offline cache are behind until they are re-read from the server.
+      await useInventoryStore.getState().fetchProducts();
+      await useInventoryStore.getState().fetchParts();
+      const units = result.received.reduce((sum, line) => sum + line.qty, 0);
+      useActivityStore.getState().logActivity(
+        'inventory',
+        `Received ${units} units across ${result.received.length} products on ${result.poNumber}`,
+        { entityId: id, entityType: 'po', severity: 'success' }
+      );
+      return result;
+    } catch (error) {
+      set({ error: (error as Error).message });
       throw error;
     }
   },

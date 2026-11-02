@@ -1,11 +1,25 @@
 import { create } from 'zustand';
 import type { PhoneModel, WriteOffReason } from '../types';
+import { computeStockStatus } from '../utils/stockStatus';
 import { inventoryService } from '../services/inventoryService';
+import type { ProductWriteOutcome } from '../services/inventoryService';
 import { restockService } from '../services/restockService';
 import { writeOffService } from '../services/writeOffService';
 import { useActivityStore } from './activityStore';
 import { useAuthStore } from './authStore';
 import { generateSKU, resolveUniqueSKU } from '../features/inventory/AddProductModal';
+
+/**
+ * `committed` means the server document moved. `queued` means only this device moved and the
+ * delta waits in the offline queue, so callers must not present it as saved.
+ */
+export type StockWriteOutcome = 'committed' | 'queued' | 'failed' | 'unchanged';
+
+export interface StockWriteResult {
+  outcome: StockWriteOutcome;
+  /** Units the shelf actually moved by; 0 when nothing was applied. */
+  applied: number;
+}
 
 interface InventoryState {
   products: PhoneModel[]; // Retail products (Server excludes repair_part from the beginning)
@@ -20,13 +34,13 @@ interface InventoryState {
   fetchAll: () => Promise<void>;
   setSearchQuery: (query: string) => void;
   updateStock: (id: string, newStock: number) => Promise<void>;
-  restockProduct: (id: string, quantityToAdd: number, opts?: { supplier?: string; note?: string; cost?: number }) => Promise<void>;
-  writeOffStock: (id: string, quantity: number, reason: WriteOffReason, note?: string) => Promise<void>;
+  restockProduct: (id: string, quantityToAdd: number, opts?: { supplier?: string; note?: string; cost?: number }) => Promise<StockWriteResult>;
+  writeOffStock: (id: string, quantity: number, reason: WriteOffReason, note?: string) => Promise<StockWriteResult>;
   adjustStockBy: (id: string, delta: number) => void;  // live adjustment (no async, no server call)
   addProduct: (product: Omit<PhoneModel, 'id'>) => Promise<void>;
   addProductsBulk: (products: Omit<PhoneModel, 'id'>[]) => Promise<void>;
-  updateProduct: (id: string, updates: Partial<Omit<PhoneModel, 'id'>>) => Promise<void>;
-  deleteProduct: (id: string) => Promise<void>;
+  updateProduct: (id: string, updates: Partial<Omit<PhoneModel, 'id'>>) => Promise<ProductWriteOutcome>;
+  deleteProduct: (id: string) => Promise<ProductWriteOutcome>;
   // Derived
   getFilteredProducts: (excludeCategory?: string) => PhoneModel[];
 }
@@ -105,10 +119,14 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
   restockProduct: async (id, quantityToAdd, opts = {}) => {
     try {
       const existing = get().products.find(p => p.id === id) || get().parts.find(p => p.id === id);
-      if (!existing) return;
-      const stockBefore = existing.stock;
-      const stockAfter = stockBefore + quantityToAdd;
-      const updated = await inventoryService.updateStock(id, stockAfter);
+      if (!existing) {
+        set({ error: 'Product not found in this till\'s inventory' });
+        return { outcome: 'failed', applied: 0 };
+      }
+      // The delta is applied server-side, so two tills restocking the same part both count.
+      const { updated, previousStock, atomic } = await inventoryService.applyStockDelta(id, quantityToAdd);
+      const stockBefore = previousStock;
+      const stockAfter = updated.stock;
       set(state => ({
         products: state.products.map(p => p.id === id ? updated : p),
         parts: state.parts.map(p => p.id === id ? updated : p),
@@ -133,20 +151,28 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
         `Restocked ${existing.name}: +${quantityToAdd} units (${stockBefore} → ${stockAfter})`,
         { entityId: id, entityType: existing.category === 'repair_part' ? 'part' : 'product', severity: 'success', userName: user?.name, userId: user?.id }
       );
-    } catch (err) {
+      return { outcome: atomic ? 'committed' : 'queued', applied: quantityToAdd };
+    } catch {
       set({ error: 'Failed to restock product' });
+      return { outcome: 'failed', applied: 0 };
     }
   },
 
   writeOffStock: async (id, quantity, reason, note) => {
     try {
       const existing = get().products.find(p => p.id === id) || get().parts.find(p => p.id === id);
-      if (!existing) return;
-      const stockBefore = existing.stock;
-      const stockAfter = Math.max(0, stockBefore - quantity);
+      if (!existing) {
+        set({ error: 'Product not found in this till\'s inventory' });
+        return { outcome: 'failed', applied: 0 };
+      }
+      // Same short-circuit as before: a zero quantity or an already-empty local stock writes nothing off.
+      if (quantity <= 0 || existing.stock === 0) return { outcome: 'unchanged', applied: 0 };
+      // The clamp at zero now happens inside the transaction, against the server's stock.
+      const { updated, previousStock, atomic } = await inventoryService.applyStockDelta(id, -quantity);
+      const stockBefore = previousStock;
+      const stockAfter = updated.stock;
       const actualWrittenOff = stockBefore - stockAfter; // can't write off more than stock
-      if (actualWrittenOff <= 0) return;
-      const updated = await inventoryService.updateStock(id, stockAfter);
+      if (actualWrittenOff <= 0) return { outcome: 'unchanged', applied: 0 };
       set(state => ({
         products: state.products.map(p => p.id === id ? updated : p),
         parts: state.parts.map(p => p.id === id ? updated : p),
@@ -170,8 +196,10 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
         `Write-off: -${actualWrittenOff} units of ${existing.name} [${reasonLabel}] (${stockBefore} → ${stockAfter})`,
         { entityId: id, entityType: existing.category === 'repair_part' ? 'part' : 'product', severity: 'danger', detail: note || undefined, userName: user?.name, userId: user?.id }
       );
-    } catch (err) {
+      return { outcome: atomic ? 'committed' : 'queued', applied: actualWrittenOff };
+    } catch {
       set({ error: 'Failed to write off stock' });
+      return { outcome: 'failed', applied: 0 };
     }
   },
 
@@ -182,17 +210,13 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
       products: state.products.map(p => {
         if (p.id !== id) return p;
         const newStock = Math.max(0, p.stock + delta);
-        const stockStatus =
-          newStock === 0 ? 'out_of_stock' :
-          newStock <= p.lowStockThreshold ? 'low_stock' : 'in_stock';
+        const stockStatus = computeStockStatus(newStock, p.lowStockThreshold);
         return { ...p, stock: newStock, stockStatus };
       }),
       parts: state.parts.map(p => {
         if (p.id !== id) return p;
         const newStock = Math.max(0, p.stock + delta);
-        const stockStatus =
-          newStock === 0 ? 'out_of_stock' :
-          newStock <= p.lowStockThreshold ? 'low_stock' : 'in_stock';
+        const stockStatus = computeStockStatus(newStock, p.lowStockThreshold);
         return { ...p, stock: newStock, stockStatus };
       }),
     }));
@@ -271,7 +295,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
 
   updateProduct: async (id, updates) => {
     try {
-      const updated = await inventoryService.updateProduct(id, updates);
+      const { product: updated, outcome } = await inventoryService.updateProduct(id, updates);
       set(state => ({
         products: state.products
           .map(p => p.id === id ? updated : p)
@@ -281,6 +305,8 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
           .filter(p => p.category === 'repair_part' || p.sku?.toUpperCase().startsWith('PRT-')),
       }));
 
+      if (outcome === 'failed') set({ error: 'Failed to update product' });
+
       const user = useAuthStore.getState().user;
       useActivityStore.getState().logActivity(
         'inventory',
@@ -288,15 +314,17 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
         id,
         user?.id
       );
+      return outcome;
     } catch {
       set({ error: 'Failed to update product' });
+      return 'failed';
     }
   },
 
   deleteProduct: async (id) => {
     try {
       const existing = get().products.find(p => p.id === id) || get().parts.find(p => p.id === id);
-      await inventoryService.deleteProduct(id);
+      const outcome = await inventoryService.deleteProduct(id);
       set(state => ({
         products: state.products.filter(p => p.id !== id),
         parts: state.parts.filter(p => p.id !== id),
@@ -307,8 +335,10 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
         `Product deleted: ${existing?.name || id}`,
         { entityId: id, entityType: existing?.category === 'repair_part' ? 'part' : 'product', severity: 'danger', userName: user?.name, userId: user?.id }
       );
+      return outcome;
     } catch {
       set({ error: 'Failed to delete product' });
+      return 'failed';
     }
   },
 

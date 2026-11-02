@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Customer, CustomerDebtEntry, CustomerDebtPayment, CustomerActivityLog, CustomerRegisteredDevice } from '../types';
+import type { Customer, CustomerDebtEntry, CustomerDebtPayment, CustomerActivityLog, CustomerRegisteredDevice, RepairTicket, SaleTransaction } from '../types';
 import { isShopCustomer, isRetailCustomer } from '../types';
 import { customerService } from '../services/customerService';
 import { debtService } from '../services/debtService';
@@ -9,7 +9,7 @@ import { transactionService } from '../services/transactionService';
 import { repairService } from '../services/repairService';
 import { useAuthStore } from './authStore';
 import { formatCurrency } from '../utils/formatCurrency';
-import { isPhoneMatch, normalizePhoneDigits, isMoreDescriptiveName, formatStandardPhone, GENERIC_NAMES, isValidNameForDeduplication, isDummyPhone } from '../utils/phoneUtils';
+import { isPhoneMatch, normalizePhoneDigits, isMoreDescriptiveName, formatStandardPhone, isValidNameForDeduplication, isDummyPhone } from '../utils/phoneUtils';
 import { calculateCustomerFinancials, matchesCustomer, isGenericCustomerName } from '../utils/customerFinancials';
 
 interface CustomerState {
@@ -20,7 +20,7 @@ interface CustomerState {
   error: string | null;
   searchQuery: string;
   // Actions
-  fetchCustomers: () => Promise<void>;
+  fetchCustomers: (options?: { force?: boolean }) => Promise<void>;
   fetchDebts: () => Promise<void>;
   fetchCustomerLogs: (customerId?: string) => Promise<void>;
   recalculateCustomer: (customerId: string) => Promise<void>;
@@ -82,7 +82,7 @@ interface CustomerState {
       imei?: string;
       notes?: string;
     };
-  }) => Promise<Customer>;
+  }) => Promise<Customer | undefined>;
   /** Explicitly enriches an existing customer profile in the background without overwriting existing data. */
   enrichCustomer: (customerId: string, data: {
     name?: string;
@@ -131,7 +131,53 @@ interface CustomerState {
 }
 
 // Concurrency guard to prevent duplicate customer profiles when simultaneous checkouts occur
-const inFlightCustomerCreations = new Map<string, Promise<Customer>>();
+const inFlightCustomerCreations = new Map<string, Promise<Customer | undefined>>();
+
+/**
+ * The sale and repair histories are read whole by three paths: every page mount that calls
+ * fetchCustomers, every recalculateCustomer (after each sale, settlement and debt payment), and
+ * recalculateAllCustomerFinancials. They are shared here so one visit to the till does not bill
+ * the entire history several times over.
+ *
+ * This is deliberately NOT replaced with a `where('customerId')` query: matchesCustomer() also
+ * matches by phone and shop name, so a scoped read would silently drop legacy records and change
+ * a customer's totals. Records this device just wrote are still authoritative because every
+ * consumer overlays the in-memory cart/parts/repair stores on top of the snapshot.
+ */
+const HISTORY_SNAPSHOT_TTL_MS = 15_000;
+
+interface HistorySnapshot {
+  transactions: SaleTransaction[];
+  tickets: RepairTicket[];
+  takenAt: number;
+}
+
+let historySnapshot: HistorySnapshot | null = null;
+let historyInFlight: Promise<HistorySnapshot> | null = null;
+
+function invalidateCustomerHistory(): void {
+  historySnapshot = null;
+}
+
+async function loadHistorySnapshot(force = false): Promise<HistorySnapshot> {
+  if (!force && historySnapshot && Date.now() - historySnapshot.takenAt < HISTORY_SNAPSHOT_TTL_MS) {
+    return historySnapshot;
+  }
+  if (historyInFlight) return historyInFlight;
+
+  historyInFlight = (async () => {
+    const [transactions, tickets] = await Promise.all([
+      transactionService.getAll().catch(() => [] as SaleTransaction[]),
+      repairService.getAll().catch(() => [] as RepairTicket[]),
+    ]);
+    historySnapshot = { transactions, tickets, takenAt: Date.now() };
+    return historySnapshot;
+  })().finally(() => {
+    historyInFlight = null;
+  });
+
+  return historyInFlight;
+}
 
 export const useCustomerStore = create<CustomerState>((set, get) => ({
   customers: [],
@@ -141,16 +187,20 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
   error: null,
   searchQuery: '',
 
-  fetchCustomers: async () => {
-    set({ isLoading: true, error: null });
+  fetchCustomers: async (options?: { force?: boolean }) => {
+    // Only blank the list out on a true first load; re-visiting a tab already has the data and
+    // showing a spinner over it is what made tab switches feel like a cold start.
+    if (get().customers.length === 0) set({ isLoading: true });
+    set({ error: null });
     try {
-      const [customers, debts, logs, transactions, tickets] = await Promise.all([
+      const [customers, debts, logs, history] = await Promise.all([
         customerService.getAll(),
         debtService.getAll(),
         customerLogService.getAll(),
-        transactionService.getAll().catch(() => []),
-        repairService.getAll().catch(() => []),
+        loadHistorySnapshot(options?.force === true),
       ]);
+      const transactions = history.transactions;
+      const tickets = history.tickets;
       
       // 1. Enrich existing customer documents with financials and devices from their repair tickets
       const merged = customers.map(c => {
@@ -169,9 +219,11 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
             if (!seen.has(devKey)) {
               seen.add(devKey);
               currentDevs.push({
+                id: `dev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
                 brand: t.deviceBrand || '',
                 model: t.deviceModel || '',
                 imei: t.deviceImei || undefined,
+                createdAt: t.createdAt,
                 firstSeen: t.createdAt,
                 lastSeen: t.createdAt,
               });
@@ -234,9 +286,11 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
             if (!seenDevs.has(devKey)) {
               seenDevs.add(devKey);
               allDevices.push({
+                id: `dev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
                 brand: t.deviceBrand || '',
                 model: t.deviceModel || '',
                 imei: t.deviceImei || undefined,
+                createdAt: t.createdAt,
                 firstSeen: t.createdAt,
                 lastSeen: t.createdAt,
               });
@@ -253,8 +307,8 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
           name: pt.customerName?.trim() || `Client #${pt.ticketNumber || pt.id.slice(-4)}`,
           phone: formattedPhone || rawPhone,
           ...(cleanPhone ? { normalizedPhone: cleanPhone } : {}),
-          accountType: (pt as any).accountType === 'shop_repairer' ? 'shop_repairer' : 'retail',
-          shopName: (pt as any).shopName || undefined,
+          accountType: pt.accountType === 'shop_repairer' ? 'shop_repairer' : 'retail',
+          shopName: pt.shopName || undefined,
           totalPurchases: 0,
           totalSpent: 0,
           totalDebt: 0,
@@ -460,7 +514,9 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
 
       // Append-only audit log
       const actor = useAuthStore.getState().user;
-      const changeKeys = Object.keys(updates).filter(k => (updates as any)[k] !== (target as any)?.[k]);
+      const updatesRecord = updates as unknown as Record<string, unknown>;
+      const targetRecord = (target ?? {}) as unknown as Record<string, unknown>;
+      const changeKeys = Object.keys(updates).filter(k => updatesRecord[k] !== targetRecord[k]);
       get().addCustomerAuditLog({
         customerId: id,
         customerName: updated.name,
@@ -762,15 +818,16 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       const targetCustomer = state.customers.find(c => c.id === customerId);
       if (!targetCustomer) return;
 
-      const [transactions, tickets] = await Promise.all([
-        transactionService.getAll().catch(() => []),
-        repairService.getAll().catch(() => []),
-      ]);
+      // Shared history snapshot — the in-memory stores below still overlay whatever this device
+      // has written since it was taken, so the newest sale is never missing from the totals.
+      const history = await loadHistorySnapshot();
+      const transactions = history.transactions;
+      const tickets = history.tickets;
 
       // Pull active in-memory transactions, invoices, and tickets to guarantee 100% real-time reflection
-      let localCartTxs: any[] = [];
-      let localInvoices: any[] = [];
-      let localTickets: any[] = [];
+      let localCartTxs: SaleTransaction[] = [];
+      let localInvoices: SaleTransaction[] = [];
+      let localTickets: RepairTicket[] = [];
       try {
         const { useCartStore } = await import('./cartStore');
         const { usePartsCartStore } = await import('./partsCartStore');
@@ -782,13 +839,13 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         // Fallback to server arrays
       }
 
-      const txMap = new Map<string, any>();
+      const txMap = new Map<string, SaleTransaction>();
       [...transactions, ...localCartTxs, ...localInvoices].forEach(tx => {
         if (tx && tx.id) txMap.set(tx.id, tx);
       });
       const allTransactions = Array.from(txMap.values());
 
-      const ticketMap = new Map<string, any>();
+      const ticketMap = new Map<string, RepairTicket>();
       [...tickets, ...localTickets].forEach(tk => {
         if (tk && tk.id) ticketMap.set(tk.id, tk);
       });
@@ -824,14 +881,15 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
   recalculateAllCustomerFinancials: async () => {
     try {
       const state = get();
-      const [transactions, tickets] = await Promise.all([
-        transactionService.getAll().catch(() => []),
-        repairService.getAll().catch(() => []),
-      ]);
+      // A full recompute is the deliberate "make everything right" action, so it never reads the
+      // shared snapshot from cache.
+      const history = await loadHistorySnapshot(true);
+      const transactions = history.transactions;
+      const tickets = history.tickets;
 
-      let localCartTxs: any[] = [];
-      let localInvoices: any[] = [];
-      let localTickets: any[] = [];
+      let localCartTxs: SaleTransaction[] = [];
+      let localInvoices: SaleTransaction[] = [];
+      let localTickets: RepairTicket[] = [];
       try {
         const { useCartStore } = await import('./cartStore');
         const { usePartsCartStore } = await import('./partsCartStore');
@@ -843,13 +901,13 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         // Fallback
       }
 
-      const txMap = new Map<string, any>();
+      const txMap = new Map<string, SaleTransaction>();
       [...transactions, ...localCartTxs, ...localInvoices].forEach(tx => {
         if (tx && tx.id) txMap.set(tx.id, tx);
       });
       const allTransactions = Array.from(txMap.values());
 
-      const ticketMap = new Map<string, any>();
+      const ticketMap = new Map<string, RepairTicket>();
       [...tickets, ...localTickets].forEach(tk => {
         if (tk && tk.id) ticketMap.set(tk.id, tk);
       });
@@ -897,14 +955,16 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
 
     if (inFlightCustomerCreations.has(key)) {
       const existingPromiseCustomer = await inFlightCustomerCreations.get(key)!;
-      if (rawInputName && isMoreDescriptiveName(rawInputName, existingPromiseCustomer.name)) {
-        await get().updateCustomer(existingPromiseCustomer.id, { name: rawInputName });
-        return { ...existingPromiseCustomer, name: rawInputName };
+      if (existingPromiseCustomer) {
+        if (rawInputName && isMoreDescriptiveName(rawInputName, existingPromiseCustomer.name)) {
+          await get().updateCustomer(existingPromiseCustomer.id, { name: rawInputName });
+          return { ...existingPromiseCustomer, name: rawInputName };
+        }
+        return existingPromiseCustomer;
       }
-      return existingPromiseCustomer;
     }
 
-    const runCreation = async (): Promise<Customer> => {
+    const runCreation = async (): Promise<Customer | undefined> => {
       // 1. Search in-memory customers (Primary search)
       let existing: Customer | undefined;
 
@@ -1030,7 +1090,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         }
 
         if (Object.keys(updates).length > 0) {
-          const updated = await get().updateCustomer(targetCustomer.id, updates);
+          await get().updateCustomer(targetCustomer.id, updates);
           const fresh = get().customers.find(c => c.id === targetCustomer.id);
           const debtTotal = get().getCustomerDebtTotal(targetCustomer.id);
           return { ...(fresh || { ...targetCustomer, ...updates }), totalDebt: debtTotal };
@@ -1061,7 +1121,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       // 3. Customer account requires a valid phone number besides the name
       if (!hasValidPhone) {
         console.warn('Customer account requires a valid phone number. Cannot auto-create account for:', rawInputName);
-        return undefined as any;
+        return undefined;
       }
 
       // Customer truly does not exist -> Create new customer profile
@@ -1212,8 +1272,8 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
     }
 
     if (Object.keys(updates).length > 0) {
-      const updated = await get().updateCustomer(customerId, updates);
-      return updated;
+      await get().updateCustomer(customerId, updates);
+      return get().customers.find(c => c.id === customerId) ?? customer;
     }
     return customer;
   },
@@ -1557,6 +1617,9 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       },
     }).catch(console.error);
 
+    // Tickets and sales just changed owner on the server, so the shared history snapshot no
+    // longer describes them; force the next recalculation to read fresh.
+    invalidateCustomerHistory();
     get().recalculateCustomer(primary.id).catch(console.error);
 
     return finalPrimary;

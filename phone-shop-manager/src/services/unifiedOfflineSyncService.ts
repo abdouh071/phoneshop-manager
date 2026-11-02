@@ -19,21 +19,19 @@
  */
 
 import {
-  collection,
   doc,
-  addDoc,
   getDoc,
   updateDoc,
-  getDocs,
-  query,
-  where,
-  limit,
 } from 'firebase/firestore';
+import { addIdempotently, findExistingDocId } from './idempotentReplay';
+import { offlineDeadLetterStore } from './offlineDeadLetterStore';
+import { offlineQueueMirror } from './offlineQueueMirror';
 import { db } from '../lib/firebase';
 import { offlineQueue } from './offlineQueue';
 import { offlineCustomerSyncService } from './offlineCustomerSyncService';
-import { inventoryService } from './inventoryService';
-import type { RepairTicket, SaleTransaction, CustomerDebtEntry, CustomerActivityLog, PhoneModel } from '../types';
+import { inventoryService, commitStockDelta } from './inventoryService';
+import type { RepairTicket, SaleTransaction, CustomerDebtEntry, CustomerActivityLog } from '../types';
+import { computeStockStatus } from '../utils/stockStatus';
 import { toast } from '../components/ui/Toast';
 
 const REPAIRS_LOCAL_KEY = 'offline_repairs';
@@ -72,7 +70,6 @@ function pruneLocalCache(): void {
       const trimmed = synced.slice(0, MAX_LOCAL_CACHE_RECORDS);
       const pruned  = [...offline, ...trimmed];
       localStorage.setItem(key, JSON.stringify(pruned));
-      console.info(`[UnifiedOfflineSync] Pruned ${synced.length - trimmed.length} stale records from ${key}`);
     } catch (e) {
       console.warn(`[UnifiedOfflineSync] Cache pruning failed for ${key}:`, e);
     }
@@ -82,7 +79,7 @@ function pruneLocalCache(): void {
 type SyncCountListener = (totalPending: number) => void;
 const listeners = new Set<SyncCountListener>();
 let isSyncing = false;
-let syncDebounceTimeout: any = null;
+let syncDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
 function notifyCountListeners(): void {
   const count = unifiedOfflineSyncService.getTotalPendingCount();
@@ -94,6 +91,29 @@ function notifyCountListeners(): void {
     }
   });
 }
+
+// Counting the badge means re-parsing every local queue, so a pass that writes several queues
+// coalesces its notifications instead of recounting after each one.
+let countNotifyTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleCountNotify(): void {
+  if (countNotifyTimer !== null) return;
+  countNotifyTimer = setTimeout(() => {
+    countNotifyTimer = null;
+    notifyCountListeners();
+  }, 50);
+}
+
+function flushCountNotify(): void {
+  if (countNotifyTimer !== null) {
+    clearTimeout(countNotifyTimer);
+    countNotifyTimer = null;
+  }
+  notifyCountListeners();
+}
+
+// A queue restored from the mirror is a queue whose pending count just changed.
+offlineQueueMirror.onRestored(notifyCountListeners);
 
 function getLocalList<T>(key: string): T[] {
   try {
@@ -107,7 +127,7 @@ function getLocalList<T>(key: string): T[] {
 function saveLocalList<T>(key: string, list: T[]): void {
   try {
     localStorage.setItem(key, JSON.stringify(list));
-    notifyCountListeners();
+    scheduleCountNotify();
   } catch (e) {
     console.error(`[UnifiedOfflineSync] Failed to persist ${key}:`, e);
   }
@@ -165,7 +185,13 @@ export const unifiedOfflineSyncService = {
     if (pending.length === 0) return 0;
 
     let synced = 0;
-    let remainingPending = [...pending];
+    // Temporary id -> Firestore id. Everything below is persisted once at the end of the pass
+    // instead of once per record: each write re-stringifies the whole local mirror and re-parses
+    // every queue to recount the badge, so a per-record write is quadratic on the main thread —
+    // and it lands immediately after a sale, which is when the till goes on to print.
+    // A tab killed mid-pass loses only the remap; the next pass re-resolves each temp id through
+    // addIdempotently/findExistingDocId rather than writing the record a second time.
+    const remapped = new Map<string, string>();
 
     for (const product of pending) {
       if (!navigator.onLine) break;
@@ -173,61 +199,70 @@ export const unifiedOfflineSyncService = {
         const oldTempId = product.id;
         const { id: _, ...productData } = product;
 
-        const docRef = await addDoc(collection(db, 'inventory'), {
-          ...productData,
-          syncedAt: new Date().toISOString(),
-        });
-        const realDocId = docRef.id;
+        const realDocId = await addIdempotently('inventory', oldTempId, { ...productData });
 
-        // Remove from pending products list
-        remainingPending = remainingPending.filter(p => p.id !== oldTempId);
-        inventoryService.savePendingProducts(remainingPending);
-
-        // Update local inventory mirror
-        const local = inventoryService.getLocalInventory();
-        inventoryService.saveLocalInventory(
-          local.map(p => p.id === oldTempId ? { ...p, id: realDocId } : p)
-        );
-
-        // Update in-memory inventoryStore
-        try {
-          const { useInventoryStore } = await import('../store/inventoryStore');
-          useInventoryStore.setState(state => ({
-            products: state.products.map(p => p.id === oldTempId ? { ...p, id: realDocId } : p),
-            parts: state.parts.map(p => p.id === oldTempId ? { ...p, id: realDocId } : p),
-          }));
-        } catch (e) {
-          console.warn('[UnifiedOfflineSync] Error updating inventoryStore:', e);
-        }
-
-        // Remap any offline transactions that referenced this temporary product ID
-        try {
-          const txs = getLocalList<SaleTransaction>(TRANSACTIONS_LOCAL_KEY);
-          let txsModified = false;
-          const updatedTxs = txs.map(tx => {
-            const hasTempProd = tx.items.some(i => i.product.id === oldTempId);
-            if (!hasTempProd) return tx;
-            txsModified = true;
-            return {
-              ...tx,
-              items: tx.items.map(item =>
-                item.product.id === oldTempId
-                  ? { ...item, product: { ...item.product, id: realDocId } }
-                  : item
-              ),
-            };
-          });
-          if (txsModified) {
-            saveLocalList(TRANSACTIONS_LOCAL_KEY, updatedTxs);
-          }
-        } catch (e) {
-          console.warn('[UnifiedOfflineSync] Error remapping transaction product IDs:', e);
-        }
-
+        remapped.set(oldTempId, realDocId);
         synced++;
       } catch (err) {
         console.error(`[UnifiedOfflineSync] Failed to sync offline product ${product.id}:`, err);
       }
+    }
+
+    if (synced === 0) return 0;
+
+    // Re-read the mirrors rather than reusing the arrays captured before the loop, so anything
+    // the UI added while these uploads were in flight is not clobbered.
+    inventoryService.savePendingProducts(
+      inventoryService.getPendingProducts().filter(p => !remapped.has(p.id))
+    );
+
+    inventoryService.saveLocalInventory(
+      inventoryService.getLocalInventory().map(p => {
+        const realId = remapped.get(p.id);
+        return realId ? { ...p, id: realId } : p;
+      })
+    );
+
+    // Update in-memory inventoryStore
+    try {
+      const { useInventoryStore } = await import('../store/inventoryStore');
+      useInventoryStore.setState(state => ({
+        products: state.products.map(p => {
+          const realId = remapped.get(p.id);
+          return realId ? { ...p, id: realId } : p;
+        }),
+        parts: state.parts.map(p => {
+          const realId = remapped.get(p.id);
+          return realId ? { ...p, id: realId } : p;
+        }),
+      }));
+    } catch (e) {
+      console.warn('[UnifiedOfflineSync] Error updating inventoryStore:', e);
+    }
+
+    // Remap any offline transactions that referenced these temporary product IDs
+    try {
+      const txs = getLocalList<SaleTransaction>(TRANSACTIONS_LOCAL_KEY);
+      let txsModified = false;
+      const updatedTxs = txs.map(tx => {
+        const touched = tx.items.some(item => remapped.has(item.product.id));
+        if (!touched) return tx;
+        txsModified = true;
+        return {
+          ...tx,
+          items: tx.items.map(item => {
+            const realId = remapped.get(item.product.id);
+            return realId
+              ? { ...item, product: { ...item.product, id: realId } }
+              : item;
+          }),
+        };
+      });
+      if (txsModified) {
+        saveLocalList(TRANSACTIONS_LOCAL_KEY, updatedTxs);
+      }
+    } catch (e) {
+      console.warn('[UnifiedOfflineSync] Error remapping transaction product IDs:', e);
     }
 
     return synced;
@@ -241,7 +276,7 @@ export const unifiedOfflineSyncService = {
     if (adjustments.length === 0) return 0;
 
     let synced = 0;
-    let remaining = [...adjustments];
+    const syncedIds = new Set<string>();
 
     for (const adj of adjustments) {
       if (!navigator.onLine) break;
@@ -249,24 +284,48 @@ export const unifiedOfflineSyncService = {
         const ref = doc(db, 'inventory', adj.productId);
         const snap = await getDoc(ref);
         if (snap.exists()) {
-          const currentStock = snap.data()?.stock ?? 0;
-          const threshold = snap.data()?.lowStockThreshold ?? 1;
-          const newStock = adj.newStock !== undefined
-            ? adj.newStock
-            : Math.max(0, currentStock + adj.delta);
-          const stockStatus =
-            newStock === 0 ? 'out_of_stock' :
-            newStock <= threshold ? 'low_stock' : 'in_stock';
+          if (adj.mode === 'relative') {
+            // A queued delta must be added to the server's stock at commit time — replaying the
+            // locally-computed absolute value would overwrite sales made from other devices.
+            await commitStockDelta(adj.productId, adj.delta);
+          } else {
+            const currentStock = snap.data()?.stock ?? 0;
+            const threshold = snap.data()?.lowStockThreshold ?? 1;
+            const newStock = adj.newStock !== undefined
+              ? adj.newStock
+              : Math.max(0, currentStock + adj.delta);
+            const stockStatus = computeStockStatus(newStock, threshold);
 
-          await updateDoc(ref, { stock: newStock, stockStatus });
+            await updateDoc(ref, { stock: newStock, stockStatus });
+          }
+        } else {
+          // The product was deleted, or never reached Firestore, while this adjustment waited.
+          // Discarding the entry is right — doing it silently is how stock disappears from the
+          // books with no trace, so the abandonment is logged instead.
+          offlineDeadLetterStore.record({
+            source: 'stock_adjustment',
+            type: 'inventory',
+            payload: { ...adj },
+            reason: 'document_missing',
+            attempts: 0,
+            enqueuedAt: adj.timestamp,
+            detail: `inventory/${adj.productId} no longer exists`,
+          });
         }
 
-        remaining = remaining.filter(a => a.id !== adj.id);
-        inventoryService.savePendingStockAdjustments(remaining);
+        syncedIds.add(adj.id);
         synced++;
       } catch (err) {
         console.error(`[UnifiedOfflineSync] Failed to sync stock adjustment for ${adj.productId}:`, err);
       }
+    }
+
+    // One write for the whole pass: savePendingStockAdjustments re-stringifies the queue and
+    // mirrors it to IndexedDB, which is quadratic when done per adjustment.
+    if (synced > 0) {
+      inventoryService.savePendingStockAdjustments(
+        inventoryService.getPendingStockAdjustments().filter(a => !syncedIds.has(a.id))
+      );
     }
 
     return synced;
@@ -281,7 +340,7 @@ export const unifiedOfflineSyncService = {
     if (pending.length === 0) return 0;
 
     let synced = 0;
-    let updatedRepairs = [...repairs];
+    const remapped = new Map<string, string>();
 
     for (const ticket of pending) {
       if (!navigator.onLine) break;
@@ -289,54 +348,43 @@ export const unifiedOfflineSyncService = {
         const oldTempId = ticket.id;
         const { id: _, ...ticketData } = ticket;
 
-        // Check if ticket with identical ticketNumber already exists on Firestore
-        let realDocId: string;
-        if (ticket.ticketNumber) {
-          const q = query(
-            collection(db, 'repairs'),
-            where('ticketNumber', '==', ticket.ticketNumber),
-            limit(1)
-          );
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            realDocId = snap.docs[0].id;
-          } else {
-            const docRef = await addDoc(collection(db, 'repairs'), {
-              ...ticketData,
-              syncedAt: new Date().toISOString(),
-            });
-            realDocId = docRef.id;
-          }
-        } else {
-          const docRef = await addDoc(collection(db, 'repairs'), {
-            ...ticketData,
-            syncedAt: new Date().toISOString(),
-          });
-          realDocId = docRef.id;
-        }
+        // Match an already-uploaded ticket by its replay key, then by ticket number
+        // (tickets queued before replay keys existed), otherwise create it once.
+        const realDocId =
+          (await findExistingDocId('repairs', 'idempotencyKey', oldTempId)) ??
+          (await findExistingDocId('repairs', 'ticketNumber', ticket.ticketNumber)) ??
+          await addIdempotently('repairs', oldTempId, { ...ticketData });
 
-        // Replace temporary ID in local storage
-        updatedRepairs = updatedRepairs.map(t =>
-          t.id === oldTempId ? { ...t, id: realDocId } : t
-        );
-        saveLocalList(REPAIRS_LOCAL_KEY, updatedRepairs);
-
-        // Update in-memory repairStore
-        try {
-          const { useRepairStore } = await import('../store/repairStore');
-          useRepairStore.setState(state => ({
-            tickets: state.tickets.map(t =>
-              t.id === oldTempId ? { ...t, id: realDocId } : t
-            ),
-          }));
-        } catch (e) {
-          console.warn('[UnifiedOfflineSync] Error updating repairStore:', e);
-        }
-
+        remapped.set(oldTempId, realDocId);
         synced++;
       } catch (err) {
         console.error(`[UnifiedOfflineSync] Failed to sync offline repair ticket ${ticket.id}:`, err);
       }
+    }
+
+    if (synced === 0) return 0;
+
+    // Replace the temporary ids in local storage once for the whole pass, re-reading the list so
+    // tickets queued while these uploads were in flight are kept.
+    saveLocalList(
+      REPAIRS_LOCAL_KEY,
+      getLocalList<RepairTicket>(REPAIRS_LOCAL_KEY).map(t => {
+        const realId = t.id ? remapped.get(t.id) : undefined;
+        return realId ? { ...t, id: realId } : t;
+      })
+    );
+
+    // Update in-memory repairStore
+    try {
+      const { useRepairStore } = await import('../store/repairStore');
+      useRepairStore.setState(state => ({
+        tickets: state.tickets.map(t => {
+          const realId = remapped.get(t.id);
+          return realId ? { ...t, id: realId } : t;
+        }),
+      }));
+    } catch (e) {
+      console.warn('[UnifiedOfflineSync] Error updating repairStore:', e);
     }
 
     return synced;
@@ -351,7 +399,7 @@ export const unifiedOfflineSyncService = {
     if (pending.length === 0) return 0;
 
     let synced = 0;
-    let updatedTxs = [...txs];
+    const remapped = new Map<string, string>();
 
     for (const tx of pending) {
       if (!navigator.onLine) break;
@@ -359,33 +407,36 @@ export const unifiedOfflineSyncService = {
         const oldTempId = tx.id;
         const { id: _, ...txData } = tx;
 
-        const docRef = await addDoc(collection(db, 'transactions'), {
-          ...txData,
-          syncedAt: new Date().toISOString(),
-        });
-        const realDocId = docRef.id;
+        const realDocId = await addIdempotently('transactions', oldTempId, { ...txData });
 
-        updatedTxs = updatedTxs.map(t =>
-          t.id === oldTempId ? { ...t, id: realDocId } : t
-        );
-        saveLocalList(TRANSACTIONS_LOCAL_KEY, updatedTxs);
-
-        // Update in-memory cartStore
-        try {
-          const { useCartStore } = await import('../store/cartStore');
-          useCartStore.setState(state => ({
-            transactions: state.transactions.map(t =>
-              t.id === oldTempId ? { ...t, id: realDocId } : t
-            ),
-          }));
-        } catch (e) {
-          console.warn('[UnifiedOfflineSync] Error updating cartStore:', e);
-        }
-
+        remapped.set(oldTempId, realDocId);
         synced++;
       } catch (err) {
         console.error(`[UnifiedOfflineSync] Failed to sync offline transaction ${tx.id}:`, err);
       }
+    }
+
+    if (synced === 0) return 0;
+
+    saveLocalList(
+      TRANSACTIONS_LOCAL_KEY,
+      getLocalList<SaleTransaction>(TRANSACTIONS_LOCAL_KEY).map(t => {
+        const realId = t.id ? remapped.get(t.id) : undefined;
+        return realId ? { ...t, id: realId } : t;
+      })
+    );
+
+    // Update in-memory cartStore
+    try {
+      const { useCartStore } = await import('../store/cartStore');
+      useCartStore.setState(state => ({
+        transactions: state.transactions.map(t => {
+          const realId = remapped.get(t.id);
+          return realId ? { ...t, id: realId } : t;
+        }),
+      }));
+    } catch (e) {
+      console.warn('[UnifiedOfflineSync] Error updating cartStore:', e);
     }
 
     return synced;
@@ -400,7 +451,7 @@ export const unifiedOfflineSyncService = {
     if (pending.length === 0) return 0;
 
     let synced = 0;
-    let updatedDebts = [...debts];
+    const remapped = new Map<string, string>();
 
     for (const debt of pending) {
       if (!navigator.onLine) break;
@@ -408,33 +459,36 @@ export const unifiedOfflineSyncService = {
         const oldTempId = debt.id;
         const { id: _, ...debtData } = debt;
 
-        const docRef = await addDoc(collection(db, 'customer_debts'), {
-          ...debtData,
-          syncedAt: new Date().toISOString(),
-        });
-        const realDocId = docRef.id;
+        const realDocId = await addIdempotently('customer_debts', oldTempId, { ...debtData });
 
-        updatedDebts = updatedDebts.map(d =>
-          d.id === oldTempId ? { ...d, id: realDocId } : d
-        );
-        saveLocalList(DEBTS_LOCAL_KEY, updatedDebts);
-
-        // Update in-memory customerStore debts
-        try {
-          const { useCustomerStore } = await import('../store/customerStore');
-          useCustomerStore.setState(state => ({
-            debts: state.debts.map(d =>
-              d.id === oldTempId ? { ...d, id: realDocId } : d
-            ),
-          }));
-        } catch (e) {
-          console.warn('[UnifiedOfflineSync] Error updating customerStore debts:', e);
-        }
-
+        remapped.set(oldTempId, realDocId);
         synced++;
       } catch (err) {
         console.error(`[UnifiedOfflineSync] Failed to sync offline debt ${debt.id}:`, err);
       }
+    }
+
+    if (synced === 0) return 0;
+
+    saveLocalList(
+      DEBTS_LOCAL_KEY,
+      getLocalList<CustomerDebtEntry>(DEBTS_LOCAL_KEY).map(d => {
+        const realId = d.id ? remapped.get(d.id) : undefined;
+        return realId ? { ...d, id: realId } : d;
+      })
+    );
+
+    // Update in-memory customerStore debts
+    try {
+      const { useCustomerStore } = await import('../store/customerStore');
+      useCustomerStore.setState(state => ({
+        debts: state.debts.map(d => {
+          const realId = remapped.get(d.id);
+          return realId ? { ...d, id: realId } : d;
+        }),
+      }));
+    } catch (e) {
+      console.warn('[UnifiedOfflineSync] Error updating customerStore debts:', e);
     }
 
     return synced;
@@ -449,7 +503,7 @@ export const unifiedOfflineSyncService = {
     if (pending.length === 0) return 0;
 
     let synced = 0;
-    let updatedLogs = [...logs];
+    const remapped = new Map<string, string>();
 
     for (const log of pending) {
       if (!navigator.onLine) break;
@@ -457,22 +511,24 @@ export const unifiedOfflineSyncService = {
         const oldTempId = log.id;
         const { id: _, ...logData } = log;
 
-        const docRef = await addDoc(collection(db, 'customer_activity_logs'), {
-          ...logData,
-          syncedAt: new Date().toISOString(),
-        });
-        const realDocId = docRef.id;
+        const realDocId = await addIdempotently('customer_activity_logs', oldTempId, { ...logData });
 
-        updatedLogs = updatedLogs.map(l =>
-          l.id === oldTempId ? { ...l, id: realDocId } : l
-        );
-        saveLocalList(LOGS_LOCAL_KEY, updatedLogs);
-
+        remapped.set(oldTempId, realDocId);
         synced++;
       } catch (err) {
         console.error(`[UnifiedOfflineSync] Failed to sync offline customer log ${log.id}:`, err);
       }
     }
+
+    if (synced === 0) return 0;
+
+    saveLocalList(
+      LOGS_LOCAL_KEY,
+      getLocalList<CustomerActivityLog>(LOGS_LOCAL_KEY).map(l => {
+        const realId = l.id ? remapped.get(l.id) : undefined;
+        return realId ? { ...l, id: realId } : l;
+      })
+    );
 
     return synced;
   },
@@ -497,8 +553,6 @@ export const unifiedOfflineSyncService = {
     const summaryDetails: string[] = [];
 
     try {
-      console.info('[UnifiedOfflineSync] Starting master sync across all domains...');
-
       // 1. Sync offline customers first (so remote customer IDs are resolved)
       try {
         const custResult = await offlineCustomerSyncService.syncPendingCustomers();
@@ -630,7 +684,7 @@ export const unifiedOfflineSyncService = {
       return { totalSynced, errors: hadErrors };
     } finally {
       isSyncing = false;
-      notifyCountListeners();
+      flushCountNotify();
     }
   },
 
@@ -650,10 +704,7 @@ export const unifiedOfflineSyncService = {
    * Initialize global listeners for online reconnection, window focus, and heartbeat
    */
   init: (): (() => void) => {
-    console.info('[UnifiedOfflineSync] Initializing unified offline sync service...');
-
     const handleOnline = () => {
-      console.info('[UnifiedOfflineSync] Network back online! Triggering automatic sync to database...');
       unifiedOfflineSyncService.triggerDebouncedSync(500);
     };
 

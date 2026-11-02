@@ -28,7 +28,7 @@ export interface ActivityLog {
   severity?: ActivitySeverity;
   userName?: string | null;
   userId?: string | null;
-  timestamp: any; // Firestore Timestamp or serverTimestamp
+  timestamp: Timestamp | string | null; // Firestore Timestamp when read back, ISO string for local logs
 }
 
 export interface LogOptions {
@@ -38,6 +38,18 @@ export interface LogOptions {
   severity?: ActivitySeverity;
   userName?: string;
   userId?: string;
+  // Accepted for call-site convenience; not persisted by the log writer
+  adminName?: string;
+  adminEmail?: string;
+  adminId?: string;
+  requestId?: string;
+  actionType?: string;
+  actionName?: string;
+  approvedBy?: string;
+  rejectedBy?: string;
+  activeUser?: string;
+  approvalMethod?: string;
+  reason?: string;
 }
 
 const COLLECTION = 'activityLogs';

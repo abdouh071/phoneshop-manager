@@ -7,6 +7,7 @@ import { activityLogService } from './activityLogService';
 import { cartService } from './cartService';
 
 // In-memory mock for localStorage in Node environment
+type QueuedSyncAction = { type: string; payload?: { id?: string } };
 const mockStorage = new Map<string, string>();
 const localStorageMock = {
   getItem: (key: string) => mockStorage.get(key) || null,
@@ -120,7 +121,7 @@ describe('Offline Fast-Path & Zero-Hang Operations', () => {
 
       // Verify action is enqueued for later sync
       const queue = JSON.parse(mockStorage.get('offline_action_queue') || '[]');
-      expect(queue.some((a: any) => a.type === 'UPDATE_REPAIR_TICKET' && a.payload.id === onlineDocId)).toBe(true);
+      expect(queue.some((a: QueuedSyncAction) => a.type === 'UPDATE_REPAIR_TICKET' && a.payload?.id === onlineDocId)).toBe(true);
     });
 
     it('updates status with online doc ID immediately when offline and enqueues to offlineQueue', async () => {
@@ -146,7 +147,7 @@ describe('Offline Fast-Path & Zero-Hang Operations', () => {
       expect(updated.status).toBe('ready');
 
       const queue = JSON.parse(mockStorage.get('offline_action_queue') || '[]');
-      expect(queue.some((a: any) => a.type === 'UPDATE_REPAIR_STATUS' && a.payload.id === onlineDocId)).toBe(true);
+      expect(queue.some((a: QueuedSyncAction) => a.type === 'UPDATE_REPAIR_STATUS' && a.payload?.id === onlineDocId)).toBe(true);
     });
 
     it('deletes ticket immediately, records tombstone, purges local cache, and enqueues to offlineQueue', async () => {
@@ -181,7 +182,7 @@ describe('Offline Fast-Path & Zero-Hang Operations', () => {
 
       // Verify purged from local storage
       const local = JSON.parse(mockStorage.get('offline_repairs') || '[]');
-      expect(local.some((t: any) => t.id === targetDocId)).toBe(false);
+      expect(local.some((t: { id: string }) => t.id === targetDocId)).toBe(false);
       expect(local.length).toBe(1);
 
       // Verify tombstone is recorded
@@ -190,7 +191,7 @@ describe('Offline Fast-Path & Zero-Hang Operations', () => {
 
       // Verify queued for offline sync
       const queue = JSON.parse(mockStorage.get('offline_action_queue') || '[]');
-      expect(queue.some((a: any) => a.type === 'DELETE_REPAIR_TICKET' && a.payload.id === targetDocId)).toBe(true);
+      expect(queue.some((a: QueuedSyncAction) => a.type === 'DELETE_REPAIR_TICKET' && a.payload?.id === targetDocId)).toBe(true);
 
       // Verify getAll() never resurrects tombstoned ticket
       const all = await repairService.getAll();
@@ -241,10 +242,10 @@ describe('Offline Fast-Path & Zero-Hang Operations', () => {
       expect(created.name).toBe('New Client Offline');
 
       const local = JSON.parse(mockStorage.get('offline_customers') || '[]');
-      expect(local.some((c: any) => c.id === created.id)).toBe(true);
+      expect(local.some((c: { id: string }) => c.id === created.id)).toBe(true);
 
       const queue = JSON.parse(mockStorage.get('offline_customer_sync_queue') || '[]');
-      expect(queue.some((item: any) => item.tempId === created.id || item.customerData?.id === created.id)).toBe(true);
+      expect(queue.some((item: { tempId?: string; customerData?: { id?: string } }) => item.tempId === created.id || item.customerData?.id === created.id)).toBe(true);
     });
 
     it('updates customer immediately when offline without hanging on remote getDoc', async () => {
@@ -290,7 +291,7 @@ describe('Offline Fast-Path & Zero-Hang Operations', () => {
       expect(tx.id).toMatch(/^offline_tx_/);
 
       const local = JSON.parse(mockStorage.get('offline_transactions') || '[]');
-      expect(local.some((t: any) => t.id === tx.id)).toBe(true);
+      expect(local.some((t: { id: string }) => t.id === tx.id)).toBe(true);
     });
 
     it('updates transaction settlement immediately when offline without hanging on updateDoc', async () => {

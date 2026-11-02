@@ -16,6 +16,10 @@
  *   offlineQueue.init(); // call once in App.tsx
  */
 
+import { offlineDeadLetterStore } from './offlineDeadLetterStore';
+import { offlineQueueMirror } from './offlineQueueMirror';
+import { errorMessage } from '../utils/errorUtils';
+
 const QUEUE_KEY = 'offline_action_queue';
 
 /** Maximum attempts before an action is permanently dropped */
@@ -29,17 +33,20 @@ function backoffDelayMs(retryCount: number): number {
   return Math.min(Math.pow(2, retryCount + 1) * 1000, 5 * 60 * 1000);
 }
 
+/** Free-form JSON bag. The concrete shape is declared by each action's registered handler. */
+export type OfflineActionPayload = Record<string, unknown>;
+
 export interface OfflineAction {
   id: string;
   type: string;
-  payload: any;
+  payload: OfflineActionPayload;
   enqueuedAt: string;
   retryCount: number;
   /** ISO timestamp before which this action should NOT be retried (exponential back-off) */
   nextRetryAfter?: string;
 }
 
-type ActionHandler = (payload: any) => Promise<void>;
+type ActionHandler = (payload: OfflineActionPayload) => Promise<void>;
 
 const handlers = new Map<string, ActionHandler>();
 const syncListeners = new Set<(pending: number) => void>();
@@ -55,11 +62,15 @@ function getQueue(): OfflineAction[] {
 }
 
 function saveQueue(queue: OfflineAction[]): void {
+  const raw = JSON.stringify(queue);
   try {
-    localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+    localStorage.setItem(QUEUE_KEY, raw);
   } catch (e) {
     console.error('[OfflineQueue] Failed to persist queue:', e);
   }
+  // Mirrored even when the line above failed: this is the copy that survives a full
+  // localStorage bucket, and it is what the next boot restores the queue from.
+  offlineQueueMirror.write(QUEUE_KEY, raw);
 }
 
 function notifySyncListeners(): void {
@@ -68,6 +79,9 @@ function notifySyncListeners(): void {
     try { fn(count); } catch (e) { console.error('[OfflineQueue] Listener error:', e); }
   });
 }
+
+// A queue restored from the mirror is a queue whose pending count just changed.
+offlineQueueMirror.onRestored(notifySyncListeners);
 
 export const offlineQueue = {
   /**
@@ -90,8 +104,8 @@ export const offlineQueue = {
    * Register a handler for a given action type.
    * The handler receives the action payload and must return a Promise.
    */
-  registerHandler(type: string, handler: ActionHandler): void {
-    handlers.set(type, handler);
+  registerHandler<T extends OfflineActionPayload>(type: string, handler: (payload: T) => Promise<void>): void {
+    handlers.set(type, handler as ActionHandler);
   },
 
   /**
@@ -105,12 +119,12 @@ export const offlineQueue = {
    */
   async enqueue(
     actionOrType: Omit<OfflineAction, 'id' | 'enqueuedAt' | 'retryCount'> | string,
-    payloadArg?: any,
+    payloadArg?: OfflineActionPayload,
     options?: { tryImmediate?: boolean }
   ): Promise<boolean> {
     const action: Omit<OfflineAction, 'id' | 'enqueuedAt' | 'retryCount'> =
       typeof actionOrType === 'string'
-        ? { type: actionOrType, payload: payloadArg }
+        ? { type: actionOrType, payload: payloadArg as OfflineActionPayload }
         : actionOrType;
 
     const fullAction: OfflineAction = {
@@ -165,6 +179,15 @@ export const offlineQueue = {
       const handler = handlers.get(action.type);
       if (!handler) {
         console.warn(`[OfflineQueue] No handler for action type: ${action.type} — dropping.`);
+        offlineDeadLetterStore.record({
+          source: 'action_queue',
+          type: action.type,
+          payload: action.payload,
+          reason: 'no_handler',
+          attempts: action.retryCount,
+          enqueuedAt: action.enqueuedAt,
+          detail: `No handler is registered for ${action.type}`,
+        });
         failed++;
         continue;
       }
@@ -184,6 +207,15 @@ export const offlineQueue = {
           });
         } else {
           console.error(`[OfflineQueue] Action ${action.type} (id=${action.id}) permanently dropped after ${MAX_RETRY_COUNT} attempts.`);
+          offlineDeadLetterStore.record({
+            source: 'action_queue',
+            type: action.type,
+            payload: action.payload,
+            reason: 'retries_exhausted',
+            attempts: MAX_RETRY_COUNT,
+            enqueuedAt: action.enqueuedAt,
+            detail: errorMessage(err),
+          });
         }
       }
     }
@@ -204,7 +236,6 @@ export const offlineQueue = {
       const pending = getQueue().length;
       if (pending === 0) return;
 
-      console.log(`[OfflineQueue] Back online — flushing ${pending} queued action(s)…`);
       const result = await offlineQueue.flush();
       if (result.success > 0) {
         // Dynamically import toast to avoid circular deps

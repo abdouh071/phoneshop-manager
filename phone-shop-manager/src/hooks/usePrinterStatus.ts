@@ -12,7 +12,7 @@ interface PrinterStatusInfo {
 const CHECK_INTERVAL_MS = 15_000; // 15 seconds
 
 // Detect Electron desktop app (preload.cjs exposes window.electronAPI)
-const electronAPI = typeof window !== 'undefined' ? (window as any).electronAPI : undefined;
+const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
 
 // Priority: Electron embedded server > env var > local hostname > fallback to localhost
 const PRINT_SERVER_URL = (() => {

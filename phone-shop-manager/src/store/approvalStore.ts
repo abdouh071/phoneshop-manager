@@ -6,19 +6,25 @@ import {
   updateDoc,
   onSnapshot,
   query,
+  where,
+  orderBy,
   limit,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import type { FieldValue, Timestamp } from 'firebase/firestore';
 import { useAuthStore } from './authStore';
 import { activityLogService } from '../services/activityLogService';
-import { verifyApprovalPin } from '../utils/security';
+import { userService, type ApprovalPinHolder } from '../services/userService';
+import { verifyApprovalPin, isLegacyApprovalPinVerifier, hashApprovalPin } from '../utils/security';
+import { serverEnforcement } from '../services/serverEnforcement';
+import type { ApprovalActionData } from '../types';
 
 export interface ApprovalRequest {
   id: string;
   actionType: string;
   actionLabel: string;
-  actionData?: Record<string, any>;
+  actionData?: ApprovalActionData;
   targetId?: string;
   requestedBy: {
     uid: string;
@@ -37,13 +43,13 @@ export interface ApprovalRequest {
   };
   rejectionReason?: string;
   approvalMethod?: 'pin' | 'remote' | 'password';
-  createdAt?: any;
+  createdAt?: FieldValue | Timestamp;
 }
 
 // Audible chime for new approval requests
 export function playApprovalNotificationChime() {
   try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return;
     const ctx = new AudioCtx();
     const osc = ctx.createOscillator();
@@ -77,7 +83,7 @@ interface ApprovalState {
   submitRequest: (params: {
     actionType: string;
     actionLabel: string;
-    actionData?: Record<string, any>;
+    actionData?: ApprovalActionData;
     targetId?: string;
     reason?: string;
   }) => Promise<string>;
@@ -97,6 +103,17 @@ interface ApprovalState {
 
 // Track IDs globally so multiple mounted components don't double-trigger notifications
 let _knownPendingIds: Set<string> | null = null;
+
+/**
+ * Replaces a v1 (fixed-salt SHA-256) verifier with the strong form once the PIN behind it
+ * has been proven correct. Fails silently: the approval that just succeeded does not depend
+ * on this write, and a staff till is not always allowed to write another user's profile.
+ */
+async function upgradeLegacyPinVerifier(uid: string, pin: string): Promise<void> {
+  try {
+    await userService.setApprovalPinVerifier(uid, await hashApprovalPin(pin));
+  } catch { /**/ }
+}
 
 export const useApprovalStore = create<ApprovalState>((set, get) => ({
   pendingRequests: [],
@@ -215,17 +232,36 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
       return { success: false, error: 'Please enter your approval PIN.' };
     }
 
-    let staff = useAuthStore.getState().staff;
-    if (!staff || staff.length === 0) {
-      await useAuthStore.getState().fetchStaff();
-      staff = useAuthStore.getState().staff;
+    let holders: ApprovalPinHolder[];
+    try {
+      // The server answers when the callables are deployed: it holds the verifiers, so the
+      // PIN stops being compared against a list a till has to read, and a legacy verifier is
+      // upgraded with privileges this device does not have.
+      const server = await serverEnforcement.verifyApprovalPin(cleanPin);
+      if (server.status === 'ok' && server.data.verified) {
+        return { success: true, adminName: server.data.adminName, adminId: server.data.adminId };
+      }
+      if (server.status === 'rejected') {
+        // An answer of "no" is not a missing server: falling back here would make the
+        // check decorative, and would let a wrong PIN through on a till that still has a
+        // stale verifier list.
+        return {
+          success: false,
+          error:
+            server.code === 'permission-denied'
+              ? 'Incorrect approval PIN. Please check and try again.'
+              : server.message,
+        };
+      }
+      holders = await userService.getApprovalPinVerifiers();
+    } catch {
+      return {
+        success: false,
+        error: 'Could not reach the server to verify the approval PIN. Send a remote approval request instead.',
+      };
     }
 
-    // Filter to active admins or super admins
-    const activeAdmins = staff.filter(s => (s.role === 'admin' || s.isSuperAdmin) && s.status !== 'revoked');
-    const adminsWithPin = activeAdmins.filter(s => Boolean(s.approvalPin));
-
-    if (adminsWithPin.length === 0) {
+    if (holders.length === 0) {
       return {
         success: false,
         noPinConfigured: true,
@@ -234,13 +270,18 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
     }
 
     // Check each admin's PIN
-    for (const admin of adminsWithPin) {
-      const isMatch = await verifyApprovalPin(cleanPin, admin.approvalPin!);
+    for (const holder of holders) {
+      const isMatch = await verifyApprovalPin(cleanPin, holder.approvalPin);
       if (isMatch) {
+        if (isLegacyApprovalPinVerifier(holder.approvalPin)) {
+          // Best-effort: a staff till is not allowed to write other users' profiles, and the
+          // approval above already succeeded, so a rejected upgrade must stay silent.
+          void upgradeLegacyPinVerifier(holder.id, cleanPin);
+        }
         return {
           success: true,
-          adminName: admin.name,
-          adminId: admin.id,
+          adminName: holder.name,
+          adminId: holder.id,
         };
       }
     }
@@ -252,30 +293,40 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
   },
 
   subscribeToPending: () => {
-    // We query the approvalRequests collection with a limit to avoid missing index errors
-    // and filter status in memory.
-    const q = query(collection(db, 'approvalRequests'), limit(150));
+    // Two indexed streams instead of one unfiltered scan. The old `limit(150)` with no ordering
+    // returned the OLDEST 150 requests (auto ids sort chronologically), so once a shop's approval
+    // history outgrew that window new pending requests stopped reaching the badge at all.
+    // Both queries use the (status, requestedAt) composite index already in firestore.indexes.json.
+    const pendingQuery = query(
+      collection(db, 'approvalRequests'),
+      where('status', '==', 'pending'),
+      orderBy('requestedAt', 'desc'),
+      limit(100)
+    );
 
-    const unsubscribe = onSnapshot(
-      q,
+    const resolvedQuery = query(
+      collection(db, 'approvalRequests'),
+      where('status', 'in', ['approved', 'rejected']),
+      orderBy('requestedAt', 'desc'),
+      limit(30)
+    );
+
+    let pendingRequests: ApprovalRequest[] = [];
+    let recentResolved: ApprovalRequest[] = [];
+
+    const unsubscribePending = onSnapshot(
+      pendingQuery,
       (snapshot) => {
-        const all: ApprovalRequest[] = [];
-        snapshot.forEach((docSnap) => {
-          all.push({
-            id: docSnap.id,
-            ...docSnap.data(),
-          } as ApprovalRequest);
-        });
+        pendingRequests = snapshot.docs.map(
+          (docSnap) => ({ id: docSnap.id, ...docSnap.data() } as ApprovalRequest)
+        );
 
-        // Sort descending by requestedAt
-        all.sort((a, b) => new Date(b.requestedAt || 0).getTime() - new Date(a.requestedAt || 0).getTime());
-
-        const pending = all.filter(r => r.status === 'pending');
-        const resolved = all.filter(r => r.status === 'approved' || r.status === 'rejected').slice(0, 30);
-
-        const currentPendingIds = new Set(pending.map(r => r.id));
+        // The chime compares against the previous pending set, so only the pending stream may
+        // seed or advance it — otherwise a resolved snapshot landing first would make every
+        // already-open request look new and ring on app start.
+        const currentPendingIds = new Set(pendingRequests.map(r => r.id));
         if (_knownPendingIds !== null) {
-          const newReqs = pending.filter(r => !_knownPendingIds!.has(r.id));
+          const newReqs = pendingRequests.filter(r => !_knownPendingIds!.has(r.id));
           if (newReqs.length > 0) {
             playApprovalNotificationChime();
           }
@@ -283,9 +334,8 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
         _knownPendingIds = currentPendingIds;
 
         set({
-          pendingRequests: pending,
-          recentResolved: resolved,
-          pendingCount: pending.length,
+          pendingRequests,
+          pendingCount: pendingRequests.length,
           error: null,
         });
       },
@@ -295,7 +345,24 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
       }
     );
 
-    return unsubscribe;
+    const unsubscribeResolved = onSnapshot(
+      resolvedQuery,
+      (snapshot) => {
+        recentResolved = snapshot.docs.map(
+          (docSnap) => ({ id: docSnap.id, ...docSnap.data() } as ApprovalRequest)
+        );
+        set({ recentResolved, error: null });
+      },
+      (err) => {
+        console.error('Approval resolved-stream error:', err);
+        set({ error: err.message });
+      }
+    );
+
+    return () => {
+      unsubscribePending();
+      unsubscribeResolved();
+    };
   },
 
   subscribeToSingleRequest: (requestId: string, onUpdate: (req: ApprovalRequest) => void) => {

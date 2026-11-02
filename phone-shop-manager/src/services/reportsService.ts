@@ -3,13 +3,13 @@ import { repairService } from './repairService';
 import { inventoryService } from './inventoryService';
 import { endOfDayService, type EndOfDayRecord } from './endOfDayService';
 import { debtService } from './debtService';
-import { toDateStr, isSameLocalDate } from '../store/endOfDayStore';
+import { toDateStr } from '../store/endOfDayStore';
+import { computeDayFigures } from '../utils/dayFigures';
+import { reconcileEodDay, type EodReconciliation } from '../utils/eodReconcile';
 import {
   isClaimedAndPaidRepair,
   getClaimedRepairRevenue,
-  getClaimedRepairHandoverCash,
   getClaimedRepairPartsCost,
-  getClaimedRepairDebt,
 } from '../utils/repairFinancials';
 import type { SaleTransaction, RepairTicket } from '../types';
 
@@ -31,6 +31,8 @@ export interface DailyIncomeDetail {
   // End of Day Status
   eodRecord?: EndOfDayRecord | null;
   isClosed: boolean;
+  /** For sealed days: how the day's records differ from what the seal froze, if at all. */
+  eodDrift?: EodReconciliation | null;
   closedAt?: string;
   closedByName?: string;
   isAutoClose?: boolean;
@@ -100,6 +102,10 @@ export interface MonthlyIncomeDetail {
 
   // Overall
   partsRevenue: number;
+  partsCount: number;
+  partsNetProfit: number;
+  partsCash: number;
+  partsCOGS: number;
   totalRevenue: number;
   totalCOGS: number;
   totalNetProfit: number;
@@ -280,7 +286,7 @@ export const reportsService = {
       case 'this_week': {
         const d = new Date(now);
         const day = d.getDay();
-        const startDay = options.weekStartDay ?? 0;
+        const startDay = opts.weekStartDay ?? 0;
         const diff = (day - startDay + 7) % 7;
         startRange = new Date(d.setDate(d.getDate() - diff));
         startRange.setHours(0, 0, 0, 0);
@@ -293,7 +299,7 @@ export const reportsService = {
       case 'last_week': {
         const d = new Date(now);
         const day = d.getDay();
-        const startDay = options.weekStartDay ?? 0;
+        const startDay = opts.weekStartDay ?? 0;
         const diff = (day - startDay + 7) % 7;
         startRange = new Date(d.setDate(d.getDate() - diff - 7));
         startRange.setHours(0, 0, 0, 0);
@@ -373,11 +379,13 @@ export const reportsService = {
     const endMs = endRange.getTime();
 
     // 2. Fetch live data (date-scoped transactions) & official End-of-Day records
+    // The seals are read for the requested dates rather than "the 90 newest", so a report
+    // longer than a quarter still compares each day against the record that closed it.
     const [transactions, repairs, products, eodRecords, debts] = await Promise.all([
       transactionService.getByDateRange(startRange, endRange),
       repairService.getAll(),
       inventoryService.getAll(),
-      endOfDayService.getAll(),
+      endOfDayService.getRange(toDateStr(startRange), toDateStr(endRange)),
       debtService.getAll(),
     ]);
 
@@ -395,10 +403,13 @@ export const reportsService = {
 
     const todayStr = toDateStr(now);
     const dailyIncomeDetails: DailyIncomeDetail[] = [];
+    const daySources = { transactions, repairs, debts };
 
     daysList.forEach(dayStr => {
       const eod = eodRecords.find(r => r.date === dayStr);
       const isToday = dayStr === todayStr;
+      // One formula, shared with the seal: what this day's records say right now.
+      const figures = computeDayFigures(daySources, dayStr);
       const dayDate = new Date(dayStr + 'T00:00:00');
       const dayLabel = dayDate.toLocaleDateString('en-US', {
         weekday: 'short',
@@ -408,12 +419,17 @@ export const reportsService = {
 
       if (eod) {
         // Officially closed day: Respect and prioritize sealed EOD numbers!
+        // The seal keeps the day exactly as it was counted at close. The live recompute is
+        // attached beside it as drift, so a payment that arrived after the seal, a refund of
+        // an older sale, or an edited line shows up as a difference instead of quietly
+        // rewriting a day the shop has already banked.
         dailyIncomeDetails.push({
           date: dayStr,
           dayLabel,
           isToday,
           eodRecord: eod,
           isClosed: true,
+          eodDrift: reconcileEodDay(eod, figures),
           closedAt: eod.closedAt,
           closedByName: eod.closedByName,
           isAutoClose: eod.isAutoClose,
@@ -427,6 +443,7 @@ export const reportsService = {
           salesCard: eod.salesCard,
           salesMobile: eod.salesMobile,
           salesTransfer: eod.salesTransfer || 0,
+          salesStoreCredit: eod.salesStoreCredit || 0,
           salesDebt: eod.salesDebt,
 
           repairsCompletedCount: eod.repairsCompleted,
@@ -439,136 +456,65 @@ export const reportsService = {
           repairsDebt: eod.repairsDebt,
 
           partsRevenue: eod.partsSalesRevenue || 0,
-          partsCash: (eod as any).partsSalesCash ?? (eod as any).partsCash ?? 0,
-          partsCount: (eod as any).partsSalesCount ?? (eod as any).partsCount ?? 0,
-          partsCOGS: (eod as any).partsCogs || 0,
-          partsNetProfit: (eod.partsSalesRevenue || 0) - ((eod as any).partsCogs || 0),
+          partsCash: eod.partsSalesCash ?? eod.partsCash ?? 0,
+          partsCard: eod.partsCard || 0,
+          partsMobile: eod.partsMobile || 0,
+          partsTransfer: eod.partsTransfer || 0,
+          partsCount: eod.partsSalesCount ?? eod.partsCount ?? 0,
+          partsCOGS: eod.partsCogs || 0,
+          partsNetProfit: (eod.partsSalesRevenue || 0) - (eod.partsCogs || 0),
           debtCollectedCash: eod.debtCollectedCash || 0,
           refundsCash: eod.refundsCash || 0,
 
           totalRevenue: eod.totalRevenue,
-          totalCOGS: eod.salesCogs + eod.repairsPartsCost + ((eod as any).partsCogs || 0),
+          totalCOGS: eod.salesCogs + eod.repairsPartsCost + (eod.partsCogs || 0),
           totalNetProfit: eod.totalNetProfit,
           totalPhysicalCash: eod.totalCash,
         });
       } else {
-        // Unclosed day / Live Today: Compute live numbers
-        const dayTx = transactions.filter(t => isSameLocalDate(t.date, dayStr));
-        const completedTx = dayTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval' && t.saleType !== 'parts_b2b');
-        const refundedTx = dayTx.filter(t => t.status === 'refunded');
-        const partsTx = dayTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval' && t.saleType === 'parts_b2b');
-
-        const sumPayment = (txList: typeof transactions, method: string) =>
-          txList.reduce((s, tx) => s + (tx.payments || []).filter(p => String(p.method || '').toLowerCase() === method.toLowerCase()).reduce((a, p) => a + (p.amount || 0), 0), 0);
-
-        const salesCash        = sumPayment(completedTx, 'cash');
-        const salesCard        = sumPayment(completedTx, 'card');
-        const salesMobile      = sumPayment(completedTx, 'mobile');
-        const salesTransfer    = sumPayment(completedTx, 'transfer');
-        const salesStoreCredit = sumPayment(completedTx, 'store_credit');
-        const salesDebt        = sumPayment(completedTx, 'debt');
-        const salesGrossRevenue = completedTx.reduce((s, t) => s + t.total, 0);
-        const salesCOGS = completedTx.reduce(
-          (s, t) => s + t.items.reduce((a, i) => a + (i.product.costPrice || 0) * i.quantity, 0), 0
-        );
-
-        // All repairs completed on this day
-        const completedRepairs = repairs.filter(r =>
-          r.status === 'completed' && isSameLocalDate(r.completedAt || r.updatedAt, dayStr)
-        );
-
-        // RECOGNIZED revenue: only phones that were picked up AND marked as paid or partly-paid.
-        // Phones completed but still in full 'debt' (paymentStatus==='debt', 0 paid) are NOT
-        // counted in income until money changes hands.
-        // For partly paid phones, ONLY the paid amount is counted in revenue/profit, NOT the full price!
-        const claimedPaidRepairs = completedRepairs.filter(r => isClaimedAndPaidRepair(r));
-
-        const repairsRevenue = claimedPaidRepairs.reduce(
-          (s, r) => s + getClaimedRepairRevenue(r), 0
-        );
-        const repairsPartsCost = claimedPaidRepairs.reduce(
-          (s, r) => s + getClaimedRepairPartsCost(r), 0
-        );
-        const repairsCashHandovers = claimedPaidRepairs.reduce(
-          (s, r) => s + getClaimedRepairHandoverCash(r), 0
-        );
-
-        const createdRepairs = repairs.filter(r => isSameLocalDate(r.createdAt, dayStr));
-        const repairsCashDeposits = createdRepairs.reduce((s, t) => s + (t.depositAmount || 0), 0);
-        const repairsCashTotal = repairsCashHandovers + repairsCashDeposits;
-
-        const repairsDebt = completedRepairs.reduce(
-          (s, r) => s + getClaimedRepairDebt(r), 0
-        );
-
-        const partsRevenue = partsTx.reduce((s, t) => s + t.total, 0);
-        const partsCOGS = partsTx.reduce(
-          (s, t) => s + t.items.reduce((a, i) => a + (i.product.costPrice || 0) * i.quantity, 0), 0
-        );
-        const partsNetProfit = partsRevenue - partsCOGS;
-        const partsCash = sumPayment(partsTx, 'cash');
-        const partsCard = sumPayment(partsTx, 'card');
-        const partsMobile = sumPayment(partsTx, 'mobile');
-        const partsTransfer = sumPayment(partsTx, 'transfer');
-        const partsCount = partsTx.length;
-
-        const todayDebtPayments = debts.flatMap(d =>
-          (d.payments || []).filter(p => isSameLocalDate(p.date, dayStr))
-        );
-        const debtCollectedCash = todayDebtPayments
-          .filter(p => String(p.method || '').toLowerCase() === 'cash')
-          .reduce((s, p) => s + p.amount, 0);
-
-        const refundsCash = sumPayment(refundedTx, 'cash');
-
-        // Recognized earned revenue from sales, claimed repairs & parts invoices (credit recovery is cash inflow into drawer, not new revenue)
-        const totalRevenue = salesGrossRevenue + repairsRevenue + partsRevenue;
-        const totalCOGS = salesCOGS + repairsPartsCost + partsCOGS;
-        const totalNetProfit = totalRevenue - totalCOGS;
-        const totalPhysicalCash = Math.max(0, salesCash + partsCash + repairsCashTotal + debtCollectedCash);
-
+        // Unclosed day / live today: the same figures a seal would have stored, computed now.
         dailyIncomeDetails.push({
           date: dayStr,
           dayLabel,
           isToday,
           isClosed: false,
 
-          salesCount: completedTx.length,
-          salesGrossRevenue,
-          salesCOGS,
-          salesNetProfit: salesGrossRevenue - salesCOGS,
-          salesCash,
-          salesCard,
-          salesMobile,
-          salesTransfer,
-          salesStoreCredit,
-          salesDebt,
+          salesCount: figures.salesCount,
+          salesGrossRevenue: figures.salesGrossRevenue,
+          salesCOGS: figures.salesCOGS,
+          salesNetProfit: figures.salesNetProfit,
+          salesCash: figures.salesCash,
+          salesCard: figures.salesCard,
+          salesMobile: figures.salesMobile,
+          salesTransfer: figures.salesTransfer,
+          salesStoreCredit: figures.salesStoreCredit,
+          salesDebt: figures.salesDebt,
 
           // repairsCompletedCount = phones claimed AND paid/partly-paid (revenue-recognized)
-          repairsCompletedCount: claimedPaidRepairs.length,
-          repairsRevenue,
-          repairsPartsCost,
-          repairsNetProfit: repairsRevenue - repairsPartsCost,
-          repairsCashTotal,
-          repairsCashHandovers,
-          repairsCashDeposits,
-          repairsDebt,
+          repairsCompletedCount: figures.repairsRecognizedCount,
+          repairsRevenue: figures.repairsRevenue,
+          repairsPartsCost: figures.repairsPartsCost,
+          repairsNetProfit: figures.repairsNetProfit,
+          repairsCashTotal: figures.repairsCash,
+          repairsCashHandovers: figures.repairsHandoverCash,
+          repairsCashDeposits: figures.repairsDepositCash,
+          repairsDebt: figures.repairsDebt,
 
-          partsRevenue,
-          partsCash,
-          partsCard,
-          partsMobile,
-          partsTransfer,
-          partsCount,
-          partsCOGS,
-          partsNetProfit,
-          debtCollectedCash,
-          refundsCash,
+          partsRevenue: figures.partsRevenue,
+          partsCash: figures.partsCash,
+          partsCard: figures.partsCard,
+          partsMobile: figures.partsMobile,
+          partsTransfer: figures.partsTransfer,
+          partsCount: figures.partsCount,
+          partsCOGS: figures.partsCOGS,
+          partsNetProfit: figures.partsNetProfit,
+          debtCollectedCash: figures.debtCollectedCash,
+          refundsCash: figures.refundsCash,
 
-          totalRevenue,
-          totalCOGS,
-          totalNetProfit,
-          totalPhysicalCash,
+          totalRevenue: figures.totalRevenue,
+          totalCOGS: figures.totalCOGS,
+          totalNetProfit: figures.totalNetProfit,
+          totalPhysicalCash: figures.totalCash,
         });
       }
     });
@@ -976,7 +922,7 @@ export const reportsService = {
     // Staff performance: only count revenue for claimed+paid repairs
     inRangeRepairs.filter(r => r.status === 'completed').forEach(r => {
       const techName = r.assignedTechnician || r.createdByName || 'Workshop Tech';
-      const techId = (r as any).assignedTechnicianId || (r as any).createdById || techName;
+      const techId = r.assignedTechnicianId || r.createdById || techName;
 
       if (!staffMap[techId]) {
         staffMap[techId] = {

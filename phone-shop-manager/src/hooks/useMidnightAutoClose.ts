@@ -34,8 +34,6 @@ export const useMidnightAutoClose = () => {
       const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 2); // 00:00:02
       const msUntilMidnight = Math.max(1000, nextMidnight.getTime() - now.getTime());
 
-      console.log(`[EndOfDay] Scheduled midnight auto-close in ${Math.round(msUntilMidnight / 1000 / 60)} minutes.`);
-
       timerRef.current = setTimeout(async () => {
         try {
           // The day that just ended is yesterday (1 second ago)
@@ -47,7 +45,6 @@ export const useMidnightAutoClose = () => {
           const alreadyDone = records.some(r => r.date === justEndedStr);
 
           if (!alreadyDone) {
-            console.log(`[EndOfDay] 00:00 midnight reached. Auto-closing day: ${justEndedStr}`);
             const closed = await closeDay(true, 'Auto-closed at midnight (00:00)', justEndedStr);
             toast.success(
               'End of Day Declared',

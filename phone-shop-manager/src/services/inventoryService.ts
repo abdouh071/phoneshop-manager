@@ -9,30 +9,45 @@ import {
   query,
   where,
   orderBy,
+  runTransaction,
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { PhoneModel } from '../types';
+import type { PhoneModel, StockStatus } from '../types';
+import { computeStockStatus } from '../utils/stockStatus';
+import { withTimeout } from '../utils/withTimeout';
 import { offlineQueue } from './offlineQueue';
+import { offlineQueueMirror } from './offlineQueueMirror';
 
 const COLLECTION = 'inventory';
 const LOCAL_STORAGE_KEY = 'offline_inventory';
 const PENDING_PRODUCTS_KEY = 'offline_pending_products';
 const PENDING_STOCK_ADJUSTMENTS_KEY = 'offline_pending_stock_adjustments';
 
+/** Stock writes are read-modify-write; the transaction budget is wider than a plain write's. */
+const STOCK_TX_TIMEOUT_MS = 2000;
+
 export interface PendingStockAdjustment {
   id: string;
   productId: string;
   delta: number;
   newStock?: number;
+  /**
+   * 'relative' — replay must add `delta` to the server's current stock.
+   * 'absolute' — replay must set `newStock` verbatim (manual edits, write-offs).
+   * Absent on records queued before this field existed: treated as 'absolute', the old behaviour.
+   */
+  mode?: 'relative' | 'absolute';
   timestamp: string;
 }
 
-const computeStockStatus = (stock: number, threshold: number): PhoneModel['stockStatus'] => {
-  if (stock === 0) return 'out_of_stock';
-  if (stock <= threshold) return 'low_stock';
-  return 'in_stock';
-};
+/**
+ * 'committed' — the server document was written.
+ * 'queued'    — device was offline (or the id is local-only); the edit waits in the sync queue.
+ * 'failed'    — the server rejected the write; the edit is still queued for retry, but nothing
+ *               reached Firestore, so callers must not claim it was saved.
+ */
+export type ProductWriteOutcome = 'committed' | 'queued' | 'failed';
 
 const docToProduct = (id: string, data: Record<string, unknown>): PhoneModel => ({
   ...(data as Omit<PhoneModel, 'id'>),
@@ -66,11 +81,13 @@ const getPendingProducts = (): PhoneModel[] => {
 };
 
 const savePendingProducts = (products: PhoneModel[]): void => {
+  const raw = JSON.stringify(products);
   try {
-    localStorage.setItem(PENDING_PRODUCTS_KEY, JSON.stringify(products));
+    localStorage.setItem(PENDING_PRODUCTS_KEY, raw);
   } catch (err) {
     console.error('Failed to save pending products to local storage', err);
   }
+  offlineQueueMirror.write(PENDING_PRODUCTS_KEY, raw);
 };
 
 const getPendingStockAdjustments = (): PendingStockAdjustment[] => {
@@ -83,12 +100,45 @@ const getPendingStockAdjustments = (): PendingStockAdjustment[] => {
 };
 
 const savePendingStockAdjustments = (adjustments: PendingStockAdjustment[]): void => {
+  const raw = JSON.stringify(adjustments);
   try {
-    localStorage.setItem(PENDING_STOCK_ADJUSTMENTS_KEY, JSON.stringify(adjustments));
+    localStorage.setItem(PENDING_STOCK_ADJUSTMENTS_KEY, raw);
   } catch (err) {
     console.error('Failed to save pending stock adjustments to local storage', err);
   }
+  // A queued delta is the one piece of offline inventory data that cannot be rebuilt: the
+  // server never saw it, so if the local copy goes, the stock change goes with it.
+  offlineQueueMirror.write(PENDING_STOCK_ADJUSTMENTS_KEY, raw);
 };
+
+/** True when the device cannot reach Firestore, or the id only exists on this device. */
+const isLocalOnlyTarget = (id: string): boolean =>
+  (typeof navigator !== 'undefined' && !navigator.onLine) || id.startsWith('offline_');
+
+/**
+ * Read the SERVER document and write `current + delta` inside one Firestore transaction.
+ * Concurrent tills selling the same model therefore serialize instead of last-write-wins.
+ * Throws on timeout or contention — callers fall back to the pending queue.
+ */
+export const commitStockDelta = async (
+  id: string,
+  delta: number
+): Promise<{ previousStock: number; stock: number; stockStatus: StockStatus }> =>
+  withTimeout(
+    runTransaction(db, async (tx) => {
+      const ref = doc(db, COLLECTION, id);
+      const snap = await tx.get(ref);
+      const data = snap.exists() ? (snap.data() as Record<string, unknown>) : {};
+      const currentStock = typeof data.stock === 'number' ? data.stock : 0;
+      const threshold = typeof data.lowStockThreshold === 'number' ? data.lowStockThreshold : 1;
+      const nextStock = Math.max(0, currentStock + delta);
+      const stockStatus = computeStockStatus(nextStock, threshold);
+      tx.update(ref, { stock: nextStock, stockStatus });
+      return { previousStock: currentStock, stock: nextStock, stockStatus };
+    }),
+    STOCK_TX_TIMEOUT_MS,
+    'stockTransaction'
+  );
 
 export const inventoryService = {
   // Export local storage accessors for the unified sync service
@@ -233,11 +283,11 @@ export const inventoryService = {
     // Save to local storage immediately so UI is always updated
     saveLocalInventory(local.map(p => p.id === id ? updatedLocal : p));
 
-    if ((typeof navigator !== 'undefined' && !navigator.onLine) || id.startsWith('offline_')) {
+    if (isLocalOnlyTarget(id)) {
       const pendingAdj = getPendingStockAdjustments();
       savePendingStockAdjustments([
         ...pendingAdj.filter(a => a.productId !== id),
-        { id: `adj_${Date.now()}_${id}`, productId: id, delta: 0, newStock, timestamp: new Date().toISOString() }
+        { id: `adj_${Date.now()}_${id}`, productId: id, delta: 0, newStock, mode: 'absolute', timestamp: new Date().toISOString() }
       ]);
       return updatedLocal;
     }
@@ -255,13 +305,22 @@ export const inventoryService = {
       const pendingAdj = getPendingStockAdjustments();
       savePendingStockAdjustments([
         ...pendingAdj.filter(a => a.productId !== id),
-        { id: `adj_${Date.now()}_${id}`, productId: id, delta: 0, newStock, timestamp: new Date().toISOString() }
+        { id: `adj_${Date.now()}_${id}`, productId: id, delta: 0, newStock, mode: 'absolute', timestamp: new Date().toISOString() }
       ]);
       return updatedLocal;
     }
   },
 
-  adjustStockAsync: async (id: string, delta: number): Promise<PhoneModel> => {
+  /**
+   * Apply a stock delta without trusting this device's mirror. The server document is read
+   * inside the transaction, so two tills selling the same model compose instead of clobbering.
+   * `previousStock` is the value the delta was applied to, and `atomic` says whether it came
+   * from Firestore or from the local mirror (offline / write failed).
+   */
+  applyStockDelta: async (
+    id: string,
+    delta: number
+  ): Promise<{ updated: PhoneModel; previousStock: number; atomic: boolean }> => {
     const local = getLocalInventory();
     const existing = local.find(p => p.id === id);
     const currentStock = existing?.stock ?? 0;
@@ -275,48 +334,43 @@ export const inventoryService = {
     // Update local storage mirror immediately
     saveLocalInventory(local.map(p => p.id === id ? updatedLocal : p));
 
-    if ((typeof navigator !== 'undefined' && !navigator.onLine) || id.startsWith('offline_')) {
+    const queueRelativeAdjustment = (): void => {
       const pendingAdj = getPendingStockAdjustments();
       const existingAdj = pendingAdj.find(a => a.productId === id);
       if (existingAdj) {
         existingAdj.delta += delta;
         existingAdj.newStock = newStock;
+        existingAdj.mode = 'relative';
         existingAdj.timestamp = new Date().toISOString();
         savePendingStockAdjustments([...pendingAdj]);
       } else {
         savePendingStockAdjustments([
           ...pendingAdj,
-          { id: `adj_${Date.now()}_${id}`, productId: id, delta, newStock, timestamp: new Date().toISOString() }
+          { id: `adj_${Date.now()}_${id}`, productId: id, delta, newStock, mode: 'relative', timestamp: new Date().toISOString() }
         ]);
       }
-      return updatedLocal;
+    };
+
+    if (isLocalOnlyTarget(id)) {
+      queueRelativeAdjustment();
+      return { updated: updatedLocal, previousStock: currentStock, atomic: false };
     }
 
     try {
-      const ref = doc(db, COLLECTION, id);
-      const updatePromise = updateDoc(ref, { stock: newStock, stockStatus });
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Firestore adjustStock timeout')), 1200)
-      );
-      await Promise.race([updatePromise, timeoutPromise]);
-      return updatedLocal;
+      const authoritative = await commitStockDelta(id, delta);
+      const reconciled: PhoneModel = { ...updatedLocal, stock: authoritative.stock, stockStatus: authoritative.stockStatus };
+      saveLocalInventory(getLocalInventory().map(p => (p.id === id ? reconciled : p)));
+      return { updated: reconciled, previousStock: authoritative.previousStock, atomic: true };
     } catch (err) {
-      console.warn(`Firestore adjustStockAsync failed for ${id}, queued for sync:`, err);
-      const pendingAdj = getPendingStockAdjustments();
-      const existingAdj = pendingAdj.find(a => a.productId === id);
-      if (existingAdj) {
-        existingAdj.delta += delta;
-        existingAdj.newStock = newStock;
-        existingAdj.timestamp = new Date().toISOString();
-        savePendingStockAdjustments([...pendingAdj]);
-      } else {
-        savePendingStockAdjustments([
-          ...pendingAdj,
-          { id: `adj_${Date.now()}_${id}`, productId: id, delta, newStock, timestamp: new Date().toISOString() }
-        ]);
-      }
-      return updatedLocal;
+      console.warn(`Firestore applyStockDelta failed for ${id}, queued for sync:`, err);
+      queueRelativeAdjustment();
+      return { updated: updatedLocal, previousStock: currentStock, atomic: false };
     }
+  },
+
+  adjustStockAsync: async (id: string, delta: number): Promise<PhoneModel> => {
+    const { updated } = await inventoryService.applyStockDelta(id, delta);
+    return updated;
   },
 
   addProduct: async (product: Omit<PhoneModel, 'id'>): Promise<PhoneModel> => {
@@ -352,7 +406,10 @@ export const inventoryService = {
     }
   },
 
-  updateProduct: async (id: string, updates: Partial<Omit<PhoneModel, 'id'>>): Promise<PhoneModel> => {
+  updateProduct: async (
+    id: string,
+    updates: Partial<Omit<PhoneModel, 'id'>>
+  ): Promise<{ product: PhoneModel; outcome: ProductWriteOutcome }> => {
     const local = getLocalInventory();
     const existing = local.find(p => p.id === id);
 
@@ -362,7 +419,7 @@ export const inventoryService = {
         acc[key] = val;
       }
       return acc;
-    }, {} as Record<string, any>);
+    }, {} as Record<string, unknown>);
 
     const merged = { ...(existing || ({} as PhoneModel)), ...cleanUpdates, id };
     if (cleanUpdates.stock !== undefined) {
@@ -377,7 +434,7 @@ export const inventoryService = {
     // If offline or id is an offline temp id, queue in offlineQueue
     if ((typeof navigator !== 'undefined' && !navigator.onLine) || id.startsWith('offline_')) {
       offlineQueue.enqueue('UPDATE_PRODUCT', { id, updates: cleanUpdates });
-      return merged;
+      return { product: merged, outcome: 'queued' };
     }
 
     try {
@@ -387,15 +444,19 @@ export const inventoryService = {
         setTimeout(() => reject(new Error('Firestore updateProduct timeout')), 1200)
       );
       await Promise.race([updatePromise, timeoutPromise]);
-      return merged;
+      return { product: merged, outcome: 'committed' };
     } catch (err) {
       console.warn(`Failed to update product ${id} in Firestore, queued for sync:`, err);
       offlineQueue.enqueue('UPDATE_PRODUCT', { id, updates: cleanUpdates });
-      return merged;
+      return { product: merged, outcome: 'failed' };
     }
   },
 
-  deleteProduct: async (id: string): Promise<void> => {
+  /**
+   * `committed` only when the server document is really gone. `queued` means this device stopped
+   * selling the product but the database still has it, which callers must not report as deleted.
+   */
+  deleteProduct: async (id: string): Promise<ProductWriteOutcome> => {
     const local = getLocalInventory();
     saveLocalInventory(local.filter(p => p.id !== id));
     savePendingProducts(getPendingProducts().filter(p => p.id !== id));
@@ -403,15 +464,19 @@ export const inventoryService = {
     if ((typeof navigator !== 'undefined' && !navigator.onLine) || id.startsWith('offline_')) {
       if (!id.startsWith('offline_')) {
         offlineQueue.enqueue('DELETE_PRODUCT', { id });
+        return 'queued';
       }
-      return;
+      // A product that only ever existed on this device has nothing to delete server-side.
+      return 'committed';
     }
 
     try {
       await deleteDoc(doc(db, COLLECTION, id));
+      return 'committed';
     } catch (err) {
       console.warn(`Failed to delete product ${id} in Firestore, queued for sync:`, err);
       offlineQueue.enqueue('DELETE_PRODUCT', { id });
+      return 'queued';
     }
   },
 

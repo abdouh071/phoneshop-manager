@@ -168,7 +168,7 @@ const getNextTicketNumber = async (localTickets: RepairTicket[]): Promise<string
 };
 
 // Sequential queue to strictly prevent concurrent duplicate ticket number allocations
-let createTicketLock = Promise.resolve<any>(null);
+let createTicketLock: Promise<unknown> = Promise.resolve(null);
 
 export const repairService = {
   getAll: async (): Promise<RepairTicket[]> => {
@@ -384,7 +384,7 @@ export const repairService = {
         ticketNumber: 'temp',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      } as any));
+      }));
 
       if (existingRecent) {
         console.warn('Duplicate ticket creation blocked in repairService; returning existing ticket:', existingRecent.ticketNumber);
@@ -473,7 +473,7 @@ export const repairService = {
 
     try {
       const ref = doc(db, COLLECTION, id);
-      const payload: Record<string, any> = { updatedAt: merged.updatedAt };
+      const payload: Record<string, unknown> = { updatedAt: merged.updatedAt };
       for (const [key, val] of Object.entries(updates)) {
         if (val !== undefined) {
           payload[key] = val;

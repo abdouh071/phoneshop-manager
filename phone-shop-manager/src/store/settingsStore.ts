@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { settingsService } from '../services/settingsService';
 import type { StoreSettings, ColorThemeKey } from '../services/settingsService';
+import { errorMessage } from '../utils/errorUtils';
 
 interface SettingsState extends StoreSettings {
   colorTheme: ColorThemeKey;
@@ -54,8 +55,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ technicianRates: updated });
     try {
       await settingsService.updateSettings({ technicianRates: updated });
-    } catch (err: any) {
-      set({ error: err.message || 'Failed to sync technician rate' });
+    } catch (err: unknown) {
+      set({ error: errorMessage(err) || 'Failed to sync technician rate' });
     }
   },
 
@@ -121,26 +122,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   updateSetting: async (key, value) => {
     // Optimistic UI update
-    set({ [key]: value } as any);
+    set({ [key]: value } as Partial<SettingsState>);
     if (key === 'storeName' && typeof value === 'string') {
       document.title = `${value} - Phone Shop Manager`;
     }
     try {
       await settingsService.updateSettings({ [key]: value });
-    } catch (err: any) {
-      set({ error: err.message || 'Failed to sync settings with Firestore' });
+    } catch (err: unknown) {
+      set({ error: errorMessage(err) || 'Failed to sync settings with Firestore' });
     }
   },
 
   updateSettingsBulk: async (newSettings) => {
-    set(newSettings as any);
+    set(newSettings);
     if (newSettings.storeName) {
       document.title = `${newSettings.storeName} - Phone Shop Manager`;
     }
     try {
       await settingsService.updateSettings(newSettings);
-    } catch (err: any) {
-      set({ error: err.message || 'Failed to sync settings with Firestore' });
+    } catch (err: unknown) {
+      set({ error: errorMessage(err) || 'Failed to sync settings with Firestore' });
     }
   }
 }));

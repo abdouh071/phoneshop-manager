@@ -20,7 +20,7 @@ export default defineConfig({
             if (id.includes('react-dom') || id.includes('react-router-dom') || id.includes('/react/')) {
               return 'vendor-react';
             }
-            if (id.includes('lucide-react') || id.includes('qrcode.react') || id.includes('react-barcode') || id.includes('@hello-pangea/dnd')) {
+            if (id.includes('lucide-react') || id.includes('qrcode.react') || id.includes('react-barcode') || id.includes('jsbarcode') || id.includes('@hello-pangea/dnd')) {
               return 'vendor-ui';
             }
           }

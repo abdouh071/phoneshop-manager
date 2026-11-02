@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { CartItem, PaymentMethod, PhoneModel, SaleTransaction, SuspendedCart, B2BCheckoutOptions, CustomerDebtEntry } from '../types';
+import type { CartItem, Customer, PaymentMethod, PhoneModel, SaleTransaction, SuspendedCart, B2BCheckoutOptions, CustomerDebtEntry } from '../types';
 import { useInventoryStore } from './inventoryStore';
 import { inventoryService } from '../services/inventoryService';
 import { transactionService } from '../services/transactionService';
@@ -80,6 +80,8 @@ interface CartState {
   customerName: string;
   customerPhone: string;
   transactions: SaleTransaction[];
+  isLoadingTransactions: boolean;
+  error: string | null;
   discount: { type: 'percent' | 'flat'; value: number } | null;
   isCheckingOut: boolean;
   // Actions
@@ -132,6 +134,8 @@ export const useCartStore = create<CartState>((set, get) => ({
   customerName: initialActive.customerName,
   customerPhone: initialActive.customerPhone,
   transactions: [],
+  isLoadingTransactions: false,
+  error: null,
   discount: initialActive.discount,
   suspendedCarts: initialSuspended,
   isCheckingOut: false,
@@ -402,12 +406,14 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
 
   fetchTransactions: async () => {
+    set({ isLoadingTransactions: true, error: null });
     try {
       // Server-side query: strictly requests retail transactions only (no parts sales fetched)
       const transactions = await transactionService.getRetailTransactions();
-      set({ transactions });
+      set({ transactions, isLoadingTransactions: false });
     } catch (err) {
       console.error('Failed to fetch retail transactions from server:', err);
+      set({ error: 'Failed to load transactions', isLoadingTransactions: false });
     }
   },
 
@@ -434,7 +440,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       const hasReturn = itemsSnapshot.some(i => i.isReturn === true);
       const actor = useAuthStore.getState().user;
 
-      let matchedOrCreatedCustomer: any = null;
+      let matchedOrCreatedCustomer: Customer | null | undefined = null;
       const isDebt = payments.some(p => p.method === 'debt');
       const isCreditUsed = !!(options?.storeCreditUsed && options.storeCreditUsed > 0);
       const isSurplusAccount = total < 0 && !!(options?.refundType && options.refundType !== 'cash');
@@ -920,7 +926,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     if (!tx) return;
 
     // Handle stock returns for reduced or removed items
-    const stockPromises: Promise<any>[] = [];
+    const stockPromises: Promise<unknown>[] = [];
     tx.items.forEach(origItem => {
       const pId = origItem.product.id;
       const newItem = newItems.find(i => i.product.id === pId);
@@ -952,7 +958,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
     const total = Math.max(0, subtotal - discountAmt);
 
-    let status: 'completed' | 'refunded' | 'partially_refunded' = tx.status || 'completed';
+    let status: NonNullable<SaleTransaction['status']> = tx.status || 'completed';
     if (newItems.length === 0 || total === 0) {
       status = 'refunded';
     } else {

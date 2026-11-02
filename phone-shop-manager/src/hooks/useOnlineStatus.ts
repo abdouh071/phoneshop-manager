@@ -10,11 +10,14 @@ export function useOnlineStatus() {
   const [justCameOnline, setJustCameOnline] = useState(false);
 
   useEffect(() => {
+    let resetTimer: ReturnType<typeof setTimeout> | null = null;
+
     const handleOnline = () => {
       setIsOnline(true);
       setJustCameOnline(true);
       window.dispatchEvent(new CustomEvent('app:online'));
-      setTimeout(() => setJustCameOnline(false), 3000);
+      if (resetTimer) clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => setJustCameOnline(false), 3000);
     };
 
     const handleOffline = () => {
@@ -29,6 +32,7 @@ export function useOnlineStatus() {
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      if (resetTimer) clearTimeout(resetTimer);
     };
   }, []);
 

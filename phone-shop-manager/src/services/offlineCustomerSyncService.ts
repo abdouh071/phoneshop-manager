@@ -1,16 +1,11 @@
-import {
-  collection,
-  doc,
-  addDoc,
-  getDocs,
-  query,
-  where,
-  writeBatch,
-} from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, where, writeBatch } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { Customer, RepairTicket, SaleTransaction, CustomerDebtEntry, CustomerActivityLog } from '../types';
 import { toast } from '../components/ui/Toast';
 import { formatStandardPhone, normalizePhoneDigits, isMoreDescriptiveName } from '../utils/phoneUtils';
+import { errorMessage } from '../utils/errorUtils';
+import { findExistingDocId } from './idempotentReplay';
+import { offlineQueueMirror } from './offlineQueueMirror';
 
 export interface OfflineCustomerQueueItem {
   tempId: string;
@@ -29,7 +24,7 @@ const DEBTS_LOCAL_KEY = 'offline_customer_debts';
 const LOGS_LOCAL_KEY = 'offline_customer_activity_logs';
 
 let isSyncing = false;
-let syncTimeout: any = null;
+let syncTimeout: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<() => void>();
 
 function notifyListeners() {
@@ -41,6 +36,9 @@ function notifyListeners() {
     }
   });
 }
+
+// A queue restored from the mirror is a queue whose pending count just changed.
+offlineQueueMirror.onRestored(notifyListeners);
 
 export const offlineCustomerSyncService = {
   /**
@@ -77,12 +75,14 @@ export const offlineCustomerSyncService = {
    * Save queue to local storage
    */
   saveQueue: (queue: OfflineCustomerQueueItem[]): void => {
+    const raw = JSON.stringify(queue);
     try {
-      localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(queue));
-      notifyListeners();
+      localStorage.setItem(SYNC_QUEUE_KEY, raw);
     } catch (e) {
       console.error('[OfflineCustomerSync] Failed to save sync queue:', e);
     }
+    offlineQueueMirror.write(SYNC_QUEUE_KEY, raw);
+    notifyListeners();
   },
 
   /**
@@ -193,8 +193,6 @@ export const offlineCustomerSyncService = {
     newRealId: string,
     customerData: Customer
   ): Promise<void> => {
-    console.info(`[OfflineCustomerSync] Replacing temporary ID "${oldTempId}" -> "${newRealId}" across records...`);
-
     // 1. Update Customers in LocalStorage
     try {
       const raw = localStorage.getItem(CUSTOMERS_LOCAL_KEY);
@@ -476,8 +474,6 @@ export const offlineCustomerSyncService = {
         return { syncedCount: 0, errors: 0 };
       }
 
-      console.info(`[OfflineCustomerSync] Starting background sync for ${queue.length} offline customer(s)...`);
-
       let syncedCount = 0;
       let errors = 0;
 
@@ -492,11 +488,14 @@ export const offlineCustomerSyncService = {
 
         try {
           const { tempId, customerData } = item;
-          let realId: string = '';
+          // A customer already uploaded under this replay key is adopted as-is. This is what
+          // stops a crash between addDoc and removeFromQueue from creating a second profile —
+          // including for customers saved without a phone number, which the lookup below cannot match.
+          let realId: string = (await findExistingDocId('customers', 'idempotencyKey', tempId)) ?? '';
 
           // 1. Check if a profile with this phone already exists in Firestore
           const hasPhone = Boolean(customerData.phone && customerData.phone.trim());
-          if (hasPhone) {
+          if (!realId && hasPhone) {
             const remoteExisting = await customerService.findByPhone(customerData.phone);
             if (remoteExisting && !remoteExisting.id.startsWith('offline_')) {
               realId = remoteExisting.id;
@@ -532,6 +531,7 @@ export const offlineCustomerSyncService = {
               ...dataToSave,
               phone: formatStandardPhone(dataToSave.phone || '') || dataToSave.phone || '',
               ...(cleanPhone ? { normalizedPhone: cleanPhone } : {}),
+              idempotencyKey: tempId,
               syncedAt: new Date().toISOString(),
             };
 
@@ -549,12 +549,12 @@ export const offlineCustomerSyncService = {
           // 4. Remove from queue upon success
           offlineCustomerSyncService.removeFromQueue(tempId);
           syncedCount++;
-        } catch (err: any) {
+        } catch (err: unknown) {
           console.error(`[OfflineCustomerSync] Error syncing offline customer ${item.tempId}:`, err);
           errors++;
           item.retryCount = (item.retryCount || 0) + 1;
           item.lastAttemptAt = new Date().toISOString();
-          item.lastError = err?.message || 'Sync failed';
+          item.lastError = errorMessage(err) || 'Sync failed';
           offlineCustomerSyncService.saveQueue(queue);
         }
       }
@@ -578,10 +578,7 @@ export const offlineCustomerSyncService = {
    * Initialize background sync listeners and periodic sync timer
    */
   init: (): (() => void) => {
-    console.info('[OfflineCustomerSync] Initializing background sync service...');
-
     const handleOnline = () => {
-      console.info('[OfflineCustomerSync] Network online detected. Triggering sync...');
       offlineCustomerSyncService.triggerDebouncedSync();
     };
 

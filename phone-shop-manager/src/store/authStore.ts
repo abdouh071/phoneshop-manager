@@ -8,6 +8,9 @@ import {
   sendPasswordResetEmail
 } from 'firebase/auth';
 import { initializeApp, deleteApp } from 'firebase/app';
+import type { FirebaseApp } from 'firebase/app';
+import type { UserCredential } from 'firebase/auth';
+import type { Timestamp } from 'firebase/firestore';
 import { auth, app } from '../lib/firebase';
 import { userService } from '../services/userService';
 import { settingsService } from '../services/settingsService';
@@ -47,6 +50,17 @@ export const fetchPublicIP = async (): Promise<string | null> => {
 // but we allow configuring an initial super admin email via environment variable.
 const LEGACY_OWNER_EMAIL = import.meta.env.VITE_SUPER_ADMIN_EMAIL || '';
 
+// Mimics `any`-style field access on caught errors without losing type safety
+const errorMessage = (err: unknown): string | undefined =>
+  err !== null && typeof err === 'object' && 'message' in err
+    ? String((err as { message: unknown }).message)
+    : undefined;
+
+const errorCode = (err: unknown): string | undefined =>
+  err !== null && typeof err === 'object' && 'code' in err
+    ? String((err as { code: unknown }).code)
+    : undefined;
+
 import { hashApprovalPin } from '../utils/security';
 
 export interface User {
@@ -56,11 +70,16 @@ export interface User {
   role: 'admin' | 'sales_agent' | 'repair_agent';
   status?: 'active' | 'revoked';
   avatar?: string;
-  lastActive?: any;
-  createdAt?: any;
+  lastActive?: Timestamp | string;
+  createdAt?: Timestamp | string;
   permissions?: Permissions;
   isSuperAdmin?: boolean;
-  approvalPin?: string;
+  /**
+   * Whether this account has an approval PIN, without carrying the verifier itself.
+   * `approvalPin` deliberately does not exist on this type: staff lists, the current
+   * session and the localStorage session cache must never hold a crackable PIN hash.
+   */
+  hasApprovalPin?: boolean;
 }
 
 interface AuthState {
@@ -77,7 +96,7 @@ interface AuthState {
   clearError: () => void;
   fetchStaff: () => Promise<void>;
   createStaffMember: (name: string, email: string, pass: string, role: 'admin' | 'sales_agent' | 'repair_agent', permissions?: Permissions) => Promise<void>;
-  updateStaffMember: (uid: string, data: Partial<Pick<User, 'name' | 'role' | 'status' | 'permissions' | 'isSuperAdmin' | 'approvalPin'>>) => Promise<void>;
+  updateStaffMember: (uid: string, data: Partial<Pick<User, 'name' | 'role' | 'status' | 'permissions' | 'isSuperAdmin'>>) => Promise<void>;
   setApprovalPin: (pin: string, targetUid?: string) => Promise<void>;
   removeApprovalPin: (targetUid?: string) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
@@ -91,7 +110,14 @@ const CACHED_USER_KEY = 'cached_auth_user';
 const getCachedUser = (): User | null => {
   try {
     const raw = localStorage.getItem(CACHED_USER_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as User & { approvalPin?: string };
+    // Tills that cached a session before verifiers were kept out of storage still have the
+    // hash on disk. Keep the flag so the Settings badge stays correct offline, then drop the
+    // hash so it cannot re-enter app state.
+    const hasApprovalPin = cached.hasApprovalPin ?? Boolean(cached.approvalPin);
+    delete cached.approvalPin;
+    return { ...cached, hasApprovalPin };
   } catch {
     return null;
   }
@@ -100,7 +126,9 @@ const getCachedUser = (): User | null => {
 const saveCachedUser = (user: User | null): void => {
   try {
     if (user) {
-      localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
+      const safe = { ...user } as User & { approvalPin?: string };
+      delete safe.approvalPin;
+      localStorage.setItem(CACHED_USER_KEY, JSON.stringify(safe));
     } else {
       localStorage.removeItem(CACHED_USER_KEY);
     }
@@ -258,7 +286,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
                 isSuperAdmin: true,
                 permissions: FULL_PERMISSIONS,
                 avatar: rawName.slice(0, 2).toUpperCase(),
-              } as any);
+              });
               const newProfile = await userService.getUserById(firebaseUser.uid);
               if (newProfile) {
                 bootstrapped = true;
@@ -356,7 +384,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
               isSuperAdmin: true,
               permissions: FULL_PERMISSIONS,
               avatar: rawName.slice(0, 2).toUpperCase(),
-            } as any);
+            });
             profile = await userService.getUserById(cred.user.uid);
           }
         }
@@ -417,10 +445,11 @@ export const useAuthStore = create<AuthState>((set, get) => {
         });
         // Log the login event
         activityLogService.log('system', `${profile.name} logged in`, { userName: profile.name, userId: profile.id }).catch(console.error);
-      } catch (err: any) {
+      } catch (err: unknown) {
         // Simplify Firebase error messages
-        let message = err.message || 'Failed to login';
-        if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        let message = errorMessage(err) || 'Failed to login';
+        const code = errorCode(err);
+        if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
           message = 'Invalid email or password.';
         }
         set({ error: message, isLoading: false });
@@ -468,15 +497,15 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
       set({ isLoading: true, error: null });
       const secondaryAppName = `Secondary_${Date.now()}`;
-      let secondaryApp: any = null;
+      let secondaryApp: FirebaseApp | null = null;
       try {
         secondaryApp = initializeApp(app.options, secondaryAppName);
         const secondaryAuth = getAuth(secondaryApp);
-        
-        let cred: any = null;
+
+        let cred: UserCredential | null = null;
         try {
           cred = await createUserWithEmailAndPassword(secondaryAuth, email, pass);
-        } catch (authErr: any) {
+        } catch (authErr: unknown) {
           throw authErr;
         }
 
@@ -489,7 +518,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
             permissions: role === 'admin' ? FULL_PERMISSIONS : (permissions ?? undefined),
             avatar: name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
           });
-        } catch (profileErr: any) {
+        } catch (profileErr: unknown) {
           // Rollback newly created Firebase Auth user so we don't leave an orphaned account
           if (cred?.user) {
             try {
@@ -507,8 +536,8 @@ export const useAuthStore = create<AuthState>((set, get) => {
         const actor = get().user;
         activityLogService.log('system', `New staff member "${name}" added as ${role}`, { userName: actor?.name, userId: actor?.id }).catch(console.error);
         set({ isLoading: false });
-      } catch (err: any) {
-        set({ error: err.message || 'Failed to create staff member', isLoading: false });
+      } catch (err: unknown) {
+        set({ error: errorMessage(err) || 'Failed to create staff member', isLoading: false });
         throw err;
       } finally {
         if (secondaryApp) {
@@ -572,8 +601,8 @@ export const useAuthStore = create<AuthState>((set, get) => {
           : `Staff member "${data.name || targetMember.name}" profile updated`;
         activityLogService.log('system', actionDesc, { userName: actor?.name, userId: actor?.id }).catch(console.error);
         set({ isLoading: false });
-      } catch (err: any) {
-        set({ error: err.message || 'Failed to update member.', isLoading: false });
+      } catch (err: unknown) {
+        set({ error: errorMessage(err) || 'Failed to update member.', isLoading: false });
         throw err;
       }
     },
@@ -587,16 +616,16 @@ export const useAuthStore = create<AuthState>((set, get) => {
       try {
         localStorage.setItem('role_override', role);
         await get().login(superAdminEmail, adminPass);
-      } catch (err: any) {
+      } catch (err: unknown) {
         localStorage.removeItem('role_override');
-        set({ error: err.message || 'Failed to authenticate Admin.', isLoading: false });
+        set({ error: errorMessage(err) || 'Failed to authenticate Admin.', isLoading: false });
       }
     },
 
     unlockHistory: async (adminEmail, adminPass) => {
       set({ isLoading: true, error: null });
       const secondaryAppName = `VerifyAdminApp_${Date.now()}`;
-      let secondaryApp: any = null;
+      let secondaryApp: FirebaseApp | null = null;
       try {
         // Authenticate the provided admin credentials using a secondary app
         secondaryApp = initializeApp(app.options, secondaryAppName);
@@ -620,9 +649,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
         useCartStore.getState().fetchTransactions();
         useActivityStore.getState().fetchActivities();
 
-      } catch (err: any) {
-        set({ error: err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential' 
-          ? 'Incorrect Admin Password' : (err.message || 'Failed to unlock.'), isLoading: false });
+      } catch (err: unknown) {
+        set({ error: errorCode(err) === 'auth/wrong-password' || errorCode(err) === 'auth/invalid-credential'
+          ? 'Incorrect Admin Password' : (errorMessage(err) || 'Failed to unlock.'), isLoading: false });
         throw err;
       } finally {
         if (secondaryApp) {
@@ -648,8 +677,8 @@ export const useAuthStore = create<AuthState>((set, get) => {
       try {
         await sendPasswordResetEmail(auth, email);
         set({ isLoading: false });
-      } catch (err: any) {
-        set({ error: err.message || 'Failed to send password reset email.', isLoading: false });
+      } catch (err: unknown) {
+        set({ error: errorMessage(err) || 'Failed to send password reset email.', isLoading: false });
         throw err;
       }
     },
@@ -680,11 +709,11 @@ export const useAuthStore = create<AuthState>((set, get) => {
       set({ isLoading: true, error: null });
       try {
         const hashedPin = await hashApprovalPin(cleanPin);
-        await userService.updateUserProfile(targetId, { approvalPin: hashedPin });
-        
+        await userService.setApprovalPinVerifier(targetId, hashedPin);
+
         // Update local user if editing self
         if (currentUser.id === targetId) {
-          set({ user: { ...currentUser, approvalPin: hashedPin } });
+          set({ user: { ...currentUser, hasApprovalPin: true } });
         }
         await get().fetchStaff();
 
@@ -694,8 +723,8 @@ export const useAuthStore = create<AuthState>((set, get) => {
         }).catch(console.error);
 
         set({ isLoading: false });
-      } catch (err: any) {
-        set({ error: err.message || 'Failed to update approval PIN.', isLoading: false });
+      } catch (err: unknown) {
+        set({ error: errorMessage(err) || 'Failed to update approval PIN.', isLoading: false });
         throw err;
       }
     },
@@ -713,14 +742,14 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
       set({ isLoading: true, error: null });
       try {
-        await userService.updateUserProfile(targetId, { approvalPin: '' });
+        await userService.clearApprovalPinVerifier(targetId);
         if (currentUser.id === targetId) {
-          set({ user: { ...currentUser, approvalPin: undefined } });
+          set({ user: { ...currentUser, hasApprovalPin: false } });
         }
         await get().fetchStaff();
         set({ isLoading: false });
-      } catch (err: any) {
-        set({ error: err.message || 'Failed to remove approval PIN.', isLoading: false });
+      } catch (err: unknown) {
+        set({ error: errorMessage(err) || 'Failed to remove approval PIN.', isLoading: false });
         throw err;
       }
     }

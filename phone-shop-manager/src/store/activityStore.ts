@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { activityLogService, inferSeverity } from '../services/activityLogService';
 import type { ActivityCategory, ActivitySeverity, ActivityEntityType, ActivityLog, LogOptions } from '../services/activityLogService';
 import { useAuthStore } from './authStore';
+import { errorMessage } from '../utils/errorUtils';
 
 export type { ActivityCategory, ActivitySeverity, ActivityEntityType, LogOptions };
 
@@ -42,11 +43,12 @@ interface ActivityState {
  * Normalizes Firestore timestamp, Date, number, or string to a reliable ISO string.
  * Completely eliminates the Jan 1, 1970 ("56 years ago") race condition bug.
  */
-export const toISO = (ts: any): string => {
+export const toISO = (ts: unknown): string => {
   if (!ts) return new Date().toISOString();
   try {
-    if (ts.toDate && typeof ts.toDate === 'function') {
-      const d = ts.toDate();
+    const withToDate = ts as { toDate?: () => Date };
+    if (withToDate.toDate && typeof withToDate.toDate === 'function') {
+      const d = withToDate.toDate();
       return d.getTime() > 1000000 ? d.toISOString() : new Date().toISOString();
     }
     if (ts instanceof Date) {
@@ -105,9 +107,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         isLoading: false,
         lastUpdated: new Date().toISOString(),
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to fetch activities:', err);
-      set({ error: err?.message || 'Failed to load activity log', isLoading: false });
+      set({ error: errorMessage(err) || 'Failed to load activity log', isLoading: false });
     }
   },
 
@@ -142,7 +144,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       const count = await activityLogService.purgeOldLogs(daysToKeep);
       await get().fetchActivities();
       return count;
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to purge old activity logs:', err);
       throw err;
     }

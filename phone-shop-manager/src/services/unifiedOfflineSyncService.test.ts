@@ -34,6 +34,9 @@ describe('Offline Inventory & Sync Capabilities', () => {
         stock: 5,
         price: 18000,
         cost: 12000,
+        costPrice: 12000,
+        stockStatus: 'in_stock',
+        lowStockThreshold: 1,
       });
 
       expect(newProd.id).toMatch(/^offline_prod_/);
@@ -64,6 +67,9 @@ describe('Offline Inventory & Sync Capabilities', () => {
           stock: 10,
           price: 500,
           cost: 200,
+          costPrice: 200,
+          sku: 'ACC-USB-C',
+          lowStockThreshold: 1,
           stockStatus: 'in_stock',
         },
       ]);
@@ -98,6 +104,9 @@ describe('Offline Inventory & Sync Capabilities', () => {
           stock: 3,
           price: 45000,
           cost: 38000,
+          costPrice: 38000,
+          sku: 'PHN-A54',
+          lowStockThreshold: 1,
           stockStatus: 'in_stock',
         },
         {
@@ -108,6 +117,9 @@ describe('Offline Inventory & Sync Capabilities', () => {
           stock: 5,
           price: 3500,
           cost: 2000,
+          costPrice: 2000,
+          sku: 'PRT-A54-BAT',
+          lowStockThreshold: 1,
           stockStatus: 'in_stock',
         },
       ]);
@@ -130,6 +142,9 @@ describe('Offline Inventory & Sync Capabilities', () => {
           stock: 2,
           price: 1500,
           cost: 800,
+          costPrice: 800,
+          sku: 'ACC-AIRPODS-PRO',
+          lowStockThreshold: 1,
           stockStatus: 'in_stock',
         },
       ]);

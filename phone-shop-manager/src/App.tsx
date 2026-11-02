@@ -8,8 +8,10 @@ import { PageSkeleton } from './components/ui/PageSkeleton';
 import { useAuthStore } from './store/authStore';
 import { offlineCustomerSyncService } from './services/offlineCustomerSyncService';
 import { offlineQueue } from './services/offlineQueue';
+import { offlineQueueMirror } from './services/offlineQueueMirror';
 import { registerOfflineHandlers } from './services/offlineHandlers';
 import { unifiedOfflineSyncService } from './services/unifiedOfflineSyncService';
+import { errorMessage } from './utils/errorUtils';
 
 // Register all domain-specific offline sync handlers once at app startup
 registerOfflineHandlers();
@@ -20,15 +22,15 @@ registerOfflineHandlers();
  * (causing MIME type error or failed fetch), it automatically reloads the
  * window once to seamlessly load the latest bundle without an error screen.
  */
-function lazyWithRetry<T extends React.ComponentType<any>>(
+function lazyWithRetry<T extends React.ComponentType<object>>(
   factory: () => Promise<{ default: T }>
 ) {
   return lazy(async () => {
     try {
       return await factory();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.warn('[LazyLoader] Dynamic chunk failed to load:', error);
-      const msg = (error?.message || '').toLowerCase();
+      const msg = (errorMessage(error) || '').toLowerCase();
       const isChunkError =
         msg.includes('mime type') ||
         msg.includes('failed to fetch dynamically imported') ||
@@ -68,13 +70,30 @@ function App() {
   const { isAuthenticated, isInitializing } = useAuthStore();
 
   useEffect(() => {
-    const cleanupCustomers = offlineCustomerSyncService.init();
-    const cleanupQueue = offlineQueue.init();
-    const cleanupUnified = unifiedOfflineSyncService.init();
+    let abandoned = false;
+    const cleanups: Array<() => void> = [];
+
+    const startSync = () => {
+      if (abandoned) return;
+      cleanups.push(offlineCustomerSyncService.init());
+      cleanups.push(offlineQueue.init());
+      cleanups.push(unifiedOfflineSyncService.init());
+    };
+
+    // Sync starts only once the mirror restore has settled: an initial flush that runs
+    // against the pre-restore queue replays the wrong contents, and the budget inside
+    // restoreAll() guarantees it always settles.
+    void offlineQueueMirror
+      .restoreAll()
+      .then(startSync)
+      .catch(e => {
+        console.error('[App] Offline mirror restore failed, starting sync on localStorage alone:', errorMessage(e));
+        startSync();
+      });
+
     return () => {
-      cleanupCustomers();
-      cleanupQueue();
-      cleanupUnified();
+      abandoned = true;
+      cleanups.forEach(cleanup => cleanup());
     };
   }, []);
 
