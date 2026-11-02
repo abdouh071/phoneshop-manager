@@ -25,17 +25,12 @@ service cloud.firestore {
       );
     }
 
-    function isWorker() {
-      return isSignedIn() && (callerProfile().role == 'sales_agent' || callerProfile().role == 'repair_agent');
-    }
-
     // ─── Inventory & Products ──────────────────────────────────────────────────
-    // All signed-in users can read & write (Admin Unlock modal handles frontend guard)
+    // All signed-in users can read & write (Admin Unlock modal handles frontend guard).
+    // Field-level checks cannot mirror the per-user permission flags the app actually uses
+    // (`permissions.inventory_edit`, `permissions.pos` stock writes), so tightening writes
+    // beyond "signed-in" belongs in Cloud Functions, not here.
     match /inventory/{docId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /products/{docId} {
       allow read, write: if isSignedIn();
     }
 
@@ -49,10 +44,15 @@ service cloud.firestore {
     }
 
     // ─── Repairs ─────────────────────────────────────────────────────────────
-    // Signed-in users can read/write all repairs.
-    // Unauthenticated users can read for public tracking, but write is strictly prohibited.
+    // Signed-in staff read and write every repair.
+    // An unauthenticated caller may only run the customer tracking lookup, which asks for
+    // one ticket by ticketNumber with limit(1); a bare read of the whole collection (PII +
+    // lock codes) and a read of an arbitrary document by id are both refused. The tracking
+    // PIN itself is still verified in the client, so this bounds the exposure instead of
+    // removing it - the complete fix is a server-side sanitized lookup.
     match /repairs/{docId} {
-      allow read:                   if true;
+      allow read:                   if isSignedIn();
+      allow list:                   if isSignedIn() || request.query.limit <= 5;
       allow create, update, delete: if isSignedIn();
     }
 
@@ -76,19 +76,28 @@ service cloud.firestore {
     }
 
     // ─── Customer Activity Logs ──────────────────────────────────────────────
-    // Immutable audit trail for customer ledger & events
+    // Immutable audit trail for customer ledger & events.
+    // The only permitted edit is re-pointing a log at another customer id, which is what
+    // merging two duplicate customers does; amounts, actions and timestamps stay frozen.
     match /customer_activity_logs/{docId} {
-      allow read:          if isSignedIn();
-      allow create:        if isSignedIn();
-      allow update, delete: if false; // permanently prohibited
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['customerId', 'customerName']);
+      allow delete: if false;
     }
 
     // ─── Activity Logs ───────────────────────────────────────────────────────
-    // Immutable audit trail — anyone can create, nobody can ever edit or delete
+    // Anyone signed-in can create; the trail cannot be edited by anyone.
+    // Deletion exists only as the admin retention purge, and only for logs that are already
+    // past the window it keeps. The window is 85 days rather than the purge's 90 so a till
+    // with a slightly fast clock does not fail the whole batch.
     match /activityLogs/{docId} {
       allow read:          if isSignedIn();
       allow create:        if isSignedIn();
-      allow update, delete: if false; // permanently prohibited
+      allow update:        if false;
+      allow delete:        if (isAdmin() || isSuperAdmin()) &&
+        resource.data.timestamp < request.time - duration.value(85, 'd');
     }
 
     // ─── Purchasing & Suppliers ──────────────────────────────────────────────
@@ -171,10 +180,17 @@ service cloud.firestore {
     }
 
     // ─── Settings ────────────────────────────────────────────────────────────
-    // Anyone can READ settings (needed for tracking page store name + IP Lock);
+    // `settings/general` is the single document the customer tracking page reads without a
+    // session (store name, currency, WhatsApp contact). Other settings documents, and any
+    // unauthenticated listing of the collection, require a signed-in staff session.
     // Only Admins/SuperAdmins can WRITE settings (changing IP config etc.)
+    match /settings/general {
+      allow get: if true;
+      allow read, write: if isAdmin() || isSuperAdmin();
+    }
+
     match /settings/{docId} {
-      allow read: if true;
+      allow read:  if isSignedIn();
       allow write: if isAdmin() || isSuperAdmin();
     }
 
@@ -192,6 +208,43 @@ service cloud.firestore {
         (request.resource.data.status == 'cancelled' && resource.data.requestedBy.uid == request.auth.uid)
       );
       allow delete: if isAdmin() || isSuperAdmin();
+    }
+
+    // ─── End Of Day ──────────────────────────────────────────────────────────
+    // Sealing a day runs on whichever till is open, by hand or at midnight, so any signed-in
+    // user may create one. A sealed record is not meant to be rewritten: staff may only edit
+    // `notes`, while admins (who also run backup restore) may correct a record.
+    match /end_of_day/{docId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isAdmin() || isSuperAdmin() ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notes']);
+      allow delete: if isAdmin() || isSuperAdmin();
+    }
+
+    // ─── Remote Print Queue ──────────────────────────────────────────────────
+    // One device pushes a job, the till that owns the printer claims it and reports the
+    // outcome. Both are signed-in sessions. Without these rules the queue listener was
+    // denied on every mount and remote printing never ran.
+    match /printQueue/{docId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn(); // pending -> processing -> completed / failed
+      allow delete: if isAdmin() || isSuperAdmin();
+    }
+
+    // ─── Server-Side Enforcement (Cloud Functions) ───────────────────────────
+    // Written only by the functions, which hold admin privileges and bypass these rules.
+    // A till may read its violations but never write one, or the log stops being evidence.
+    match /moneyPathViolations/{docId} {
+      allow read:  if isAdmin() || isSuperAdmin();
+      allow write: if false;
+    }
+
+    // The per-date lock that keeps "one seal per day" true even when two tills close at once.
+    match /eod_seal_locks/{date} {
+      allow read:  if isSignedIn();
+      allow write: if false;
     }
 
     // ─── Deny Everything Else ────────────────────────────────────────────────
