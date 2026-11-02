@@ -113,6 +113,13 @@ export const colors = {
   dangerSoft: ramp.red100,
   dangerText: ramp.red900,
   info: ramp.blue500,
+
+  /**
+   * WhatsApp's own green. It stays on the share button because a green that is
+   * not *that* green stops reading as WhatsApp — but it belongs here, not in a
+   * screen's style sheet.
+   */
+  whatsapp: '#25d366',
 } as const;
 
 /** 4pt spacing scale. */
