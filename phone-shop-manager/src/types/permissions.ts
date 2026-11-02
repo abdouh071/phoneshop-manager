@@ -10,6 +10,7 @@ export interface Permissions {
   inventory_products: boolean; // phones, accessories, tablets, wearables
   inventory_parts: boolean;    // repair parts (category = 'repair_part')
   inventory_edit: boolean;     // add/edit/delete items & adjust stock
+  inventory_delete: boolean;   // delete products and parts
   parts_sell: boolean;         // sell repair parts from the dedicated Parts section
   customers: boolean;
   customers_debt: boolean;     // View and manage customer debt
@@ -29,6 +30,7 @@ export const SALES_AGENT_PERMISSIONS: Permissions = {
   inventory_products: true,
   inventory_parts: false,
   inventory_edit: false,
+  inventory_delete: false,
   parts_sell: false,
   customers: true,
   customers_debt: false,
@@ -48,6 +50,7 @@ export const REPAIR_AGENT_PERMISSIONS: Permissions = {
   inventory_products: false,
   inventory_parts: true,
   inventory_edit: false,
+  inventory_delete: false,
   parts_sell: true,
   customers: true,
   customers_debt: false,
@@ -67,6 +70,7 @@ export const FULL_PERMISSIONS: Permissions = {
   inventory_products: true,
   inventory_parts: true,
   inventory_edit: true,
+  inventory_delete: true,
   parts_sell: true,
   customers: true,
   customers_debt: true,

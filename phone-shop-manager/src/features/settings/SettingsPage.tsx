@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Save, ShieldAlert, Globe, AlertTriangle, Loader2, Palette, Check, Laptop, Monitor, TabletSmartphone } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import styles from './Settings.module.css';
 import type { StoreSettings, ColorThemeKey } from '../../services/settingsService';
+import { errorMessage } from '../../utils/errorUtils';
 
 const COLOR_THEMES: {
   key: ColorThemeKey;
@@ -266,8 +267,8 @@ export const SettingsPage = () => {
       await settings.updateSettingsBulk(payload);
       setHasEdited(false);
       toast.success(t('settings.saved', 'Settings Saved'), 'Your store preferences have been updated.');
-    } catch (err: any) {
-      toast.error('Save Failed', err?.message || 'Could not write settings to Firestore. Please check your connection and try again.');
+    } catch (err: unknown) {
+      toast.error('Save Failed', errorMessage(err) || 'Could not write settings to Firestore. Please check your connection and try again.');
     } finally {
       setIsSaving(false);
       setPendingCurrency(null);
@@ -645,7 +646,7 @@ export const SettingsPage = () => {
               <Select
                 label={t('settings.theme', 'Theme')}
                 value={settings.theme}
-                onChange={val => settings.updateSetting('theme', val as any)}
+                onChange={val => settings.updateSetting('theme', val as StoreSettings['theme'])}
                 options={[
                   { value: 'light', label: t('settings.light', 'Light Mode') },
                   { value: 'dark', label: t('settings.dark', 'Dark Mode') },

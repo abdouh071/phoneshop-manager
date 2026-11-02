@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { Plus, Search, Truck, Building2, Package, CheckCircle2, MoreVertical, XCircle, FileText } from 'lucide-react';
-import { Card, CardHeader } from '../../components/ui/Card';
+import React, { useEffect, useState } from 'react';
+import { Plus, Building2, FileText } from 'lucide-react';
+import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { SearchInput } from '../../components/ui/Input';
 import { usePurchasingStore } from '../../store/purchasingStore';
@@ -44,7 +44,7 @@ const StatusBadge: React.FC<{ status: POStatus }> = ({ status }) => {
 
 export const PurchasingPage = () => {
   const { fetchData, purchaseOrders, suppliers, getFilteredPOs, getFilteredSuppliers, searchQuery, setSearchQuery, isLoading } = usePurchasingStore();
-  const permissions = usePermissions();
+  usePermissions();
   const [activeTab, setActiveTab] = useState<'pos' | 'suppliers'>('pos');
   const location = useLocation();
 

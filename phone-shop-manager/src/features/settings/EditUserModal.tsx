@@ -14,6 +14,7 @@ import {
   PERMISSION_DEFINITIONS,
 } from '../../types/permissions';
 import type { Permissions } from '../../types/permissions';
+import { errorMessage } from '../../utils/errorUtils';
 
 type WorkerRole = 'admin' | 'sales_agent' | 'repair_agent';
 
@@ -72,13 +73,13 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ isOpen, onClose, m
     try {
       await updateStaffMember(member.id, {
         name: name.trim(),
-        role: role as any,
+        role,
         permissions: role === 'admin' ? FULL_PERMISSIONS : permissions,
       });
       toast.success('Staff Member Updated', `${name}'s profile has been saved.`);
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Failed to update member.');
+    } catch (err: unknown) {
+      setError(errorMessage(err) || 'Failed to update member.');
     }
   };
 
@@ -155,7 +156,7 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ isOpen, onClose, m
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600 }}>Quick Approval PIN</div>
                 <div style={{ fontSize: '12px', color: 'var(--color-on-surface-variant, #64748b)' }}>
-                  {member.approvalPin ? 'PIN is currently active' : 'No PIN configured yet'}
+                  {member.hasApprovalPin ? 'PIN is currently active' : 'No PIN configured yet'}
                 </div>
               </div>
               <Button
@@ -164,7 +165,7 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ isOpen, onClose, m
                 size="sm"
                 onClick={() => setIsPinModalOpen(true)}
               >
-                {member.approvalPin ? 'Change PIN' : 'Set PIN'}
+                {member.hasApprovalPin ? 'Change PIN' : 'Set PIN'}
               </Button>
             </div>
           </div>

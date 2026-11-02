@@ -1,15 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
-import {
-  Store,
-  DollarSign,
-  Calendar,
-  CreditCard,
-  CheckCircle2,
-  AlertTriangle,
-  Clock,
-  FileText,
-  Percent,
-} from 'lucide-react';
+import { Store, CreditCard, CheckCircle2, AlertTriangle, Clock, Percent } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -23,6 +13,7 @@ import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrenc
 import { usePrivacyStore } from '../../store/privacyStore';
 import type { Customer, PaymentMethod, SaleTransaction, CustomerDebtEntry } from '../../types';
 import styles from './B2BParts.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface B2BPartsCheckoutModalProps {
   isOpen: boolean;
@@ -45,7 +36,7 @@ export const B2BPartsCheckoutModal: React.FC<B2BPartsCheckoutModalProps> = ({
   customer,
   onSuccess,
 }) => {
-  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
+  usePrivacyStore(s => s.isPrivacyActive);
   const { getTotal, getSubtotal, getDiscountAmount, items, checkoutB2B } = usePartsCartStore();
   const { getCustomerDebtTotal } = useCustomerStore();
   const { user } = useAuthStore();
@@ -53,8 +44,8 @@ export const B2BPartsCheckoutModal: React.FC<B2BPartsCheckoutModalProps> = ({
   const toast = useToast();
 
   const total = getTotal();
-  const subtotal = getSubtotal();
-  const discountAmount = getDiscountAmount();
+  getSubtotal();
+  getDiscountAmount();
 
   // Current balance of the customer
   const currentDebt = getCustomerDebtTotal(customer.id) || customer.totalDebt || 0;
@@ -129,8 +120,8 @@ export const B2BPartsCheckoutModal: React.FC<B2BPartsCheckoutModalProps> = ({
         onSuccess(result);
         onClose();
       }
-    } catch (err: any) {
-      toast.error('Checkout Failed', err.message || 'Could not complete B2B checkout');
+    } catch (err: unknown) {
+      toast.error('Checkout Failed', errorMessage(err) || 'Could not complete B2B checkout');
     } finally {
       isSubmittingRef.current = false;
       setIsSubmitting(false);

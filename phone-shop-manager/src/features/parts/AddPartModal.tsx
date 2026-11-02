@@ -11,7 +11,8 @@ import type { PhoneModel } from '../../types';
 import styles from '../inventory/ProductForm.module.css';
 import { useSettingsStore } from '../../store/settingsStore';
 import { printBarcodeDirect, openPrintWindow, buildLabelsHTML } from '../../utils/printWindow';
-import { formatCurrency, getCurrencySymbol } from '../../utils/formatCurrency';
+import { getCurrencySymbol } from '../../utils/formatCurrency';
+import { computeStockStatus } from '../../utils/stockStatus';
 import { ProfitMarginCalculator } from '../../components/ui/ProfitMarginCalculator';
 
 interface AddPartModalProps {
@@ -99,11 +100,6 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
     set('sku', generateSKU(form.name || 'PRT', form.model || 'GEN'));
   };
 
-  const costNum = Number(form.costPrice) || 0;
-  const priceNum = Number(form.price) || 0;
-  const profit = priceNum - costNum;
-  const marginPercent = priceNum > 0 ? Math.round((profit / priceNum) * 100) : 0;
-
   const validate = (): boolean => {
     const errs: Partial<FormData> = {};
     if (!form.name.trim()) errs.name = 'Required';
@@ -145,7 +141,7 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
       price: Number(form.price),
       costPrice: Number(form.costPrice), 
       stock,
-      stockStatus: stock === 0 ? 'out_of_stock' : stock <= threshold ? 'low_stock' : 'in_stock',
+      stockStatus: computeStockStatus(stock, threshold),
       sku: finalSku,
       category: 'repair_part',
       supplier: form.supplier.trim() || undefined,
@@ -162,7 +158,7 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
         const tempProduct = { ...product, id: 'temp-' + Date.now(), hidePrice: true };
         const result = await printBarcodeDirect([tempProduct as PhoneModel], storeName, currency);
         if (result.method === 'browser') {
-          const html = buildLabelsHTML([tempProduct as any], storeName);
+          const html = buildLabelsHTML([tempProduct], storeName);
           openPrintWindow(html, 'Part Label');
         }
       }

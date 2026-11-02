@@ -130,7 +130,7 @@ export const SwitchAccountTypeModal: React.FC<SwitchAccountTypeModalProps> = ({
             </label>
             <Input
               value={shopName}
-              onChange={(v) => { setShopName(v); setError(null); }}
+              onChange={(e) => { setShopName(e.target.value); setError(null); }}
               placeholder={t('customers.shopNamePlaceholder', 'e.g. AP Phone Repair, Benali GSM')}
               autoFocus
             />

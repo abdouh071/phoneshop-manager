@@ -57,7 +57,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
     const store = settings.storeName || 'PhoneShop Pro';
     const curr = settings.currency || 'USD';
     const itemsText = transaction.items
-      .map(i => `• ${i.productName} x${i.quantity} — ${formatCurrency(i.price * i.quantity, curr)}`)
+      .map(i => `• ${i.productName} x${i.quantity} — ${formatCurrency((i.price ?? 0) * i.quantity, !!curr)}`)
       .join('\n');
     return [
       `🧾 *${store}*`,
@@ -67,9 +67,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
       `────────────────`,
       itemsText,
       `────────────────`,
-      `Total: *${formatCurrency(transaction.total, curr)}*`,
-      `Payment: ${methodLabel(transaction.paymentMethod)}`,
-      transaction.remainingBalance ? `Balance Due: ${formatCurrency(transaction.remainingBalance, curr)}` : null,
+      `Total: *${formatCurrency(transaction.total, !!curr)}*`,
+      `Payment: ${methodLabel(transaction.paymentMethod ?? '')}`,
+      transaction.remainingBalance ? `Balance Due: ${formatCurrency(transaction.remainingBalance, !!curr)}` : null,
       settings.receiptFooter ? `\n${settings.receiptFooter}` : '\nThank you for choosing us!',
     ].filter(Boolean).join('\n');
   };
@@ -86,8 +86,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({ title, text });
-      } catch (err: any) {
-        if (err.name !== 'AbortError') {
+      } catch (err: unknown) {
+        if (!(err !== null && typeof err === 'object' && 'name' in err && (err as { name: unknown }).name === 'AbortError')) {
           console.warn('Share error:', err);
         }
       }

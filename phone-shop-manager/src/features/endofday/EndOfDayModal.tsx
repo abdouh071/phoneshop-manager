@@ -7,8 +7,9 @@ import {
 import { useEndOfDayStore } from '../../store/endOfDayStore';
 import { usePrivacyStore } from '../../store/privacyStore';
 import type { EndOfDayRecord } from '../../services/endOfDayService';
-import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { formatPrivateCurrency } from '../../utils/formatCurrency';
 import { PrivacyCurtainButton } from '../../components/layout/PrivacyCurtainButton';
+import { useToast } from '../../components/ui/Toast';
 import styles from './EndOfDayModal.module.css';
 
 interface Props {
@@ -19,8 +20,9 @@ interface Props {
 }
 
 export const EndOfDayModal: React.FC<Props> = ({ isOpen, onClose, viewRecord }) => {
-  const isPrivacyActive = usePrivacyStore((s) => s.isPrivacyActive);
+  usePrivacyStore((s) => s.isPrivacyActive);
   const { buildPreview, closeDay, todayRecord, isSaving, updateNotes } = useEndOfDayStore();
+  const toast = useToast();
 
   const [preview, setPreview] = useState<Omit<EndOfDayRecord, 'id'> | null>(null);
   const [notes, setNotes]     = useState('');
@@ -53,10 +55,15 @@ export const EndOfDayModal: React.FC<Props> = ({ isOpen, onClose, viewRecord }) 
   const isReadOnly = !!(viewRecord || alreadyClosed || done);
 
   const handleClose = async () => {
-    const record = await closeDay(false, notes);
-    setSaved(record);
-    setPreview(record);
-    setDone(true);
+    try {
+      const record = await closeDay(false, notes);
+      setSaved(record);
+      setPreview(record);
+      setDone(true);
+    } catch (err) {
+      console.error('Failed to close day:', err);
+      toast.error('Close Day Failed', 'Could not save the end-of-day report. Please try again.');
+    }
   };
 
   const handlePrint = () => window.print();
@@ -64,8 +71,13 @@ export const EndOfDayModal: React.FC<Props> = ({ isOpen, onClose, viewRecord }) 
   const handleSaveNotes = async () => {
     const id = (viewRecord ?? todayRecord ?? saved)?.id;
     if (!id || !notes) return;
-    await updateNotes(id, notes);
-    setEditingNotes(false);
+    try {
+      await updateNotes(id, notes);
+      setEditingNotes(false);
+    } catch (err) {
+      console.error('Failed to save notes:', err);
+      toast.error('Save Failed', 'Could not save notes. Please try again.');
+    }
   };
 
   if (!data) return null;

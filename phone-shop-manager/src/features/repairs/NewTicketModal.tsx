@@ -20,6 +20,7 @@ import { CustomerHistoryWidget } from './CustomerHistoryWidget';
 import { Smartphone, User, Wrench, Calculator, ShieldCheck, Calendar, Sparkles, PauseCircle, Printer } from 'lucide-react';
 import { printRepairLabelDirect, buildRepairLabelHTML, openPrintWindow } from '../../utils/printWindow';
 import { useSettingsStore } from '../../store/settingsStore';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface NewTicketModalProps {
   isOpen: boolean;
@@ -86,7 +87,7 @@ const ISSUE_PRESETS = [
 ];
 
 export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose, ticketToEdit, prefillCustomer, onTicketCreated, onPrintTicket }) => {
-  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
+  usePrivacyStore(s => s.isPrivacyActive);
   const [form, setForm] = useState<FormData>(INITIAL);
   const [errors, setErrors] = useState<Partial<FormData>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -100,7 +101,7 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
   const [showLockCode, setShowLockCode] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
-  const { createTicket, updateTicket, tickets, activeDraft, saveActiveDraft: storeSaveDraft, clearActiveDraft, holdDraft, isCreatingTicket } = useRepairStore();
+  const { createTicket, updateTicket, activeDraft, saveActiveDraft: storeSaveDraft, clearActiveDraft, holdDraft, isCreatingTicket } = useRepairStore();
   const { storeName } = useSettingsStore();
   const isBusy = isSubmitting || isCreatingTicket || isPrinting;
   const { findOrCreateCustomer, addCustomer, updateCustomer, enrichCustomer, customers, fetchCustomers } = useCustomerStore();
@@ -300,7 +301,7 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
 
     if (regex.test(current)) {
       // Remove it cleanly
-      let updated = current.replace(regex, (match, p1, p2) => {
+      let updated = current.replace(regex, ( p1, p2) => {
         if (p1 && p2 && p1.includes(',') && p2.includes(',')) return ', ';
         return '';
       }).trim();
@@ -357,7 +358,7 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
     if (shouldPrint) setIsPrinting(true);
 
     try {
-      let cust: any = undefined;
+      let cust: Customer | undefined = undefined;
       const cleanPhone = normalizePhoneDigits(form.customerPhone.trim());
       const hasValidPhone = cleanPhone.length >= 7;
       const formattedCustPhone = hasValidPhone
@@ -552,7 +553,7 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
         resultingTicket = { ...ticketToEdit, ...ticketPayload, updatedAt: new Date().toISOString() };
         toast.success('Ticket updated!', `Repair #${ticketToEdit.ticketNumber} details saved.`);
       } else {
-        resultingTicket = await createTicket(ticketPayload as any);
+        resultingTicket = await createTicket(ticketPayload as Parameters<typeof createTicket>[0]);
         toast.success('Ticket created!', `New repair ticket generated for ${form.customerName}.`);
         onTicketCreated?.(resultingTicket);
       }
@@ -572,14 +573,14 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
               onPrintTicket(resultingTicket);
             } else {
               openPrintWindow(
-                buildRepairLabelHTML(resultingTicket, storeName),
+                buildRepairLabelHTML(resultingTicket),
                 `Repair Sticker - ${resultingTicket.ticketNumber}`
               );
             }
           }
-        } catch (printErr: any) {
+        } catch (printErr: unknown) {
           console.error('Failed to auto-print label:', printErr);
-          toast.error('Print Error', printErr?.message || 'Could not print label automatically.');
+          toast.error('Print Error', errorMessage(printErr) || 'Could not print label automatically.');
         }
       }
 
@@ -587,9 +588,9 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
       setErrors({});
       clearActiveDraft();
       onClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to submit repair ticket:', err);
-      toast.error('Submission failed', err?.message || 'Please try again.');
+      toast.error('Submission failed', errorMessage(err) || 'Please try again.');
     } finally {
       isSubmittingRef.current = false;
       setIsSubmitting(false);
@@ -769,7 +770,7 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
                         <span className={dropStyles.optionPhone}>{c.phone}</span>
                         {Boolean(c.totalDebt && c.totalDebt > 0) ? (
                           <span className={dropStyles.optionDebt}>
-                            ⚠️ Dept: {formatPrivateCurrency(c.totalDebt)}
+                            ⚠️ Dept: {formatPrivateCurrency(c.totalDebt ?? 0)}
                           </span>
                         ) : Boolean(c.totalSpent && c.totalSpent > 0) ? (
                           <span className={dropStyles.optionSpent}>
@@ -841,8 +842,8 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
                     setCustomerQuery(form.customerName.trim());
                     setShowSuggestions(false);
                     toast.success('Customer Profile Updated', `Renamed profile to "${form.customerName.trim()}".`);
-                  } catch (err: any) {
-                    toast.error('Update Failed', err.message || 'Could not update customer');
+                  } catch (err: unknown) {
+                    toast.error('Update Failed', errorMessage(err) || 'Could not update customer');
                   } finally {
                     setIsUpdatingCustomer(false);
                   }

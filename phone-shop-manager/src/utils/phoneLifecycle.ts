@@ -101,9 +101,9 @@ export const isTicketActiveReturnPending = (ticket: RepairTicket, allTickets: Re
   }
 
   // 5. Check returnRecords array if marked completed
-  if ((ticket as any).returnRecords && Array.isArray((ticket as any).returnRecords)) {
-    const records = (ticket as any).returnRecords;
-    if (records.some((r: any) => r.status === 'completed' && r.resolvedAt)) {
+  if (ticket.returnRecords && Array.isArray(ticket.returnRecords)) {
+    const records = ticket.returnRecords;
+    if (records.some(r => r.status === 'completed' && r.resolvedAt)) {
       return false;
     }
   }
@@ -154,7 +154,7 @@ export const buildPhoneLifecycle = (
     mainTicket.returnDate ||
     mainTicket.returnReason ||
     returnChildTickets.length > 0 ||
-    (mainTicket as any).returnRecords?.length > 0
+    (mainTicket.returnRecords?.length ?? 0) > 0
   );
 
   const isReturnResolved = Boolean(

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Download, Printer, Filter, Package, AlertTriangle, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
+import { Download, Printer, Filter, AlertTriangle } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { exportToCSV } from '../../utils/exportUtils';
@@ -10,6 +10,7 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { useToast } from '../../components/ui/Toast';
 import type { PhoneModel } from '../../types';
 import styles from './ExportLowStockModal.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface ExportLowStockModalProps {
   isOpen: boolean;
@@ -271,8 +272,8 @@ export const ExportLowStockModal: React.FC<ExportLowStockModalProps> = ({
       if (res.method === 'direct') {
         toast.success('Report Sent to Printer', 'Low stock report printed on thermal printer.');
       }
-    } catch (err: any) {
-      toast.error(err?.message || 'Print server error.');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err) || 'Print server error.');
     } finally {
       setIsPrinting(false);
     }
@@ -368,7 +369,7 @@ export const ExportLowStockModal: React.FC<ExportLowStockModalProps> = ({
               <select
                 className={styles.selectInput}
                 value={stockScope}
-                onChange={e => setStockScope(e.target.value as any)}
+                onChange={e => setStockScope(e.target.value as 'all_low' | 'low_only' | 'out_only')}
               >
                 <option value="all_low">Low Stock & Out of Stock</option>
                 <option value="low_only">Low Stock Only (Stock &gt; 0)</option>

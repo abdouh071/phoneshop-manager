@@ -35,7 +35,9 @@ export const PrinterStatusPill: React.FC = () => {
       ref={pillRef}
       className={[styles.pill, isOnline ? styles.online : styles.offline].join(' ')}
       onClick={handleClick}
-      title={isOnline ? `Receipt: ${printer} · Labels: ${labelPrinter}` : 'Print server offline (fallback: browser print)'}
+      title={isOnline
+        ? t('common.receiptTooltip', { printer, label: labelPrinter })
+        : t('common.printServerOfflineTitle')}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter') handleClick(); }}
@@ -48,29 +50,29 @@ export const PrinterStatusPill: React.FC = () => {
       {showPopover && (
         <div className={styles.popover} onClick={(e) => e.stopPropagation()}>
           <div className={styles.popoverTitle}>
-            <span>Thermal Hardware</span>
+            <span>{t('common.thermalHardware')}</span>
             <span style={{ fontSize: '10px', color: isOnline ? '#059669' : '#d97706' }}>
-              {isOnline ? 'Online :3355' : 'Offline'}
+              {isOnline ? `${t('common.online')} :3355` : t('common.offline')}
             </span>
           </div>
           {isOnline ? (
             <>
               <div className={styles.printerRow}>
-                <span>Receipt (80mm):</span>
+                <span>{t('common.receiptPrinter')}</span>
                 <span className={styles.printerVal}>{printer}</span>
               </div>
               <div className={styles.printerRow}>
-                <span>Label (Sticker):</span>
+                <span>{t('common.labelPrinter')}</span>
                 <span className={styles.printerVal}>{labelPrinter}</span>
               </div>
               <div className={styles.printerRow}>
-                <span>Auto-Cutter:</span>
-                <span className={styles.printerVal}>{hasCutter ? 'Enabled' : 'Disabled'}</span>
+                <span>{t('common.autoCutter')}</span>
+                <span className={styles.printerVal}>{hasCutter ? t('common.enabled') : t('common.disabled')}</span>
               </div>
             </>
           ) : (
             <div style={{ color: '#64748b', fontSize: '11px', lineHeight: '1.4' }}>
-              Local print server not detected. Tickets and receipts will open using the browser print dialog.
+              {t('common.printServerNotDetected')}
             </div>
           )}
         </div>

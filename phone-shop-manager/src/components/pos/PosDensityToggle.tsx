@@ -1,5 +1,6 @@
 import React from 'react';
 import { Laptop, Monitor, TabletSmartphone } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { usePosDensityStore, type PosDensity } from '../../store/posDensityStore';
 import { useToast } from '../ui/Toast';
 import styles from './PosDensityToggle.module.css';
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export const PosDensityToggle: React.FC<Props> = ({ className, showLabels = true }) => {
+  const { t } = useTranslation();
   const { density, setDensity } = usePosDensityStore();
   const toast = useToast();
 
@@ -18,21 +20,21 @@ export const PosDensityToggle: React.FC<Props> = ({ className, showLabels = true
     setDensity(newDensity);
     const label =
       newDensity === 'compact'
-        ? 'Compact Laptop Mode (Alt+D)'
+        ? t('density.compactTitle')
         : newDensity === 'touch'
-        ? 'Touchscreen POS Mode (Alt+D)'
-        : 'Standard Desktop Mode (Alt+D)';
+        ? t('density.touchTitle')
+        : t('density.standardTitle');
     const sub =
       newDensity === 'compact'
-        ? 'Dense cards, tight cart, zero vertical scrolling for 13"–14" laptops.'
+        ? t('density.compactDesc')
         : newDensity === 'touch'
-        ? 'Large tap targets (44px+), big buttons, and touch numpad for counter screens.'
-        : 'Balanced spacing for regular monitors and mouse interaction.';
+        ? t('density.touchDesc')
+        : t('density.standardDesc');
     toast.info(label, sub);
   };
 
   return (
-    <div className={[styles.densityToggle, className].filter(Boolean).join(' ')} role="group" aria-label="POS Layout Density">
+    <div className={[styles.densityToggle, className].filter(Boolean).join(' ')} role="group" aria-label={t('density.groupLabel')}>
       <button
         type="button"
         className={[
@@ -40,10 +42,10 @@ export const PosDensityToggle: React.FC<Props> = ({ className, showLabels = true
           density === 'compact' && styles.densityBtnActive,
         ].filter(Boolean).join(' ')}
         onClick={() => handleSelect('compact')}
-        title="Compact Laptop Mode (Alt+D) — Tighter cards & zero-scroll cart for 13–14 inch displays"
+        title={t('density.compactHint')}
       >
         <Laptop size={14} />
-        {showLabels && <span className={styles.btnLabel}>Compact</span>}
+        {showLabels && <span className={styles.btnLabel}>{t('density.compact')}</span>}
       </button>
 
       <button
@@ -53,10 +55,10 @@ export const PosDensityToggle: React.FC<Props> = ({ className, showLabels = true
           density === 'comfortable' && styles.densityBtnActive,
         ].filter(Boolean).join(' ')}
         onClick={() => handleSelect('comfortable')}
-        title="Standard Desktop Mode — Balanced spacing for normal desktop monitors"
+        title={t('density.standardHint')}
       >
         <Monitor size={14} />
-        {showLabels && <span className={styles.btnLabel}>Standard</span>}
+        {showLabels && <span className={styles.btnLabel}>{t('density.standard')}</span>}
       </button>
 
       <button
@@ -66,10 +68,10 @@ export const PosDensityToggle: React.FC<Props> = ({ className, showLabels = true
           density === 'touch' && (styles.densityBtnActiveTouch || styles.densityBtnActive),
         ].filter(Boolean).join(' ')}
         onClick={() => handleSelect('touch')}
-        title="Touchscreen POS Mode (Alt+D) — Large tap targets (44px+), jumbo buttons & touch keypad"
+        title={t('density.touchHint')}
       >
         <TabletSmartphone size={14} />
-        {showLabels && <span className={styles.btnLabel}>Touch</span>}
+        {showLabels && <span className={styles.btnLabel}>{t('density.touch')}</span>}
       </button>
     </div>
   );

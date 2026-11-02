@@ -10,8 +10,9 @@ import type { Customer } from '../../types';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { isPhoneMatch, formatStandardPhone, normalizePhoneDigits } from '../../utils/phoneUtils';
 import { CustomerDuplicatePromptCard } from '../../components/customers/CustomerDuplicatePromptCard';
-import { BookOpen, AlertCircle, Calendar, Package, Store, User } from 'lucide-react';
+import { BookOpen, AlertCircle, Store, User } from 'lucide-react';
 import styles from '../inventory/ProductForm.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface AddCustomerModalProps {
   isOpen: boolean;
@@ -131,7 +132,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
     }
   }, [customerToEdit, isOpen, defaultAccountType, lockedAccountType]);
 
-  const set = (key: keyof FormData, value: any) => {
+  const set = (key: keyof FormData, value: string) => {
     setForm(prev => ({ ...prev, [key]: value }));
     setErrors(e => ({ ...e, [key]: undefined }));
   };
@@ -238,10 +239,10 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
       }
       
       handleClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast.error(
         t('customers.operationFailed', 'Operation Failed'),
-        err.message || t('customers.saveCustomerError', 'Could not save customer.')
+        errorMessage(err) || t('customers.saveCustomerError', 'Could not save customer.')
       );
     } finally {
       setIsSubmitting(false);
@@ -518,7 +519,8 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
               let currentCust = matchedDuplicateCustomer;
               if (Object.keys(updates).length > 0) {
                 try {
-                  currentCust = await updateCustomer(matchedDuplicateCustomer.id, updates);
+                  await updateCustomer(matchedDuplicateCustomer.id, updates);
+                  currentCust = useCustomerStore.getState().customers.find(c => c.id === matchedDuplicateCustomer.id) ?? matchedDuplicateCustomer;
                   toast.success(t('customers.profileAutoEnrichedTitle', 'Profile Auto-Enriched'), t('customers.profileAutoEnrichedDesc', 'Enriched {{name}}\'s profile with new details.', { name: matchedDuplicateCustomer.name }));
                 } catch (e) {
                   console.warn('Failed to auto-enrich on use existing:', e);
@@ -571,8 +573,8 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
                 });
                 toast.success(t('customers.customerProfileUpdatedTitle', 'Customer Profile Updated'), t('customers.customerProfileUpdatedDesc', 'Updated {{name}}\'s profile.', { name: form.name.trim() }));
                 handleClose();
-              } catch (err: any) {
-                toast.error(t('customers.updateFailedTitle', 'Update Failed'), err.message || 'Could not update customer');
+              } catch (err: unknown) {
+                toast.error(t('customers.updateFailedTitle', 'Update Failed'), errorMessage(err) || 'Could not update customer');
               } finally {
                 setIsUpdatingExisting(false);
               }

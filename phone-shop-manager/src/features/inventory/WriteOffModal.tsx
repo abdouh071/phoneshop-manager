@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
@@ -13,16 +14,10 @@ interface WriteOffModalProps {
   onClose: () => void;
 }
 
-const REASON_OPTIONS: { value: WriteOffReason; label: string }[] = [
-  { value: 'damaged', label: '💥 Damaged (physical damage)' },
-  { value: 'defective', label: '⚠️ Defective (factory/DOA)' },
-  { value: 'lost', label: '🔍 Lost (misplaced / unknown)' },
-  { value: 'stolen', label: '🚨 Stolen / Theft' },
-  { value: 'expired', label: '⏰ Expired / Obsolete' },
-  { value: 'other', label: '📝 Other' },
-];
+const REASON_VALUES: WriteOffReason[] = ['damaged', 'defective', 'lost', 'stolen', 'expired', 'other'];
 
 export const WriteOffModal: React.FC<WriteOffModalProps> = ({ product, onClose }) => {
+  const { t } = useTranslation();
   const { writeOffStock } = useInventoryStore();
   const toast = useToast();
   const [qty, setQty] = useState('1');
@@ -33,25 +28,42 @@ export const WriteOffModal: React.FC<WriteOffModalProps> = ({ product, onClose }
   if (!product) return null;
 
   const maxQty = product.stock;
+  const reasonOptions = REASON_VALUES.map(value => ({ value, label: t(`inventory.writeOffModal.reasons.${value}`) }));
 
   const handleSubmit = async () => {
     const amount = parseInt(qty, 10);
     if (isNaN(amount) || amount <= 0) {
-      toast.error('Invalid Quantity', 'Please enter a valid quantity to write off.');
+      toast.error(t('inventory.writeOffModal.invalidQtyTitle'), t('inventory.writeOffModal.invalidQtyBody'));
       return;
     }
     if (amount > maxQty) {
-      toast.error('Exceeds Stock', `You only have ${maxQty} units in stock.`);
+      toast.error(t('inventory.writeOffModal.exceedsTitle'), t('inventory.writeOffModal.exceedsBody', { max: maxQty }));
       return;
     }
     setIsSubmitting(true);
     try {
-      await writeOffStock(product.id, amount, reason, note || undefined);
-      const reasonLabel = reason.charAt(0).toUpperCase() + reason.slice(1);
-      toast.success('Write-Off Recorded', `${amount} unit(s) of ${product.name} marked as ${reasonLabel}.`);
-      onClose();
+      const result = await writeOffStock(product.id, amount, reason, note || undefined);
+      const reasonLabel = t(`inventory.writeOffModal.reasonShort.${reason}`);
+      if (result.outcome === 'committed') {
+        toast.success(
+          t('inventory.writeOffModal.doneTitle'),
+          t('inventory.writeOffModal.doneBody', { qty: result.applied, name: product.name, reason: reasonLabel })
+        );
+        onClose();
+      } else if (result.outcome === 'queued') {
+        // The delta only waits in this device's queue: the server stock has not moved yet.
+        toast.info(
+          t('inventory.writeOffModal.queuedTitle'),
+          t('inventory.writeOffModal.queuedBody', { qty: result.applied, name: product.name })
+        );
+        onClose();
+      } else if (result.outcome === 'unchanged') {
+        toast.warning(t('inventory.writeOffModal.nothingTitle'), t('inventory.writeOffModal.nothingBody', { name: product.name }));
+      } else {
+        toast.error(t('inventory.writeOffModal.failedTitle'), t('inventory.writeOffModal.failedBody'));
+      }
     } catch {
-      toast.error('Error', 'Failed to record write-off. Please try again.');
+      toast.error(t('inventory.writeOffModal.failedTitle'), t('inventory.writeOffModal.failedBody'));
     } finally {
       setIsSubmitting(false);
     }
@@ -65,17 +77,17 @@ export const WriteOffModal: React.FC<WriteOffModalProps> = ({ product, onClose }
           <div className={styles.headerLeft}>
             <AlertTriangle size={20} style={{ color: '#dc2626' }} />
             <div>
-              <h2 className={styles.title}>Mark as Defective / Write Off</h2>
+              <h2 className={styles.title}>{t('inventory.writeOffModal.title')}</h2>
               <p className={styles.subtitle}>{product.name} {product.model}</p>
             </div>
           </div>
-          <button className={styles.closeBtn} onClick={onClose}><X size={18} /></button>
+          <button className={styles.closeBtn} onClick={onClose} aria-label={t('common.close')}><X size={18} /></button>
         </div>
 
         {/* Current stock indicator */}
         <div className={styles.stockInfo}>
-          <span className={styles.stockLabel}>Current Stock</span>
-          <span className={styles.stockValue}>{maxQty} units available</span>
+          <span className={styles.stockLabel}>{t('inventory.writeOffModal.currentStock')}</span>
+          <span className={styles.stockValue}>{t('inventory.writeOffModal.unitsAvailable', { qty: maxQty })}</span>
         </div>
 
         {/* Form */}
@@ -83,7 +95,7 @@ export const WriteOffModal: React.FC<WriteOffModalProps> = ({ product, onClose }
           <div className={styles.formRow}>
             <div style={{ flex: '0 0 120px' }}>
               <Input
-                label="Qty to Write Off"
+                label={t('inventory.writeOffModal.qtyLabel')}
                 type="number"
                 min="1"
                 max={String(maxQty)}
@@ -93,17 +105,17 @@ export const WriteOffModal: React.FC<WriteOffModalProps> = ({ product, onClose }
             </div>
             <div style={{ flex: 1 }}>
               <Select
-                label="Reason"
+                label={t('inventory.writeOffModal.reasonLabel')}
                 value={reason}
                 onChange={v => setReason(v as WriteOffReason)}
-                options={REASON_OPTIONS}
+                options={reasonOptions}
               />
             </div>
           </div>
 
           <Input
-            label="Note (optional)"
-            placeholder="e.g. Dropped during demo, screen cracked"
+            label={t('inventory.writeOffModal.noteLabel')}
+            placeholder={t('inventory.writeOffModal.notePlaceholder')}
             value={note}
             onChange={e => setNote(e.target.value)}
           />
@@ -113,16 +125,15 @@ export const WriteOffModal: React.FC<WriteOffModalProps> = ({ product, onClose }
         <div className={styles.warning}>
           <AlertTriangle size={14} />
           <span>
-            This will permanently remove <strong>{qty || 0}</strong> unit(s) from stock.
-            This action is logged and cannot be undone.
+            {t('inventory.writeOffModal.warning', { qty: qty || 0 })}
           </span>
         </div>
 
         {/* Actions */}
         <div className={styles.actions}>
-          <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>{t('common.cancel')}</Button>
           <Button variant="danger" onClick={handleSubmit} isLoading={isSubmitting}>
-            Confirm Write-Off
+            {t('inventory.writeOffModal.confirm')}
           </Button>
         </div>
       </div>

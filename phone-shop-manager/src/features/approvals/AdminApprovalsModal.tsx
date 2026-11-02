@@ -1,24 +1,12 @@
 import React, { useState } from 'react';
-import {
-  ShieldCheck,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  User,
-  AlertCircle,
-  Send,
-  CornerDownRight,
-  ChevronRight,
-  History,
-  Check,
-  X,
-} from 'lucide-react';
+import { CheckCircle2, XCircle, History, Check, X } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
-import { Badge } from '../../components/ui/Badge';
+import '../../components/ui/Badge';
 import { useApprovalStore, type ApprovalRequest } from '../../store/approvalStore';
 import { useToast } from '../../components/ui/Toast';
 import { RequestDetailsCard } from './RequestDetailsCard';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface AdminApprovalsModalProps {
   isOpen: boolean;
@@ -39,8 +27,8 @@ export const AdminApprovalsModal: React.FC<AdminApprovalsModalProps> = ({ isOpen
     try {
       await approveRequest(request.id, 'remote');
       toast.success('Request Approved', `Approved "${request.actionLabel}" for ${request.requestedBy.name}`);
-    } catch (err: any) {
-      toast.error('Approval Failed', err.message);
+    } catch (err: unknown) {
+      toast.error('Approval Failed', errorMessage(err));
     } finally {
       setActionInProgress(null);
     }
@@ -53,8 +41,8 @@ export const AdminApprovalsModal: React.FC<AdminApprovalsModalProps> = ({ isOpen
       toast.info('Request Rejected', 'The staff member has been notified.');
       setRejectingId(null);
       setRejectReason('');
-    } catch (err: any) {
-      toast.error('Rejection Failed', err.message);
+    } catch (err: unknown) {
+      toast.error('Rejection Failed', errorMessage(err));
     } finally {
       setActionInProgress(null);
     }

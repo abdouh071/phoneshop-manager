@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { LogOut } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../../store/authStore';
 import { LogoutConfirmModal } from './LogoutConfirmModal';
 
@@ -10,6 +11,7 @@ interface UserLogoutButtonProps {
 export const UserLogoutButton: React.FC<UserLogoutButtonProps> = ({
   variant = 'header',
 }) => {
+  const { t } = useTranslation();
   const { user } = useAuthStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -45,8 +47,8 @@ export const UserLogoutButton: React.FC<UserLogoutButtonProps> = ({
             cursor: 'pointer',
             transition: 'all 0.15s ease',
           }}
-          title={`Signed in as ${user.name} — Click to Log Out`}
-          aria-label="Log Out"
+          title={`${t('sidebar.logout')} — ${user.name}`}
+          aria-label={t('sidebar.logout')}
         >
           <LogOut size={16} />
         </button>
@@ -134,10 +136,10 @@ export const UserLogoutButton: React.FC<UserLogoutButtonProps> = ({
             e.currentTarget.style.color = 'var(--color-on-surface-variant, #64748b)';
             e.currentTarget.style.background = 'transparent';
           }}
-          title="Log Out of your account (Alt+L)"
+          title={`${t('sidebar.logout')} (Alt+L)`}
         >
           <LogOut size={13} />
-          <span>Exit</span>
+          <span>{t('sidebar.logout')}</span>
         </button>
       </div>
 

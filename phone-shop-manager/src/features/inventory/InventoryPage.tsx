@@ -1,12 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import {
-  Eye, Edit, Trash2, TrendingUp, AlertTriangle, Package, Plus,
-  ChevronDown, ChevronUp, ChevronRight, CornerDownRight, DollarSign,
-  ScanLine, ClipboardList, Upload, CheckCircle2, AlertCircle, XCircle,
-  LayoutList, Table, Printer, FileSpreadsheet
-} from 'lucide-react';
-import { Card } from '../../components/ui/Card';
+import { Eye, Trash2, TrendingUp, AlertTriangle, Package, Plus, ChevronDown, ChevronUp, ChevronRight, CornerDownRight, DollarSign, ScanLine, ClipboardList, Upload, CheckCircle2, AlertCircle, XCircle, LayoutList, Table, Printer, FileSpreadsheet } from 'lucide-react';
+import '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { SearchInput } from '../../components/ui/Input';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
@@ -27,6 +22,7 @@ import { ExportLowStockModal } from './ExportLowStockModal';
 import { RestockHistoryPanel } from './RestockHistoryPanel';
 import { WriteOffLogPanel } from './WriteOffLogPanel';
 import { WriteOffModal } from './WriteOffModal';
+import { useRestockHandler } from './useRestockHandler';
 import { BulkImportModal } from './BulkImportModal';
 import { InventoryTablesView } from './InventoryTablesView';
 import type { PhoneModel } from '../../types';
@@ -41,10 +37,6 @@ import { ACCESSORY_SUB_CATEGORIES } from '../../utils/accessorySubCategories';
 const margin = (p: PhoneModel) =>
   p.price > 0 ? (((p.price - p.costPrice) / p.price) * 100) : 0;
 
-const StockStatusDot: React.FC<{ status: PhoneModel['stockStatus'] }> = ({ status }) => {
-  const cls = { in_stock: styles.dotGreen, low_stock: styles.dotYellow, out_of_stock: styles.dotRed }[status];
-  return <span className={[styles.dot, cls].join(' ')} />;
-};
 
 export const InventoryPage = () => {
   const { t } = useTranslation();
@@ -80,7 +72,7 @@ export const InventoryPage = () => {
     name: string;
     callback: () => void;
     actionType?: string;
-    actionData?: Record<string, any>;
+    actionData?: Record<string, unknown>;
     targetId?: string;
   } | null>(null);
   const [isExportLowStockOpen, setIsExportLowStockOpen] = useState(false);
@@ -183,8 +175,8 @@ export const InventoryPage = () => {
   const sortedGroups = useMemo(() => {
     const groups = groupProductsByBaseModel(filtered);
     return groups.sort((a, b) => {
-      let valA: any = a[sortKey as keyof ProductGroup] ?? '';
-      let valB: any = b[sortKey as keyof ProductGroup] ?? '';
+      let valA: string | number = (a[sortKey as keyof ProductGroup] ?? '') as string | number;
+      let valB: string | number = (b[sortKey as keyof ProductGroup] ?? '') as string | number;
       if (sortKey === 'price') { valA = a.minPrice; valB = b.minPrice; }
       if (sortKey === 'costPrice') { valA = a.minCost; valB = b.minCost; }
       if (sortKey === 'stock') { valA = a.totalStock; valB = b.totalStock; }
@@ -230,23 +222,16 @@ export const InventoryPage = () => {
   };
 
   // Restock handler
-  const handleRestock = async (product: PhoneModel) => {
-    const amt = parseInt(restockAmt, 10);
-    if (isNaN(amt) || amt <= 0) return;
-    await restockProduct(product.id, amt, {
-      supplier: restockMeta.supplier || undefined,
-      note: restockMeta.note || undefined,
-      cost: restockMeta.cost ? parseFloat(restockMeta.cost) : undefined,
-    });
+  const handleRestock = useRestockHandler(() => restockAmt, restockMeta, () => {
     setRestockingId(null);
     setRestockAmt('');
     setRestockMeta({ supplier: '', note: '', cost: '' });
-  };
+  });
 
   const requirePermission = (
     actionName: string,
     callback: () => void,
-    meta?: { actionType?: string; actionData?: Record<string, any>; targetId?: string }
+    meta?: { actionType?: string; actionData?: Record<string, unknown>; targetId?: string }
   ) => {
     if (permissions.inventory_edit || user?.role === 'admin') {
       callback();
@@ -627,9 +612,7 @@ export const InventoryPage = () => {
               currentStock: p.stock,
             },
           })}
-          onRestockProduct={async (p, amount, meta) => {
-            await restockProduct(p.id, amount, meta);
-          }}
+          onRestockProduct={async (p, amount, meta) => restockProduct(p.id, amount, meta)}
           onWriteOffProduct={p => requirePermission(`Write off product: ${p.name}`, () => setWriteOffProduct(p), {
             actionType: 'inventory_write_off',
             targetId: p.id,

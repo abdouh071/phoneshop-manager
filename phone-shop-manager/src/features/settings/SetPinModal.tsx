@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { KeyRound, ShieldCheck, AlertCircle, Check, Trash2 } from 'lucide-react';
+import { KeyRound, AlertCircle, Trash2 } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { useAuthStore, type User } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface SetPinModalProps {
   isOpen: boolean;
@@ -36,7 +37,7 @@ export const SetPinModal: React.FC<SetPinModalProps> = ({
 
   if (!userToEdit) return null;
 
-  const hasExistingPin = Boolean(userToEdit.approvalPin);
+  const hasExistingPin = Boolean(userToEdit.hasApprovalPin);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,8 +63,8 @@ export const SetPinModal: React.FC<SetPinModalProps> = ({
         `Approval PIN for ${isEditingSelf ? 'your account' : userToEdit.name} has been updated.`
       );
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Failed to save approval PIN.');
+    } catch (err: unknown) {
+      setError(errorMessage(err) || 'Failed to save approval PIN.');
     }
   };
 
@@ -76,8 +77,8 @@ export const SetPinModal: React.FC<SetPinModalProps> = ({
       await removeApprovalPin(userToEdit.id);
       toast.info('Approval PIN Removed', `PIN has been cleared for ${userToEdit.name}.`);
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Failed to remove approval PIN.');
+    } catch (err: unknown) {
+      setError(errorMessage(err) || 'Failed to remove approval PIN.');
     }
   };
 

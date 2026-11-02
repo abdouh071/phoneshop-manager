@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, ShieldAlert, Trash2 } from 'lucide-react';
+import { X, Save, Trash2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
 import { Input, TextArea } from '../../components/ui/Input';
 import { useInventoryStore } from '../../store/inventoryStore';
@@ -10,6 +11,8 @@ import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSettingsStore } from '../../store/settingsStore';
 import { getCurrencySymbol } from '../../utils/formatCurrency';
+import { computeStockStatus } from '../../utils/stockStatus';
+import { errorMessage } from '../../utils/errorUtils';
 import type { PhoneModel } from '../../types';
 import { ProfitMarginCalculator } from '../../components/ui/ProfitMarginCalculator';
 import styles from '../inventory/ProductForm.module.css';
@@ -20,6 +23,7 @@ interface EditPartPanelProps {
 }
 
 export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, onClose }) => {
+  const { t } = useTranslation();
   const { updateProduct, deleteProduct } = useInventoryStore();
   const toast = useToast();
   const permissions = usePermissions();
@@ -40,7 +44,7 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, onClose }
 
   if (!product) return null;
 
-  const set = (key: keyof PhoneModel, value: any) => {
+  const set = (key: keyof PhoneModel, value: unknown) => {
     setForm(prev => ({ ...prev, [key]: value }));
   };
 
@@ -59,26 +63,39 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, onClose }
       costPrice: Number(form.costPrice),
       stock,
       lowStockThreshold: threshold,
-      stockStatus: stock === 0 ? 'out_of_stock' : stock <= threshold ? 'low_stock' : 'in_stock',
+      stockStatus: computeStockStatus(stock, threshold),
     };
 
-    try {
-      await updateProduct(product.id, updates);
+    const outcome = await updateProduct(product.id, updates);
+    if (outcome === 'committed') {
       toast.success('Part Updated', `${updates.name} has been updated.`);
-      onClose();
-    } catch (err) {
-      toast.error('Failed to update part');
+    } else if (outcome === 'queued') {
+      toast.info('Saved offline', `${updates.name} is kept on this device and syncs when you reconnect.`);
+    } else {
+      toast.warning('Not saved to the server', `${updates.name} is kept on this device and will retry syncing automatically.`);
     }
+    onClose();
   };
 
   const handleDelete = async () => {
+    const label = `${product.name} ${product.model}`.trim();
     try {
-      await deleteProduct(product.id);
-      toast.success('Part Deleted');
+      const outcome = await deleteProduct(product.id);
+      if (outcome === 'committed') {
+        toast.success(t('inventory.deletedTitle'), t('inventory.deletedDesc', { name: label }));
+      } else if (outcome === 'queued') {
+        // The server document is still there; only this till stopped showing it.
+        toast.info(t('inventory.deleteQueuedTitle'), t('inventory.deleteQueuedDesc', { name: label }));
+      } else {
+        toast.error(t('inventory.deleteFailedTitle'), t('inventory.deleteFailedDesc', { name: label }));
+        setIsDeleting(false);
+        return;
+      }
       setIsDeleting(false);
       onClose();
     } catch (err) {
-      toast.error('Failed to delete part');
+      toast.error(t('inventory.deleteFailedTitle'), errorMessage(err) || t('inventory.deleteFailedDesc', { name: label }));
+      setIsDeleting(false);
     }
   };
 

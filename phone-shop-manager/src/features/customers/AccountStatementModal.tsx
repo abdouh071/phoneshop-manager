@@ -1,17 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  Printer, Send, Download, FileText, Calendar, Store, User,
-  CheckCircle2, AlertCircle, ArrowUpRight, DollarSign, X, ShieldCheck,
-  TrendingDown, TrendingUp, History, CreditCard, ChevronDown, Wrench, ShoppingBag
-} from 'lucide-react';
+import { Printer, Send, Download, FileText, CheckCircle2, AlertCircle, History, CreditCard, ChevronDown, Wrench, ShoppingBag } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { useToast } from '../../components/ui/Toast';
 import { ReceiptModal } from '../pos/ReceiptModal';
 import { PrintRepairTicketModal } from '../repairs/PrintRepairTicketModal';
 import { OperationReceiptModal } from './OperationReceiptModal';
-import { printOperationReceipt } from '../../utils/statementPrint';
+import '../../utils/statementPrint';
 import { useCartStore } from '../../store/cartStore';
 import { usePartsCartStore } from '../../store/partsCartStore';
 import { useCustomerStore } from '../../store/customerStore';
@@ -56,7 +52,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
   onClose,
 }) => {
   const { t, i18n } = useTranslation();
-  const toast = useToast();
+  useToast();
   const locale = i18n.language === 'ar' ? 'ar-DZ' : i18n.language === 'fr' ? 'fr-FR' : 'en-US';
 
   const getPaymentMethodLabel = (method: string) => {
@@ -115,10 +111,10 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
 
   const { transactions } = useCartStore();
   const { invoices, fetchInvoices } = usePartsCartStore();
-  const { debts, getCustomerDebts, getCustomerDebtTotal } = useCustomerStore();
+  const { debts, getCustomerDebtTotal } = useCustomerStore();
   const { tickets } = useRepairStore();
   const settings = useSettingsStore();
-  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
+  usePrivacyStore(s => s.isPrivacyActive);
 
   useEffect(() => {
     if (invoices.length === 0) {
@@ -365,37 +361,37 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
     });
 
     // Process Repair Tickets (Problem 10 fix: Include repair revenue and intake deposits)
-    custTickets.forEach(t => {
-      const isCompleted = t.status === 'completed';
-      const deposit = t.depositAmount || 0;
-      const refNumber = t.ticketNumber || `REP-${t.id.slice(0, 6)}`;
-      const deviceDesc = `${t.deviceBrand || ''} ${t.deviceModel || ''}`.trim() || t('statementModal.device', 'Device');
-      const issueSummary = t.issueDescription ? ` (${t.issueDescription.slice(0, 35)})` : '';
+    custTickets.forEach(ticket => {
+      const isCompleted = ticket.status === 'completed';
+      const deposit = ticket.depositAmount || 0;
+      const refNumber = ticket.ticketNumber || `REP-${ticket.id.slice(0, 6)}`;
+      const deviceDesc = `${ticket.deviceBrand || ''} ${ticket.deviceModel || ''}`.trim() || t('statementModal.device', 'Device');
+      const issueSummary = ticket.issueDescription ? ` (${ticket.issueDescription.slice(0, 35)})` : '';
 
       // 1. Intake Deposit (credited at creation date if paid)
-      if (deposit > 0 && t.createdAt) {
+      if (deposit > 0 && ticket.createdAt) {
         events.push({
-          id: `rep_dep_${t.id}`,
-          date: t.createdAt,
+          id: `rep_dep_${ticket.id}`,
+          date: ticket.createdAt,
           type: 'payment',
           refNumber: `DEP-${refNumber}`,
           description: t('statementModal.repairDepositDesc', 'Intake Deposit for Repair #{{ref}} ({{device}})', { ref: refNumber, device: deviceDesc }),
           debit: 0,
           credit: deposit,
           netChange: -deposit,
-          rawTimestamp: new Date(t.createdAt).getTime(),
-          rawTicket: t,
+          rawTimestamp: new Date(ticket.createdAt).getTime(),
+          rawTicket: ticket,
         });
       }
 
       // 2. Handover / Completed Repair Service (billed at completion date)
       if (isCompleted) {
-        const finalCost = t.actualCost ?? t.estimatedCost ?? 0;
-        const totalPaid = t.paidAmount ?? 0;
-        const handoverPaid = Math.max(0, t.handoverAmountPaid ?? (totalPaid - deposit));
+        const finalCost = ticket.actualCost ?? ticket.estimatedCost ?? 0;
+        const totalPaid = ticket.paidAmount ?? 0;
+        const handoverPaid = Math.max(0, ticket.handoverAmountPaid ?? (totalPaid - deposit));
 
-        const partsDesc = t.partsUsed && t.partsUsed.length > 0
-          ? ` [${t('statementModal.partsInstalled', 'Parts Installed')}: ${t.partsUsed.map(p => `${p.quantity}× ${p.name}`).join(', ')}]`
+        const partsDesc = ticket.partsUsed && ticket.partsUsed.length > 0
+          ? ` [${t('statementModal.partsInstalled', 'Parts Installed')}: ${ticket.partsUsed.map(p => `${p.quantity}× ${p.name}`).join(', ')}]`
           : '';
 
         let repairDesc = t('statementModal.repairServiceDesc', 'Repair Service #{{ref}} ({{device}}{{issue}}){{parts}}', {
@@ -418,16 +414,16 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
         }
 
         events.push({
-          id: `rep_${t.id}`,
-          date: t.completedAt || t.updatedAt || t.createdAt,
+          id: `rep_${ticket.id}`,
+          date: ticket.completedAt || ticket.updatedAt || ticket.createdAt,
           type: 'repair',
           refNumber,
           description: repairDesc,
           debit: finalCost,
           credit: handoverPaid,
           netChange: finalCost - handoverPaid,
-          rawTimestamp: new Date(t.completedAt || t.updatedAt || t.createdAt).getTime(),
-          rawTicket: t,
+          rawTimestamp: new Date(ticket.completedAt || ticket.updatedAt || ticket.createdAt).getTime(),
+          rawTicket: ticket,
         });
       }
     });
@@ -487,12 +483,9 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
   if (!customer) return null;
 
   const currentTotalDebt = getCustomerDebtTotal(customer.id);
-  const statementNumber = `STMT-${customer.id.slice(0, 4).toUpperCase()}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
 
   // Reconciliation Check: when all time is selected, closingBalance should match currentTotalDebt exactly
-  const isAllTime = datePreset === 'all';
-  const balanceDiscrepancy = Math.abs(statementData.closingBalance - currentTotalDebt);
-  const isReconciled = !isAllTime || balanceDiscrepancy < 0.01;
+  Math.abs(statementData.closingBalance - currentTotalDebt);
 
   const handlePrint = () => {
     window.print();
@@ -900,8 +893,8 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                             <tr key={iIdx}>
                                               <td><strong>{it.product.name}</strong> {it.product.model || ''}</td>
                                               <td style={{ textAlign: 'center' }}>{it.quantity}</td>
-                                              <td style={{ textAlign: 'right' }}>{formatPrivateCurrency(it.unitPrice)}</td>
-                                              <td style={{ textAlign: 'right' }}>{formatPrivateCurrency(it.totalPrice)}</td>
+                                              <td style={{ textAlign: 'right' }}>{formatPrivateCurrency(it.unitPrice ?? 0)}</td>
+                                              <td style={{ textAlign: 'right' }}>{formatPrivateCurrency(it.totalPrice ?? 0)}</td>
                                             </tr>
                                           ))}
                                         </tbody>

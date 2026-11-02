@@ -1,41 +1,34 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { WifiOff, WifiIcon, RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { unifiedOfflineSyncService } from '../../services/unifiedOfflineSyncService';
 import styles from './OfflineBanner.module.css';
 
 export const OfflineBanner: React.FC = () => {
-  const [isOffline, setIsOffline] = useState(!navigator.onLine);
-  const [justCameOnline, setJustCameOnline] = useState(false);
+  const { t } = useTranslation();
+  const { isOnline, justCameOnline } = useOnlineStatus();
   const [pendingCount, setPendingCount] = useState(unifiedOfflineSyncService.getTotalPendingCount());
   const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOffline(false);
-      setJustCameOnline(true);
+    if (justCameOnline) {
       setIsSyncing(true);
-      setTimeout(() => {
-        setJustCameOnline(false);
-        setIsSyncing(false);
-      }, 4000);
-    };
-    const handleOffline = () => {
-      setIsOffline(true);
-      setJustCameOnline(false);
-    };
+      const timer = setTimeout(() => setIsSyncing(false), 3000);
+      return () => clearTimeout(timer);
+    }
+    setIsSyncing(false);
+  }, [justCameOnline]);
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
+  useEffect(() => {
     // Subscribe to total pending offline records across all models
     const unsubscribe = unifiedOfflineSyncService.subscribe(count => setPendingCount(count));
-
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
       unsubscribe();
     };
   }, []);
+
+  const isOffline = !isOnline;
 
   if (!isOffline && !justCameOnline && pendingCount === 0) return null;
 
@@ -49,8 +42,8 @@ export const OfflineBanner: React.FC = () => {
         )}
         <span>
           {isSyncing
-            ? 'Back online — syncing queued changes…'
-            : 'Connection restored. All changes synced.'}
+            ? t('common.backOnlineSyncing')
+            : t('common.connectionRestored')}
         </span>
       </div>
     );
@@ -60,10 +53,10 @@ export const OfflineBanner: React.FC = () => {
     <div className={styles.banner} role="status">
       <WifiOff size={14} />
       <span>
-        Offline Mode — Data is saved locally.
+        {t('common.offlineMode')}
         {pendingCount > 0 && (
           <strong style={{ marginLeft: 4 }}>
-            {pendingCount} change{pendingCount > 1 ? 's' : ''} will auto-sync when online.
+            {t('common.pendingChanges', { count: pendingCount })}
           </strong>
         )}
       </span>

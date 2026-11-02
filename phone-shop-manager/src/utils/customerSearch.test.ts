@@ -18,9 +18,11 @@ describe('Customer Directory Search & Discovery Logic', () => {
     lastVisitDate: '2026-01-01T10:00:00Z',
     registeredDevices: [
       {
+        id: 'dev-oppo-a5s',
         brand: 'Oppo',
         model: 'a5s',
         imei: '861234567890123',
+        createdAt: '2026-01-01T10:00:00Z',
       },
     ],
   };

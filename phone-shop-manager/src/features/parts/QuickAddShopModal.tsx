@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Store, User, Phone, DollarSign, FileText, AlertCircle, ShieldAlert } from 'lucide-react';
+import { Store, AlertCircle } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -10,6 +10,7 @@ import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { useToast } from '../../components/ui/Toast';
 import type { Customer } from '../../types';
 import styles from '../inventory/ProductForm.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface QuickAddShopModalProps {
   isOpen: boolean;
@@ -74,8 +75,8 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
 
       onCustomerCreated(newCustomer);
       handleClose();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to create shop account.');
+    } catch (err: unknown) {
+      setError(errorMessage(err) || 'Failed to create shop account.');
     } finally {
       setIsSubmitting(false);
     }

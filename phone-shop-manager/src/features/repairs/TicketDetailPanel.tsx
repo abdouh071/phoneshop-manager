@@ -5,7 +5,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Textarea } from '../../components/ui/Textarea';
 import { Modal } from '../../components/ui/Modal';
-import { Printer, Plus, Trash2, Package, Edit, CheckCircle, Wrench, CheckCircle2, BadgeCheck, ArrowRight, Activity, UserCheck, Clock } from 'lucide-react';
+import { Printer, Plus, Trash2, Package, Edit, CheckCircle, Wrench, CheckCircle2, BadgeCheck, ArrowRight, Activity, UserCheck } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { RepairStatusBadge } from '../../components/ui/Badge';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
@@ -18,6 +18,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import type { RepairTicket, PhoneModel, Customer } from '../../types';
 import { useCustomerStore } from '../../store/customerStore';
 import { activityLogService } from '../../services/activityLogService';
+import { errorMessage } from '../../utils/errorUtils';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { nextStatusMap } from './repairConstants';
 import styles from './TicketDetail.module.css';
@@ -25,7 +26,7 @@ import { LockCodeViewer } from './LockCodeWidget';
 import { CustomerHistoryWidget } from './CustomerHistoryWidget';
 import { PrintRepairTicketModal } from './PrintRepairTicketModal';
 import { PhoneLifecycleHistoryCard } from './PhoneLifecycleHistoryCard';
-import { isTicketActiveReturnPending } from '../../utils/phoneLifecycle';
+import '../../utils/phoneLifecycle';
 import { formatWhatsAppUrl } from '../../utils/phoneUtils';
 
 interface TicketDetailPanelProps {
@@ -78,7 +79,7 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
   const { updateStatus, updateTicket, createTicket, tickets } = useRepairStore();
   const { parts: inventoryParts, fetchParts, adjustStockBy } = useInventoryStore();
 
-  const linkedTickets = React.useMemo(() => {
+  React.useMemo(() => {
     if (!ticket) return [];
     const familyId = ticket.parentTicketId || ticket.id;
     return tickets
@@ -193,13 +194,13 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
       brand: 'Custom',
       model: '',
       name: customPartName.trim(),
+      price: Number(customPartCost) || 0,
       costPrice: Number(customPartCost) || 0,
-      sellPrice: Number(customPartCost) || 0,
       stock: 1,
-      minStock: 0,
+      stockStatus: 'in_stock',
       sku: 'CUSTOM',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      category: 'repair_part',
+      lowStockThreshold: 1,
     };
     addPart(dummyProduct);
     setCustomPartName('');
@@ -388,8 +389,8 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
         targetStatus === 'pending' ? t('status.pending') :
         t(`status.${targetStatus}`, targetStatus.replace('_', ' '));
       toast.success(t('ticket.statusUpdated'), t('ticket.statusUpdatedDesc', { ticketNumber: ticket.ticketNumber, label }));
-    } catch (err: any) {
-      toast.error(t('error.updateFailed'), err?.message || t('error.couldNotUpdate'));
+    } catch (err: unknown) {
+      toast.error(t('error.updateFailed'), errorMessage(err) || t('error.couldNotUpdate'));
     } finally {
       setIsSubmitting(false);
     }
@@ -455,7 +456,7 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
       status: 'pending' as const,
     };
 
-    const existingRecords = (ticket as any).returnRecords || [];
+    const existingRecords = ticket.returnRecords || [];
 
     await updateTicket(ticket.id, {
       returnReason: returnForm.reason.trim(),
@@ -525,8 +526,7 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
                 );
               }
               const statusLabel = next === 'in_progress' ? t('ticket.startRepair') : 
-                                  next === 'ready' ? t('ticket.markReady') : 
-                                  next === 'completed' ? t('ticket.markClaimed') : '';
+                                  next === 'ready' ? t('ticket.markReady') : '';
               return (
                 <Button variant="primary" onClick={() => handleSetStatus(next)} disabled={isSubmitting} leftIcon={<ArrowRight size={16} />}>
                   {statusLabel}
@@ -1088,7 +1088,7 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
               <div className={styles.partsList}>
                 {ticket.partsUsed?.map((pu, idx) => (
                   <div key={`existing-${idx}`} className={styles.partRow} style={{ opacity: 0.7 }}>
-                    <span className={styles.partName}>{pu.name || (pu as any).productName}</span>
+                    <span className={styles.partName}>{pu.name || pu.productName}</span>
                     <span className={styles.partSku}>{pu.cost ? formatCurrency(pu.cost) : t('common.saved')}</span>
                     <button className={styles.removePartBtn} disabled style={{ cursor: 'not-allowed' }}>
                       <CheckCircle size={12} />

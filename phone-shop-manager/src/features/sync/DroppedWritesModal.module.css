@@ -1,0 +1,127 @@
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 58vh;
+  overflow-y: auto;
+}
+
+.item {
+  border: 1px solid var(--color-outline-variant, #e2e8f0);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--color-surface-container-lowest, #ffffff);
+}
+
+.itemHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.itemType {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-on-surface, #0f172a);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.itemReason {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: var(--color-warning-bg, #fef3c7);
+  color: var(--color-warning-text, #92400e);
+}
+
+.itemWhen {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--color-on-surface-variant, #64748b);
+}
+
+.itemHint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-on-surface-variant, #64748b);
+}
+
+.itemDetail {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--color-surface-container-low, #f1f5f9);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-on-surface, #0f172a);
+  word-break: break-word;
+}
+
+.itemMeta {
+  display: flex;
+  gap: 14px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--color-on-surface-variant, #64748b);
+}
+
+.itemActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.evictedNotice {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--color-danger-bg, #fee2e2);
+  color: var(--color-danger-text, #991b1b);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--color-on-surface-variant, #64748b);
+}
+
+.emptyTitle {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-on-surface, #0f172a);
+}
+
+.emptyBody {
+  margin: 0;
+  font-size: 12px;
+  max-width: 380px;
+}
+
+@media (max-width: 768px) {
+  .list {
+    max-height: 52vh;
+  }
+
+  .itemWhen {
+    margin-left: 0;
+    width: 100%;
+  }
+}

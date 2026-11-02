@@ -6,6 +6,7 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../ui/Toast';
 import { OfflineBanner } from './OfflineBanner';
+import { DroppedWritesBanner } from './DroppedWritesBanner';
 import { PrinterStatusPill } from './PrinterStatusPill';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import { useGlobalBarcodeScanner } from '../../hooks/useGlobalBarcodeScanner';
@@ -87,6 +88,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   return (
     <>
       <OfflineBanner />
+      <DroppedWritesBanner />
       <div 
         className={styles.shell} 
         data-theme={actualTheme} 

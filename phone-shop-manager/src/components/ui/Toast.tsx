@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { CheckCircle, AlertCircle, AlertTriangle, Info, X } from 'lucide-react';
 import styles from './Toast.module.css';
 
@@ -51,13 +51,15 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setTimeout(() => dismiss(id), 4000);
   }, [dismiss]);
 
-  const ctx: ToastContextValue = {
+  // Stable identity: consumers that put `toast` in an effect dependency list (usePrintQueue
+  // resubscribes its Firestore listener on it) must not be invalidated by an unrelated re-render.
+  const ctx = useMemo<ToastContextValue>(() => ({
     toast: addToast,
     success: (title, message) => addToast({ variant: 'success', title, message }),
     error: (title, message) => addToast({ variant: 'error', title, message }),
     warning: (title, message) => addToast({ variant: 'warning', title, message }),
     info: (title, message) => addToast({ variant: 'info', title, message }),
-  };
+  }), [addToast]);
 
   globalToastHandler = ctx;
 

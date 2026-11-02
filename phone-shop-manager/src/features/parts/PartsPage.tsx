@@ -1,10 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import {
-  Plus, Minus, Trash2, ShoppingCart, CheckCircle, X,
-  Package, AlertTriangle, ChevronDown, ChevronUp, ChevronRight, CornerDownRight, Eye,
-  ClipboardList, TrendingUp, DollarSign, User, UserCheck, CheckCircle2, AlertCircle, XCircle
-} from 'lucide-react';
+import { Plus, Minus, Trash2, ShoppingCart, X, Package, AlertTriangle, ChevronDown, ChevronUp, ChevronRight, CornerDownRight, Eye, ClipboardList, TrendingUp, DollarSign, User, UserCheck, CheckCircle2, AlertCircle, XCircle } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { SearchInput } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
@@ -21,7 +17,7 @@ import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrenc
 import { usePrivacyStore } from '../../store/privacyStore';
 import { groupProductsByBaseModel } from '../../utils/productGrouping';
 import type { ProductGroup } from '../../utils/productGrouping';
-import type { PhoneModel, PaymentMethod, StockStatus, SuspendedCart } from '../../types';
+import type { PhoneModel, PaymentMethod, SuspendedCart } from '../../types';
 
 // Modals
 import { ReceiptModal } from '../pos/ReceiptModal';
@@ -34,6 +30,7 @@ import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { PrintPartsLabelsModal } from './PrintPartsLabelsModal';
 import { RestockHistoryPanel } from '../inventory/RestockHistoryPanel';
 import { WriteOffLogPanel } from '../inventory/WriteOffLogPanel';
+import { useRestockHandler } from '../inventory/useRestockHandler';
 import { CustomerAutocompleteInput } from '../pos/CustomerAutocompleteInput';
 import { QuickAddShopModal } from './QuickAddShopModal';
 import { B2BPartsCheckoutModal } from './B2BPartsCheckoutModal';
@@ -43,21 +40,18 @@ import { RestockAssistantModal } from './RestockAssistantModal';
 import { CustomerProfilePanel } from '../customers/CustomerProfilePanel';
 import { useCustomerStore } from '../../store/customerStore';
 import type { Customer, CustomerDebtEntry, SaleTransaction } from '../../types';
-import { Store, Building2, Bell } from 'lucide-react';
+import { Store, Bell } from 'lucide-react';
 
 import styles from './Parts.module.css';
 import posStyles from '../pos/POS.module.css';
 import b2bStyles from './B2BParts.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 // ─── HELPER COMPONENTS & UTILS ───────────────────────────────────────────
 
 const margin = (p: PhoneModel) =>
   p.price > 0 ? (((p.price - p.costPrice) / p.price) * 100) : 0;
 
-const StockStatusDot: React.FC<{ status: StockStatus }> = ({ status }) => {
-  const cls = { in_stock: styles.dotGreen, low_stock: styles.dotYellow, out_of_stock: styles.dotRed }[status];
-  return <span className={[styles.dot, cls].join(' ')} />;
-};
 
 const ProductCard: React.FC<{ group: ProductGroup; onAdd: () => void }> = ({ group, onAdd }) => {
   const metaText = (() => {
@@ -115,15 +109,9 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
 
 export const PartsPage = () => {
   const { t } = useTranslation();
-  const { fetchParts, parts, restockProduct } = useInventoryStore();
+  const { fetchParts, parts } = useInventoryStore();
   const partsOnly = parts;
-  const {
-    items, addToCart, removeFromCart, updateQuantity, clearCart,
-    setPayments, setCustomerName, setDiscount, checkout,
-    payments, customerName, discount,
-    getSubtotal, getDiscountAmount, getTotal, getItemCount,
-    suspendedCarts, suspendCart, resumeCart, discardSuspendedCart, fetchCarts
-  } = usePartsCartStore();
+  const { items, addToCart, removeFromCart, updateQuantity, clearCart, setPayments, setCustomerName, setDiscount, checkout, customerName, discount, getSubtotal, getTotal, getItemCount, suspendedCarts, suspendCart, resumeCart, discardSuspendedCart, fetchCarts } = usePartsCartStore();
   const permissions = usePermissions();
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'admin';
@@ -152,7 +140,7 @@ export const PartsPage = () => {
   const [editingProduct, setEditingProduct] = useState<PhoneModel | null>(null);
   const [detailProduct, setDetailProduct] = useState<PhoneModel | null>(null);
   const [writeOffProduct, setWriteOffProduct] = useState<PhoneModel | null>(null);
-  const [completedTx, setCompletedTx] = useState<any | null>(null);
+  const [completedTx, setCompletedTx] = useState<SaleTransaction | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<ProductGroup | null>(null);
   const [actionRequiringUnlock, setActionRequiringUnlock] = useState<{ name: string; callback: () => void } | null>(null);
 
@@ -309,8 +297,8 @@ export const PartsPage = () => {
   // Sort groups
   const sortedGroups = useMemo(() => {
     return [...groups].sort((a, b) => {
-      let valA: any = a[sortKey as keyof ProductGroup] ?? '';
-      let valB: any = b[sortKey as keyof ProductGroup] ?? '';
+      let valA: string | number = (a[sortKey as keyof ProductGroup] ?? '') as string | number;
+      let valB: string | number = (b[sortKey as keyof ProductGroup] ?? '') as string | number;
       if (sortKey === 'price') { valA = a.minPrice; valB = b.minPrice; }
       if (sortKey === 'costPrice') { valA = a.minCost; valB = b.minCost; }
       if (sortKey === 'stock') { valA = a.totalStock; valB = b.totalStock; }
@@ -357,27 +345,15 @@ export const PartsPage = () => {
   };
 
   // Restock handler
-  const handleRestock = async (product: PhoneModel) => {
-    const amt = parseInt(restockAmt, 10);
-    if (isNaN(amt) || amt <= 0) return;
-    try {
-      await restockProduct(product.id, amt, {
-        supplier: restockMeta.supplier || undefined,
-        note: restockMeta.note || undefined,
-        cost: restockMeta.cost ? parseFloat(restockMeta.cost) : undefined,
-      });
-      toast.success('Part Restocked', `Added ${amt} units to ${product.name}`);
-      setRestockingId(null);
-      setRestockAmt('');
-      setRestockMeta({ supplier: '', note: '', cost: '' });
-    } catch (err) {
-      toast.error('Restock Failed', 'Could not save restock entry');
-    }
-  };
+  const handleRestock = useRestockHandler(() => restockAmt, restockMeta, () => {
+    setRestockingId(null);
+    setRestockAmt('');
+    setRestockMeta({ supplier: '', note: '', cost: '' });
+  });
 
   // POS State
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('cash');
-  const [amountPaid, setAmountPaid] = useState('');
+  const [, setAmountPaid] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   // Synchronous lock prevents duplicate submissions even on rapid multi-clicks
   const checkoutLock = useRef(false);
@@ -391,8 +367,8 @@ export const PartsPage = () => {
       const tx = await checkout();
       setCompletedTx(tx);
       setAmountPaid('');
-    } catch (err: any) {
-      toast.error('Checkout failed', err.message);
+    } catch (err: unknown) {
+      toast.error('Checkout failed', errorMessage(err));
     } finally {
       setIsProcessing(false);
       checkoutLock.current = false;
@@ -1079,7 +1055,7 @@ export const PartsPage = () => {
                 {suspendedCarts.map((sc: SuspendedCart) => {
                   const scDisc = typeof sc.discount === 'number'
                     ? sc.discount
-                    : (sc.discount && typeof sc.discount === 'object' ? (sc.discount as any).value : 0) || 0;
+                    : (sc.discount && typeof sc.discount === 'object' ? sc.discount.value : 0) || 0;
                   const scItemsTotal = sc.items.reduce((s, i) => s + i.product.price * i.quantity, 0);
                   const scFinalTotal = Math.max(0, scItemsTotal - scDisc);
 

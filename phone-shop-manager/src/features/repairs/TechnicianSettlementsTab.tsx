@@ -346,8 +346,8 @@ export const TechnicianSettlementsTab: React.FC = () => {
         grossRevenue += rev;
 
         if (t.partsUsed && Array.isArray(t.partsUsed)) {
-          t.partsUsed.forEach((p: any) => {
-            const cost = parseFloat(p.cost) || 0;
+          t.partsUsed.forEach((p) => {
+            const cost = parseFloat(String(p.cost)) || 0;
             const qty = p.quantity || 1;
             totalPartsCost += cost * qty;
           });
@@ -389,8 +389,8 @@ export const TechnicianSettlementsTab: React.FC = () => {
 
       let ticketParts = 0;
       if (t.partsUsed && Array.isArray(t.partsUsed)) {
-        t.partsUsed.forEach((p: any) => {
-          const cost = parseFloat(p.cost) || 0;
+        t.partsUsed.forEach((p) => {
+          const cost = parseFloat(String(p.cost)) || 0;
           const qty = p.quantity || 1;
           ticketParts += cost * qty;
         });
@@ -458,8 +458,8 @@ export const TechnicianSettlementsTab: React.FC = () => {
         dayGross += rev;
         let partsCost = 0;
         if (t.partsUsed && Array.isArray(t.partsUsed)) {
-          t.partsUsed.forEach((p: any) => {
-            partsCost += (parseFloat(p.cost) || 0) * (p.quantity || 1);
+          t.partsUsed.forEach((p) => {
+            partsCost += (parseFloat(String(p.cost)) || 0) * (p.quantity || 1);
           });
         }
         dayParts += partsCost;
@@ -989,8 +989,8 @@ export const TechnicianSettlementsTab: React.FC = () => {
               const partsList: { name: string; cost: number; qty: number }[] = [];
 
               if (t.partsUsed && Array.isArray(t.partsUsed)) {
-                t.partsUsed.forEach((p: any) => {
-                  const c = parseFloat(p.cost) || 0;
+                t.partsUsed.forEach((p) => {
+                  const c = parseFloat(String(p.cost)) || 0;
                   const q = p.quantity || 1;
                   partsCost += c * q;
                   partsList.push({ name: p.name || 'Part', cost: c * q, qty: q });

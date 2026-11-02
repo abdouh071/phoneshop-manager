@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Printer, CheckCircle, Store, FileText, Download, Share2 } from 'lucide-react';
+import { Printer } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import type { SaleTransaction, CustomerDebtEntry } from '../../types';
@@ -25,16 +25,12 @@ const formatDate = (iso: string) =>
     minute: '2-digit',
   });
 
-export const PartsInvoiceModal: React.FC<PartsInvoiceModalProps> = ({
-  transaction,
-  debtEntry,
-  onClose,
-}) => {
+export const PartsInvoiceModal: React.FC<PartsInvoiceModalProps> = ({ transaction, onClose }) => {
   const settings = useSettingsStore();
   const { customers, getCustomerDebtTotal } = useCustomerStore();
-  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
-  const toast = useToast();
-  const [isPrinting, setIsPrinting] = useState(false);
+  usePrivacyStore(s => s.isPrivacyActive);
+  useToast();
+  const [, ] = useState(false);
 
   if (!transaction) return null;
 
@@ -73,7 +69,7 @@ export const PartsInvoiceModal: React.FC<PartsInvoiceModalProps> = ({
           <div className={styles.invoiceLogoGroup}>
             <h2>{settings.storeName || 'PHONE SHOP MANAGER'}</h2>
             <p className={styles.invoiceSub}>Parts Wholesale & Service Hub</p>
-            {'phone' in settings && (settings as any).phone && <p className={styles.invoiceSub}>📞 {(settings as any).phone}</p>}
+            {'phone' in settings && settings.phone && <p className={styles.invoiceSub}>📞 {settings.phone}</p>}
           </div>
 
           <div className={styles.invoiceMetaCol}>

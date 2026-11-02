@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { X, Package, Printer, CheckCircle, AlertTriangle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
 import { usePurchasingStore } from '../../store/purchasingStore';
-import { useInventoryStore } from '../../store/inventoryStore';
 import { useToast } from '../../components/ui/Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { errorMessage } from '../../utils/errorUtils';
 import type { PurchaseOrder } from '../../types';
 import styles from './POViewerModal.module.css';
 
@@ -13,12 +14,9 @@ interface POViewerModalProps {
   onClose: () => void;
 }
 
-const formatDate = (iso: string) =>
-  new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-
 export const POViewerModal: React.FC<POViewerModalProps> = ({ po, onClose }) => {
-  const { updatePO } = usePurchasingStore();
-  const { restockProduct } = useInventoryStore();
+  const { t, i18n } = useTranslation();
+  const { receivePO } = usePurchasingStore();
   const toast = useToast();
 
   const [isReceiving, setIsReceiving] = useState(false);
@@ -30,51 +28,39 @@ export const POViewerModal: React.FC<POViewerModalProps> = ({ po, onClose }) => 
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleDateString(i18n.language, { month: 'short', day: 'numeric', year: 'numeric' });
+
   const handleReceiveToggle = () => {
     setIsReceiving(!isReceiving);
   };
 
   const handleReceiveSubmit = async () => {
+    const receipts = po.items
+      .map(item => ({ productId: item.productId, qty: receiveAmounts[item.productId] ?? 0 }))
+      .filter(r => r.qty > 0);
+
+    if (receipts.length === 0) {
+      toast.warning(t('purchasing.viewer.nothingTitle'), t('purchasing.viewer.nothingBody'));
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      // 1. Calculate new received quantities
-      const newItems = po.items.map(item => {
-        const toReceive = receiveAmounts[item.productId] || 0;
-        return {
-          ...item,
-          receivedQty: item.receivedQty + toReceive
-        };
-      });
-
-      // 2. Determine new status
-      const allFullyReceived = newItems.every(i => i.receivedQty >= i.requestedQty);
-      const someReceived = newItems.some(i => i.receivedQty > 0);
-      const newStatus = allFullyReceived ? 'completed' : (someReceived ? 'partially_received' : po.status);
-
-      // 3. Update PO in Firestore
-      await updatePO(po.id, {
-        items: newItems,
-        status: newStatus
-      });
-
-      // 4. Update Inventory & Log Restocks
-      // We iterate over the items and if we are receiving > 0, we restock it.
-      for (const item of po.items) {
-        const toReceive = receiveAmounts[item.productId] || 0;
-        if (toReceive > 0) {
-          // Note: restockProduct logs to the restock history automatically.
-          await restockProduct(item.productId, toReceive, {
-            supplier: po.supplierName,
-            note: `Received from ${po.poNumber}`,
-            cost: item.unitCost
-          });
-        }
-      }
-
-      toast.success('Stock Received', `Inventory has been updated successfully.`);
+      // One Firestore transaction covers the PO lines, every product's stock and the restock logs,
+      // so a failure leaves nothing half-received.
+      const result = await receivePO(po.id, receipts);
+      const units = result.received.reduce((sum, line) => sum + line.qty, 0);
+      toast.success(
+        t('purchasing.viewer.receivedTitle'),
+        result.status === 'completed'
+          ? t('purchasing.viewer.receivedFullBody', { units, poNumber: result.poNumber })
+          : t('purchasing.viewer.receivedPartialBody', { units, poNumber: result.poNumber })
+      );
       onClose();
     } catch (err) {
-      toast.error('Error', 'Failed to receive stock.');
+      // Keep the modal open: nothing was written, so the quantities can be corrected and retried.
+      toast.error(t('purchasing.viewer.failedTitle'), errorMessage(err) || t('purchasing.viewer.failedBody'));
     } finally {
       setIsSubmitting(false);
     }
@@ -86,42 +72,44 @@ export const POViewerModal: React.FC<POViewerModalProps> = ({ po, onClose }) => 
         <div className={styles.header}>
           <div className={styles.headerLeft}>
             <h2>{po.poNumber}</h2>
-            <span className={styles.statusBadge} data-status={po.status}>{po.status.replace('_', ' ')}</span>
+            <span className={styles.statusBadge} data-status={po.status}>
+              {t(`purchasing.status.${po.status}`)}
+            </span>
           </div>
-          <button className={styles.closeBtn} onClick={onClose}><X size={20} /></button>
+          <button className={styles.closeBtn} onClick={onClose} aria-label={t('common.close')}><X size={20} /></button>
         </div>
 
         <div className={styles.body}>
           <div className={styles.metaGrid}>
             <div>
-              <div className={styles.metaLabel}>Supplier</div>
+              <div className={styles.metaLabel}>{t('purchasing.supplier')}</div>
               <div className={styles.metaValue}>{po.supplierName}</div>
             </div>
             <div>
-              <div className={styles.metaLabel}>Order Date</div>
+              <div className={styles.metaLabel}>{t('purchasing.orderDate')}</div>
               <div className={styles.metaValue}>{formatDate(po.orderDate)}</div>
             </div>
             <div>
-              <div className={styles.metaLabel}>Expected Delivery</div>
+              <div className={styles.metaLabel}>{t('purchasing.viewer.expectedDelivery')}</div>
               <div className={styles.metaValue}>{po.expectedDelivery ? formatDate(po.expectedDelivery) : '—'}</div>
             </div>
             <div>
-              <div className={styles.metaLabel}>Total Amount</div>
+              <div className={styles.metaLabel}>{t('purchasing.viewer.totalAmount')}</div>
               <div className={styles.metaValue}>{formatCurrency(po.totalAmount)}</div>
             </div>
           </div>
 
           <div className={styles.itemsSection}>
-            <h3>Order Items</h3>
+            <h3>{t('purchasing.viewer.orderItems')}</h3>
             <div className={styles.tableWrap}>
               <table className={styles.table}>
                 <thead>
                   <tr>
-                    <th>Product</th>
-                    <th>Unit Cost</th>
-                    <th>Ordered</th>
-                    <th>Received</th>
-                    {isReceiving && <th>Receive Now</th>}
+                    <th>{t('purchasing.viewer.product')}</th>
+                    <th>{t('purchasing.viewer.unitCost')}</th>
+                    <th>{t('purchasing.viewer.ordered')}</th>
+                    <th>{t('purchasing.viewer.received')}</th>
+                    {isReceiving && <th>{t('purchasing.viewer.receiveNow')}</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -145,16 +133,17 @@ export const POViewerModal: React.FC<POViewerModalProps> = ({ po, onClose }) => 
                         {isReceiving && (
                           <td>
                             {!isFullyReceived ? (
-                              <input 
-                                type="number" 
-                                min="0" 
+                              <input
+                                type="number"
+                                min="0"
                                 max={item.requestedQty - item.receivedQty}
+                                aria-label={t('purchasing.viewer.receiveNow')}
                                 className={styles.receiveInput}
                                 value={receiveAmounts[item.productId] ?? 0}
                                 onChange={e => setReceiveAmounts(prev => ({ ...prev, [item.productId]: parseInt(e.target.value) || 0 }))}
                               />
                             ) : (
-                              <span className={styles.doneText}>Done</span>
+                              <span className={styles.doneText}>{t('common.done')}</span>
                             )}
                           </td>
                         )}
@@ -165,17 +154,17 @@ export const POViewerModal: React.FC<POViewerModalProps> = ({ po, onClose }) => 
               </table>
             </div>
           </div>
-          
+
           {po.notes && (
             <div className={styles.notesSection}>
-              <strong>Notes:</strong> {po.notes}
+              <strong>{t('common.notes')}:</strong> {po.notes}
             </div>
           )}
 
           {isReceiving && (
             <div className={styles.warningBanner}>
               <AlertTriangle size={16} />
-              <span>Receiving these items will immediately update your active inventory stock and record a restock log for each product.</span>
+              <span>{t('purchasing.viewer.receiveWarning')}</span>
             </div>
           )}
         </div>
@@ -183,18 +172,18 @@ export const POViewerModal: React.FC<POViewerModalProps> = ({ po, onClose }) => 
         <div className={styles.footer}>
           {!isReceiving ? (
             <>
-              <Button variant="ghost" onClick={() => window.print()} leftIcon={<Printer size={16} />}>Print PO</Button>
+              <Button variant="ghost" onClick={() => window.print()} leftIcon={<Printer size={16} />}>{t('purchasing.viewer.printPO')}</Button>
               {po.status !== 'completed' && po.status !== 'cancelled' && (
                 <Button leftIcon={<Package size={16} />} onClick={handleReceiveToggle}>
-                  Receive Stock
+                  {t('purchasing.viewer.receiveStock')}
                 </Button>
               )}
             </>
           ) : (
             <>
-              <Button variant="ghost" onClick={handleReceiveToggle} disabled={isSubmitting}>Cancel</Button>
+              <Button variant="ghost" onClick={handleReceiveToggle} disabled={isSubmitting}>{t('common.cancel')}</Button>
               <Button leftIcon={<CheckCircle size={16} />} onClick={handleReceiveSubmit} isLoading={isSubmitting}>
-                Confirm Receipt
+                {t('purchasing.viewer.confirmReceipt')}
               </Button>
             </>
           )}

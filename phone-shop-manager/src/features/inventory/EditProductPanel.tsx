@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SlidePanel } from '../../components/ui/SlidePanel';
 import { Button } from '../../components/ui/Button';
 import { Input, TextArea } from '../../components/ui/Input';
@@ -7,7 +8,7 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useToast } from '../../components/ui/Toast';
 import { useSettingsStore } from '../../store/settingsStore';
-import { formatCurrency, getCurrencySymbol } from '../../utils/formatCurrency';
+import { getCurrencySymbol } from '../../utils/formatCurrency';
 import { ProfitMarginCalculator } from '../../components/ui/ProfitMarginCalculator';
 import type { PhoneModel, AccessorySubCategory } from '../../types';
 import { ACCESSORY_SUB_CATEGORY_OPTIONS } from '../../utils/accessorySubCategories';
@@ -26,6 +27,7 @@ const CATEGORY_OPTIONS = [
 ];
 
 export const EditProductPanel: React.FC<EditProductPanelProps> = ({ product, onClose }) => {
+  const { t } = useTranslation();
   const { currency } = useSettingsStore();
   const symbol = getCurrencySymbol(currency);
   const [name, setName] = useState('');
@@ -100,7 +102,7 @@ export const EditProductPanel: React.FC<EditProductPanelProps> = ({ product, onC
 
     setIsSubmitting(true);
     // Note: SKU is strictly excluded from updates so it is NEVER changed or regenerated when name is edited
-    await updateProduct(product.id, {
+    const outcome = await updateProduct(product.id, {
       name: trimmedName,
       model: trimmedModel,
       price: priceNum,
@@ -113,24 +115,33 @@ export const EditProductPanel: React.FC<EditProductPanelProps> = ({ product, onC
       lowStockThreshold: threshold,
       notes: notes.trim(),
     });
-    toast.success('Product updated', `${trimmedName} ${trimmedModel} saved successfully.`);
+    if (outcome === 'committed') {
+      toast.success('Product updated', `${trimmedName} ${trimmedModel} saved successfully.`);
+    } else if (outcome === 'queued') {
+      toast.info('Saved offline', `${trimmedName} ${trimmedModel} is kept on this device and syncs when you reconnect.`);
+    } else {
+      toast.warning('Not saved to the server', `${trimmedName} ${trimmedModel} is kept on this device and will retry syncing automatically.`);
+    }
     setIsSubmitting(false);
     onClose();
   };
 
   const handleDelete = async () => {
     setIsSubmitting(true);
-    await deleteProduct(product.id);
-    toast.success('Product deleted', `${product.name} ${product.model} has been removed.`);
+    const label = `${product.name} ${product.model}`.trim();
+    const outcome = await deleteProduct(product.id);
+    if (outcome === 'committed') {
+      toast.success(t('inventory.deletedTitle'), t('inventory.deletedDesc', { name: label }));
+    } else if (outcome === 'queued') {
+      // The server document is still there; only this till stopped showing it.
+      toast.info(t('inventory.deleteQueuedTitle'), t('inventory.deleteQueuedDesc', { name: label }));
+    } else {
+      toast.error(t('inventory.deleteFailedTitle'), t('inventory.deleteFailedDesc', { name: label }));
+    }
     setIsSubmitting(false);
     setShowConfirmDelete(false);
-    onClose();
+    if (outcome !== 'failed') onClose();
   };
-
-  const sellPrice = Number(price);
-  const costNum = Number(costPrice);
-  const margin = sellPrice > 0 ? (((sellPrice - costNum) / sellPrice) * 100).toFixed(1) : '0';
-  const profit = (sellPrice - costNum).toFixed(2);
 
   return (
     <>

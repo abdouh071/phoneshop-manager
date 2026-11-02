@@ -1,32 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import {
-  AlertTriangle,
-  AlertCircle,
-  CheckCircle2,
-  XCircle,
-  ChevronDown,
-  Eye,
-  Edit,
-  Trash2,
-  Plus,
-  Printer,
-  DollarSign,
-  TrendingUp,
-  Smartphone,
-  ShieldCheck,
-  Zap,
-  MapPin,
-  CornerDownRight,
-  Sparkles,
-  Package,
-  Layers,
-  ArrowRight,
-  FileSpreadsheet
-} from 'lucide-react';
+import { AlertTriangle, AlertCircle, CheckCircle2, XCircle, ChevronDown, Eye, Edit, Plus, Printer, DollarSign, Smartphone, ShieldCheck, MapPin, Package, Layers, FileSpreadsheet } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { PhoneModel } from '../../types';
 import { ACCESSORY_SUB_CATEGORIES, getSubCategoryMeta } from '../../utils/accessorySubCategories';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { usePrivacyStore } from '../../store/privacyStore';
+import type { StockWriteResult } from '../../store/inventoryStore';
+import { useToast } from '../../components/ui/Toast';
 import styles from './InventoryTables.module.css';
 
 export interface InventoryTablesViewProps {
@@ -34,7 +14,7 @@ export interface InventoryTablesViewProps {
   canViewCosts: boolean;
   onSelectProduct: (product: PhoneModel) => void;
   onEditProduct: (product: PhoneModel) => void;
-  onRestockProduct: (product: PhoneModel, amount: number, meta?: { supplier?: string; note?: string; cost?: number }) => Promise<void>;
+  onRestockProduct: (product: PhoneModel, amount: number, meta?: { supplier?: string; note?: string; cost?: number }) => Promise<StockWriteResult>;
   onWriteOffProduct: (product: PhoneModel) => void;
   onPrintLabel?: (product: PhoneModel) => void;
   statusFilter?: string;
@@ -75,21 +55,9 @@ const getBrandAvatar = (name: string = '', model: string = '') => {
   return { char: (name[0] || 'P').toUpperCase(), cls: styles.avatarGeneric };
 };
 
-export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
-  products,
-  canViewCosts,
-  onSelectProduct,
-  onEditProduct,
-  onRestockProduct,
-  onWriteOffProduct,
-  onPrintLabel,
-  statusFilter,
-  categoryFilter,
-  subCategoryFilter,
-  onSelectCategory,
-  onSelectSubCategory,
-  onExportLowStock,
-}) => {
+export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({ products, canViewCosts, onSelectProduct, onEditProduct, onRestockProduct, onWriteOffProduct, onPrintLabel, statusFilter, categoryFilter, subCategoryFilter, onExportLowStock }) => {
+  const { t } = useTranslation();
+  const toast = useToast();
   const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
 
   // Collapsible state for each section
@@ -232,11 +200,28 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
   }, [deviceVaultProducts]);
 
   // Fast Restock Handler
+  const reportRestock = (product: PhoneModel, result: StockWriteResult): void => {
+    if (result.outcome === 'queued') {
+      // Only this device moved; the server stock is untouched until the queue drains.
+      toast.info(
+        t('inventory.restockQueuedTitle'),
+        t('inventory.restockQueuedDesc', { amt: result.applied, name: product.name })
+      );
+    } else if (result.outcome === 'failed') {
+      toast.error(t('inventory.restockFailedTitle'), t('inventory.restockFailedDesc', { name: product.name }));
+    } else {
+      toast.success(
+        t('inventory.restockSuccessTitle'),
+        t('inventory.restockSuccessDesc', { amt: result.applied, name: product.name })
+      );
+    }
+  };
+
   const handleQuickPreset = async (e: React.MouseEvent, product: PhoneModel, amount: number) => {
     e.stopPropagation();
     try {
       setLoadingRestockId(product.id);
-      await onRestockProduct(product, amount);
+      reportRestock(product, await onRestockProduct(product, amount));
     } finally {
       setLoadingRestockId(null);
     }
@@ -251,10 +236,13 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
 
     try {
       setLoadingRestockId(product.id);
-      await onRestockProduct(product, qty, {
+      const result = await onRestockProduct(product, qty, {
         cost: current.cost ? parseFloat(current.cost) : undefined,
       });
-      setInlineRestock(prev => ({ ...prev, [product.id]: { open: false, qty: '', cost: '' } }));
+      reportRestock(product, result);
+      if (result.outcome !== 'failed') {
+        setInlineRestock(prev => ({ ...prev, [product.id]: { open: false, qty: '', cost: '' } }));
+      }
     } finally {
       setLoadingRestockId(null);
     }
@@ -347,7 +335,7 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                               </span>
                               <div className={styles.productSubRow}>
                                 {hasValidStorage(product) && <span className={styles.specChip}>{product.storage}</span>}
-                                {hasValidColor(product.color) && (
+                                {hasValidColor(product.color) && product.color && (
                                   <span className={styles.colorChip}>
                                     <span className={styles.colorDot} style={{ backgroundColor: product.color.toLowerCase() }} />
                                     {product.color}
@@ -551,7 +539,7 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             {hasValidStorage(product) && <span className={styles.specChip}>{product.storage}</span>}
-                            {hasValidColor(product.color) && (
+                            {hasValidColor(product.color) && product.color && (
                               <span className={styles.colorChip}>
                                 <span className={styles.colorDot} style={{ backgroundColor: product.color.toLowerCase() }} />
                                 {product.color}
@@ -855,7 +843,7 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                               </span>
                               <div className={styles.productSubRow}>
                                 {hasValidStorage(product) && <span className={styles.specChip}>{product.storage}</span>}
-                                {hasValidColor(product.color) && (
+                                {hasValidColor(product.color) && product.color && (
                                   <span className={styles.colorChip}>
                                     <span className={styles.colorDot} style={{ backgroundColor: product.color.toLowerCase() }} />
                                     {product.color}
@@ -1096,7 +1084,7 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({
                               </span>
                               <div className={styles.productSubRow}>
                                 {hasValidStorage(product) && <span className={styles.specChip}>{product.storage}</span>}
-                                {hasValidColor(product.color) && (
+                                {hasValidColor(product.color) && product.color && (
                                   <span className={styles.colorChip}>
                                     <span className={styles.colorDot} style={{ backgroundColor: product.color.toLowerCase() }} />
                                     {product.color}

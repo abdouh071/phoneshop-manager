@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { repairService } from '../../services/repairService';
 import { settingsService } from '../../services/settingsService';
 import type { RepairTicket } from '../../types';
@@ -15,15 +16,14 @@ import styles from './CustomerTracking.module.css';
 interface StepConfig {
   key: string;
   icon: string;
-  label: string;
-  description: string;
+  labelKey: string;
 }
 
 const STEPS: StepConfig[] = [
-  { key: 'pending', icon: '⏳', label: 'Intake & Diagnostics', description: 'Device received, initial inspection underway.' },
-  { key: 'in_progress', icon: '🔧', label: 'In Progress', description: 'Technician is actively repairing your device.' },
-  { key: 'ready', icon: '📦', label: 'Ready for Pickup', description: 'Repair completed, quality checks passed. Your device is waiting at the counter.' },
-  { key: 'completed', icon: '✅', label: 'Completed & Picked Up', description: 'Device delivered. Warranty active.' },
+  { key: 'pending', icon: '⏳', labelKey: 'intake' },
+  { key: 'in_progress', icon: '🔧', labelKey: 'inProgress' },
+  { key: 'ready', icon: '📦', labelKey: 'ready' },
+  { key: 'completed', icon: '✅', labelKey: 'completed' },
 ];
 
 const STATUS_ORDER: Record<string, number> = {
@@ -44,6 +44,7 @@ const SearchLanding: React.FC<{
   shopName: string;
   initialTicketNumber?: string;
 }> = ({ onSearch, isSearching, searchError, shopName, initialTicketNumber = '' }) => {
+  const { t } = useTranslation();
   const [ticketInput, setTicketInput] = useState(initialTicketNumber);
   const [pinInput, setPinInput] = useState('');
 
@@ -58,16 +59,16 @@ const SearchLanding: React.FC<{
     <div className={styles.searchLanding}>
       <div className={styles.logoIcon}>🔍</div>
       <div>
-        <h1 className={styles.searchTitle}>Track Your Repair</h1>
+        <h1 className={styles.searchTitle}>{t('tracking.trackYourRepair')}</h1>
         <p className={styles.searchSubtitle}>
-          Enter your ticket number and PIN to see the live status of your device repair at {shopName || 'our shop'}.
+          {t('tracking.enterTicketAndPin', { shop: shopName || t('tracking.ourShop') })}
         </p>
       </div>
       <form className={styles.searchBox} onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <input
           type="text"
           className={styles.searchInput}
-          placeholder="Ticket Number (e.g. TKT-0042)"
+          placeholder={t('tracking.ticketNumberPlaceholder')}
           value={ticketInput}
           onChange={(e) => setTicketInput(e.target.value)}
           autoFocus={!initialTicketNumber}
@@ -77,7 +78,7 @@ const SearchLanding: React.FC<{
         <input
           type="text"
           className={styles.searchInput}
-          placeholder="4-Digit PIN (e.g. A8X2)"
+          placeholder={t('tracking.pinPlaceholder')}
           value={pinInput}
           onChange={(e) => setPinInput(e.target.value)}
           autoFocus={!!initialTicketNumber}
@@ -92,10 +93,10 @@ const SearchLanding: React.FC<{
           {isSearching ? (
             <>
               <div className={styles.loadingSpinner} style={{ width: 18, height: 18, borderWidth: 2 }} />
-              Searching…
+              {t('tracking.searching')}
             </>
           ) : (
-            <>🔎 Look Up Ticket</>
+            <>🔎 {t('tracking.lookUpTicket')}</>
           )}
         </button>
       </form>
@@ -109,6 +110,7 @@ const SearchLanding: React.FC<{
 // ============================================================
 
 export const CustomerTrackingPage: React.FC = () => {
+  const { t, i18n } = useTranslation();
   const { ticketNumber } = useParams<{ ticketNumber?: string }>();
   const [searchParams] = useSearchParams();
   const pin = searchParams.get('pin') || '';
@@ -190,22 +192,22 @@ export const CustomerTrackingPage: React.FC = () => {
       if (found) {
         navigate(`/track/${found.ticketNumber}?pin=${queryPin.trim().toUpperCase()}`, { replace: true });
       } else {
-        setSearchError(`Invalid Ticket Number or PIN. Please double-check your receipt.`);
+        setSearchError(t('tracking.invalidTicketOrPin'));
       }
     } catch {
       setIsSearching(false);
-      setSearchError('Unable to look up the ticket. Please check your connection and try again.');
+      setSearchError(t('tracking.lookupFailed'));
     }
-  }, [navigate]);
+  }, [navigate, t]);
 
   // ---- Format helpers ----
   const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString('en-US', {
+    new Date(iso).toLocaleDateString(i18n.language, {
       month: 'short', day: 'numeric', year: 'numeric',
     });
 
   const formatDateTime = (iso: string) =>
-    new Date(iso).toLocaleDateString('en-US', {
+    new Date(iso).toLocaleDateString(i18n.language, {
       month: 'short', day: 'numeric', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
@@ -231,7 +233,7 @@ export const CustomerTrackingPage: React.FC = () => {
       <div className={styles.trackingPage}>
         <div className={styles.loadingState}>
           <div className={styles.loadingSpinner} />
-          <span className={styles.loadingText}>Fetching your repair status…</span>
+          <span className={styles.loadingText}>{t('tracking.fetchingStatus')}</span>
         </div>
       </div>
     );
@@ -243,12 +245,12 @@ export const CustomerTrackingPage: React.FC = () => {
       <div className={styles.trackingPage}>
         <div className={styles.notFound}>
           <div className={styles.notFoundIcon}>🔍</div>
-          <h2 className={styles.notFoundTitle}>Ticket Not Found</h2>
+          <h2 className={styles.notFoundTitle}>{t('tracking.ticketNotFound')}</h2>
           <p className={styles.notFoundDesc}>
-            We couldn't find a matching repair ticket for <strong>{ticketNumber}</strong> with that PIN. Please verify the details on your intake slip.
+            {t('tracking.notFoundDesc', { ticket: ticketNumber })}
           </p>
           <a className={styles.backLink} href="/track">
-            ← Search again
+            ← {t('tracking.searchAgain')}
           </a>
         </div>
       </div>
@@ -270,7 +272,7 @@ export const CustomerTrackingPage: React.FC = () => {
   const shopPhone = shopSettings.storePhone || '';
   const cleanPhone = shopPhone.replace(/[^0-9+]/g, '');
   const whatsappMsg = encodeURIComponent(
-    `Hello! I am inquiring about my repair ticket #${ticket.ticketNumber}. Could you please provide an update?`
+    t('tracking.whatsappMessage', { ticket: ticket.ticketNumber })
   );
 
   // Find timestamp for each status from history
@@ -286,18 +288,18 @@ export const CustomerTrackingPage: React.FC = () => {
 
         {/* ---- Header ---- */}
         <div className={styles.cardHeader}>
-          <p className={styles.shopName}>{shopSettings.storeName || 'Phone Repair Shop'}</p>
+          <p className={styles.shopName}>{shopSettings.storeName || t('tracking.phoneRepairShop')}</p>
           <h1 className={styles.ticketNumber}>{ticket.ticketNumber}</h1>
           <p className={styles.deviceName}>{ticket.deviceBrand} {ticket.deviceModel}</p>
           <div className={styles.liveIndicator}>
             <span className={styles.liveDot} />
-            Live Updates
+            {t('tracking.liveUpdates')}
           </div>
         </div>
 
         {/* ---- Status Stepper ---- */}
         <div className={styles.stepperSection}>
-          <h2 className={styles.stepperTitle}>Repair Progress</h2>
+          <h2 className={styles.stepperTitle}>{t('tracking.repairProgress')}</h2>
           <div className={styles.stepper}>
             {STEPS.map((step, index) => {
               let state: 'completed' | 'active' | 'future' = 'future';
@@ -333,8 +335,8 @@ export const CustomerTrackingPage: React.FC = () => {
                     {state === 'completed' ? '✓' : step.icon}
                   </div>
                   <div className={styles.stepContent}>
-                    <p className={styles.stepLabel}>{step.label}</p>
-                    <p className={styles.stepDesc}>{step.description}</p>
+                    <p className={styles.stepLabel}>{t(`tracking.steps.${step.labelKey}.label`)}</p>
+                    <p className={styles.stepDesc}>{t(`tracking.steps.${step.labelKey}.desc`)}</p>
                     {timestamp && (
                       <span className={styles.stepTimestamp}>{formatDateTime(timestamp)}</span>
                     )}
@@ -347,46 +349,46 @@ export const CustomerTrackingPage: React.FC = () => {
           {/* Special statuses */}
           {isReturned && (
             <div className={styles.returnedBadge}>
-              ⚠️ Device returned for warranty inspection
+              ⚠️ {t('tracking.returnedForWarranty')}
               {ticket.returnReason && <span> — {ticket.returnReason}</span>}
             </div>
           )}
           {isCancelled && (
             <div className={styles.cancelledBadge}>
-              ✕ This repair has been cancelled
+              ✕ {t('tracking.repairCancelled')}
             </div>
           )}
         </div>
 
         {/* ---- Device & Issue Info ---- */}
         <div className={styles.infoSection}>
-          <h2 className={styles.infoTitle}>Device Details</h2>
+          <h2 className={styles.infoTitle}>{t('tracking.deviceDetails')}</h2>
           <div className={styles.infoGrid}>
             <div className={styles.infoItem}>
-              <span className={styles.infoLabel}>Device</span>
+              <span className={styles.infoLabel}>{t('tracking.device')}</span>
               <span className={styles.infoValue}>{ticket.deviceBrand} {ticket.deviceModel}</span>
             </div>
             <div className={styles.infoItem}>
-              <span className={styles.infoLabel}>Drop-off Date</span>
+              <span className={styles.infoLabel}>{t('tracking.dropOffDate')}</span>
               <span className={styles.infoValue}>{formatDate(ticket.createdAt)}</span>
             </div>
             {ticket.estimatedCompletionDate && (
               <div className={styles.infoItem}>
-                <span className={styles.infoLabel}>Est. Completion</span>
+                <span className={styles.infoLabel}>{t('tracking.estimatedCompletion')}</span>
                 <span className={styles.infoValue}>{formatDate(ticket.estimatedCompletionDate)}</span>
               </div>
             )}
             <div className={styles.infoItem} style={{ gridColumn: '1 / -1' }}>
-              <span className={styles.infoLabel}>Reported Issue</span>
+              <span className={styles.infoLabel}>{t('tracking.reportedIssue')}</span>
               <span className={`${styles.infoValue} ${styles.issueDesc}`}>
-                {ticket.issueDescription || 'Diagnostic required'}
+                {ticket.issueDescription || t('tracking.diagnosticRequired')}
               </span>
             </div>
             {ticket.remark && (
               <div className={styles.remarkBox}>
                 <div className={styles.remarkHeader}>
                   <span className={styles.remarkIcon}>🔍</span>
-                  <span className={styles.remarkTitle}>Technician Remark & Workshop Findings</span>
+                  <span className={styles.remarkTitle}>{t('tracking.technicianRemark')}</span>
                 </div>
                 <p className={styles.remarkText}>{ticket.remark}</p>
               </div>
@@ -396,11 +398,11 @@ export const CustomerTrackingPage: React.FC = () => {
 
         {/* ---- Financial Summary ---- */}
         <div className={styles.infoSection}>
-          <h2 className={styles.infoTitle}>Financial Summary</h2>
+          <h2 className={styles.infoTitle}>{t('tracking.financialSummary')}</h2>
           <div>
             <div className={styles.financeRow}>
               <span className={styles.financeLabel}>
-                {ticket.actualCost ? 'Final Cost' : 'Estimated Cost'}
+                {ticket.actualCost ? t('tracking.finalCost') : t('tracking.estimatedCost')}
               </span>
               <span className={styles.financeValue}>
                 {formatCurrency(totalCost, false)}
@@ -408,16 +410,16 @@ export const CustomerTrackingPage: React.FC = () => {
             </div>
             {deposit > 0 && (
               <div className={styles.financeRow}>
-                <span className={styles.financeLabel}>Deposit Paid</span>
+                <span className={styles.financeLabel}>{t('tracking.depositPaid')}</span>
                 <span className={styles.financeValue} style={{ color: '#4ade80' }}>
                   −{formatCurrency(deposit, false)}
                 </span>
               </div>
             )}
             <div className={styles.financeRow}>
-              <span className={styles.financeLabel}>Balance Due</span>
+              <span className={styles.financeLabel}>{t('tracking.balanceDue')}</span>
               {isPaid ? (
-                <span className={styles.paidBadge}>✓ PAID IN FULL</span>
+                <span className={styles.paidBadge}>✓ {t('common.paidInFull')}</span>
               ) : (
                 <span className={styles.balanceBadge}>
                   {formatCurrency(balanceDue, false)}
@@ -434,7 +436,7 @@ export const CustomerTrackingPage: React.FC = () => {
               href={`tel:${cleanPhone}`}
               className={`${styles.contactBtn} ${styles.callBtn}`}
             >
-              📞 Call Shop
+              📞 {t('tracking.callShop')}
             </a>
             <a
               href={formatWhatsAppUrl(cleanPhone, whatsappMsg) || `https://wa.me/?text=${encodeURIComponent(whatsappMsg)}`}
@@ -442,7 +444,7 @@ export const CustomerTrackingPage: React.FC = () => {
               rel="noopener noreferrer"
               className={`${styles.contactBtn} ${styles.whatsappBtn}`}
             >
-              💬 WhatsApp
+              💬 {t('tracking.whatsapp')}
             </a>
           </div>
         )}
@@ -456,8 +458,8 @@ export const CustomerTrackingPage: React.FC = () => {
 
         {/* ---- Footer ---- */}
         <div className={styles.trackingFooter}>
-          <p>This page updates automatically in real-time.</p>
-          <p>Powered by {shopSettings.storeName || 'Phone Repair Manager'}</p>
+          <p>{t('tracking.autoUpdates')}</p>
+          <p>{t('tracking.poweredBy', { shop: shopSettings.storeName || 'Phone Repair Manager' })}</p>
         </div>
       </div>
     </div>

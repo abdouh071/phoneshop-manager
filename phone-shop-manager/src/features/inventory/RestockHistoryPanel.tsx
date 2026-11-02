@@ -23,11 +23,13 @@ export const RestockHistoryPanel: React.FC<RestockHistoryPanelProps> = ({ isOpen
   const { parts } = useInventoryStore();
   const [entries, setEntries] = useState<RestockEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
     if (!isOpen) return;
     setIsLoading(true);
+    setLoadError(false);
     restockService.getAll()
       .then(allEntries => {
         const partIds = new Set(parts.map(p => p.id));
@@ -37,6 +39,10 @@ export const RestockHistoryPanel: React.FC<RestockHistoryPanelProps> = ({ isOpen
           return true;
         });
         setEntries(filteredEntries);
+      })
+      .catch(() => {
+        setEntries([]);
+        setLoadError(true);
       })
       .finally(() => setIsLoading(false));
   }, [isOpen, parts]);
@@ -116,6 +122,8 @@ export const RestockHistoryPanel: React.FC<RestockHistoryPanelProps> = ({ isOpen
         <div className={styles.tableWrap}>
           {isLoading ? (
             <div className={styles.empty}>Loading restock history…</div>
+          ) : loadError ? (
+            <div className={styles.empty}>Failed to load restock history. Please try again.</div>
           ) : filtered.length === 0 ? (
             <div className={styles.empty}>
               {entries.length === 0

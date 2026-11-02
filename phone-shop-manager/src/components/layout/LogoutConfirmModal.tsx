@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { LogOut, AlertTriangle, ShieldCheck, User as UserIcon, Lock } from 'lucide-react';
+import { LogOut, AlertTriangle, Lock } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
-import { Badge } from '../ui/Badge';
+import '../ui/Badge';
 import { useAuthStore } from '../../store/authStore';
 import { useCartStore } from '../../store/cartStore';
 import { useToast } from '../ui/Toast';
@@ -28,7 +28,7 @@ export const LogoutConfirmModal: React.FC<LogoutConfirmModalProps> = ({ isOpen, 
       await logout();
       toast.info('Logged Out', 'You have been safely signed out.');
       onClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Logout error:', err);
       // Even if an error occurs, force close modal
       onClose();

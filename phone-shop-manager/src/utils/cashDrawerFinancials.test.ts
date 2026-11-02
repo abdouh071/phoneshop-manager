@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { isSameLocalDate, toDateStr } from '../store/endOfDayStore';
-import type { SaleTransaction } from '../types';
+import type { PhoneModel, SaleTransaction } from '../types';
 
 describe('Cash Drawer Financials & Date Scoping', () => {
   const todayStr = toDateStr(new Date());
@@ -13,7 +13,7 @@ describe('Cash Drawer Financials & Date Scoping', () => {
     {
       id: 'tx-1',
       date: new Date().toISOString(),
-      items: [{ product: { id: 'p1', name: 'Case', price: 1000 } as any, quantity: 1 }],
+      items: [{ product: { id: 'p1', name: 'Case', price: 1000 } as PhoneModel, quantity: 1 }],
       subtotal: 1000,
       total: 1000,
       payments: [{ method: 'cash', amount: 1000 }],
@@ -23,7 +23,7 @@ describe('Cash Drawer Financials & Date Scoping', () => {
     {
       id: 'tx-2',
       date: new Date().toISOString(),
-      items: [{ product: { id: 'p2', name: 'Charger', price: 2500 } as any, quantity: 1 }],
+      items: [{ product: { id: 'p2', name: 'Charger', price: 2500 } as PhoneModel, quantity: 1 }],
       subtotal: 2500,
       total: 2500,
       payments: [{ method: 'card', amount: 2500 }],
@@ -33,7 +33,7 @@ describe('Cash Drawer Financials & Date Scoping', () => {
     {
       id: 'tx-3',
       date: new Date().toISOString(),
-      items: [{ product: { id: 'p3', name: 'Cable', price: 500 } as any, quantity: 1 }],
+      items: [{ product: { id: 'p3', name: 'Cable', price: 500 } as PhoneModel, quantity: 1 }],
       subtotal: 500,
       total: 500,
       payments: [{ method: 'cash', amount: 500 }],
@@ -43,7 +43,7 @@ describe('Cash Drawer Financials & Date Scoping', () => {
     {
       id: 'tx-4',
       date: new Date().toISOString(),
-      items: [{ product: { id: 'p4', name: 'Film', price: 800 } as any, quantity: 1 }],
+      items: [{ product: { id: 'p4', name: 'Film', price: 800 } as PhoneModel, quantity: 1 }],
       subtotal: 800,
       total: 800,
       payments: [{ method: 'cash', amount: 800 }],
@@ -53,17 +53,17 @@ describe('Cash Drawer Financials & Date Scoping', () => {
     {
       id: 'tx-5',
       date: new Date().toISOString(),
-      items: [{ product: { id: 'p5', name: 'Holder', price: 1200 } as any, quantity: 1 }],
+      items: [{ product: { id: 'p5', name: 'Holder', price: 1200 } as PhoneModel, quantity: 1 }],
       subtotal: 1200,
       total: 1200,
       payments: [{ method: 'cash', amount: 1200 }],
-      status: 'cancelled' as any,
+      status: 'cancelled',
     },
     // 6. Valid cash sale from YESTERDAY: 3000 DA (must NOT leak into today)
     {
       id: 'tx-6',
       date: yesterdayObj.toISOString(),
-      items: [{ product: { id: 'p6', name: 'Battery', price: 3000 } as any, quantity: 1 }],
+      items: [{ product: { id: 'p6', name: 'Battery', price: 3000 } as PhoneModel, quantity: 1 }],
       subtotal: 3000,
       total: 3000,
       payments: [{ method: 'cash', amount: 3000 }],
@@ -154,20 +154,21 @@ describe('Cash Drawer Financials & Date Scoping', () => {
     const legacyTx: SaleTransaction = {
       id: 'tx-legacy',
       date: new Date().toISOString(),
-      items: [{ product: { id: 'p7', name: 'Adaptor', price: 600 } as any, quantity: 1 }],
+      items: [{ product: { id: 'p7', name: 'Adaptor', price: 600 } as PhoneModel, quantity: 1 }],
       subtotal: 600,
       total: 600,
-      payments: [] as any, // missing/empty payments
+      payments: [], // missing/empty payments
       status: 'completed',
     };
 
     const mixedCaseTx: SaleTransaction = {
       id: 'tx-mixed',
       date: new Date().toISOString(),
-      items: [{ product: { id: 'p8', name: 'Stylus', price: 400 } as any, quantity: 1 }],
+      items: [{ product: { id: 'p8', name: 'Stylus', price: 400 } as PhoneModel, quantity: 1 }],
       subtotal: 400,
       total: 400,
-      payments: [{ method: 'CASH' as any, amount: 400 }],
+      // Deliberately uppercase: legacy rows store payment methods outside the current union
+      payments: [{ method: 'CASH', amount: 400 }] as unknown as SaleTransaction['payments'],
       status: 'completed',
     };
 
@@ -224,7 +225,7 @@ describe('Cash Drawer Financials & Date Scoping', () => {
 
     // Gross recognized revenue from completed sales already excludes refunded status transactions
     const grossRevenue = completedTxTotal + repairsRevenue + partsRevenue; // 70,000 DA
-    const refundsTotal = 10000; // 10,000 DA refunded transaction
+     // 10,000 DA refunded transaction
 
     // Net revenue should equal recognized gross revenue (since refunded transactions were already filtered out)
     const netRevenue = grossRevenue;

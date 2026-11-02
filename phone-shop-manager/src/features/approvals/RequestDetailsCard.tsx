@@ -1,21 +1,7 @@
 import React from 'react';
-import {
-  Package,
-  Smartphone,
-  Wrench,
-  Receipt,
-  User,
-  Tag,
-  Layers,
-  DollarSign,
-  AlertCircle,
-  FileText,
-  Clock,
-  Shield,
-  CreditCard,
-  Hash,
-} from 'lucide-react';
+import { Package, Smartphone, Wrench, Receipt, FileText, Clock } from 'lucide-react';
 import { formatCurrency } from '../../utils/formatCurrency';
+import type { ApprovalActionData } from '../../types';
 
 export interface WorkerInfo {
   uid: string;
@@ -28,36 +14,25 @@ export interface WorkerInfo {
 export interface RequestDetailsCardProps {
   actionLabel?: string;
   actionType?: string;
-  actionData?: Record<string, any> | null;
+  actionData?: ApprovalActionData | null;
   requestedBy?: WorkerInfo;
   requestedAt?: string;
   reason?: string;
   compact?: boolean;
 }
 
-export const RequestDetailsCard: React.FC<RequestDetailsCardProps> = ({
-  actionLabel,
-  actionType,
-  actionData,
-  requestedBy,
-  requestedAt,
-  reason,
-  compact = false,
-}) => {
+export const RequestDetailsCard: React.FC<RequestDetailsCardProps> = ({ actionLabel, actionData, requestedBy, requestedAt, reason, compact = false }) => {
   // Extract known item data if available
   const productName = actionData?.productName || actionData?.partName || actionData?.itemName;
   const model = actionData?.model || actionData?.deviceModel;
   const sku = actionData?.sku || actionData?.partNumber;
   const category = actionData?.category;
   const price = actionData?.price !== undefined ? actionData.price : actionData?.catalogPrice;
-  const cost = actionData?.cost !== undefined ? actionData.cost : actionData?.costPrice;
   const currentStock = actionData?.currentStock !== undefined ? actionData.currentStock : actionData?.stock;
   const customerName = actionData?.customerName;
   const ticketNumber = actionData?.ticketNumber;
   const discountAmount = actionData?.discountAmount;
-  const cartTotal = actionData?.cartTotal;
   const invoiceNumber = actionData?.invoiceNumber;
-  const writeOffReason = actionData?.writeOffReason;
   const restockAmount = actionData?.restockAmount;
 
   // Determine role styling

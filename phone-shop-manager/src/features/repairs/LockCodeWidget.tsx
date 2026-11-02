@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Lock, Key, Hash, Eye, EyeOff, RotateCcw, Copy, Check, Grid, ShieldAlert } from 'lucide-react';
+import { Lock, Hash, Eye, EyeOff, Copy, Check, Grid } from 'lucide-react';
 import styles from './LockCodeWidget.module.css';
 
 // 3x3 Grid point definition (dots 1 to 9)

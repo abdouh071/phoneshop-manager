@@ -8,14 +8,22 @@ import { useApprovalStore, type ApprovalRequest } from '../../store/approvalStor
 import { useActivityStore } from '../../store/activityStore';
 import { useToast } from './Toast';
 import { RequestDetailsCard } from '../../features/approvals/RequestDetailsCard';
+import type { ApprovalActionData } from '../../types';
+import { errorMessage } from '../../utils/errorUtils';
+
+export interface ApprovalSuccessInfo {
+  method: 'remote' | 'pin' | 'password';
+  approvedBy?: string | { uid: string; name: string };
+  adminEmail?: string;
+}
 
 export interface ApprovalModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (data?: any) => void;
+  onSuccess: (data?: ApprovalSuccessInfo) => void;
   actionName?: string;
   actionType?: string;
-  actionData?: Record<string, any>;
+  actionData?: ApprovalActionData;
   targetId?: string;
 }
 
@@ -151,8 +159,8 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
           }
         }
       }
-    } catch (err: any) {
-      setPinError(err.message || 'Failed to verify PIN.');
+    } catch (err: unknown) {
+      setPinError(errorMessage(err) || 'Failed to verify PIN.');
     } finally {
       setPinLoading(false);
     }
@@ -172,8 +180,8 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
       });
       setActiveRequestId(reqId);
       toast.info('Request Sent', 'Administrators have been notified on their devices.');
-    } catch (err: any) {
-      toast.error('Failed to Send Request', err.message);
+    } catch (err: unknown) {
+      toast.error('Failed to Send Request', errorMessage(err));
     } finally {
       setIsSubmittingRemote(false);
     }
@@ -212,8 +220,8 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
       toast.success('Admin Verified', 'Authorization granted via password.');
       onSuccess({ method: 'password', adminEmail: email });
       onClose();
-    } catch (err: any) {
-      setPassError(err.message || 'Incorrect admin email or password.');
+    } catch (err: unknown) {
+      setPassError(errorMessage(err) || 'Incorrect admin email or password.');
     } finally {
       setPassLoading(false);
     }

@@ -1,9 +1,8 @@
 import React, { useMemo } from 'react';
-import {
-  TrendingUp, TrendingDown, Users, Wrench, ShoppingCart,
-  AlertTriangle, ShieldAlert, DollarSign, ChevronRight
-} from 'lucide-react';
+import { TrendingUp, TrendingDown, Users, Wrench, ShoppingCart, AlertTriangle, ShieldAlert, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { useCartStore } from '../../store/cartStore';
 import { useRepairStore } from '../../store/repairStore';
 import { useInventoryStore } from '../../store/inventoryStore';
@@ -20,6 +19,7 @@ import { formatPrivateCurrency } from '../../utils/formatCurrency';
 import styles from './AdminMobileDashboard.module.css';
 
 export const AdminMobileDashboard: React.FC = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const haptic = useHaptic();
   const { user } = useAuthStore();
@@ -28,7 +28,7 @@ export const AdminMobileDashboard: React.FC = () => {
   const { products } = useInventoryStore();
   const { debts } = useCustomerStore();
   const { pendingCount, openModal } = useApprovalStore();
-  const { currency } = useSettingsStore();
+  useSettingsStore();
 
   const today = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
   const yesterday = useMemo(() => { const d = new Date(today); d.setDate(d.getDate() - 1); return d; }, [today]);
@@ -69,7 +69,7 @@ export const AdminMobileDashboard: React.FC = () => {
       .reduce((s, p) => s + p.amount, 0);
   }, [debts, today]);
 
-  const yestDebtCollected = useMemo(() => {
+  useMemo(() => {
     return debts
       .flatMap(d => (d.payments || []).filter(p => isSameDay(p.date, yesterday)))
       .filter(p => String(p.method || '').toLowerCase() === 'cash')
@@ -97,18 +97,22 @@ export const AdminMobileDashboard: React.FC = () => {
   const lowStock = useMemo(() => products.filter(p => p.stockStatus !== 'in_stock').length, [products]);
 
   // Recent staff activity (last 8 transactions by staff)
+  const timeLocale = useMemo(() => {
+    const lang = i18n.language || 'en';
+    return lang.startsWith('ar') ? 'ar-DZ' : lang.startsWith('fr') ? 'fr-FR' : 'en-US';
+  }, []);
   const recentStaffActivity = useMemo(() =>
     [...activeTx]
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, 6)
       .map(tx => ({
         id: tx.id,
-        staff: tx.processedByName || 'Staff',
-        action: `Sale — ${tx.items.length} item${tx.items.length > 1 ? 's' : ''}`,
+        staff: tx.processedByName || t('mobile.staff'),
+        action: t('mobile.saleAction', { count: tx.items.length }),
         amount: tx.total,
-        time: new Date(tx.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+        time: new Date(tx.date).toLocaleTimeString(timeLocale, { hour: '2-digit', minute: '2-digit' }),
       })),
-    [activeTx]
+    [activeTx, timeLocale, t]
   );
 
   const nav = (path: string) => { haptic.tap(); navigate(path); };
@@ -118,7 +122,7 @@ export const AdminMobileDashboard: React.FC = () => {
       {/* Greeting */}
       <div className={styles.greeting}>
         <span className={styles.greetingText}>
-          {new Date().getHours() < 12 ? '🌅 Good morning' : new Date().getHours() < 18 ? '☀️ Good afternoon' : '🌙 Good evening'},
+          {new Date().getHours() < 12 ? t('mobile.goodMorning') : new Date().getHours() < 18 ? t('mobile.goodAfternoon') : t('mobile.goodEvening')},
         </span>
         <span className={styles.greetingName}>{user?.name?.split(' ')[0]}</span>
       </div>
@@ -128,8 +132,8 @@ export const AdminMobileDashboard: React.FC = () => {
         <button className={styles.approvalAlert} onClick={() => { haptic.warning(); openModal(); }}>
           <ShieldAlert size={18} />
           <div className={styles.approvalAlertText}>
-            <strong>{pendingCount} Pending Approval{pendingCount > 1 ? 's' : ''}</strong>
-            <span>Staff require your authorization</span>
+            <strong>{t('mobile.pendingApproval', { count: pendingCount })}</strong>
+            <span>{t('mobile.staffNeedAuth')}</span>
           </div>
           <ChevronRight size={16} />
         </button>
@@ -137,39 +141,39 @@ export const AdminMobileDashboard: React.FC = () => {
 
       {/* Revenue Snapshot */}
       <div className={styles.section}>
-        <h3 className={styles.sectionTitle}>Today vs Yesterday</h3>
+        <h3 className={styles.sectionTitle}>{t('mobile.todayVsYesterday')}</h3>
         <div className={styles.revenueCard}>
           <div className={styles.revenueMain}>
-            <span className={styles.revenueLabel}>Today's Revenue</span>
+            <span className={styles.revenueLabel}>{t('mobile.todaysRevenue')}</span>
             <span className={styles.revenueValue}>{formatPrivateCurrency(todayRevenue)}</span>
             <div className={[styles.revenueBadge, revenueChange >= 0 ? styles.revenueBadgeUp : styles.revenueBadgeDown].join(' ')}>
               {revenueChange >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-              <span>{Math.abs(revenueChange).toFixed(1)}% vs yesterday</span>
+              <span>{t('mobile.vsYesterday', { pct: Math.abs(revenueChange).toFixed(1) })}</span>
             </div>
           </div>
           <div className={styles.revenueBreakdown}>
             <div className={styles.breakdownRow}>
-              <span>🛒 Retail Sales</span>
+              <span>🛒 {t('mobile.retailSales')}</span>
               <span>{formatPrivateCurrency(todayRetailSalesRev)}</span>
             </div>
             <div className={styles.breakdownRow}>
-              <span>🔧 Repairs</span>
+              <span>🔧 {t('sidebar.repairs')}</span>
               <span>{formatPrivateCurrency(todayRepairRev)}</span>
             </div>
             {todayPartsRev > 0 && (
               <div className={styles.breakdownRow}>
-                <span>📦 Parts B2B</span>
+                <span>📦 {t('mobile.partsB2B')}</span>
                 <span>{formatPrivateCurrency(todayPartsRev)}</span>
               </div>
             )}
             {todayDebtCollected > 0 && (
               <div className={styles.breakdownRow}>
-                <span>💳 Debt Collections</span>
+                <span>💳 {t('mobile.debtCollections')}</span>
                 <span>{formatPrivateCurrency(todayDebtCollected)}</span>
               </div>
             )}
             <div className={[styles.breakdownRow, styles.breakdownRowTotal].join(' ')}>
-              <span>📅 This Month</span>
+              <span>📅 {t('mobile.thisMonth')}</span>
               <span>{formatPrivateCurrency(monthlyRev)}</span>
             </div>
           </div>
@@ -181,34 +185,34 @@ export const AdminMobileDashboard: React.FC = () => {
         <button className={styles.statCard} onClick={() => nav('/repairs')}>
           <Wrench size={20} className={styles.statIcon} style={{ color: '#d97706' }} />
           <span className={styles.statValue}>{activeRepairs}</span>
-          <span className={styles.statLabel}>Active Repairs</span>
+          <span className={styles.statLabel}>{t('mobile.activeRepairs')}</span>
         </button>
         <button className={styles.statCard} onClick={() => nav('/repairs')}>
           <Wrench size={20} className={styles.statIcon} style={{ color: '#16a34a' }} />
           <span className={styles.statValue}>{readyPickup}</span>
-          <span className={styles.statLabel}>Ready Pickup</span>
+          <span className={styles.statLabel}>{t('dashboard.readyForPickup')}</span>
         </button>
         <button className={styles.statCard} onClick={() => nav('/pos')}>
           <ShoppingCart size={20} className={styles.statIcon} style={{ color: '#6366f1' }} />
           <span className={styles.statValue}>{todayTx.length}</span>
-          <span className={styles.statLabel}>Today's Sales</span>
+          <span className={styles.statLabel}>{t('dashboard.todaySales')}</span>
         </button>
         <button className={styles.statCard} onClick={() => nav('/inventory')} style={lowStock > 0 ? { borderColor: '#fbbf24' } : {}}>
           <AlertTriangle size={20} className={styles.statIcon} style={{ color: lowStock > 0 ? '#d97706' : 'var(--color-on-surface-variant)' }} />
           <span className={styles.statValue} style={lowStock > 0 ? { color: '#d97706' } : {}}>{lowStock}</span>
-          <span className={styles.statLabel}>Low Stock</span>
+          <span className={styles.statLabel}>{t('mobile.lowStock')}</span>
         </button>
       </div>
 
       {/* Staff Activity Feed */}
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <h3 className={styles.sectionTitle}>Staff Activity Today</h3>
-          <button className={styles.sectionLink} onClick={() => nav('/activity')}>View All</button>
+          <h3 className={styles.sectionTitle}>{t('mobile.staffActivityToday')}</h3>
+          <button className={styles.sectionLink} onClick={() => nav('/activity')}>{t('common.viewAll')}</button>
         </div>
         <div className={styles.activityList}>
           {recentStaffActivity.length === 0 ? (
-            <p className={styles.empty}>No sales activity today yet.</p>
+            <p className={styles.empty}>{t('mobile.noSalesActivity')}</p>
           ) : (
             recentStaffActivity.map(item => (
               <div key={item.id} className={styles.activityRow}>
@@ -232,10 +236,10 @@ export const AdminMobileDashboard: React.FC = () => {
       {/* Quick Navigation */}
       <div className={styles.quickNav}>
         {[
-          { label: 'POS', icon: ShoppingCart, path: '/pos', color: '#6366f1' },
-          { label: 'Reports', icon: TrendingUp, path: '/reports', color: '#0ea5e9' },
-          { label: 'Staff', icon: Users, path: '/settings', color: '#10b981' },
-          { label: 'Inventory', icon: AlertTriangle, path: '/inventory', color: '#f59e0b' },
+          { label: t('sidebar.pos'), icon: ShoppingCart, path: '/pos', color: '#6366f1' },
+          { label: t('sidebar.reports'), icon: TrendingUp, path: '/reports', color: '#0ea5e9' },
+          { label: t('mobile.staff'), icon: Users, path: '/settings', color: '#10b981' },
+          { label: t('sidebar.inventory'), icon: AlertTriangle, path: '/inventory', color: '#f59e0b' },
         ].map(({ label, icon: Icon, path, color }) => (
           <button key={path} className={styles.quickNavBtn} onClick={() => nav(path)}>
             <div className={styles.quickNavIcon} style={{ background: `${color}20`, color }}>

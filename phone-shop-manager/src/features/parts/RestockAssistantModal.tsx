@@ -1,8 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import {
-  AlertTriangle, CheckCircle2, Package, XCircle, ShoppingCart,
-  Printer, Send, Download, Plus, DollarSign, Filter, RefreshCw, Layers
-} from 'lucide-react';
+import { CheckCircle2, ShoppingCart, Printer, Send, Download } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { SearchInput } from '../../components/ui/Input';
@@ -18,6 +16,7 @@ import { exportToCSV } from '../../utils/exportUtils';
 import { formatWhatsAppUrl } from '../../utils/phoneUtils';
 import type { PhoneModel, POItem } from '../../types';
 import styles from './RestockAssistant.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface RestockAssistantModalProps {
   isOpen: boolean;
@@ -37,13 +36,14 @@ export const RestockAssistantModal: React.FC<RestockAssistantModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  const { t } = useTranslation();
   const { parts, restockProduct, fetchParts } = useInventoryStore();
   const { suppliers, addPO, fetchData: fetchPurchasingData } = usePurchasingStore();
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'admin';
   const settings = useSettingsStore();
   const toast = useToast();
-  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
+  usePrivacyStore(s => s.isPrivacyActive);
 
   const [filterType, setFilterType] = useState<'all_needed' | 'out_only' | 'low_only' | 'all'>('all_needed');
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
@@ -234,8 +234,8 @@ export const RestockAssistantModal: React.FC<RestockAssistantModalProps> = ({
         `PO for ${selectedItems.length} parts (${metrics.totalUnitsToOrder} units) generated successfully.`
       );
       onClose();
-    } catch (err: any) {
-      toast.error('Error', err.message || 'Failed to create Purchase Order.');
+    } catch (err: unknown) {
+      toast.error('Error', errorMessage(err) || 'Failed to create Purchase Order.');
     } finally {
       setIsProcessing(false);
     }
@@ -305,22 +305,38 @@ Please check stock availability and confirm estimated dispatch time. Thank you!`
 
     setIsProcessing(true);
     try {
+      let queuedUnits = 0;
+      let committedUnits = 0;
       for (const item of selectedItems) {
-        await restockProduct(item.product.id, item.orderQty, {
+        const result = await restockProduct(item.product.id, item.orderQty, {
           supplier: selectedSupplierName || 'Direct Reorder',
           note: `Bulk restock via Smart Restock Assistant`,
           cost: item.unitCost,
         });
+        // 'queued' is not a server write: the units only moved in this device's offline queue.
+        if (result.outcome === 'queued') queuedUnits += result.applied;
+        if (result.outcome === 'committed') committedUnits += result.applied;
       }
 
       await fetchParts();
-      toast.success(
-        'Inventory Restocked',
-        `Successfully added ${metrics.totalUnitsToOrder} units across ${selectedItems.length} parts to stock.`
-      );
+      if (queuedUnits > 0) {
+        toast.warning(
+          t('inventory.bulkRestockQueuedTitle'),
+          t('inventory.bulkRestockQueuedBody', {
+            queued: queuedUnits,
+            committed: committedUnits,
+            total: metrics.totalUnitsToOrder,
+          })
+        );
+      } else {
+        toast.success(
+          t('inventory.bulkRestockTitle'),
+          t('inventory.bulkRestockBody', { units: committedUnits, items: selectedItems.length })
+        );
+      }
       onClose();
-    } catch (err: any) {
-      toast.error('Restock Error', err.message || 'Failed to complete bulk restock.');
+    } catch (err: unknown) {
+      toast.error(t('inventory.restockFailedTitle'), errorMessage(err) || t('inventory.bulkRestockFailedBody'));
     } finally {
       setIsProcessing(false);
     }
@@ -604,7 +620,7 @@ Please check stock availability and confirm estimated dispatch time. Thank you!`
             <div>
               <h2 style={{ margin: 0, fontSize: '20px' }}>{settings.storeName || 'PHONE SHOP MANAGER PRO'}</h2>
               <p style={{ margin: '2px 0', fontSize: '12px' }}>Parts Wholesale & Repair Division</p>
-              {'phone' in settings && (settings as any).phone && <p style={{ margin: '2px 0', fontSize: '12px' }}>Tel: {(settings as any).phone}</p>}
+              {'phone' in settings && settings.phone && <p style={{ margin: '2px 0', fontSize: '12px' }}>Tel: {settings.phone}</p>}
             </div>
             <div style={{ textAlign: 'right' }}>
               <h3 style={{ margin: 0, fontSize: '16px' }}>REORDER REQUISITION / BON DE COMMANDE</h3>

@@ -14,6 +14,7 @@ import { EndOfDayButton } from '../endofday/EndOfDayButton';
 import { isSameLocalDate, toDateStr } from '../../store/endOfDayStore';
 import { isClaimedAndPaidRepair, getClaimedRepairHandoverCash } from '../../utils/repairFinancials';
 import styles from './CashDrawer.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface CashDrawerModalProps {
   isOpen: boolean;
@@ -234,8 +235,8 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
       } else {
         toast.info('Browser Print Opened', 'Thermal server offline; opened print dialog.');
       }
-    } catch (err: any) {
-      toast.error('Print Failed', err?.message || 'Unable to print Z-Report.');
+    } catch (err: unknown) {
+      toast.error('Print Failed', errorMessage(err) || 'Unable to print Z-Report.');
     } finally {
       setIsPrinting(false);
     }

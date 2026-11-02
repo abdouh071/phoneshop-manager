@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { X, Building2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { usePurchasingStore } from '../../store/purchasingStore';
@@ -13,6 +14,7 @@ interface SupplierModalProps {
 }
 
 export const SupplierModal: React.FC<SupplierModalProps> = ({ isOpen, onClose, supplierId }) => {
+  const { t } = useTranslation();
   const { suppliers, addSupplier, updateSupplier } = usePurchasingStore();
   const toast = useToast();
   
@@ -88,7 +90,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({ isOpen, onClose, s
               <p>{supplierId ? 'Update supplier details' : 'Create a new supplier profile'}</p>
             </div>
           </div>
-          <button className={styles.closeBtn} onClick={onClose}><X size={20} /></button>
+          <button className={styles.closeBtn} onClick={onClose} aria-label={t('common.close')}><X size={20} /></button>
         </div>
 
         <form onSubmit={handleSubmit} className={styles.form}>

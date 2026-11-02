@@ -4,7 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { StockBadge } from '../../components/ui/Badge';
 import type { PhoneModel } from '../../types';
 import { Edit, Tag, Package, AlertTriangle, FileText, Truck, Clock } from 'lucide-react';
-import { useActivityStore } from '../../store/activityStore';
+import { useActivityStore, type Activity } from '../../store/activityStore';
 import { useAuthStore } from '../../store/authStore';
 import { usePermissions } from '../../hooks/usePermissions';
 import styles from './ProductDetail.module.css';
@@ -34,7 +34,7 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({ product,
   const stockValue = product.costPrice * product.stock;
   const potentialRevenue = product.price * product.stock;
 
-  const productActivities = activities.filter(a => a.entityId === product.id || (a as any).productId === product.id);
+  const productActivities = activities.filter(a => a.entityId === product.id || (a as Activity & { productId?: string }).productId === product.id);
 
   return (
     <SlidePanel

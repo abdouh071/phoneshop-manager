@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { Smartphone, LogIn, Mail, ArrowLeft } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../../store/authStore';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { useToast } from '../../components/ui/Toast';
 import styles from './LoginPage.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 export const LoginPage = () => {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isResetMode, setIsResetMode] = useState(false);
@@ -32,11 +35,11 @@ export const LoginPage = () => {
       await sendPasswordReset(resetEmail);
       setResetSent(true);
       toast.success(
-        'Email Sent',
-        `A password reset link has been sent to ${resetEmail}. Check your inbox.`
+        t('login.emailSent'),
+        t('login.resetLinkSentTo', { email: resetEmail })
       );
-    } catch (err: any) {
-      toast.error('Error', err.message || 'Failed to send password reset email.');
+    } catch (err: unknown) {
+      toast.error(t('common.error'), errorMessage(err) || t('login.resetEmailFailed'));
     }
   };
 
@@ -67,7 +70,7 @@ export const LoginPage = () => {
                 fontSize: '14px'
               }}
             >
-              Worker Login
+              {t('login.workerLogin')}
             </button>
             <button
               onClick={() => { setActiveTab('quick'); clearError(); }}
@@ -83,7 +86,7 @@ export const LoginPage = () => {
                 fontSize: '14px'
               }}
             >
-              Quick Role Login
+              {t('login.quickRoleLogin')}
             </button>
           </div>
         )}
@@ -93,12 +96,12 @@ export const LoginPage = () => {
             <Smartphone size={28} />
           </div>
           <h1 className={styles.title}>
-            {isResetMode ? 'Reset Password' : 'Welcome Back'}
+            {isResetMode ? t('login.resetPassword') : t('login.welcomeBack')}
           </h1>
           <p className={styles.subtitle}>
             {isResetMode 
-              ? 'Enter your email to receive a password reset link' 
-              : 'Sign in to PhoneShop Manager Pro'}
+              ? t('login.resetSubtitle') 
+              : t('login.subtitle')}
           </p>
         </div>
 
@@ -107,7 +110,7 @@ export const LoginPage = () => {
           activeTab === 'worker' ? (
             <form onSubmit={handleSubmit} className={styles.form}>
               <Input 
-                label="Email Address" 
+                label={t('login.email')} 
                 type="email"
                 placeholder="admin@example.com"
                 value={email}
@@ -116,7 +119,7 @@ export const LoginPage = () => {
               />
               
               <Input 
-                label="Password" 
+                label={t('login.password')} 
                 type="password"
                 placeholder="••••••••"
                 value={password}
@@ -138,7 +141,7 @@ export const LoginPage = () => {
                     padding: 0
                   }}
                 >
-                  Forgot Password?
+                  {t('login.forgotPassword')}
                 </button>
               </div>
 
@@ -150,7 +153,7 @@ export const LoginPage = () => {
                 leftIcon={!isLoading ? <LogIn size={18} /> : undefined}
                 className={styles.submitBtn}
               >
-                Sign In
+                {t('login.signIn')}
               </Button>
             </form>
           ) : (
@@ -169,7 +172,7 @@ export const LoginPage = () => {
                     cursor: 'pointer', textAlign: 'center', fontWeight: 600, color: quickRole === 'sales_agent' ? 'var(--color-on-primary-container)' : 'inherit'
                   }}
                 >
-                  🛒 Sales
+                  🛒 {t('login.sales')}
                 </button>
                 <button
                   type="button"
@@ -180,14 +183,14 @@ export const LoginPage = () => {
                     cursor: 'pointer', textAlign: 'center', fontWeight: 600, color: quickRole === 'repair_agent' ? 'var(--color-on-primary-container)' : 'inherit'
                   }}
                 >
-                  🔧 Repair
+                  🔧 {t('login.repair')}
                 </button>
               </div>
 
               <Input 
-                label="Admin Password" 
+                label={t('login.adminPassword')} 
                 type="password"
-                placeholder="Enter Admin Password to unlock"
+                placeholder={t('login.unlockPlaceholder')}
                 value={quickAdminPassword}
                 onChange={(e) => setQuickAdminPassword(e.target.value)}
                 required
@@ -201,7 +204,7 @@ export const LoginPage = () => {
                 leftIcon={!isLoading ? <LogIn size={18} /> : undefined}
                 className={styles.submitBtn}
               >
-                Unlock Terminal
+                {t('login.unlockTerminal')}
               </Button>
             </form>
           )
@@ -218,12 +221,12 @@ export const LoginPage = () => {
                 textAlign: 'center',
                 lineHeight: 1.5
               }}>
-                ✓ A secure link has been sent to your email. Click it to set a new password, then return here to log in.
+                ✓ {t('login.resetSentMessage')}
               </div>
             ) : (
               <>
                 <Input 
-                  label="Email Address" 
+                  label={t('login.email')} 
                   type="email"
                   placeholder="name@example.com"
                   value={resetEmail}
@@ -238,7 +241,7 @@ export const LoginPage = () => {
                   leftIcon={!isLoading ? <Mail size={18} /> : undefined}
                   className={styles.submitBtn}
                 >
-                  Send Reset Link
+                  {t('login.sendResetLink')}
                 </Button>
               </>
             )}
@@ -261,13 +264,13 @@ export const LoginPage = () => {
                 padding: 0
               }}
             >
-              <ArrowLeft size={16} /> Back to Login
+              <ArrowLeft size={16} /> {t('login.backToLogin')}
             </button>
           </form>
         )}
 
         <div className={styles.footer}>
-          <p>Need help? Contact the Store Owner.</p>
+          <p>{t('login.needHelp')}</p>
         </div>
       </div>
     </div>

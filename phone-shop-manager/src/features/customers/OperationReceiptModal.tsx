@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Printer, MessageCircle, CheckCircle2, Wrench, ShoppingBag, FileText, CreditCard } from 'lucide-react';
+import { Printer, MessageCircle } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { useToast } from '../../components/ui/Toast';
@@ -14,6 +14,7 @@ import {
   buildReceiptWhatsAppText,
 } from '../../utils/statementPrint';
 import styles from './OperationReceiptModal.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface OperationReceiptModalProps {
   isOpen: boolean;
@@ -48,9 +49,9 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
       if (res.success) {
         onClose();
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Print failure:', err);
-      toast.error(t('statementModal.printError', 'Print error'), err?.message || 'Failed to send to print server.');
+      toast.error(t('statementModal.printError', 'Print error'), errorMessage(err) || 'Failed to send to print server.');
     } finally {
       setIsPrinting(false);
     }
@@ -177,13 +178,13 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
                 {it.detail && <div className={styles.itemDetail}>{it.detail}</div>}
                 {it.quantity > 1 && (
                   <div className={styles.itemQty}>
-                    {it.quantity} × {formatCurrency(it.price, receiptData.currency)}
+                    {it.quantity} × {formatCurrency(it.price, !!receiptData.currency)}
                   </div>
                 )}
               </div>
               <div className={styles.itemRight}>
                 <div className={styles.itemPrice}>
-                  {formatCurrency(it.total, receiptData.currency)}
+                  {formatCurrency(it.total, !!receiptData.currency)}
                 </div>
               </div>
             </div>
@@ -198,19 +199,19 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
             <div className={styles.totalRow}>
               <span>{t('statementModal.discount', 'Discount:')}</span>
               <strong style={{ color: '#16a34a' }}>
-                -{formatCurrency(receiptData.discount, receiptData.currency)}
+                -{formatCurrency(receiptData.discount, !!receiptData.currency)}
               </strong>
             </div>
           )}
 
           <div className={styles.grandTotalRow}>
             <span>{t('statementModal.total', 'TOTAL:')}</span>
-            <span>{formatCurrency(receiptData.total, receiptData.currency)}</span>
+            <span>{formatCurrency(receiptData.total, !!receiptData.currency)}</span>
           </div>
 
           <div className={styles.totalRow} style={{ marginTop: 4 }}>
             <span>{t('statementModal.paymentLine', 'Payment')} ({receiptData.paymentMethod}) :</span>
-            <strong>{formatCurrency(receiptData.paidAmount, receiptData.currency)}</strong>
+            <strong>{formatCurrency(receiptData.paidAmount, !!receiptData.currency)}</strong>
           </div>
         </div>
 
@@ -223,7 +224,7 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
         >
           <span>{t('statementModal.currentBalance', 'CURRENT ACCOUNT BALANCE:')}</span>
           <span className={styles.balanceAmount}>
-            {formatCurrency(receiptData.currentTotalDebt, receiptData.currency)}
+            {formatCurrency(receiptData.currentTotalDebt, !!receiptData.currency)}
           </span>
         </div>
 

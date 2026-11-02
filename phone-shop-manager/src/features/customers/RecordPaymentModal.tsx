@@ -7,9 +7,10 @@ import { useCustomerStore } from '../../store/customerStore';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
+import { endOfDayService, type EndOfDayRecord } from '../../services/endOfDayService';
 import type { CustomerDebtEntry, PaymentMethod } from '../../types';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
-import { DollarSign, CheckCircle2, AlertCircle } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 import styles from '../inventory/ProductForm.module.css';
 
 interface RecordPaymentModalProps {
@@ -20,7 +21,7 @@ interface RecordPaymentModalProps {
 
 export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, onClose, debt }) => {
   const { t } = useTranslation();
-  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
+  usePrivacyStore(s => s.isPrivacyActive);
   const user = useAuthStore(s => s.user);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('cash');
@@ -28,6 +29,19 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [sealedOnDate, setSealedOnDate] = useState<EndOfDayRecord | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !date) {
+      setSealedOnDate(null);
+      return;
+    }
+    let active = true;
+    endOfDayService.getByDate(date)
+      .then(record => { if (active) setSealedOnDate(record); })
+      .catch(() => { if (active) setSealedOnDate(null); });
+    return () => { active = false; };
+  }, [isOpen, date]);
 
   const { recordDebtPayment } = useCustomerStore();
   const toast = useToast();
@@ -211,6 +225,26 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
             value={date}
             onChange={e => setDate(e.target.value)}
           />
+
+          {sealedOnDate && (
+            <p style={{
+              margin: '-6px 0 0',
+              display: 'flex',
+              gap: '6px',
+              alignItems: 'flex-start',
+              fontSize: '12px',
+              color: '#b45309',
+              background: '#fffbeb',
+              border: '1px solid #fde68a',
+              borderRadius: '8px',
+              padding: '6px 8px',
+            }}>
+              <AlertCircle size={13} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <span>
+                {t('customers.sealedDayPaymentNotice', 'This day was already closed (End of Day sealed). The payment is still recorded, but reports will show it as a change made to a closed day.')}
+              </span>
+            </p>
+          )}
         </div>
 
         <Input

@@ -1,34 +1,14 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import {
-  Package,
-  ShoppingCart,
-  Wrench,
-  Monitor,
-  Clock,
-  User,
-  ArrowUpRight,
-  Search,
-  RefreshCw,
-  Download,
-  AlertTriangle,
-  ShieldAlert,
-  CheckCircle,
-  Info,
-  Calendar,
-  X,
-  Trash2,
-  Loader2,
-  FileSpreadsheet,
-  FileJson,
-} from 'lucide-react';
+import { Package, ShoppingCart, Wrench, Monitor, Clock, User, ArrowUpRight, Search, RefreshCw, Download, Calendar, X, Trash2, Loader2 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { useToast } from '../../components/ui/Toast';
 import { useActivityStore } from '../../store/activityStore';
 import type { Activity, ActivityCategory, ActivitySeverity } from '../../store/activityStore';
 import { useAuthStore } from '../../store/authStore';
 import styles from './Activity.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 // ─── Helpers ─────────────────────────────────────────────────
 const getCategoryIcon = (category: ActivityCategory) => {
@@ -372,8 +352,8 @@ export const ActivityPage: React.FC = () => {
     try {
       const deletedCount = await purgeOldLogs(90);
       toast.success(t('settings.purged', 'Logs Cleaned'), `Successfully deleted ${deletedCount} archived logs older than 90 days.`);
-    } catch (err: any) {
-      toast.error('Cleanup Failed', err?.message || 'Could not purge logs.');
+    } catch (err: unknown) {
+      toast.error('Cleanup Failed', errorMessage(err) || 'Could not purge logs.');
     } finally {
       setIsPurging(false);
     }
@@ -467,7 +447,7 @@ export const ActivityPage: React.FC = () => {
           <select
             className={styles.selectDropdown}
             value={dateFilter}
-            onChange={e => setDateFilter(e.target.value as any)}
+            onChange={e => setDateFilter(e.target.value as typeof dateFilter)}
           >
             <option value="all">📅 {t('common.allTime', 'All Dates')}</option>
             <option value="today">📅 {t('common.today', 'Today')}</option>
@@ -494,7 +474,7 @@ export const ActivityPage: React.FC = () => {
           <select
             className={styles.selectDropdown}
             value={severityFilter}
-            onChange={e => setSeverityFilter(e.target.value as any)}
+            onChange={e => setSeverityFilter(e.target.value as typeof severityFilter)}
           >
             <option value="all">⚡ All Severities</option>
             <option value="danger">🔴 Critical / Destructive</option>

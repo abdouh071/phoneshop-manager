@@ -1,24 +1,14 @@
 import React, { useState } from 'react';
-import { Card, CardHeader } from '../../components/ui/Card';
+import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Select } from '../../components/ui/Select';
-import { 
-  Printer, 
-  Tag, 
-  CheckCircle2, 
-  AlertCircle, 
-  RefreshCw, 
-  Scissors, 
-  Sliders, 
-  FileText,
-  Sparkles,
-  HelpCircle
-} from 'lucide-react';
+import { Printer, Tag, CheckCircle2, AlertCircle, RefreshCw, Scissors, Sliders, HelpCircle } from 'lucide-react';
 import styles from './Settings.module.css';
 import { useToast } from '../../components/ui/Toast';
 import { useSettingsStore } from '../../store/settingsStore';
 import { usePrinterStatus } from '../../hooks/usePrinterStatus';
 import { printReceiptDirect, printBarcodeDirect, calibrateLabelPrinter } from '../../utils/printWindow';
+import { errorMessage } from '../../utils/errorUtils';
 
 export const PrintersTab: React.FC = () => {
   const { isOnline, printer, labelPrinter, hasCutter, isChecking, refresh } = usePrinterStatus();
@@ -38,8 +28,8 @@ export const PrintersTab: React.FC = () => {
         autoCutReceipt: autoCut,
       });
       toast.success('Printer Preferences Saved', 'Hardware printer preferences updated successfully.');
-    } catch (err: any) {
-      toast.error('Failed to Save', err?.message || 'Could not save printer preferences.');
+    } catch (err: unknown) {
+      toast.error('Failed to Save', errorMessage(err) || 'Could not save printer preferences.');
     }
   };
 
@@ -91,8 +81,8 @@ export const PrintersTab: React.FC = () => {
       } else {
         toast.info('Browser Print Opened', 'Direct print server offline; browser print dialog opened as fallback.');
       }
-    } catch (err: any) {
-      toast.error('Print Error', err?.message || 'Failed to print test receipt.');
+    } catch (err: unknown) {
+      toast.error('Print Error', errorMessage(err) || 'Failed to print test receipt.');
     } finally {
       setIsTestingReceipt(false);
     }
@@ -121,8 +111,8 @@ export const PrintersTab: React.FC = () => {
       } else {
         toast.info('Browser Print Triggered', 'Print server not reachable for direct TSPL printing.');
       }
-    } catch (err: any) {
-      toast.error('Label Print Error', err?.message || 'Failed to print test label.');
+    } catch (err: unknown) {
+      toast.error('Label Print Error', errorMessage(err) || 'Failed to print test label.');
     } finally {
       setIsTestingLabel(false);
     }
@@ -142,8 +132,8 @@ export const PrintersTab: React.FC = () => {
       } else {
         toast.error('Calibration Failed', res.error || 'Could not calibrate label printer.');
       }
-    } catch (err: any) {
-      toast.error('Error', err?.message || 'Print server unreachable.');
+    } catch (err: unknown) {
+      toast.error('Error', errorMessage(err) || 'Print server unreachable.');
     } finally {
       setIsCalibrating(false);
     }

@@ -18,6 +18,31 @@ const resources = {
   }
 };
 
+// Arabic has six CLDR plural categories (zero/one/two/few/many/other); English, French and
+// the rest of this file's translations are authored with two. i18next picks the suffix from
+// Intl.PluralRules and has no cross-category fallback, so an Arabic count of 2 or 7 looked
+// for `_two`/`_few`, found nothing, and rendered the English string instead. Filling the
+// gaps from `_other` keeps every count in Arabic — and `_other` is already the correct
+// Arabic plural form for 3-10, the range these badges actually show.
+const ARABIC_CATEGORIES_FROM_OTHER = ['_zero', '_two', '_few', '_many'] as const;
+
+const aliasArabicPluralForms = (namespace: Record<string, unknown>): void => {
+  for (const [key, value] of Object.entries(namespace)) {
+    if (value !== null && typeof value === 'object') {
+      aliasArabicPluralForms(value as Record<string, unknown>);
+      continue;
+    }
+    if (!key.endsWith('_other') || typeof value !== 'string') continue;
+    const base = key.slice(0, -'_other'.length);
+    for (const suffix of ARABIC_CATEGORIES_FROM_OTHER) {
+      const aliasedKey = base + suffix;
+      if (!(aliasedKey in namespace)) namespace[aliasedKey] = value;
+    }
+  }
+};
+
+aliasArabicPluralForms(resources.ar.translation as Record<string, unknown>);
+
 i18n
   .use(LanguageDetector)
   .use(initReactI18next)

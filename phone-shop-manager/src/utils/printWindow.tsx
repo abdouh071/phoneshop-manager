@@ -1,19 +1,17 @@
-import React from 'react';
 import { renderToString } from 'react-dom/server';
 import JsBarcode from 'jsbarcode';
-import html2canvas from 'html2canvas';
 import { formatCurrency, formatCurrencyWith } from './formatCurrency';
 import { useSettingsStore } from '../store/settingsStore';
+import type { RepairTicket } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
 import i18n from '../i18n';
-import { printFormattedReport } from './exportUtils';
 
 // ============================================================
 // ESC/POS Direct Printing via Local Print Server
 // ============================================================
 
 // Detect Electron desktop app (preload.cjs exposes window.electronAPI)
-const electronAPI = typeof window !== 'undefined' ? (window as any).electronAPI : undefined;
+const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
 
 // Helper to safely call Electron IPC with a 12-second timeout safeguard so buttons never hang indefinitely
 function callElectronPrint<T>(fn: () => Promise<T>, timeoutMs = 12000): Promise<T> {
@@ -24,6 +22,8 @@ function callElectronPrint<T>(fn: () => Promise<T>, timeoutMs = 12000): Promise<
     ),
   ]);
 }
+
+interface PrintServerResult { ok?: boolean; error?: string; message?: string; }
 
 // Priority: Electron embedded server > env var > local hostname > fallback to localhost
 const PRINT_SERVER_URL = (() => {
@@ -94,6 +94,35 @@ function getTranslations() {
     netCashDrawer: t('reports.netCashDrawer', 'NET CASH IN DRAWER:'),
     staffBreakdown: t('reports.staffBreakdown', 'STAFF BREAKDOWN'),
     endOfReport: t('reports.endOfReport', '*** END OF REPORT ***'),
+    returnItem: t('pos.returnItem', 'RETURN'),
+    order: t('pos.order', 'Order:'),
+    refundDue: t('pos.refundDue', 'REFUND DUE'),
+    cashRefund: t('pos.cashRefund', 'Cash Refund'),
+    creditTab: t('pos.creditTab', 'Credit Tab (Dette)'),
+    storeCredit: t('pos.storeCredit', 'Store Credit (Avoir)'),
+    payCash: t('pos.payCash', 'Cash'),
+    payCard: t('pos.payCard', 'Card'),
+    payMobile: t('pos.payMobile', 'BaridiMob'),
+    payTransfer: t('pos.payTransfer', 'Transfer'),
+    reportDate: t('reports.reportDate', 'Date:'),
+    generatedAt: t('reports.generatedAt', 'Generated:'),
+    sales: t('reports.sales', 'sales'),
+    excludedNote: t('reports.excludedNote', '(Excluded from drawer sales; contributes $0 cash)'),
+    voidedCancelled: t('reports.voidedCancelled', 'Voided / Cancelled'),
+    retailPosCash: t('reports.retailPosCash', 'Retail POS Cash:'),
+    partsB2B: t('reports.partsB2B', 'Parts B2B Wholesale:'),
+    repairHandovers: t('reports.repairHandovers', 'Repair Handover Pickups:'),
+    repairDeposits: t('reports.repairDeposits', 'Repair Intake Deposits:'),
+    debtRepaid: t('reports.debtRepaid', 'Customer Debt Repaid:'),
+    exactCashNote: t('reports.exactCashNote', '(Exact cash to count in till)'),
+    paymentMethods: t('reports.paymentMethods', 'PAYMENT METHODS (TENDER)'),
+    cashTender: t('reports.cashTender', 'Cash Tender:'),
+    cardTpe: t('reports.cardTpe', 'Card / TPE Terminal:'),
+    mobileMoney: t('reports.mobileMoney', 'Mobile Money / BaridiMob:'),
+    bankTransfers: t('reports.bankTransfers', 'Bank Transfers:'),
+    chargedDebt: t('reports.chargedDebt', 'Charged to Debt Tab:'),
+    storeCreditApplied: t('reports.storeCreditApplied', 'Store Credit Applied:'),
+    grossSalesVolume: t('reports.grossSalesVolume', 'Gross Sales Volume:'),
   };
 }
 
@@ -174,13 +203,13 @@ export async function printReceiptDirect(
   // ── IPC path (Electron desktop) ──
   if (electronAPI?.printReceipt) {
     try {
-      const data = await callElectronPrint(() => electronAPI.printReceipt(payload));
+      const data = await callElectronPrint<PrintServerResult>(() => electronAPI.printReceipt(payload));
       if (data?.ok) return { method: 'direct' as const };
       console.warn('[Print] IPC receipt error:', data?.error);
       return { method: 'direct' as const, error: data?.error };
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.warn('[Print] IPC receipt failed:', e);
-      return { method: 'direct' as const, error: e?.message || 'Print failed' };
+      return { method: 'direct' as const, error: (e instanceof Error && e.message) || 'Print failed' };
     }
   }
 
@@ -193,7 +222,7 @@ export async function printReceiptDirect(
       body: JSON.stringify(payload),
     });
 
-    const data = await res.json();
+    const data = (await res.json()) as PrintServerResult;
     if (data.ok) {
       return { method: 'direct' };
     }
@@ -231,13 +260,13 @@ export async function printRepairLabelDirect(
   // ── IPC path (Electron desktop) ──
   if (electronAPI?.printRepairLabel) {
     try {
-      const data = await callElectronPrint(() => electronAPI.printRepairLabel(payload));
+      const data = await callElectronPrint<PrintServerResult>(() => electronAPI.printRepairLabel(payload));
       if (data?.ok) return { method: 'direct' as const };
       console.warn('[Print] IPC label error:', data?.error);
       return { method: 'direct' as const, error: data?.error };
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.warn('[Print] IPC label failed:', e);
-      return { method: 'direct' as const, error: e?.message || 'Print failed' };
+      return { method: 'direct' as const, error: (e instanceof Error && e.message) || 'Print failed' };
     }
   }
 
@@ -250,7 +279,7 @@ export async function printRepairLabelDirect(
       body: JSON.stringify(payload),
     });
 
-    const data = await res.json();
+    const data = (await res.json()) as PrintServerResult;
     if (data.ok) {
       return { method: 'direct' };
     }
@@ -267,7 +296,7 @@ export async function printRepairLabelDirect(
  * Send a repair intake receipt directly to the thermal POS printer (80mm).
  */
 export async function printRepairIntakeTicketDirect(
-  ticket: any,
+  ticket: RepairTicket,
   storeName: string,
   currency: string = 'DZD'
 ): Promise<{ method: 'direct' | 'browser'; error?: string }> {
@@ -281,13 +310,13 @@ export async function printRepairIntakeTicketDirect(
   // ── IPC path (Electron desktop) ──
   if (electronAPI?.printRepairTicket) {
     try {
-      const data = await callElectronPrint(() => electronAPI.printRepairTicket(payload));
+      const data = await callElectronPrint<PrintServerResult>(() => electronAPI.printRepairTicket(payload));
       if (data?.ok) return { method: 'direct' as const };
       console.warn('[Print] IPC repair ticket error:', data?.error);
       return { method: 'direct' as const, error: data?.error };
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.warn('[Print] IPC repair ticket failed:', e);
-      return { method: 'direct' as const, error: e?.message || 'Print failed' };
+      return { method: 'direct' as const, error: (e instanceof Error && e.message) || 'Print failed' };
     }
   }
 
@@ -300,7 +329,7 @@ export async function printRepairIntakeTicketDirect(
       body: JSON.stringify(payload),
     });
 
-    const data = await res.json();
+    const data = (await res.json()) as PrintServerResult;
     if (data.ok) {
       return { method: 'direct' };
     }
@@ -318,7 +347,7 @@ export async function printRepairIntakeTicketDirect(
  * 2. The phone back label on the label printer (to stick on the device)
  */
 export async function printRepairBothDirect(
-  ticket: any,
+  ticket: RepairTicket,
   storeName: string,
   currency: string = 'DZD'
 ): Promise<{ ticketResult: 'direct' | 'browser'; labelResult: 'direct' | 'browser' }> {
@@ -338,7 +367,7 @@ export async function printRepairBothDirect(
  * Falls back silently to window.print() style if server is unavailable.
  */
 export async function printBarcodeDirect(
-  products: any[],
+  products: unknown[],
   storeName: string,
   currency: string
 ): Promise<{ method: 'direct' | 'browser'; error?: string }> {
@@ -347,13 +376,13 @@ export async function printBarcodeDirect(
   // ── IPC path (Electron desktop) ──
   if (electronAPI?.printBarcode) {
     try {
-      const data = await callElectronPrint(() => electronAPI.printBarcode(payload));
+      const data = await callElectronPrint<PrintServerResult>(() => electronAPI.printBarcode(payload));
       if (data?.ok) return { method: 'direct' as const };
       console.warn('[Print] IPC barcode error:', data?.error);
       return { method: 'direct' as const, error: data?.error };
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.warn('[Print] IPC barcode failed:', e);
-      return { method: 'direct' as const, error: e?.message || 'Print failed' };
+      return { method: 'direct' as const, error: (e instanceof Error && e.message) || 'Print failed' };
     }
   }
 
@@ -366,7 +395,7 @@ export async function printBarcodeDirect(
       body: JSON.stringify(payload),
     });
 
-    const data = await res.json();
+    const data = (await res.json()) as PrintServerResult;
     if (data.ok) {
       return { method: 'direct' };
     }
@@ -484,12 +513,13 @@ export function buildReceiptHTML(transaction: {
     netDifference: number;
   };
 }, storeName: string, receiptHeader?: string, receiptFooter?: string) {
+  const tr = getTranslations();
   const { receiptHeader: defaultHeader, receiptFooter: defaultFooter } = useSettingsStore.getState();
   const activeHeader = receiptHeader || defaultHeader;
-  const activeFooter = receiptFooter || defaultFooter || 'Thank you for your purchase!';
+  const activeFooter = receiptFooter || defaultFooter || tr.thanks;
 
   const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString('en-US', {
+    new Date(iso).toLocaleDateString(i18n.language === 'ar' ? 'ar-DZ' : i18n.language === 'fr' ? 'fr-FR' : 'en-US', {
       month: 'short', day: 'numeric', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
@@ -513,7 +543,7 @@ export function buildReceiptHTML(transaction: {
     return `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;font-size:12px;line-height:1.35;">
         <span style="flex:1;padding-right:8px;color:#111827;">
-          ${isReturn ? '<span style="display:inline-block;background:#fee2e2;color:#b91c1c;font-size:9.5px;font-weight:700;padding:0 3px;border-radius:2px;margin-right:3px;">RETURN</span>' : ''}
+          ${isReturn ? `<span style="display:inline-block;background:#fee2e2;color:#b91c1c;font-size:9.5px;font-weight:700;padding:0 3px;border-radius:2px;margin-right:3px;">${tr.returnItem}</span>` : ''}
           <strong style="color:#374151;">${item.quantity}×</strong> ${item.product.name} ${item.product.model || ''}
         </span>
         <span style="white-space:nowrap;font-variant-numeric:tabular-nums;${isReturn ? 'color:#b91c1c;font-weight:600;' : 'color:#111827;'}">
@@ -525,12 +555,12 @@ export function buildReceiptHTML(transaction: {
 
   const formatMethodName = (m: string) => {
     switch (m) {
-      case 'debt': return 'Credit Tab (Dette)';
-      case 'store_credit': return 'Store Credit (Avoir)';
-      case 'cash': return 'Cash';
-      case 'card': return 'Card';
-      case 'mobile': return 'BaridiMob';
-      case 'transfer': return 'Transfer';
+      case 'debt': return tr.creditTab;
+      case 'store_credit': return tr.storeCredit;
+      case 'cash': return tr.payCash;
+      case 'card': return tr.payCard;
+      case 'mobile': return tr.payMobile;
+      case 'transfer': return tr.payTransfer;
       default: return m.charAt(0).toUpperCase() + m.slice(1);
     }
   };
@@ -555,12 +585,12 @@ export function buildReceiptHTML(transaction: {
         <div style="font-size:11.5px;line-height:1.4;">
           ${transaction.customerName ? `
             <div style="display:flex;justify-content:space-between;padding:1px 0;">
-              <span style="color:#6b7280;">Customer</span><span style="font-weight:600;color:#1f2937;">${transaction.customerName}</span>
+              <span style="color:#6b7280;">${tr.customer}</span><span style="font-weight:600;color:#1f2937;">${transaction.customerName}</span>
             </div>
           ` : ''}
           ${transaction.processedByName ? `
             <div style="display:flex;justify-content:space-between;padding:1px 0;">
-              <span style="color:#6b7280;">Cashier</span><span style="font-weight:600;color:#1f2937;">${transaction.processedByName}</span>
+              <span style="color:#6b7280;">${tr.cashier}</span><span style="font-weight:600;color:#1f2937;">${transaction.processedByName}</span>
             </div>
           ` : ''}
         </div>
@@ -569,19 +599,19 @@ export function buildReceiptHTML(transaction: {
       <!-- Status Badge -->
       ${transaction.status === 'refunded' ? `
         <div style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;padding:3px;text-align:center;font-size:10px;font-weight:700;letter-spacing:0.06em;border-radius:4px;margin:8px 0;">
-          FULLY REFUNDED
+          ${tr.fullyRefunded}
         </div>
       ` : ''}
       ${transaction.status === 'partially_refunded' ? `
         <div style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:3px;text-align:center;font-size:10px;font-weight:700;letter-spacing:0.06em;border-radius:4px;margin:8px 0;">
-          PARTIALLY REFUNDED
+          ${tr.partiallyRefunded}
         </div>
       ` : ''}
 
       <!-- Item Table -->
       <div style="border-top:1px dashed #d1d5db;margin:8px 0;"></div>
       <div style="font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#9ca3af;display:flex;justify-content:space-between;padding-bottom:3px;border-bottom:1px solid #f3f4f6;">
-        <span>Item</span><span>Price</span>
+        <span>${tr.item}</span><span>${tr.price}</span>
       </div>
       <div style="padding:4px 0;">
         ${itemsHTML}
@@ -591,13 +621,13 @@ export function buildReceiptHTML(transaction: {
       <div style="border-top:1px dashed #d1d5db;margin:6px 0;"></div>
       <div style="font-size:12px;font-variant-numeric:tabular-nums;">
         <div style="display:flex;justify-content:space-between;padding:2px 0;color:#4b5563;">
-          <span>Subtotal</span><span>${formatCurrency(transaction.subtotal)}</span>
+          <span>${tr.subtotal}</span><span>${formatCurrency(transaction.subtotal)}</span>
         </div>
 
         ${discountAmount > 0 ? `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 6px;margin:3px 0;background:#ecfdf5;border:1px dashed #a7f3d0;border-radius:4px;color:#047857;font-weight:600;">
             <span>
-              Discount
+              ${tr.discount}
               ${discount?.type === 'percent' ? `<span style="background:#059669;color:#fff;font-size:9.5px;font-weight:700;padding:1px 4px;border-radius:2px;margin-left:3px;">${discount.value}%</span>` : ''}
             </span>
             <span>−${formatCurrency(discountAmount)}</span>
@@ -606,13 +636,13 @@ export function buildReceiptHTML(transaction: {
 
         ${transaction.exchangeSummary ? `
           <div style="display:flex;justify-content:space-between;font-size:11px;color:#6b7280;font-style:italic;padding:1px 0;">
-            <span>Exchange adj.</span>
+            <span>${i18n.t('pos.exchangeAdj', 'Exchange adj.')}</span>
             <span>${formatCurrency(transaction.exchangeSummary.purchasedTotal - transaction.exchangeSummary.returnedTotal)}</span>
           </div>
         ` : ''}
 
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:15px;font-weight:800;padding:7px 0 3px 0;border-top:1.5px solid #111827;margin-top:5px;color:#111827;">
-          <span>${transaction.total < 0 ? 'REFUND DUE' : 'TOTAL'}</span>
+          <span>${transaction.total < 0 ? tr.refundDue : tr.total}</span>
           <span>${transaction.total < 0 ? `−${formatCurrency(Math.abs(transaction.total))}` : formatCurrency(transaction.total)}</span>
         </div>
       </div>
@@ -622,7 +652,7 @@ export function buildReceiptHTML(transaction: {
       <div style="font-size:11.5px;color:#4b5563;font-variant-numeric:tabular-nums;">
         ${transaction.payments.map(p => `
           <div style="display:flex;justify-content:space-between;padding:1px 0;">
-            <span>${p.method === 'cash' && p.amount < 0 ? 'Cash Refund' : formatMethodName(p.method)}</span>
+            <span>${p.method === 'cash' && p.amount < 0 ? tr.cashRefund : formatMethodName(p.method)}</span>
             <span style="${p.amount < 0 ? 'color:#b91c1c;font-weight:600;' : ''}">${p.amount < 0 ? '−' : ''}${formatCurrency(Math.abs(p.amount))}</span>
           </div>
         `).join('')}
@@ -656,16 +686,6 @@ export function buildLabelsHTML(products: {
   const { storeName: defaultStoreName } = useSettingsStore.getState();
   const activeStoreName = storeName || defaultStoreName || 'PhoneShop Pro';
   
-  const labelStyle = `
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    padding: 8px 0;
-    text-align: center;
-    break-inside: avoid;
-    page-break-inside: avoid;
-    overflow: hidden;
-    background: #fff;
-  `;
 
   const labelsHTML = products.map(p => {
     let specs: string[] = [];
@@ -839,13 +859,13 @@ export async function printZReportDirect(
   // ── IPC path (Electron desktop) ──
   if (electronAPI?.printZReport) {
     try {
-      const resData = await callElectronPrint(() => electronAPI.printZReport(payload));
+      const resData = await callElectronPrint<PrintServerResult>(() => electronAPI.printZReport(payload));
       if (resData?.ok) return { method: 'direct' as const };
       console.warn('[Print] IPC Z-Report error:', resData?.error);
       return { method: 'direct' as const, error: resData?.error };
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.warn('[Print] IPC Z-Report failed:', e);
-      return { method: 'direct' as const, error: e?.message || 'Print failed' };
+      return { method: 'direct' as const, error: (e instanceof Error && e.message) || 'Print failed' };
     }
   }
 
@@ -858,7 +878,7 @@ export async function printZReportDirect(
       body: JSON.stringify(payload),
     });
 
-    const resData = await res.json();
+    const resData = (await res.json()) as PrintServerResult;
     if (resData.ok) {
       return { method: 'direct' };
     }
@@ -911,9 +931,9 @@ export function openZReportPrintWindow(
     };
   },
   storeName: string,
-  currency: string = 'USD'
+  _currency: string = 'USD'
 ) {
-  const html = buildZReportHTML(data, storeName, currency);
+  const html = buildZReportHTML(data, storeName);
   openPrintWindow(html, 'Z-Report (End-of-Day Summary)');
 }
 
@@ -955,13 +975,11 @@ export function buildZReportHTML(
       staffBreakdown: { name: string; count: number; total: number }[];
     };
   },
-  storeName: string,
-  currency: string = 'USD'
-) {
+  storeName: string) {
   const { summary } = data;
   const staffRows = summary.staffBreakdown.map(s => `
     <div style="display:flex;justify-content:space-between;font-size:12px;margin:2px 0;">
-      <span>${s.name} (${s.count} txs)</span>
+      <span>${s.name} (${s.count} ${i18n.t('reports.txs', 'txs')})</span>
       <strong>${formatCurrency(s.total)}</strong>
     </div>
   `).join('');
@@ -976,10 +994,10 @@ export function buildZReportHTML(
     <div style="font-family:'Courier New',Courier,monospace;font-size:12px;max-width:320px;margin:0 auto;padding:12px;background:#fff;color:#000;">
       <div style="text-align:center;margin-bottom:8px;">
         <h2 style="font-size:16px;font-weight:bold;margin:0 0 4px 0;text-transform:uppercase;">${storeName || 'PhoneShop Pro'}</h2>
-        <div style="font-size:13px;font-weight:bold;margin:4px 0;">*** END-OF-DAY Z-REPORT ***</div>
-        <div style="font-size:11px;color:#333;">Date: ${data.date}</div>
-        <div style="font-size:11px;color:#333;">Cashier: ${data.generatedBy}</div>
-        <div style="font-size:10px;color:#666;">Generated: ${new Date().toLocaleTimeString()}</div>
+        <div style="font-size:13px;font-weight:bold;margin:4px 0;">${i18n.t('reports.zReport', '*** END-OF-DAY Z-REPORT ***')}</div>
+        <div style="font-size:11px;color:#333;">${i18n.t('reports.reportDate', 'Date:')} ${data.date}</div>
+        <div style="font-size:11px;color:#333;">${i18n.t('reports.cashier', 'Cashier:')} ${data.generatedBy}</div>
+        <div style="font-size:10px;color:#666;">${i18n.t('reports.generatedAt', 'Generated:')} ${new Date().toLocaleTimeString()}</div>
       </div>
 
       <div style="border-top:1px dashed #000;margin:8px 0;"></div>
@@ -1011,10 +1029,10 @@ export function buildZReportHTML(
         <span>${i18n.t('reports.refundsGiven', 'Refunds')} (${summary.refundsCount} ${i18n.t('reports.txs', 'txs')}):</span>
         <strong>-${formatCurrency(summary.refundsAmount)}</strong>
       </div>
-      <div style="font-size:10px;color:#666;margin-bottom:2px;">(Excluded from drawer sales; contributes $0 cash)</div>
+      <div style="font-size:10px;color:#666;margin-bottom:2px;">${i18n.t('reports.excludedNote', '(Excluded from drawer sales; contributes $0 cash)')}</div>
       ${(summary.cancelledCount && summary.cancelledCount > 0) ? `
       <div style="display:flex;justify-content:space-between;margin:2px 0;color:#666;">
-        <span>Voided / Cancelled (${summary.cancelledCount} ${i18n.t('reports.txs', 'txs')}):</span>
+        <span>${i18n.t('reports.voidedCancelled', 'Voided / Cancelled')} (${summary.cancelledCount} ${i18n.t('reports.txs', 'txs')}):</span>
         <strong>${formatCurrency(0)}</strong>
       </div>
       ` : ''}
@@ -1023,28 +1041,28 @@ export function buildZReportHTML(
 
       <div style="font-weight:bold;margin:6px 0 4px 0;">${i18n.t('reports.cashDrawerRec', 'PHYSICAL CASH INFLOW (DETAILS)')}</div>
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
-        <span>• Retail POS Cash (${summary.posRetailCount || summary.salesCount} sales):</span>
+        <span>• ${i18n.t('reports.retailPosCash', 'Retail POS Cash:')} (${summary.posRetailCount || summary.salesCount} ${i18n.t('reports.sales', 'sales')})</span>
         <span>${formatCurrency(posCash)}</span>
       </div>
       ${partsCash > 0 ? `
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
-        <span>• Parts B2B Wholesale:</span>
+        <span>• ${i18n.t('reports.partsB2B', 'Parts B2B Wholesale:')}</span>
         <span>${formatCurrency(partsCash)}</span>
       </div>
       ` : ''}
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
-        <span>• Repair Handover Pickups:</span>
+        <span>• ${i18n.t('reports.repairHandovers', 'Repair Handover Pickups:')}</span>
         <span>+${formatCurrency(repairPickups)}</span>
       </div>
       ${repairDeposits > 0 ? `
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
-        <span>• Repair Intake Deposits:</span>
+        <span>• ${i18n.t('reports.repairDeposits', 'Repair Intake Deposits:')}</span>
         <span>+${formatCurrency(repairDeposits)}</span>
       </div>
       ` : ''}
       ${debtCollected > 0 ? `
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
-        <span>• Customer Debt Repaid:</span>
+        <span>• ${i18n.t('reports.debtRepaid', 'Customer Debt Repaid:')}</span>
         <span>+${formatCurrency(debtCollected)}</span>
       </div>
       ` : ''}
@@ -1052,44 +1070,44 @@ export function buildZReportHTML(
       <div style="border:2px solid #000;border-radius:4px;padding:8px;margin:10px 0;text-align:center;background:#f9f9f9;">
         <div style="font-size:11px;font-weight:bold;text-transform:uppercase;">${i18n.t('reports.netCashDrawer', 'NET PHYSICAL CASH IN DRAWER')}</div>
         <div style="font-size:18px;font-weight:bold;margin-top:2px;">${formatCurrency(summary.netCash)}</div>
-        <div style="font-size:10px;color:#555;">(Exact cash to count in till)</div>
+        <div style="font-size:10px;color:#555;">${i18n.t('reports.exactCashNote', '(Exact cash to count in till)')}</div>
       </div>
 
       <div style="border-top:1px dashed #000;margin:8px 0;"></div>
 
-      <div style="font-weight:bold;margin:6px 0 4px 0;">PAYMENT METHODS (TENDER)</div>
+      <div style="font-weight:bold;margin:6px 0 4px 0;">${i18n.t('reports.paymentMethods', 'PAYMENT METHODS (TENDER)')}</div>
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
-        <span>• Cash Tender:</span>
+        <span>• ${i18n.t('reports.cashTender', 'Cash Tender:')}</span>
         <span>${formatCurrency(posCash + partsCash)}</span>
       </div>
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
-        <span>• Card / TPE Terminal:</span>
+        <span>• ${i18n.t('reports.cardTpe', 'Card / TPE Terminal:')}</span>
         <span>${formatCurrency(summary.cardTotal || 0)}</span>
       </div>
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
-        <span>• Mobile Money / BaridiMob:</span>
+        <span>• ${i18n.t('reports.mobileMoney', 'Mobile Money / BaridiMob:')}</span>
         <span>${formatCurrency(summary.mobileTotal || 0)}</span>
       </div>
       ${(summary.transferTotal && summary.transferTotal > 0) ? `
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
-        <span>• Bank Transfers:</span>
+        <span>• ${i18n.t('reports.bankTransfers', 'Bank Transfers:')}</span>
         <span>${formatCurrency(summary.transferTotal)}</span>
       </div>
       ` : ''}
       ${(summary.debtTotal && summary.debtTotal > 0) ? `
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
-        <span>• Charged to Debt Tab:</span>
+        <span>• ${i18n.t('reports.chargedDebt', 'Charged to Debt Tab:')}</span>
         <span>${formatCurrency(summary.debtTotal)}</span>
       </div>
       ` : ''}
       ${(summary.creditTotal && summary.creditTotal > 0) ? `
       <div style="display:flex;justify-content:space-between;margin:2px 0;">
-        <span>• Store Credit Applied:</span>
+        <span>• ${i18n.t('reports.storeCreditApplied', 'Store Credit Applied:')}</span>
         <span>${formatCurrency(summary.creditTotal)}</span>
       </div>
       ` : ''}
       <div style="display:flex;justify-content:space-between;margin:4px 0 2px 0;font-weight:bold;border-top:1px dotted #ccc;padding-top:2px;">
-        <span>Gross Sales Volume:</span>
+        <span>${i18n.t('reports.grossSalesVolume', 'Gross Sales Volume:')}</span>
         <span>${formatCurrency(summary.grossSales)}</span>
       </div>
 
@@ -1123,9 +1141,8 @@ export function buildRepairLabelHTML(ticket: {
   lockType?: string;
   lockValue?: string;
   createdAt?: string;
-}, storeName?: string) {
-  const { storeName: defaultStoreName, currency } = useSettingsStore.getState();
-  const activeStoreName = storeName || defaultStoreName || 'PhoneShop Pro';
+}) {
+  const { currency } = useSettingsStore.getState();
 
   const ticketNum = (ticket.ticketNumber || '').trim();
   const phoneName = `${ticket.deviceBrand || ''} ${ticket.deviceModel || ''}`.trim();
@@ -1556,12 +1573,12 @@ export async function printCustomTicketDirect(
   // ── IPC path (Electron desktop) ──
   if (electronAPI?.printCustomTicket) {
     try {
-      const data = await callElectronPrint(() => electronAPI.printCustomTicket(payload));
+      const data = await callElectronPrint<PrintServerResult>(() => electronAPI.printCustomTicket(payload));
       if (data?.ok) return { success: true };
       return { success: false, error: data?.error || 'IPC print returned an error.' };
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.warn('[Print] IPC custom ticket failed:', e);
-      return { success: false, error: e?.message || 'Print failed' };
+      return { success: false, error: (e instanceof Error && e.message) || 'Print failed' };
     }
   }
 
@@ -1574,12 +1591,12 @@ export async function printCustomTicketDirect(
       body: JSON.stringify(payload),
     });
 
-    const data = await res.json();
+    const data = (await res.json()) as PrintServerResult;
     if (data.ok) {
       return { success: true };
     }
     return { success: false, error: data.error || 'Print server returned an error.' };
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('[Print Server Error] Custom ticket print failed:', err);
     return {
       success: false,
@@ -1596,12 +1613,12 @@ export async function calibrateLabelPrinter(): Promise<{ success: boolean; messa
   // ── IPC path (Electron desktop) ──
   if (electronAPI?.calibrateLabels) {
     try {
-      const data = await callElectronPrint(() => electronAPI.calibrateLabels({}));
+      const data = await callElectronPrint<PrintServerResult>(() => electronAPI.calibrateLabels({}));
       if (data?.ok) return { success: true, message: data.message };
       return { success: false, error: data?.error || 'IPC calibration returned an error.' };
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.warn('[Print] IPC calibrate failed:', e);
-      return { success: false, error: e?.message || 'Calibration failed' };
+      return { success: false, error: (e instanceof Error && e.message) || 'Calibration failed' };
     }
   }
 
@@ -1612,12 +1629,12 @@ export async function calibrateLabelPrinter(): Promise<{ success: boolean; messa
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(8000),
     });
-    const data = await res.json();
+    const data = (await res.json()) as PrintServerResult;
     if (data.ok) {
       return { success: true, message: data.message };
     }
     return { success: false, error: data.error || 'Calibration command rejected by print server.' };
-  } catch (err: any) {
+  } catch (err: unknown) {
     return {
       success: false,
       error: 'Print server is unreachable (http://localhost:3355). Please check that the print server is running.'
@@ -1799,130 +1816,6 @@ function buildLowStockThermalSlipText(payload: LowStockReportPrintPayload): stri
   return out.join('\n');
 }
 
-function buildLowStockReportHTML(payload: LowStockReportPrintPayload): string {
-  const {
-    storeName = 'PhoneShop Pro',
-    currency = 'DZD',
-    category = 'all',
-    subCategory = 'all',
-    totalUnitsNeeded = 0,
-    totalRestockCost = 0,
-    canViewCosts = true,
-    products = [],
-  } = payload;
-
-  const dateStr = new Date().toLocaleDateString();
-  const catLabel = category === 'all' ? 'All Inventory Categories' : category.toUpperCase();
-  const subLabel = category === 'accessory' && subCategory !== 'all' ? ` (${subCategory})` : '';
-
-  const sorted = sortLowStockProducts(products);
-  let lastGroup = '';
-  const rowsHtml = sorted
-    .map((p, idx) => {
-      const groupName = getCategoryGroupHeader(p);
-      let groupHeaderHtml = '';
-      if (groupName !== lastGroup) {
-        lastGroup = groupName;
-        groupHeaderHtml = `
-          <tr style="background-color: #f1f5f9; font-weight: bold;">
-            <td colspan="${canViewCosts ? 11 : 9}" style="padding: 8px 12px; font-size: 13px; color: #1e293b; border-top: 2px solid #cbd5e1;">
-              ${groupName}
-            </td>
-          </tr>
-        `;
-      }
-      const threshold = p.lowStockThreshold || 1;
-      const deficit = Math.max(1, threshold - (p.stock || 0));
-      const subMeta = p.accessorySubCategory || '-';
-      return `
-        ${groupHeaderHtml}
-        <tr>
-          <td>${idx + 1}</td>
-          <td><strong>${p.name} ${p.model}</strong></td>
-          <td>${p.category || ''} ${subMeta !== '-' ? `(${subMeta})` : ''}</td>
-          <td class="font-mono">${p.sku || '-'}</td>
-          <td class="text-danger" style="font-weight: bold;">${p.stock}</td>
-          <td>${threshold}</td>
-          <td style="font-weight: bold; color: #b91c1c;">+${deficit}</td>
-          ${canViewCosts ? `<td>${(p.costPrice || 0).toLocaleString()} ${currency}</td><td>${((p.costPrice || 0) * deficit).toLocaleString()} ${currency}</td>` : ''}
-          <td>${p.supplier || '-'}</td>
-          <td>[ &nbsp; &nbsp; &nbsp; ]</td>
-        </tr>
-      `;
-    })
-    .join('');
-
-  return `
-    <div class="report-header">
-      <div>
-        <div class="shop-name">${storeName}</div>
-        <div class="report-title">Low Stock Replenishment & Reorder Sheet</div>
-        <div style="font-size: 12px; color: #64748b; margin-top: 2px;">
-          Filter Scope: <strong>${catLabel}${subLabel}</strong>
-        </div>
-      </div>
-      <div class="meta-info">
-        <div><strong>Date:</strong> ${dateStr}</div>
-        <div><strong>Products Below Min:</strong> ${products.length}</div>
-        <div><strong>Units to Reorder:</strong> ${totalUnitsNeeded}</div>
-      </div>
-    </div>
-
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-label">Deficit Products</div>
-        <div class="kpi-value">${products.length}</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Units Needed</div>
-        <div class="kpi-value text-danger">${totalUnitsNeeded}</div>
-      </div>
-      ${
-        canViewCosts
-          ? `
-        <div class="kpi-card">
-          <div class="kpi-label">Est. Restock Budget</div>
-          <div class="kpi-value">${totalRestockCost.toLocaleString()} ${currency}</div>
-        </div>
-      `
-          : ''
-      }
-    </div>
-
-    <div class="section-title">Itemized Replenishment List (Grouped by Category)</div>
-    <table>
-      <thead>
-        <tr>
-          <th style="width: 30px;">#</th>
-          <th>Product & Model</th>
-          <th>Category & Sub</th>
-          <th>SKU</th>
-          <th>Stock</th>
-          <th>Min</th>
-          <th>Order Qty</th>
-          ${canViewCosts ? '<th>Unit Cost</th><th>Est. Cost</th>' : ''}
-          <th>Supplier</th>
-          <th>Received</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rowsHtml}
-      </tbody>
-    </table>
-
-    <div class="signature-box" style="margin-top: 32px;">
-      <div>
-        <div class="sig-line">Prepared By</div>
-      </div>
-      <div>
-        <div class="sig-line">Manager Approval</div>
-      </div>
-      <div>
-        <div class="sig-line">Supplier Order Confirmation</div>
-      </div>
-    </div>
-  `;
-}
 
 /**
  * Sends a low stock replenishment report to the thermal print server.
@@ -1941,7 +1834,7 @@ export async function printLowStockReportDirect(
   // ── Tier 1: Electron IPC Dedicated Path (Desktop app with new build) ──
   if (electronAPI?.printLowStockReport) {
     try {
-      const res = await callElectronPrint(() => electronAPI.printLowStockReport(sortedPayload));
+      const res = await callElectronPrint<PrintServerResult>(() => electronAPI.printLowStockReport(sortedPayload));
       if (res?.ok) return { method: 'direct' };
       console.warn('[Print] IPC Low Stock Report error:', res?.error);
     } catch (err) {
@@ -1955,9 +1848,11 @@ export async function printLowStockReportDirect(
   if (electronAPI?.printReceipt) {
     try {
       const now = new Date();
+      const category = payload.category ?? 'all';
+      const subCategory = payload.subCategory ?? 'all';
       const catLabel =
-        (payload.category === 'all' ? 'ALL CATEGORIES' : payload.category.toUpperCase()) +
-        (payload.category === 'accessory' && payload.subCategory !== 'all' ? ` (${payload.subCategory.toUpperCase()})` : '');
+        (category === 'all' ? 'ALL CATEGORIES' : category.toUpperCase()) +
+        (category === 'accessory' && subCategory !== 'all' ? ` (${subCategory.toUpperCase()})` : '');
 
       let lastGroup = '';
       const receiptItems = sortedProducts.map((p, idx) => {
@@ -2006,7 +1901,7 @@ export async function printLowStockReportDirect(
         translations: getTranslations(),
       };
 
-      const res = await callElectronPrint(() => electronAPI.printReceipt(receiptPayload));
+      const res = await callElectronPrint<PrintServerResult>(() => electronAPI.printReceipt(receiptPayload));
       if (res?.ok) return { method: 'direct' };
       console.warn('[Print] IPC Receipt fallback error:', res?.error);
     } catch (err) {
@@ -2024,7 +1919,7 @@ export async function printLowStockReportDirect(
     });
 
     if (res.ok) {
-      const data = await res.json();
+      const data = (await res.json()) as PrintServerResult;
       if (data.ok) return { method: 'direct' };
       console.warn('[Print] /print-low-stock-report returned error:', data.error);
     } else {
@@ -2059,7 +1954,7 @@ export async function printLowStockReportDirect(
       body: JSON.stringify(customPayload),
     });
 
-    const data = await res.json();
+    const data = (await res.json()) as PrintServerResult;
     if (data.ok) return { method: 'direct' };
     console.warn('[Print] /print-custom-ticket returned error:', data.error);
   } catch (err) {

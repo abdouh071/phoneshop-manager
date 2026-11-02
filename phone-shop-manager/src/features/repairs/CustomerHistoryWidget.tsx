@@ -1,26 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import {
-  ChevronDown,
-  Sparkles,
-  Smartphone,
-  Clock,
-  CheckCircle2,
-  AlertTriangle,
-  UserCheck,
-  Wrench,
-  RotateCcw,
-  XCircle,
-  CreditCard,
-  AlertCircle,
-  Store,
-  User,
-} from 'lucide-react';
+import { ChevronDown, Sparkles, Smartphone, Clock, CheckCircle2, AlertTriangle, Wrench, RotateCcw, XCircle, CreditCard, AlertCircle, Store, User } from 'lucide-react';
 import { useRepairStore } from '../../store/repairStore';
 import { useCustomerStore } from '../../store/customerStore';
 import { usePrivacyStore } from '../../store/privacyStore';
 import type { RepairTicket, Customer } from '../../types';
 import styles from './CustomerHistoryWidget.module.css';
-import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { formatPrivateCurrency } from '../../utils/formatCurrency';
 import { isPhoneMatch, normalizePhoneDigits } from '../../utils/phoneUtils';
 import { isTicketActiveReturnPending } from '../../utils/phoneLifecycle';
 
@@ -53,7 +38,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
   onViewTicket,
   defaultOpen = false,
 }) => {
-  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
+  usePrivacyStore(s => s.isPrivacyActive);
   const { tickets } = useRepairStore();
   const { customers, debts } = useCustomerStore();
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -409,7 +394,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
                 {Boolean(matchedCustomer.storeCredit && matchedCustomer.storeCredit > 0) && (
                   <div className={styles.accountPillCredit}>
                     <CreditCard size={12} />
-                    <span>Credit: {formatPrivateCurrency(matchedCustomer.storeCredit)}</span>
+                    <span>Credit: {formatPrivateCurrency(matchedCustomer.storeCredit ?? 0)}</span>
                   </div>
                 )}
               </div>
@@ -582,7 +567,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
                       <div className={styles.itemFinancials}>
                         {fin.isDebt ? (
                           <span className={styles.debtCostBreakdown}>
-                            <span className={styles.costTotalText}>Total: {formatPrivateCurrency(fin.totalCost)}</span>
+                            <span className={styles.costTotalText}>Total: {formatPrivateCurrency(fin.totalCost ?? 0)}</span>
                             {fin.paidAmount > 0 && (
                               <span className={styles.costPaidText}>Paid: {formatPrivateCurrency(fin.paidAmount)}</span>
                             )}
@@ -590,14 +575,14 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
                           </span>
                         ) : fin.exactStatus === 'taken' ? (
                           <span className={styles.itemCostPaid}>
-                            Paid: {formatPrivateCurrency(fin.totalCost)}
+                            Paid: {formatPrivateCurrency(fin.totalCost ?? 0)}
                           </span>
                         ) : (
                           <span className={styles.itemCost}>
-                            {formatPrivateCurrency(fin.totalCost)}
+                            {formatPrivateCurrency(fin.totalCost ?? 0)}
                             {Boolean(t.depositAmount && t.depositAmount > 0) && (
                               <span className={styles.depositNote}>
-                                {' '}(Deposit: {formatPrivateCurrency(t.depositAmount)})
+                                {' '}(Deposit: {formatPrivateCurrency(t.depositAmount ?? 0)})
                               </span>
                             )}
                           </span>

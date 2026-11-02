@@ -3,7 +3,7 @@
  */
 
 export function exportToCSV(filename: string, headers: string[], rows: (string | number | boolean | null | undefined)[][]) {
-  const sanitize = (val: any): string => {
+  const sanitize = (val: unknown): string => {
     if (val === null || val === undefined) return '""';
     const str = String(val).replace(/"/g, '""');
     return `"${str}"`;

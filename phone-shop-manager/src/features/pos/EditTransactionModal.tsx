@@ -7,6 +7,7 @@ import { Minus, Plus, AlertTriangle } from 'lucide-react';
 import type { SaleTransaction, CartItem } from '../../types';
 import { formatCurrency, getCurrencySymbol } from '../../utils/formatCurrency';
 import { useSettingsStore } from '../../store/settingsStore';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface EditTransactionModalProps {
   isOpen: boolean;
@@ -109,8 +110,8 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
         `Transaction ${transaction.id} has been modified.${refundAmount > 0 ? ` Refund due: ${formatCurrency(refundAmount)}` : additionalDue > 0 ? ` Extra collected: ${formatCurrency(additionalDue)}` : ''}`
       );
       onClose();
-    } catch (err: any) {
-      toast.error('Error', err.message || 'Failed to update transaction.');
+    } catch (err: unknown) {
+      toast.error('Error', errorMessage(err) || 'Failed to update transaction.');
     } finally {
       setIsProcessing(false);
     }

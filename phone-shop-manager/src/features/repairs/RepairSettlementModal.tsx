@@ -15,7 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import type { RepairTicket, RepairStatusHistoryEntry, PaymentMethod } from '../../types';
+import type { Customer, RepairTicket, RepairStatusHistoryEntry, PaymentMethod } from '../../types';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -28,6 +28,7 @@ import { useAuthStore } from '../../store/authStore';
 import { activityLogService } from '../../services/activityLogService';
 import { customerLogService } from '../../services/customerLogService';
 import styles from './RepairSettlementModal.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface RepairSettlementModalProps {
   isOpen: boolean;
@@ -172,7 +173,7 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
     try {
       const trimmedPhone = formatStandardPhone(customerPhone.trim()) || customerPhone.trim();
       let customerId = ticket.customerId;
-      let matchedCustomer = matchingCustomer;
+      let matchedCustomer: Customer | null | undefined = matchingCustomer;
 
       // 3. Resolve or create customer account
       const devicePayload = ticket.deviceBrand && ticket.deviceModel ? {
@@ -406,9 +407,9 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
 
       onSettled(mergedTicket);
       onClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to settle repair ticket:', err);
-      toast.error('Settlement Failed', err?.message || 'Could not complete repair settlement.');
+      toast.error('Settlement Failed', errorMessage(err) || 'Could not complete repair settlement.');
     } finally {
       setIsSubmitting(false);
     }

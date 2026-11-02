@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Printer, Tag, FileText, Layers, CheckCircle2 } from 'lucide-react';
+import { X, Printer, Tag, FileText, Layers } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useToast } from '../../components/ui/Toast';
@@ -14,6 +14,7 @@ import {
 } from '../../utils/printWindow';
 import type { RepairTicket } from '../../types';
 import styles from './PrintRepairTicketModal.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface PrintRepairTicketModalProps {
   isOpen: boolean;
@@ -32,17 +33,17 @@ export const PrintRepairTicketModal: React.FC<PrintRepairTicketModalProps> = ({
   const [format, setFormat] = useState<'both' | 'label' | 'receipt'>('both');
   const [isPrinting, setIsPrinting] = useState(false);
 
-  const { t, i18n } = useTranslation();
+  const { i18n } = useTranslation();
 
   // Generate previews dynamically
   const labelHtml = useMemo(() => {
     if (!ticket) return '';
-    return buildRepairLabelHTML(ticket, storeName);
+    return buildRepairLabelHTML(ticket);
   }, [ticket, storeName, i18n.language]);
 
   const receiptHtml = useMemo(() => {
     if (!ticket) return '';
-    return buildRepairReceiptHTML(ticket, storeName);
+    return buildRepairReceiptHTML(ticket);
   }, [ticket, storeName, i18n.language]);
 
   if (!isOpen || !ticket) return null;
@@ -102,9 +103,9 @@ export const PrintRepairTicketModal: React.FC<PrintRepairTicketModalProps> = ({
       openPrintWindow(combinedHtml, `Repair Print - ${ticket.ticketNumber}`);
       toast.info('Browser Print', 'Opening print dialog for both ticket and sticker.');
       onClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[Print Both Error]', err);
-      toast.error('Print Failed', err?.message || 'Failed to dispatch print jobs.');
+      toast.error('Print Failed', errorMessage(err) || 'Failed to dispatch print jobs.');
     } finally {
       setIsPrinting(false);
     }
@@ -122,8 +123,8 @@ export const PrintRepairTicketModal: React.FC<PrintRepairTicketModalProps> = ({
       }
       openPrintWindow(labelHtml, `Repair Sticker - ${ticket.ticketNumber}`);
       onClose();
-    } catch (err: any) {
-      toast.error('Print Failed', err?.message || 'Failed to print label.');
+    } catch (err: unknown) {
+      toast.error('Print Failed', errorMessage(err) || 'Failed to print label.');
     } finally {
       setIsPrinting(false);
     }
@@ -141,8 +142,8 @@ export const PrintRepairTicketModal: React.FC<PrintRepairTicketModalProps> = ({
       }
       openPrintWindow(receiptHtml, `Repair Ticket - ${ticket.ticketNumber}`);
       onClose();
-    } catch (err: any) {
-      toast.error('Print Failed', err?.message || 'Failed to print ticket.');
+    } catch (err: unknown) {
+      toast.error('Print Failed', errorMessage(err) || 'Failed to print ticket.');
     } finally {
       setIsPrinting(false);
     }

@@ -1,6 +1,6 @@
 import React from 'react';
-import { Calculator, TrendingUp, AlertCircle, Sparkles, Package } from 'lucide-react';
-import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { Calculator } from 'lucide-react';
+import { formatCurrency } from '../../utils/formatCurrency';
 import { usePrivacyStore } from '../../store/privacyStore';
 import styles from './ProfitMarginCalculator.module.css';
 

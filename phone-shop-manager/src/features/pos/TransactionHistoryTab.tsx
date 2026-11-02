@@ -25,8 +25,8 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
   const [txRequiringUnlock, setTxRequiringUnlock] = useState<{ tx: SaleTransaction; purpose: UnlockPurpose } | null>(null);
   const [txToPrint, setTxToPrint] = useState<SaleTransaction | null>(null);
   const { transactions } = useCartStore();
-  const { user, isHistoryUnlocked } = useAuthStore();
-  const permissions = usePermissions();
+  const { user } = useAuthStore();
+  usePermissions();
 
   useEffect(() => {
     if (initialSearch) setSearchQuery(initialSearch);
@@ -55,11 +55,6 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const isToday = (dateStr: string) => {
-    const d = new Date(dateStr);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime() === today.getTime();
-  };
 
   const canEditDirectly = (t: SaleTransaction) => {
     if (t.status === 'refunded') return false;

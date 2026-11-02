@@ -637,7 +637,7 @@ export const StatusTablesView: React.FC<StatusTablesViewProps> = ({
                     const cost = ticket.actualCost ?? ticket.estimatedCost ?? 0;
                     const deposit = ticket.depositAmount ?? 0;
                     const balance = Math.max(0, cost - deposit);
-                    const cleanPhone = getCleanPhone(ticket.customerPhone);
+                    getCleanPhone(ticket.customerPhone);
 
                     return (
                       <tr 

@@ -1,27 +1,23 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Modal } from '../../components/ui/Modal';
-import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
+import { Store, User, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import {
-  GitMerge,
-  Store,
-  User,
-  ArrowRight,
-  AlertTriangle,
-  CheckCircle2,
-  Phone,
-  Wrench,
-  DollarSign,
-  Package,
-} from 'lucide-react';
+  DetectedPairsBar,
+  EntitySelect,
+  MergeBanner,
+  MergeFooter,
+  MergeSummaryBox,
+  PairComparisonGrid,
+} from '../../components/merge/MergeDialogPrimitives';
 import { useCustomerStore } from '../../store/customerStore';
 import { useRepairStore } from '../../store/repairStore';
 import { useToast } from '../../components/ui/Toast';
 import type { Customer } from '../../types';
 import { isShopCustomer, isRetailCustomer } from '../../types';
 import { formatCurrency } from '../../utils/formatCurrency';
-import styles from './MergeCustomersModal.module.css';
+import styles from '../../components/merge/MergeDialog.module.css';
 
 interface MergeCustomersModalProps {
   isOpen: boolean;
@@ -31,13 +27,88 @@ interface MergeCustomersModalProps {
   initialReason?: string;
 }
 
-export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
-  isOpen,
-  onClose,
-  initialAccountA,
-  initialAccountB,
-  initialReason,
-}) => {
+interface AccountStats {
+  debt: number;
+  repairsCount: number;
+  orders: number;
+  spent: number;
+}
+
+const AccountPanel: React.FC<{
+  selectLabel: React.ReactNode;
+  value: string;
+  accounts: Customer[];
+  otherAccountId: string;
+  onChange: (id: string) => void;
+  account?: Customer;
+  stats: AccountStats;
+}> = ({ selectLabel, value, accounts, otherAccountId, onChange, account, stats }) => {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      <EntitySelect
+        label={selectLabel}
+        value={value}
+        onChange={onChange}
+        options={accounts.map(c => ({
+          id: c.id,
+          disabled: c.id === otherAccountId,
+          label: (
+            <>
+              {isShopCustomer(c) ? '🏪 [Shop] ' : '👤 [Retail] '}
+              {c.shopName ? `${c.shopName} (${c.name})` : c.name} — {c.phone}
+            </>
+          ),
+        }))}
+      />
+
+      {account && (
+        <>
+          <div className={styles.accountCardHeader}>
+            <div>
+              <h4 className={styles.accountName}>{account.name}</h4>
+              {account.shopName && (
+                <p className={styles.accountShopName}>🏪 {account.shopName}</p>
+              )}
+            </div>
+            <span className={isShopCustomer(account) ? styles.accountBadgeShop : styles.accountBadgeRetail}>
+              {isShopCustomer(account) ? `🏪 ${t('common.b2bShop', 'B2B Shop')}` : `👤 ${t('common.retailCustomer', 'Retail')}`}
+            </span>
+          </div>
+
+          <div className={styles.accountMeta}>
+            <span>📞 {account.phone || t('common.none', 'No phone')}</span>
+            {account.email && <span>✉️ {account.email}</span>}
+          </div>
+
+          <div className={styles.statRow}>
+            <div className={styles.statItem}>
+              <span className={styles.statLabel}>{t('customers.debtBalance', 'Debt Balance')}</span>
+              <span className={styles.statValue} style={{ color: stats.debt > 0 ? '#dc2626' : '#16a34a' }}>
+                {formatCurrency(stats.debt)}
+              </span>
+            </div>
+            <div className={styles.statItem}>
+              <span className={styles.statLabel}>{t('customers.repairs', 'Repair Phones')}</span>
+              <span className={styles.statValue}>{stats.repairsCount}</span>
+            </div>
+            <div className={styles.statItem}>
+              <span className={styles.statLabel}>{t('customers.orders', 'Orders')}</span>
+              <span className={styles.statValue}>{stats.orders}</span>
+            </div>
+            <div className={styles.statItem}>
+              <span className={styles.statLabel}>{t('customers.totalSpent', 'Spent')}</span>
+              <span className={styles.statValue}>{formatCurrency(stats.spent)}</span>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+};
+
+export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({ isOpen, onClose, initialAccountA, initialAccountB }) => {
   const { t } = useTranslation();
   const { customers, debts, mergeCustomers, findDuplicates, autoResolveAllDuplicates } = useCustomerStore();
   // Only show active (non-merged) customers in the selectors
@@ -142,7 +213,6 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
 
   const combinedDebt = statsA.debt + statsB.debt;
   const combinedOrders = statsA.orders + statsB.orders;
-  const combinedSpent = statsA.spent + statsB.spent;
   const combinedRepairs = statsA.repairsCount + statsB.repairsCount;
 
   // Decide which account acts as primary (retained ID) and which is secondary (absorbed)
@@ -257,6 +327,9 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
     }
   };
 
+  const accountNameLine = (c: Customer) =>
+    `${isShopCustomer(c) ? '🏪' : '👤'} ${c.shopName ? `${c.shopName} (${c.name})` : c.name} (${c.phone || 'No phone'})`;
+
   return (
     <Modal
       isOpen={isOpen}
@@ -264,251 +337,71 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
       title={t('customers.mergeDeduplicateTitle', 'Merge & Deduplicate Customer Accounts')}
       size="md"
       footer={
-        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-          <div>
-            {detectedDuplicates.length > 1 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleMergeAll}
-                isLoading={isSubmitting}
-                style={{
-                  borderColor: '#ca8a04',
-                  color: '#854d0e',
-                  background: '#fefce8',
-                  fontWeight: 600,
-                }}
-              >
-                ⚡ {t('customers.autoResolveAll', { count: detectedDuplicates.length, defaultValue: `Auto-Resolve All (${detectedDuplicates.length})` })}
-              </Button>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>
-              {t('common.cancel', 'Cancel')}
-            </Button>
-            <Button
-              variant="primary"
-              onClick={handleConfirmMerge}
-              isLoading={isSubmitting}
-              leftIcon={<GitMerge size={16} />}
-            >
-              {t('customers.mergeRetainPrimary', 'Merge & Retain Primary')}
-            </Button>
-          </div>
-        </div>
+        <MergeFooter
+          batchLabel={detectedDuplicates.length > 1
+            ? t('customers.autoResolveAll', { count: detectedDuplicates.length, defaultValue: `Auto-Resolve All (${detectedDuplicates.length})` })
+            : undefined}
+          onBatch={handleMergeAll}
+          cancelLabel={t('common.cancel', 'Cancel')}
+          confirmLabel={t('customers.mergeRetainPrimary', 'Merge & Retain Primary')}
+          onConfirm={handleConfirmMerge}
+          onCancel={onClose}
+          isSubmitting={isSubmitting}
+        />
       }
     >
       <div className={styles.container}>
         {/* Banner Notice */}
-        <div className={styles.banner}>
-          <GitMerge size={22} className={styles.bannerIcon} />
-          <p className={styles.bannerText}>
-            {t('customers.step1ChooseAccounts', 'Step 1: Choose Two Customer Accounts to Merge')}
-          </p>
-        </div>
+        <MergeBanner>
+          {t('customers.step1ChooseAccounts', 'Step 1: Choose Two Customer Accounts to Merge')}
+        </MergeBanner>
 
         {/* Detected Duplicates Picker (if any) */}
         {detectedDuplicates.length > 0 && (
-          <div className={styles.duplicateSelectorBar}>
-            <div className={styles.duplicateBarHeader}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontWeight: 600 }}>⚡ {t('customers.detectedDuplicatesTitle', 'Detected Duplicate Accounts')} ({detectedDuplicates.length})</span>
-                <span style={{ fontSize: '11px', color: '#a16207' }}>Match: Name or Phone Number</span>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleMergeAll}
-                isLoading={isSubmitting}
-                style={{
-                  fontSize: '11px',
-                  padding: '4px 10px',
-                  borderColor: '#ca8a04',
-                  color: '#854d0e',
-                  background: '#fefce8',
-                  fontWeight: 600,
-                }}
-              >
-                ⚡ {t('customers.autoResolveAll', { count: detectedDuplicates.length, defaultValue: `Auto-Resolve All (${detectedDuplicates.length})` })}
-              </Button>
-            </div>
-            <select
-              className={styles.duplicateSelect}
-              value={selectedPairIndex}
-              onChange={(e) => handleDuplicateSelect(Number(e.target.value))}
-            >
-              <option value={-1}>-- {t('customers.resolveThisPair', 'Choose a detected duplicate or select manually below')} --</option>
-              {detectedDuplicates.map((dup, idx) => (
-                <option key={`${dup.retail.id}_${dup.shop.id}`} value={idx}>
-                  {isShopCustomer(dup.retail) ? '🏪' : '👤'} {dup.retail.shopName ? `${dup.retail.shopName} (${dup.retail.name})` : dup.retail.name} ({dup.retail.phone || 'No phone'}) ➔ {isShopCustomer(dup.shop) ? '🏪' : '👤'} {dup.shop.shopName ? `${dup.shop.shopName} (${dup.shop.name})` : dup.shop.name} ({dup.shop.phone || 'No phone'}) — [{dup.reason}]
-                </option>
-              ))}
-            </select>
-          </div>
+          <DetectedPairsBar
+            title={t('customers.detectedDuplicatesTitle', 'Detected Duplicate Accounts')}
+            count={detectedDuplicates.length}
+            matchHint="Match: Name or Phone Number"
+            manualSelectLabel={t('customers.resolveThisPair', 'Choose a detected duplicate or select manually below')}
+            pairs={detectedDuplicates.map(dup => ({
+              key: `${dup.retail.id}_${dup.shop.id}`,
+              label: `${accountNameLine(dup.retail)} ➔ ${accountNameLine(dup.shop)} — [${dup.reason}]`,
+            }))}
+            selectedIndex={selectedPairIndex}
+            onSelect={handleDuplicateSelect}
+            batchLabel={t('customers.autoResolveAll', { count: detectedDuplicates.length, defaultValue: `Auto-Resolve All (${detectedDuplicates.length})` })}
+            onBatch={handleMergeAll}
+            isBusy={isSubmitting}
+          />
         )}
 
         {/* Side-by-Side Account Selectors and Profiles */}
-        <div className={styles.comparisonGrid}>
-          {/* Account A Card */}
-          <div className={`${styles.accountCard} ${styles.accountCardActive}`}>
-            <div className={styles.searchSelectWrap}>
-              <label className={styles.selectLabel}>{t('customers.accountA', 'Account A')}:</label>
-              <select
-                style={{
-                  width: '100%',
-                  padding: '6px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
-                  fontSize: '13px',
-                  background: '#ffffff',
-                }}
-                value={accountAId}
-                onChange={(e) => {
-                  setAccountAId(e.target.value);
-                  setSelectedPairIndex(-1);
-                }}
-              >
-                {activeCustomers.map(c => (
-                  <option key={c.id} value={c.id} disabled={c.id === accountBId}>
-                    {isShopCustomer(c) ? '🏪 [Shop] ' : '👤 [Retail] '}
-                    {c.shopName ? `${c.shopName} (${c.name})` : c.name} — {c.phone}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {accountA && (
-              <>
-                <div className={styles.accountCardHeader}>
-                  <div>
-                    <h4 className={styles.accountName}>{accountA.name}</h4>
-                    {accountA.shopName && (
-                      <p className={styles.accountShopName}>🏪 {accountA.shopName}</p>
-                    )}
-                  </div>
-                  <span className={isShopCustomer(accountA) ? styles.accountBadgeShop : styles.accountBadgeRetail}>
-                    {isShopCustomer(accountA) ? `🏪 ${t('common.b2bShop', 'B2B Shop')}` : `👤 ${t('common.retailCustomer', 'Retail')}`}
-                  </span>
-                </div>
-
-                <div className={styles.accountMeta}>
-                  <span>📞 {accountA.phone || t('common.none', 'No phone')}</span>
-                  {accountA.email && <span>✉️ {accountA.email}</span>}
-                </div>
-
-                <div className={styles.statRow}>
-                  <div className={styles.statItem}>
-                    <span className={styles.statLabel}>{t('customers.debtBalance', 'Debt Balance')}</span>
-                    <span className={styles.statValue} style={{ color: statsA.debt > 0 ? '#dc2626' : '#16a34a' }}>
-                      {formatCurrency(statsA.debt)}
-                    </span>
-                  </div>
-                  <div className={styles.statItem}>
-                    <span className={styles.statLabel}>{t('customers.repairs', 'Repair Phones')}</span>
-                    <span className={styles.statValue}>{statsA.repairsCount}</span>
-                  </div>
-                  <div className={styles.statItem}>
-                    <span className={styles.statLabel}>{t('customers.orders', 'Orders')}</span>
-                    <span className={styles.statValue}>{statsA.orders}</span>
-                  </div>
-                  <div className={styles.statItem}>
-                    <span className={styles.statLabel}>{t('customers.totalSpent', 'Spent')}</span>
-                    <span className={styles.statValue}>{formatCurrency(statsA.spent)}</span>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Merge Arrow */}
-          <div className={styles.mergeArrowWrap}>
-            <div style={{
-              background: '#e2e8f0',
-              borderRadius: '50%',
-              width: '36px',
-              height: '36px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#475569',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-            }}>
-              <GitMerge size={18} />
-            </div>
-          </div>
-
-          {/* Account B Card */}
-          <div className={`${styles.accountCard} ${styles.accountCardActive}`}>
-            <div className={styles.searchSelectWrap}>
-              <label className={styles.selectLabel}>{t('customers.accountB', 'Account B')}:</label>
-              <select
-                style={{
-                  width: '100%',
-                  padding: '6px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
-                  fontSize: '13px',
-                  background: '#ffffff',
-                }}
-                value={accountBId}
-                onChange={(e) => {
-                  setAccountBId(e.target.value);
-                  setSelectedPairIndex(-1);
-                }}
-              >
-                {activeCustomers.map(c => (
-                  <option key={c.id} value={c.id} disabled={c.id === accountAId}>
-                    {isShopCustomer(c) ? '🏪 [Shop] ' : '👤 [Retail] '}
-                    {c.shopName ? `${c.shopName} (${c.name})` : c.name} — {c.phone}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {accountB && (
-              <>
-                <div className={styles.accountCardHeader}>
-                  <div>
-                    <h4 className={styles.accountName}>{accountB.name}</h4>
-                    {accountB.shopName && (
-                      <p className={styles.accountShopName}>🏪 {accountB.shopName}</p>
-                    )}
-                  </div>
-                  <span className={isShopCustomer(accountB) ? styles.accountBadgeShop : styles.accountBadgeRetail}>
-                    {isShopCustomer(accountB) ? `🏪 ${t('common.b2bShop', 'B2B Shop')}` : `👤 ${t('common.retailCustomer', 'Retail')}`}
-                  </span>
-                </div>
-
-                <div className={styles.accountMeta}>
-                  <span>📞 {accountB.phone || t('common.none', 'No phone')}</span>
-                  {accountB.email && <span>✉️ {accountB.email}</span>}
-                </div>
-
-                <div className={styles.statRow}>
-                  <div className={styles.statItem}>
-                    <span className={styles.statLabel}>{t('customers.debtBalance', 'Debt Balance')}</span>
-                    <span className={styles.statValue} style={{ color: statsB.debt > 0 ? '#dc2626' : '#16a34a' }}>
-                      {formatCurrency(statsB.debt)}
-                    </span>
-                  </div>
-                  <div className={styles.statItem}>
-                    <span className={styles.statLabel}>{t('customers.repairs', 'Repair Phones')}</span>
-                    <span className={styles.statValue}>{statsB.repairsCount}</span>
-                  </div>
-                  <div className={styles.statItem}>
-                    <span className={styles.statLabel}>{t('customers.orders', 'Orders')}</span>
-                    <span className={styles.statValue}>{statsB.orders}</span>
-                  </div>
-                  <div className={styles.statItem}>
-                    <span className={styles.statLabel}>{t('customers.totalSpent', 'Spent')}</span>
-                    <span className={styles.statValue}>{formatCurrency(statsB.spent)}</span>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+        <PairComparisonGrid
+          leftActive
+          rightActive
+          left={
+            <AccountPanel
+              selectLabel={t('customers.accountA', 'Account A')}
+              value={accountAId}
+              accounts={activeCustomers}
+              otherAccountId={accountBId}
+              onChange={(id) => { setAccountAId(id); setSelectedPairIndex(-1); }}
+              account={accountA}
+              stats={statsA}
+            />
+          }
+          right={
+            <AccountPanel
+              selectLabel={t('customers.accountB', 'Account B')}
+              value={accountBId}
+              accounts={activeCustomers}
+              otherAccountId={accountAId}
+              onChange={(id) => { setAccountBId(id); setSelectedPairIndex(-1); }}
+              account={accountB}
+              stats={statsB}
+            />
+          }
+        />
 
         {/* Destination Decision */}
         <div className={styles.decisionSection}>
@@ -573,7 +466,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
             <label className={styles.selectLabel}>{t('customers.finalName', 'Final Contact / Customer Name *')}</label>
             <Input
               value={finalName}
-              onChange={setFinalName}
+              onChange={(e) => setFinalName(e.target.value)}
               placeholder="e.g. Karim Benali"
             />
           </div>
@@ -581,7 +474,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
             <label className={styles.selectLabel}>{t('customers.finalPhone', 'Final Phone Number *')}</label>
             <Input
               value={finalPhone}
-              onChange={setFinalPhone}
+              onChange={(e) => setFinalPhone(e.target.value)}
               placeholder="e.g. 0555 12 34 56"
             />
           </div>
@@ -590,7 +483,7 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
               <label className={styles.selectLabel}>{t('customers.shopWorkshopNameRequired', 'Shop / Workshop Name *')}</label>
               <Input
                 value={finalShopName}
-                onChange={setFinalShopName}
+                onChange={(e) => setFinalShopName(e.target.value)}
                 placeholder="e.g. Benali Phone Repair"
               />
             </div>
@@ -598,34 +491,20 @@ export const MergeCustomersModal: React.FC<MergeCustomersModalProps> = ({
         </div>
 
         {/* Consolidation Summary Box */}
-        <div className={styles.summaryBox}>
-          <span className={styles.summaryTitle}>{t('customers.summaryConsolidated', 'Summary of Consolidated Account')}</span>
-          <div className={styles.summaryGrid}>
-            <div className={styles.summaryItem}>
-              <span className={styles.summaryItemLabel}>{t('customers.activeDebt', 'Combined Debt')}</span>
-              <span
-                className={styles.summaryItemValue}
-                style={{ color: combinedDebt > 0 ? '#d97706' : '#16a34a' }}
-              >
-                {formatCurrency(combinedDebt)}
-              </span>
-            </div>
-            <div className={styles.summaryItem}>
-              <span className={styles.summaryItemLabel}>{t('customers.totalOrders', 'Total Orders')}</span>
-              <span className={styles.summaryItemValue}>{combinedOrders}</span>
-            </div>
-            <div className={styles.summaryItem}>
-              <span className={styles.summaryItemLabel}>{t('customers.totalRepairs', 'Repair Phones Preserved')}</span>
-              <span className={styles.summaryItemValue}>{combinedRepairs}</span>
-            </div>
-          </div>
-          {secondaryAccount && (
-            <p style={{ margin: 0, fontSize: '12px', color: '#92400e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <AlertTriangle size={13} />
-              {secondaryAccount.shopName || secondaryAccount.name} ➔ {finalName}
-            </p>
-          )}
-        </div>
+        <MergeSummaryBox
+          title={t('customers.summaryConsolidated', 'Summary of Consolidated Account')}
+          items={[
+            {
+              label: t('customers.activeDebt', 'Combined Debt'),
+              value: formatCurrency(combinedDebt),
+              valueStyle: { color: combinedDebt > 0 ? '#d97706' : '#16a34a' },
+            },
+            { label: t('customers.totalOrders', 'Total Orders'), value: combinedOrders },
+            { label: t('customers.totalRepairs', 'Repair Phones Preserved'), value: combinedRepairs },
+          ]}
+          footnoteIcon={secondaryAccount ? <AlertTriangle size={13} /> : undefined}
+          footnote={secondaryAccount ? <>{secondaryAccount.shopName || secondaryAccount.name} ➔ {finalName}</> : undefined}
+        />
       </div>
     </Modal>
   );

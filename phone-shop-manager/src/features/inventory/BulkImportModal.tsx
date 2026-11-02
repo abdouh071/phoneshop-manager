@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import Papa from 'papaparse';
 import { Upload, X, AlertCircle, FileText, CheckCircle2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useToast } from '../../components/ui/Toast';
@@ -21,9 +22,10 @@ const TEMPLATE_HEADERS = [
 
 export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClose }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [parsedData, setParsedData] = useState<any[]>([]);
+  const [parsedData, setParsedData] = useState<Record<string, string>[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [isImporting, setIsImporting] = useState(false);
+  const { t } = useTranslation();
   const { addProductsBulk } = useInventoryStore();
   const toast = useToast();
 
@@ -48,7 +50,7 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
-        const rows = results.data as any[];
+        const rows = results.data as Record<string, string>[];
         const parseErrors: string[] = [];
         
         // Basic validation
@@ -161,7 +163,7 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({ isOpen, onClos
             <h2 className={styles.title}>Bulk Import Products</h2>
             <p className={styles.subtitle}>Upload a CSV file to add multiple products at once.</p>
           </div>
-          <button className={styles.closeBtn} onClick={handleClose}><X size={20} /></button>
+          <button className={styles.closeBtn} onClick={handleClose} aria-label={t('common.close')}><X size={20} /></button>
         </div>
 
         <div className={styles.body}>

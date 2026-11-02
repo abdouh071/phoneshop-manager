@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
-import { Plus, Clock, Wrench, CheckCircle2, Archive, LayoutList, Columns, AlertTriangle, User, Smartphone, Sparkles, PauseCircle, PlayCircle, Trash2, Printer, XCircle, RotateCcw, Eye, GitMerge } from 'lucide-react';
+import { Plus, Clock, Wrench, CheckCircle2, Archive, LayoutList, Columns, AlertTriangle, User, Smartphone, Sparkles, PauseCircle, PlayCircle, Trash2, Printer, XCircle, RotateCcw, Eye, GitMerge, RefreshCw } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { Button } from '../../components/ui/Button';
 import { SearchInput } from '../../components/ui/Input';
@@ -297,21 +297,7 @@ const TicketCard: React.FC<{
 
 export const RepairsPage = () => {
   const { t } = useTranslation();
-  const {
-    fetchTickets,
-    searchQuery,
-    setSearchQuery,
-    updateStatus,
-    tickets,
-    getFilteredTickets,
-    heldDrafts,
-    resumeDraft,
-    discardHeldDraft,
-    clearActiveDraft,
-    statusFilter,
-    setStatusFilter,
-    findDuplicates,
-  } = useRepairStore();
+  const { fetchTickets, searchQuery, setSearchQuery, updateStatus, tickets, heldDrafts, resumeDraft, discardHeldDraft, statusFilter, setStatusFilter, findDuplicates, isLoading, error } = useRepairStore();
   const { customers, fetchCustomers } = useCustomerStore();
 
   // Deduplication & safe fusion state
@@ -834,7 +820,7 @@ export const RepairsPage = () => {
         isOpen={!!profileCustomer}
         onClose={() => setProfileCustomer(null)}
         customer={profileCustomer}
-        onNewRepair={(c, lastDevice) => {
+        onNewRepair={() => {
           setProfileCustomer(null);
           setTicketToEdit(null);
           setIsNewOpen(true);
@@ -850,6 +836,32 @@ export const RepairsPage = () => {
         initialTicketA={mergeInitialTicketA}
         initialTicketB={mergeInitialTicketB}
       />
+
+      {/* Loading / Error status */}
+      {isLoading && tickets.length === 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', borderRadius: '8px', marginBottom: '8px', background: 'var(--color-surface-variant)', color: 'var(--color-on-surface-variant)', fontSize: '14px' }}>
+          <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} />
+          <span>Loading repair tickets…</span>
+        </div>
+      )}
+
+      {error && !isLoading && (
+        <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', borderRadius: '8px', marginBottom: '8px', background: 'rgba(220, 38, 38, 0.08)', border: '1px solid rgba(220, 38, 38, 0.2)', color: '#b91c1c', fontSize: '14px' }}>
+          <AlertTriangle size={18} />
+          <span style={{ flex: 1 }}>{error}</span>
+          <button
+            type="button"
+            onClick={() => fetchTickets()}
+            style={{
+              background: 'rgba(220, 38, 38, 0.1)', border: '1px solid rgba(220, 38, 38, 0.3)',
+              borderRadius: '6px', padding: '6px 12px', cursor: 'pointer',
+              color: '#b91c1c', fontSize: '13px', fontWeight: 600,
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {isMobile ? (
         <MobileRepairsView
@@ -1329,7 +1341,7 @@ export const RepairsPage = () => {
                               index={index}
                               onClick={() => setSelectedTicket(ticket)}
                               onAdvance={handleAdvanceCard}
-                              onPrint={(e, t) => handlePrintTicket(t)}
+                              onPrint={(_e, t) => handlePrintTicket(t)}
                               onOpenCustomerProfile={handleOpenCustomerProfile}
                               onQuickSettle={(e, t) => { e.stopPropagation(); setSettlementTicket(t); }}
                             />

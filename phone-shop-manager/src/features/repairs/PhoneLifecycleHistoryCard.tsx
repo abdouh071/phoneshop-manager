@@ -1,17 +1,5 @@
 import React from 'react';
-import {
-  Clock,
-  CheckCircle2,
-  AlertTriangle,
-  RotateCcw,
-  Wrench,
-  Package,
-  DollarSign,
-  ArrowRight,
-  ShieldCheck,
-  User,
-  Smartphone,
-} from 'lucide-react';
+import { CheckCircle2, RotateCcw, Smartphone } from 'lucide-react';
 import type { RepairTicket, CustomerDebtEntry } from '../../types';
 import { buildPhoneLifecycle, type PhoneLifecycleStage } from '../../utils/phoneLifecycle';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -34,15 +22,7 @@ export const PhoneLifecycleHistoryCard: React.FC<PhoneLifecycleHistoryCardProps>
     return buildPhoneLifecycle(ticket, allTickets, debts);
   }, [ticket, allTickets, debts]);
 
-  const {
-    mainTicket,
-    familyTickets,
-    stages,
-    financials,
-    wasReturned,
-    isReturnResolved,
-    returnReason,
-  } = analysis;
+  const { mainTicket, familyTickets, stages, financials, wasReturned, isReturnResolved } = analysis;
 
   const formatDate = (isoString?: string) => {
     if (!isoString) return '—';
@@ -118,7 +98,7 @@ export const PhoneLifecycleHistoryCard: React.FC<PhoneLifecycleHistoryCardProps>
       {familyTickets.length > 1 && (
         <div className={styles.familyTicketsRow}>
           <span style={{ fontWeight: 600, color: '#475569' }}>Tickets:</span>
-          {familyTickets.map((t, idx) => {
+          {familyTickets.map((t) => {
             const isCurrent = t.id === ticket.id;
             const isMain = t.id === mainTicket.id;
             return (

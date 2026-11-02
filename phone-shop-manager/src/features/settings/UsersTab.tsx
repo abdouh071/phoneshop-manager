@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardHeader } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
-import { Edit2, UserX, UserPlus, RefreshCw, ShieldOff, Smartphone, KeyRound } from 'lucide-react';
+import { Edit2, UserPlus, RefreshCw, ShieldOff, Smartphone, KeyRound } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import type { User } from '../../store/authStore';
 import { NewUserModal } from './NewUserModal';
@@ -10,6 +10,7 @@ import { EditUserModal } from './EditUserModal';
 import { SetPinModal } from './SetPinModal';
 import { useToast } from '../../components/ui/Toast';
 import styles from './Settings.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 export const UsersTab = () => {
   const { user, staff, fetchStaff, updateStaffMember, isSuperAdmin } = useAuthStore();
@@ -41,8 +42,8 @@ export const UsersTab = () => {
     try {
       await updateStaffMember(member.id, { status: 'revoked' });
       toast.success('Access Revoked', `${member.name} can no longer log in.`);
-    } catch (err: any) {
-      toast.error('Error', err.message);
+    } catch (err: unknown) {
+      toast.error('Error', errorMessage(err));
     }
   };
 
@@ -50,12 +51,12 @@ export const UsersTab = () => {
     try {
       await updateStaffMember(member.id, { status: 'active' });
       toast.success('Account Reactivated', `${member.name} can now log in again.`);
-    } catch (err: any) {
-      toast.error('Error', err.message);
+    } catch (err: unknown) {
+      toast.error('Error', errorMessage(err));
     }
   };
 
-  const formatLastActive = (lastActive: any) => {
+  const formatLastActive = (lastActive: { toDate?: () => Date } | (string & { toDate?: () => Date }) | null | undefined) => {
     if (!lastActive) return 'Never';
     if (lastActive.toDate) {
       const date = lastActive.toDate();
@@ -105,14 +106,14 @@ export const UsersTab = () => {
             <div>
               <div style={{ fontSize: '15px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span>Admin Quick Approval PIN</span>
-                {user?.approvalPin ? (
+                {user?.hasApprovalPin ? (
                   <Badge variant="success">PIN Active</Badge>
                 ) : (
                   <Badge variant="warning">Not Configured</Badge>
                 )}
               </div>
               <div style={{ fontSize: '12px', color: 'var(--color-on-surface-variant, #64748b)', marginTop: '2px' }}>
-                {user?.approvalPin
+                {user?.hasApprovalPin
                   ? 'Your approval PIN is active. Use it on any staff terminal to instantly authorize price changes, discounts, and returns in-person without entering your login password.'
                   : 'Configure a 4-8 digit numeric PIN so you can authorize staff actions on their screens without typing your full password in front of others.'}
               </div>
@@ -120,12 +121,12 @@ export const UsersTab = () => {
           </div>
 
           <Button
-            variant={user?.approvalPin ? 'secondary' : 'primary'}
+            variant={user?.hasApprovalPin ? 'secondary' : 'primary'}
             size="sm"
             leftIcon={<KeyRound size={15} />}
             onClick={() => { setSelectedPinUser(user); setIsPinModalOpen(true); }}
           >
-            {user?.approvalPin ? 'Change My PIN' : 'Set Approval PIN'}
+            {user?.hasApprovalPin ? 'Change My PIN' : 'Set Approval PIN'}
           </Button>
         </div>
       )}
@@ -224,7 +225,7 @@ export const UsersTab = () => {
                   <td className={styles.td}>
                     {isAdminMember ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {u.approvalPin ? (
+                        {u.hasApprovalPin ? (
                           <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 600 }}>
                             ● Configured
                           </span>
@@ -247,7 +248,7 @@ export const UsersTab = () => {
                               textDecoration: 'underline',
                             }}
                           >
-                            {u.approvalPin ? 'Edit' : 'Set'}
+                            {u.hasApprovalPin ? 'Edit' : 'Set'}
                           </button>
                         )}
                       </div>

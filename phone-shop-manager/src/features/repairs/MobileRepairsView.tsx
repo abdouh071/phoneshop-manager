@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { Wrench, Plus, Search, ChevronDown } from 'lucide-react';
+import { Wrench, Plus, Search } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useRepairStore } from '../../store/repairStore';
 import { useAuthStore } from '../../store/authStore';
 import { RepairTicketSwipeCard } from './RepairTicketSwipeCard';
@@ -18,6 +19,7 @@ export const MobileRepairsView: React.FC<MobileRepairsViewProps> = ({
   onTicketClick,
   onNewTicket,
 }) => {
+  const { t } = useTranslation();
   const { tickets, fetchTickets } = useRepairStore();
   const { user } = useAuthStore();
   const [search, setSearch] = useState('');
@@ -64,11 +66,11 @@ export const MobileRepairsView: React.FC<MobileRepairsViewProps> = ({
   );
 
   const FILTER_OPTIONS: { value: FilterStatus; label: string; count?: number }[] = [
-    { value: 'all',         label: 'All Active' },
-    { value: 'today',       label: `Today (${todayCount})` },
-    { value: 'pending',     label: 'Pending' },
-    { value: 'in_progress', label: 'In Progress' },
-    { value: 'ready',       label: 'Ready' },
+    { value: 'all',         label: t('mobile.allActive') },
+    { value: 'today',       label: t('mobile.todayCount', { count: todayCount }) },
+    { value: 'pending',     label: t('status.pending') },
+    { value: 'in_progress', label: t('status.in_progress') },
+    { value: 'ready',       label: t('status.ready') },
   ];
 
   return (
@@ -77,12 +79,12 @@ export const MobileRepairsView: React.FC<MobileRepairsViewProps> = ({
       <div className={styles.stickyHeader}>
         <div className={styles.headerTop}>
           <div>
-            <h2 className={styles.title}>Repairs</h2>
+            <h2 className={styles.title}>{t('sidebar.repairs')}</h2>
             <p className={styles.subtitle}>
-              Hi {user?.name?.split(' ')[0]} — {filtered.length} ticket{filtered.length !== 1 ? 's' : ''}
+              {t('mobile.hiTickets', { name: user?.name?.split(' ')[0], count: filtered.length })}
             </p>
           </div>
-          <button className={styles.fabBtn} onClick={onNewTicket} aria-label="New Ticket">
+          <button className={styles.fabBtn} onClick={onNewTicket} aria-label={t('repairs.newTicket')}>
             <Plus size={20} />
           </button>
         </div>
@@ -93,7 +95,7 @@ export const MobileRepairsView: React.FC<MobileRepairsViewProps> = ({
           <input
             className={styles.searchInput}
             type="search"
-            placeholder="Search tickets, customer, device…"
+            placeholder={t('repairs.searchPlaceholder')}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -119,9 +121,9 @@ export const MobileRepairsView: React.FC<MobileRepairsViewProps> = ({
           {filtered.length === 0 ? (
             <div className={styles.empty}>
               <Wrench size={36} className={styles.emptyIcon} />
-              <p>No tickets found</p>
+              <p>{t('repairs.noTickets')}</p>
               <button className={styles.newTicketBtn} onClick={onNewTicket}>
-                <Plus size={16} /> New Ticket
+                <Plus size={16} /> {t('repairs.newTicket')}
               </button>
             </div>
           ) : (

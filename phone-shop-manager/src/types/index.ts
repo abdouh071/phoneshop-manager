@@ -14,13 +14,19 @@ export interface PhoneModel {
   id: string;
   name: string;
   model: string;
+  brand?: string;
   storage?: string;
   color?: string;
   price: number;
   costPrice: number;
+  cost?: number; // unit cost used by repair parts
+  partNumber?: string;
+  condition?: ProductCondition;
   stock: number;
   stockStatus: StockStatus;
   sku: string;
+  /** Legacy: some imported rows carry a barcode distinct from the SKU */
+  barcode?: string;
   category: ProductCategory;
   accessorySubCategory?: AccessorySubCategory; // only set when category === 'accessory'
   supplier?: string;
@@ -35,10 +41,15 @@ export interface PhoneModel {
 export interface CartItem {
   product: PhoneModel;
   quantity: number;
+  unitPrice?: number;
+  totalPrice?: number;
   isReturn?: boolean;
   returnReason?: string;
   restock?: boolean;
   customReturnPrice?: number;
+  // Flat-item shape used by receipt builders (e.g. WhatsApp text from old/imported transactions)
+  productName?: string;
+  price?: number;
 }
 
 export interface SaleTransaction {
@@ -71,7 +82,12 @@ export interface SaleTransaction {
     refundType?: 'cash' | 'store_credit' | 'debt_deduction';
     storeCreditUsed?: number;
   };
-  status?: 'completed' | 'refunded' | 'partially_refunded';
+  status?: 'completed' | 'refunded' | 'partially_refunded' | 'voided' | 'cancelled' | 'pending_approval';
+  notes?: string;
+  paymentStatus?: 'paid' | 'partial' | 'debt';
+  // Legacy flat fields read by receipt builders (WhatsApp text etc.)
+  paymentMethod?: string;
+  remainingBalance?: number;
   // Worker accountability
   processedById?: string;
   processedByName?: string;
@@ -118,12 +134,50 @@ export interface StockWriteOff {
   date: string;          // ISO string
 }
 
+// --- Admin approvals ---
+/**
+ * Free-form payload attached to an approval request. Keys the details card understands
+ * are typed; anything else is rendered generically as a string.
+ */
+export interface ApprovalActionData {
+  productName?: string;
+  partName?: string;
+  itemName?: string;
+  itemType?: string;
+  model?: string;
+  deviceModel?: string;
+  sku?: string;
+  partNumber?: string;
+  category?: string;
+  price?: number;
+  catalogPrice?: number;
+  cost?: number;
+  costPrice?: number;
+  currentStock?: number;
+  stock?: number;
+  customerName?: string;
+  ticketNumber?: string;
+  invoiceNumber?: string;
+  discountAmount?: number;
+  restockAmount?: number;
+  [key: string]: unknown;
+}
+
 // --- Repairs ---
 export interface RepairStatusHistoryEntry {
   status: RepairStatus;
   changedById: string;
   changedByName: string;
   at: string; // ISO date string
+}
+
+export interface RepairPartUsed {
+  productId: string;
+  quantity: number;
+  cost: number;
+  name: string;
+  /** Legacy alias written by older part-allocation flows */
+  productName?: string;
 }
 
 export interface RepairTicket {
@@ -134,12 +188,23 @@ export interface RepairTicket {
   customerPhone: string;
   deviceBrand: string;
   deviceModel: string;
+  deviceName?: string;
+  imei?: string;
+  serialNumber?: string;
+  deviceImei?: string;
   issueDescription: string;
+  issue?: string; // legacy alias for issueDescription on older records
+  problem?: string; // legacy alias
+  notes?: string;
+  settlementNotes?: string;
   remark?: string; // Technician remark / findings (e.g. additional issues found during repair, customer notes)
   estimatedCost: number;
   depositAmount?: number;
   actualCost?: number;
-  partsUsed?: { productId: string; quantity: number; cost: number; name: string }[];
+  // Legacy aliases read by settlement/handover components
+  cost?: number;
+  finalCost?: number;
+  partsUsed?: RepairPartUsed[];
   status: RepairStatus;
   parentTicketId?: string; // Links to the main/first ticket for this device
   parentTicketNumber?: string; // Human-readable ticket number of parent ticket
@@ -147,10 +212,14 @@ export interface RepairTicket {
   activeReturnTicketId?: string; // Links original ticket to its active child return ticket
   activeReturnTicketNumber?: string; // Human-readable ticket number of active child return ticket
   assignedTechnician?: string;
+  assignedTechnicianId?: string;
   // Device Lock / Passcode
   lockType?: 'pin' | 'pattern' | 'password' | 'none';
   lockValue?: string; // e.g. "1234" or "1-2-5-8-9"
   trackingPin?: string; // 4-char alphanumeric code for customer tracking portal security
+  // Legacy account fields carried on some older intake tickets
+  accountType?: 'retail' | 'shop_repairer';
+  shopName?: string;
   // Worker accountability
   createdById?: string;
   createdByName?: string;
@@ -162,7 +231,7 @@ export interface RepairTicket {
   returnDate?: string;
   repairedAt?: string; // Timestamp when marked ready (production credit)
   // Handover / Settlement tracking
-  paymentStatus?: 'paid' | 'partial' | 'debt';
+  paymentStatus?: 'paid' | 'partial' | 'debt' | 'pending';
   paidAmount?: number;
   handoverAmountPaid?: number;
   completedAt?: string;
@@ -208,6 +277,8 @@ export interface CustomerRegisteredDevice {
   imei?: string;
   notes?: string;
   createdAt: string;
+  firstSeen?: string;
+  lastSeen?: string;
 }
 
 export interface Customer {
@@ -232,6 +303,7 @@ export interface Customer {
   totalPurchases: number;
   totalSpent: number;
   totalDebt?: number;
+  debt?: number; // current outstanding debt snapshot
   lastVisitDate: string;
   joinDate: string;
   /** If set, this customer was merged into another account and should be hidden from active lists */
@@ -279,6 +351,7 @@ export interface CustomerDebtEntry {
   linkedTicketId?: string;
   /** Human-readable ticket number copy (e.g. "TKT-0169") stored for display / legacy fallback. */
   linkedTicketNumber?: string;
+  metadata?: { transactionId?: string };
   payments: CustomerDebtPayment[];
   createdAt: string;
   updatedAt?: string;
@@ -290,6 +363,7 @@ export type CustomerActionType =
   | 'debt_added'
   | 'debt_payment'
   | 'debt_deleted'
+  | 'debt_edited'
   | 'sale_completed'
   | 'b2b_parts_sale'
   | 'repair_created'
@@ -311,7 +385,7 @@ export interface CustomerActivityLog {
   actorName: string;
   actorRole?: string;
   date: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   createdAt?: string;
 }
 

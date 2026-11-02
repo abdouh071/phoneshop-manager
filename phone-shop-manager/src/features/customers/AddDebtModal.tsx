@@ -10,8 +10,9 @@ import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
 import type { Customer } from '../../types';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
-import { BookOpen, AlertCircle, ShieldAlert } from 'lucide-react';
+import { AlertCircle, ShieldAlert } from 'lucide-react';
 import styles from '../inventory/ProductForm.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface AddDebtModalProps {
   isOpen: boolean;
@@ -21,7 +22,7 @@ interface AddDebtModalProps {
 
 export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, customer }) => {
   const { t } = useTranslation();
-  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
+  usePrivacyStore(s => s.isPrivacyActive);
   const [productOrService, setProductOrService] = useState('');
   const [totalAmount, setTotalAmount] = useState('');
   const [amountPaid, setAmountPaid] = useState('');
@@ -94,8 +95,8 @@ export const AddDebtModal: React.FC<AddDebtModalProps> = ({ isOpen, onClose, cus
         t('customers.debtLoggedSuccess', { amount: formatCurrency(remainingNum), name: customer.name, defaultValue: `Logged ${formatCurrency(remainingNum)} debt for ${customer.name}.` })
       );
       onClose();
-    } catch (err: any) {
-      const msg = err?.message || 'An error occurred while saving.';
+    } catch (err: unknown) {
+      const msg = errorMessage(err) || 'An error occurred while saving.';
       setError(msg);
       toast.error(t('customers.failedToRecordDebt', 'Failed to Record Debt'), msg);
     } finally {

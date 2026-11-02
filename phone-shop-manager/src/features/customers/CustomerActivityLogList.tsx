@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   BookOpen, DollarSign, Wrench, ShoppingBag, User,
-  FileText, Plus, Send, UserCheck, Shield
+  FileText, Plus, Send, UserCheck
 } from 'lucide-react';
 import type { Customer, CustomerActivityLog, CustomerActionType } from '../../types';
 import { useCustomerStore } from '../../store/customerStore';

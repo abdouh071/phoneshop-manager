@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { X, Search, Plus, Trash2, Save, Send } from 'lucide-react';
+import { X, Plus, Trash2, Save, Send } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
 import { Select } from '../../components/ui/Select';
 import { Input, SearchInput } from '../../components/ui/Input';
@@ -18,6 +19,7 @@ interface POBuilderModalProps {
 }
 
 export const POBuilderModal: React.FC<POBuilderModalProps> = ({ isOpen, onClose, poId }) => {
+  const { t } = useTranslation();
   const { suppliers, purchaseOrders, addPO, updatePO, addSupplier } = usePurchasingStore();
   const { products, parts, fetchAll } = useInventoryStore();
   const toast = useToast();
@@ -188,7 +190,7 @@ export const POBuilderModal: React.FC<POBuilderModalProps> = ({ isOpen, onClose,
           <div>
             <h2>{poId ? 'Edit Purchase Order' : 'New Purchase Order'}</h2>
           </div>
-          <button className={styles.closeBtn} onClick={onClose}><X size={20} /></button>
+          <button className={styles.closeBtn} onClick={onClose} aria-label={t('common.close')}><X size={20} /></button>
         </div>
 
         <div className={styles.body}>

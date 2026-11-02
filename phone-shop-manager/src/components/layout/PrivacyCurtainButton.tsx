@@ -1,5 +1,5 @@
 import React from 'react';
-import { Eye, EyeOff, Shield } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { useToast } from '../ui/Toast';
 import { useTranslation } from 'react-i18next';

@@ -4,7 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import type { PhoneModel } from '../../types';
 import styles from './StockAudit.module.css';
-import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { formatPrivateCurrency } from '../../utils/formatCurrency';
 import { usePrivacyStore } from '../../store/privacyStore';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ interface StockAuditProps {
 }
 
 export const StockAudit: React.FC<StockAuditProps> = ({ products, onClose }) => {
-  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
+  usePrivacyStore(s => s.isPrivacyActive);
   const [phase, setPhase] = useState<AuditPhase>('scanning');
   const [skuInput, setSkuInput] = useState('');
   const [scanned, setScanned] = useState<Map<string, ScannedEntry>>(new Map());

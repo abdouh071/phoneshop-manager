@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { SearchInput } from '../../components/ui/Input';
-import { Printer, Store, User, FileText, Calendar, DollarSign, ArrowUpRight, CheckCircle2, Clock, AlertCircle, FileEdit, RotateCcw } from 'lucide-react';
+import { Printer, Store, User, FileText, Calendar, CheckCircle2, Clock, AlertCircle, FileEdit, RotateCcw } from 'lucide-react';
 import { usePartsCartStore } from '../../store/partsCartStore';
 import { useAuthStore } from '../../store/authStore';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -10,7 +10,7 @@ import { EditTransactionModal } from '../pos/EditTransactionModal';
 import { RefundModal } from '../pos/RefundModal';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { AccountStatementModal } from '../customers/AccountStatementModal';
-import styles from './B2BParts.module.css';
+import './B2BParts.module.css';
 
 interface PartsInvoicesTabProps {
   onOpenCustomerProfile?: (customer: Customer) => void;
@@ -22,7 +22,7 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
   customers,
 }) => {
   const { invoices: partsTransactions, fetchInvoices } = usePartsCartStore();
-  const { user, isHistoryUnlocked } = useAuthStore();
+  const { user } = useAuthStore();
 
   React.useEffect(() => {
     fetchInvoices();

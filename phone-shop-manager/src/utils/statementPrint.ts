@@ -1,10 +1,11 @@
 import { useSettingsStore } from '../store/settingsStore';
 import { formatCurrency } from './formatCurrency';
 import i18n from '../i18n';
-import type { Customer, CustomerDebtEntry, RepairTicket, SaleTransaction } from '../types';
+import type { Customer } from '../types';
 import type { LedgerEvent } from '../features/customers/AccountStatementModal';
+import { errorMessage } from './errorUtils';
 
-const electronAPI = typeof window !== 'undefined' ? (window as any).electronAPI : undefined;
+const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
 
 const PRINT_SERVER_URL = (() => {
   if (electronAPI?.printServerUrl) return electronAPI.printServerUrl;
@@ -24,6 +25,33 @@ export interface OperationReceiptItem {
   quantity: number;
   price: number;
   total: number;
+}
+
+export interface ReceiptPrintItem {
+  product: { name?: string; model?: string; price?: number };
+  quantity: number;
+}
+
+export interface ReceiptPrintTransaction {
+  id?: string;
+  date?: string;
+  customerName?: string;
+  processedByName?: string;
+  items: ReceiptPrintItem[];
+  subtotal?: number;
+  discount?: number | { type: 'percent' | 'flat'; value: number };
+  total?: number;
+  payments: { method: string; amount: number }[];
+  status?: string;
+}
+
+export interface PrintServerReceiptPayload {
+  storeName?: string;
+  currency?: string;
+  transaction?: ReceiptPrintTransaction | null;
+  headerMessage?: string;
+  footerMessage?: string;
+  logo?: string;
 }
 
 export interface OperationReceiptPreviewData {
@@ -59,7 +87,7 @@ export interface OperationReceiptPreviewData {
     dueDate?: string;
     notes?: string;
   };
-  payload: any;
+  payload: PrintServerReceiptPayload;
 }
 
 interface BuildReceiptParams {
@@ -89,9 +117,9 @@ export function buildOperationReceiptData({
   const lang = i18n.language || 'en';
   const locale = lang.startsWith('ar') ? 'ar-DZ' : lang.startsWith('fr') ? 'fr-FR' : 'en-US';
 
-  let transactionData: any = null;
+  let transactionData: ReceiptPrintTransaction | null = null;
   let headerMessage = i18n.t('statementModal.operationReceipt', "TRANSACTION RECEIPT");
-  let footerMessage = `${i18n.t('statementModal.currentAccountBalance', 'Current Account Balance')} : ${formatCurrency(currentTotalDebt, currency)}\n${i18n.t('statementModal.thankYouTrust', 'Thank you for your business!')}`;
+  let footerMessage = `${i18n.t('statementModal.currentAccountBalance', 'Current Account Balance')} : ${formatCurrency(currentTotalDebt, !!currency)}\n${i18n.t('statementModal.thankYouTrust', 'Thank you for your business!')}`;
   const items: OperationReceiptItem[] = [];
   let subtotal = 0;
   let discount: number | undefined = undefined;
@@ -212,8 +240,8 @@ export function buildOperationReceiptData({
           name: it.product?.name || i18n.t('statementModal.item', 'Item'),
           detail: it.product?.model || '',
           quantity: it.quantity,
-          price: it.unitPrice,
-          total: it.totalPrice,
+          price: it.unitPrice ?? 0,
+          total: it.totalPrice ?? 0,
         });
       });
 
@@ -376,7 +404,7 @@ export function buildOperationReceiptData({
  * Sends a structured receipt payload directly to the internal print server (ESC/POS thermal printer).
  */
 export async function sendPayloadToPrintServer(
-  payload: any,
+  payload: PrintServerReceiptPayload,
   toast?: {
     success: (title: string, message?: string) => void;
     error: (title: string, message?: string) => void;
@@ -402,13 +430,13 @@ export async function sendPayloadToPrintServer(
         data?.error || i18n.t('statementModal.printerErrorDesc', 'Print server returned an error.')
       );
       return { success: false, error: data?.error };
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.warn('[Print Server IPC] failed:', e);
       toast?.error(
         i18n.t('statementModal.printerError', 'Printer Error'),
-        e?.message || i18n.t('statementModal.printerErrorDesc', 'Print server communication failed.')
+        errorMessage(e) || i18n.t('statementModal.printerErrorDesc', 'Print server communication failed.')
       );
-      return { success: false, error: e?.message };
+      return { success: false, error: errorMessage(e) };
     }
   }
 
@@ -437,7 +465,7 @@ export async function sendPayloadToPrintServer(
       data.error || i18n.t('statementModal.printerErrorDesc', 'Print server error.')
     );
     return { success: false, error: data.error };
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('[Print Server Error]', err);
     toast?.error(
       i18n.t('statementModal.printerUnreachable', 'Print Server Unreachable'),
@@ -491,16 +519,16 @@ export function buildReceiptWhatsAppText(data: OperationReceiptPreviewData): str
 
   lines.push(`*${i18n.t('statementModal.serviceDetails', 'Service Details:')}*`);
   data.items.forEach(it => {
-    lines.push(`• ${it.name}${it.detail ? ` (${it.detail})` : ''} x${it.quantity} — ${formatCurrency(it.total, data.currency)}`);
+    lines.push(`• ${it.name}${it.detail ? ` (${it.detail})` : ''} x${it.quantity} — ${formatCurrency(it.total, !!data.currency)}`);
   });
 
   lines.push(`────────────────────────`);
-  lines.push(`*${i18n.t('statementModal.total', 'TOTAL:')}* *${formatCurrency(data.total, data.currency)}*`);
-  lines.push(`*${i18n.t('statementModal.settlement', 'Settlement:')}* ${data.paymentMethod} (${formatCurrency(data.paidAmount, data.currency)})`);
+  lines.push(`*${i18n.t('statementModal.total', 'TOTAL:')}* *${formatCurrency(data.total, !!data.currency)}*`);
+  lines.push(`*${i18n.t('statementModal.settlement', 'Settlement:')}* ${data.paymentMethod} (${formatCurrency(data.paidAmount, !!data.currency)})`);
 
   if (data.currentTotalDebt !== undefined) {
     lines.push(`────────────────────────`);
-    lines.push(`*${i18n.t('statementModal.closingBalanceLabel', 'Total Balance Due')}:* *${formatCurrency(data.currentTotalDebt, data.currency)}*`);
+    lines.push(`*${i18n.t('statementModal.closingBalanceLabel', 'Total Balance Due')}:* *${formatCurrency(data.currentTotalDebt, !!data.currency)}*`);
   }
 
   lines.push(``);

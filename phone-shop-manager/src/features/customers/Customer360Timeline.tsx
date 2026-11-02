@@ -5,16 +5,13 @@ import {
   ChevronDown, ChevronUp, Calendar
 } from 'lucide-react';
 import { RepairStatusBadge } from '../../components/ui/Badge';
-import type { SaleTransaction, CustomerDebtEntry } from '../../types';
-import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import type { SaleTransaction, CustomerDebtEntry, RepairTicket } from '../../types';
+import { formatPrivateCurrency } from '../../utils/formatCurrency';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { isDebtOverdue, getDaysOverdue } from '../../utils/debtAlerts';
 import styles from './Timeline.module.css';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type RepairTicket = any;
-
 type SaleEvent    = { kind: 'sale';    date: string; data: SaleTransaction };
 type RepairEvent  = { kind: 'repair';  date: string; data: RepairTicket };
 type DebtOpenEvent= { kind: 'debt';    date: string; data: CustomerDebtEntry };
@@ -85,17 +82,17 @@ const SaleCard: React.FC<{ event: SaleEvent; onViewReceipt?: (tx: SaleTransactio
       {open && (
         <div className={styles.cardBody}>
           <div className={styles.itemList}>
-            {tx.items.map((item: any, i: number) => (
+            {tx.items.map((item, i: number) => (
               <div key={i} className={styles.itemRow}>
                 <span>{item.quantity}× {item.product.name} {item.product.model}</span>
                 <span>{formatPrivateCurrency(item.product.price * item.quantity)}</span>
               </div>
             ))}
           </div>
-          {tx.discount && (typeof tx.discount === 'object' ? tx.discount.value > 0 : (tx.discount as any) > 0) && (
+          {tx.discount && (typeof tx.discount === 'object' ? tx.discount.value > 0 : Number(tx.discount) > 0) && (
             <div className={styles.debtRow} style={{ color: '#15803d', fontWeight: 600 }}>
               <span>{t('customers.discountApplied', '🏷️ Discount Applied')}</span>
-              <span>-{formatPrivateCurrency(typeof tx.discount === 'object' ? (tx.discount.type === 'percent' ? ((tx.subtotal || tx.total) * tx.discount.value / 100) : tx.discount.value) : (tx.discount as any))}</span>
+              <span>-{formatPrivateCurrency(typeof tx.discount === 'object' ? (tx.discount.type === 'percent' ? ((tx.subtotal || tx.total) * tx.discount.value / 100) : tx.discount.value) : Number(tx.discount))}</span>
             </div>
           )}
           <div className={styles.cardFooter}>
@@ -161,7 +158,7 @@ const RepairCard: React.FC<{ event: RepairEvent }> = ({ event }) => {
             <div style={{ fontSize: '11px', color: '#0369a1', background: '#f0f9ff', border: '1px solid #bae6fd', padding: '4px 8px', borderRadius: '4px' }}>
               <strong>{t('customers.sparePartsInstalled', 'Spare Parts Installed:')}</strong>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '3px' }}>
-                {tk.partsUsed.map((p: any, i: number) => (
+                {tk.partsUsed.map((p, i: number) => (
                   <span key={i} style={{ background: '#ffffff', padding: '1px 5px', borderRadius: '3px', border: '1px solid #e0f2fe' }}>
                     {p.quantity}× {p.name} ({formatPrivateCurrency(p.cost)})
                   </span>
@@ -325,7 +322,7 @@ export const Customer360Timeline: React.FC<Props> = ({ transactions, tickets, de
   const locale = i18n.language.startsWith('ar') ? 'ar-DZ' : i18n.language.startsWith('fr') ? 'fr-FR' : 'en-GB';
   const monthLocale = i18n.language.startsWith('ar') ? 'ar-DZ' : i18n.language.startsWith('fr') ? 'fr-FR' : 'en-US';
 
-  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
+  usePrivacyStore(s => s.isPrivacyActive);
   const [filter, setFilter] = useState<FilterKind>('all');
 
   const allEvents = useMemo<TimelineEvent[]>(() => {

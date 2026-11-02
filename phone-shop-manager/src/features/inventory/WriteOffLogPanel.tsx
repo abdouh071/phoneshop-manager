@@ -38,11 +38,13 @@ export const WriteOffLogPanel: React.FC<WriteOffLogPanelProps> = ({ isOpen, onCl
   const { parts } = useInventoryStore();
   const [entries, setEntries] = useState<StockWriteOff[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
     if (!isOpen) return;
     setIsLoading(true);
+    setLoadError(false);
     writeOffService.getAll()
       .then(allEntries => {
         const partIds = new Set(parts.map(p => p.id));
@@ -52,6 +54,10 @@ export const WriteOffLogPanel: React.FC<WriteOffLogPanelProps> = ({ isOpen, onCl
           return true;
         });
         setEntries(filteredEntries);
+      })
+      .catch(() => {
+        setEntries([]);
+        setLoadError(true);
       })
       .finally(() => setIsLoading(false));
   }, [isOpen, parts]);
@@ -134,6 +140,8 @@ export const WriteOffLogPanel: React.FC<WriteOffLogPanelProps> = ({ isOpen, onCl
         <div className={styles.tableWrap}>
           {isLoading ? (
             <div className={styles.empty}>Loading write-off history…</div>
+          ) : loadError ? (
+            <div className={styles.empty}>Failed to load write-off history. Please try again.</div>
           ) : filtered.length === 0 ? (
             <div className={styles.empty}>
               {entries.length === 0

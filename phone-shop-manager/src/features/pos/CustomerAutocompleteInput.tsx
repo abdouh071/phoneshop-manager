@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { User, Store, X, Plus, Check, ChevronDown, Phone, UserPlus, AlertCircle, UserCheck } from 'lucide-react';
+import { User, Store, X, Check, Phone, UserPlus, UserCheck } from 'lucide-react';
 import { useCustomerStore } from '../../store/customerStore';
 import { useToast } from '../../components/ui/Toast';
 import type { Customer } from '../../types';
@@ -123,12 +123,14 @@ const QuickCreateCustomerModal: React.FC<QuickCreateModalProps> = ({
         });
         toast.success('Separate Contact Created', `${created.name} registered.`);
       } else {
-        created = await findOrCreateCustomer({
+        const found = await findOrCreateCustomer({
           name: name.trim(),
           phone: formattedPhone,
           accountType: accountType || 'retail',
           shopName: accountType === 'shop_repairer' ? (shopName.trim() || name.trim()) : undefined,
         });
+        if (!found) throw new Error('Customer account requires a valid phone number.');
+        created = found;
       }
 
       onCreated(created);
@@ -364,10 +366,11 @@ const QuickCreateCustomerModal: React.FC<QuickCreateModalProps> = ({
                 let targetCustomer = phoneOnlyMatch;
                 if (isShop && shopName.trim() && !phoneOnlyMatch.shopName) {
                   try {
-                    targetCustomer = await updateCustomer(phoneOnlyMatch.id, {
+                    await updateCustomer(phoneOnlyMatch.id, {
                       shopName: shopName.trim(),
                       accountType: 'shop_repairer',
                     });
+                    targetCustomer = useCustomerStore.getState().customers.find(c => c.id === phoneOnlyMatch.id) ?? phoneOnlyMatch;
                     toast.success('Profile Enriched', `Saved shop name "${shopName.trim()}" to ${targetCustomer.name}'s profile.`);
                   } catch (e) {
                     console.warn('Could not auto-enrich shop name:', e);

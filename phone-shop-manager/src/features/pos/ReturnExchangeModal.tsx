@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Search, RefreshCw, AlertCircle, CheckCircle, Package, ArrowDownLeft } from 'lucide-react';
+import { Search, ArrowDownLeft } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { useInventoryStore } from '../../store/inventoryStore';

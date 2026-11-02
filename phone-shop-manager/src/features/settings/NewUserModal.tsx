@@ -11,6 +11,7 @@ import {
   PERMISSION_DEFINITIONS,
 } from '../../types/permissions';
 import type { Permissions } from '../../types/permissions';
+import { errorMessage } from '../../utils/errorUtils';
 
 type WorkerRole = 'admin' | 'sales_agent' | 'repair_agent';
 
@@ -56,14 +57,14 @@ export const NewUserModal: React.FC<NewUserModalProps> = ({ isOpen, onClose }) =
     }
 
     try {
-      await createStaffMember(name, email, password, role as any, role !== 'admin' ? permissions : undefined);
+      await createStaffMember(name, email, password, role, role !== 'admin' ? permissions : undefined);
       toast.success('Staff Member Added', `${name} can now log in to the system.`);
       // Reset
       setName(''); setEmail(''); setPassword(''); setRole('sales_agent');
       setPermissions({ ...SALES_AGENT_PERMISSIONS });
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Failed to create user.');
+    } catch (err: unknown) {
+      setError(errorMessage(err) || 'Failed to create user.');
     }
   };
 

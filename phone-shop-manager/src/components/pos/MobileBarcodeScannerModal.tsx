@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, CheckCircle2, AlertCircle, Barcode, X } from 'lucide-react';
+import { CheckCircle2, AlertCircle } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useCartStore } from '../../store/cartStore';
 import { useToast } from '../ui/Toast';
 import { useHaptic } from '../../hooks/useHaptic';
-import type { Product } from '../../types';
+import type { PhoneModel } from '../../types';
 import styles from './MobileBarcodeScannerModal.module.css';
+import { errorMessage } from '../../utils/errorUtils';
 
 interface MobileBarcodeScannerModalProps {
   isOpen: boolean;
@@ -23,10 +24,10 @@ export const MobileBarcodeScannerModal: React.FC<MobileBarcodeScannerModalProps>
   const animFrameRef = useRef<number | null>(null);
   const isScanningRef = useRef<boolean>(false);
 
-  const [hasCamera, setHasCamera] = useState<boolean>(true);
+  const [, setHasCamera] = useState<boolean>(true);
   const [cameraError, setCameraError] = useState<string>('');
   const [manualCode, setManualCode] = useState<string>('');
-  const [lastScanned, setLastScanned] = useState<{ code: string; product?: Product } | null>(null);
+  const [lastScanned, setLastScanned] = useState<{ code: string; product?: PhoneModel } | null>(null);
 
   const { products } = useInventoryStore();
   const { addToCart } = useCartStore();
@@ -39,7 +40,7 @@ export const MobileBarcodeScannerModal: React.FC<MobileBarcodeScannerModalProps>
 
     const matched = products.find(p =>
       p.sku?.toLowerCase() === cleanCode ||
-      (p as any).barcode?.toLowerCase() === cleanCode ||
+      p.barcode?.toLowerCase() === cleanCode ||
       p.id.toLowerCase() === cleanCode
     );
 
@@ -98,7 +99,7 @@ export const MobileBarcodeScannerModal: React.FC<MobileBarcodeScannerModalProps>
 
         // Start scanning loop if BarcodeDetector is available
         if ('BarcodeDetector' in window) {
-          const detector = new (window as any).BarcodeDetector({
+          const detector = new window.BarcodeDetector!({
             formats: ['qr_code', 'ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e'],
           });
 
@@ -129,10 +130,10 @@ export const MobileBarcodeScannerModal: React.FC<MobileBarcodeScannerModalProps>
 
           animFrameRef.current = requestAnimationFrame(scanLoop);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.warn('[CameraScanner] Camera access error:', err);
         setHasCamera(false);
-        setCameraError(err.message || 'Camera permission denied or camera unavailable.');
+        setCameraError(errorMessage(err) || 'Camera permission denied or camera unavailable.');
       }
     }
 

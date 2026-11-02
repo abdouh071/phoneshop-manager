@@ -23,7 +23,7 @@ import { EndOfDayButton } from '../endofday/EndOfDayButton';
 import { AdminMobileDashboard } from './AdminMobileDashboard';
 import type { RevenueDataPoint, SaleTransaction } from '../../types';
 import styles from './Dashboard.module.css';
-import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { formatPrivateCurrency } from '../../utils/formatCurrency';
 import { getOverdueDebts } from '../../utils/debtAlerts';
 import {
   isClaimedAndPaidRepair,
@@ -50,7 +50,6 @@ const StatCard: React.FC<StatCardProps> = ({ label, value, change, icon, accent,
   <Card
     className={[styles.statCard, accent && styles.accentCard, onClick && styles.statCardClickable].filter(Boolean).join(' ')}
     onClick={onClick}
-    style={onClick ? { cursor: 'pointer' } : undefined}
   >
     <div className={styles.statTop}>
       <div className={[styles.statIcon, accent && styles.accentIcon].filter(Boolean).join(' ')}>
@@ -107,12 +106,12 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const DashboardPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const isPrivacyActive = usePrivacyStore((s) => s.isPrivacyActive);
-  const { products, fetchProducts } = useInventoryStore();
-  const { transactions, fetchTransactions } = useCartStore();
-  const { debts, customers, fetchCustomers } = useCustomerStore();
-  const { tickets, fetchTickets } = useRepairStore();
-  const { isAuthenticated, user, isHistoryUnlocked } = useAuthStore();
+  usePrivacyStore((s) => s.isPrivacyActive);
+  const { products, fetchProducts, isLoading: productsLoading, error: productsError } = useInventoryStore();
+  const { transactions, fetchTransactions, isLoadingTransactions, error: transactionsError } = useCartStore();
+  const { debts, customers, fetchCustomers, isLoading: customersLoading, error: customersError } = useCustomerStore();
+  const { tickets, fetchTickets, isLoading: ticketsLoading, error: ticketsError } = useRepairStore();
+  const { user, isHistoryUnlocked } = useAuthStore();
   const settings = useSettingsStore();
   const permissions = usePermissions();
   
@@ -125,6 +124,17 @@ export const DashboardPage = () => {
     fetchTickets();
     fetchCustomers();
   }, [fetchProducts, fetchTransactions, fetchTickets, fetchCustomers]);
+
+  const isLoading = productsLoading || ticketsLoading || customersLoading || isLoadingTransactions;
+  const loadError = productsError || ticketsError || customersError || transactionsError;
+  const hasData = transactions.length > 0 || tickets.length > 0 || products.length > 0;
+
+  const refreshAll = () => {
+    fetchProducts();
+    fetchTransactions();
+    fetchTickets();
+    fetchCustomers({ force: true });
+  };
 
   const overdueDebtsList = useMemo(() => getOverdueDebts(debts), [debts]);
   const overdueTotalAmount = useMemo(() => overdueDebtsList.reduce((sum, d) => sum + d.remainingBalance, 0), [overdueDebtsList]);
@@ -193,7 +203,7 @@ export const DashboardPage = () => {
     () => yesterdayRepairs.reduce((s,r) => s + getClaimedRepairRevenue(r), 0),
     [yesterdayRepairs]
   );
-  const yestDebtCollected = useMemo(() => {
+  useMemo(() => {
     return debts
       .flatMap(d => (d.payments || []).filter(p => isSameDay(p.date, yesterday)))
       .filter(p => String(p.method || '').toLowerCase() === 'cash')
@@ -329,6 +339,32 @@ export const DashboardPage = () => {
         />
       )}
 
+      {/* Loading / Error status */}
+      {isLoading && !hasData && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', borderRadius: '8px', marginBottom: '8px', background: 'var(--color-surface-variant)', color: 'var(--color-on-surface-variant)', fontSize: '14px' }}>
+          <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} />
+          <span>Loading dashboard data…</span>
+        </div>
+      )}
+
+      {loadError && !isLoading && (
+        <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', borderRadius: '8px', marginBottom: '8px', background: 'rgba(220, 38, 38, 0.08)', border: '1px solid rgba(220, 38, 38, 0.2)', color: '#b91c1c', fontSize: '14px' }}>
+          <AlertTriangle size={18} />
+          <span style={{ flex: 1 }}>Some dashboard data could not be loaded. Figures below may be incomplete.</span>
+          <button
+            type="button"
+            onClick={refreshAll}
+            style={{
+              background: 'rgba(220, 38, 38, 0.1)', border: '1px solid rgba(220, 38, 38, 0.3)',
+              borderRadius: '6px', padding: '6px 12px', cursor: 'pointer',
+              color: '#b91c1c', fontSize: '13px', fontWeight: 600,
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Critical Stock Alert */}
       {lowStockCount > 0 && (
         <div style={{ background: 'var(--color-warning-container)', color: 'var(--color-warning-text)', padding: '16px', borderRadius: '8px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -356,7 +392,7 @@ export const DashboardPage = () => {
         <Button 
           variant="secondary" 
           leftIcon={<RefreshCw size={15} />}
-          onClick={() => { fetchProducts(); fetchTransactions(); fetchTickets(); }}
+          onClick={refreshAll}
         >
           Refresh Data
         </Button>
@@ -366,7 +402,7 @@ export const DashboardPage = () => {
       {/* Quick Action Shortcuts */}
       <div className={styles.quickActionsGrid}>
         {permissions.pos && (
-          <div className={styles.quickActionCard} onClick={() => navigate('/pos')}>
+          <div className={styles.quickActionCard} role="button" tabIndex={0} onClick={() => navigate('/pos')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/pos'); } }}>
             <div className={[styles.quickActionIcon, styles.actionSale].join(' ')}>
               <ShoppingBag size={18} />
             </div>
@@ -378,7 +414,7 @@ export const DashboardPage = () => {
         )}
 
         {permissions.repairs && (
-          <div className={styles.quickActionCard} onClick={() => navigate('/repairs')}>
+          <div className={styles.quickActionCard} role="button" tabIndex={0} onClick={() => navigate('/repairs')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/repairs'); } }}>
             <div className={[styles.quickActionIcon, styles.actionRepair].join(' ')}>
               <Wrench size={18} />
             </div>
@@ -390,7 +426,7 @@ export const DashboardPage = () => {
         )}
 
         {permissions.inventory_parts && (
-          <div className={styles.quickActionCard} onClick={() => navigate('/parts')}>
+          <div className={styles.quickActionCard} role="button" tabIndex={0} onClick={() => navigate('/parts')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/parts'); } }}>
             <div className={[styles.quickActionIcon, styles.actionParts].join(' ')}>
               <Smartphone size={18} />
             </div>
@@ -402,7 +438,7 @@ export const DashboardPage = () => {
         )}
 
         {permissions.inventory_products && (
-          <div className={styles.quickActionCard} onClick={() => navigate('/inventory')}>
+          <div className={styles.quickActionCard} role="button" tabIndex={0} onClick={() => navigate('/inventory')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/inventory'); } }}>
             <div className={[styles.quickActionIcon, styles.actionInventory].join(' ')}>
               <Plus size={18} />
             </div>

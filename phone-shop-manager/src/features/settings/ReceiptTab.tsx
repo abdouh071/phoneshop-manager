@@ -8,6 +8,7 @@ import { useToast } from '../../components/ui/Toast';
 import { useSettingsStore } from '../../store/settingsStore';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { printReceiptDirect } from '../../utils/printWindow';
+import { errorMessage } from '../../utils/errorUtils';
 
 export const ReceiptTab = () => {
   const { receiptHeader, receiptFooter, storeName, currency, logoUrl: savedLogoUrl, updateSettingsBulk } = useSettingsStore();
@@ -79,9 +80,9 @@ export const ReceiptTab = () => {
           const optimizedPng = canvas.toDataURL('image/png');
           setLogoUrl(optimizedPng);
           toast.success('Logo Loaded', `Optimized to ${targetW}x${targetH}px thermal-ready PNG. Click Save to persist.`);
-        } catch (procErr: any) {
+        } catch (procErr: unknown) {
           console.error('Error processing logo image:', procErr);
-          toast.error('Optimization Failed', procErr?.message || 'Could not process image.');
+          toast.error('Optimization Failed', errorMessage(procErr) || 'Could not process image.');
         }
       };
       img.onerror = () => {
@@ -134,8 +135,8 @@ export const ReceiptTab = () => {
         logoUrl: logoUrl,
       });
       toast.success('Receipt Settings Saved', 'Receipt template and store logo saved successfully.');
-    } catch (err: any) {
-      toast.error('Save Failed', err.message || 'Could not save receipt settings.');
+    } catch (err: unknown) {
+      toast.error('Save Failed', errorMessage(err) || 'Could not save receipt settings.');
     } finally {
       setIsSaving(false);
     }
@@ -175,9 +176,9 @@ export const ReceiptTab = () => {
       } else {
         toast.info('Browser Print', 'Local print server offline — opened browser print fallback.');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Test print failed:', err);
-      toast.error('Print Error', err?.message || 'Could not print test receipt.');
+      toast.error('Print Error', errorMessage(err) || 'Could not print test receipt.');
     } finally {
       setIsTestingPrint(false);
     }

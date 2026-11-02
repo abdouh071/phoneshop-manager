@@ -12,7 +12,8 @@ import { ACCESSORY_SUB_CATEGORY_OPTIONS } from '../../utils/accessorySubCategori
 import styles from './ProductForm.module.css';
 import { useSettingsStore } from '../../store/settingsStore';
 import { printBarcodeDirect, openPrintWindow, buildLabelsHTML } from '../../utils/printWindow';
-import { formatCurrency, getCurrencySymbol } from '../../utils/formatCurrency';
+import { getCurrencySymbol } from '../../utils/formatCurrency';
+import { computeStockStatus } from '../../utils/stockStatus';
 import { ProfitMarginCalculator } from '../../components/ui/ProfitMarginCalculator';
 import { Plus, X, Package, Layers, Link, Copy, Barcode, RefreshCw } from 'lucide-react';
 
@@ -180,7 +181,6 @@ const VariantCard: React.FC<VariantCardProps> = ({
   const effectiveCost = variant.costPrice || (!isFirst && syncCost && firstVariant ? firstVariant.costPrice : '');
   const effectivePrice = variant.price || (!isFirst && syncPrice && firstVariant ? firstVariant.price : '');
   const effectiveStock = variant.stock || (!isFirst && syncStock && firstVariant ? firstVariant.stock : '');
-  const effectiveThreshold = variant.lowStockThreshold || (!isFirst && syncStock && firstVariant ? firstVariant.lowStockThreshold : '5');
   const effectiveStorage = hideStorageColor ? 'N/A' : variant.storage;
   const effectiveColor = hideStorageColor ? '' : variant.color;
 
@@ -346,7 +346,7 @@ const VariantCard: React.FC<VariantCardProps> = ({
 
 // ─── Main Modal ──────────────────────────────────────────────────────────────
 export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose }) => {
-  const { user } = useAuthStore();
+  useAuthStore();
   const { storeName, currency } = useSettingsStore();
   const symbol = getCurrencySymbol(currency);
   const { addProduct, addProductsBulk, products } = useInventoryStore();
@@ -671,7 +671,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
         price: Number(form.price),
         costPrice: Number(form.costPrice),
         stock,
-        stockStatus: stock === 0 ? 'out_of_stock' : stock <= threshold ? 'low_stock' : 'in_stock',
+        stockStatus: computeStockStatus(stock, threshold),
         sku: guaranteedUniqueSku,
         category: form.category as PhoneModel['category'],
         accessorySubCategory: form.category === 'accessory' ? ((form.accessorySubCategory as AccessorySubCategory) || 'other') : undefined,
@@ -763,7 +763,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
           price: Number(effectivePrice),
           costPrice: Number(effectiveCost),
           stock,
-          stockStatus: stock === 0 ? 'out_of_stock' : stock <= threshold ? 'low_stock' : 'in_stock',
+          stockStatus: computeStockStatus(stock, threshold),
           sku: guaranteedUniqueSku,
           category: form.category as PhoneModel['category'],
           accessorySubCategory: form.category === 'accessory' ? ((form.accessorySubCategory as AccessorySubCategory) || 'other') : undefined,
