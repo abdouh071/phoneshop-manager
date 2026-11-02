@@ -138,22 +138,37 @@ export const UsersTab = () => {
             subtitle={`${staff.filter(s => s.status !== 'revoked').length} active member${staff.filter(s => s.status !== 'revoked').length !== 1 ? 's' : ''}`}
           />
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <a
-              href={import.meta.env.VITE_APK_DOWNLOAD_URL || '/downloads/Auto-Manager.apk'}
-              download="Auto-Manager.apk"
-              target={import.meta.env.VITE_APK_DOWNLOAD_URL ? '_blank' : '_self'}
-              rel="noopener noreferrer"
-              style={{ textDecoration: 'none' }}
-              title="Download Android APK for technicians"
-            >
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={<Smartphone size={16} />}
+            {/* Used to fall back to /downloads/Auto-Manager.apk, a copy of an old build baked
+                into the installer. That bundle is gone from the shell, and staff install from
+                Expo now, so the link only appears when it points somewhere real. */}
+            {(import.meta.env.VITE_APK_DOWNLOAD_URL as string | undefined)?.trim() ? (
+              <a
+                href={(import.meta.env.VITE_APK_DOWNLOAD_URL as string).trim()}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ textDecoration: 'none' }}
+                title="Get the technician app from Expo"
               >
-                Download Technician App (.APK)
-              </Button>
-            </a>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<Smartphone size={16} />}
+                >
+                  Get the Technician App
+                </Button>
+              </a>
+            ) : (
+              <span title="Set VITE_APK_DOWNLOAD_URL to your Expo builds page so staff can install the technician app.">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<Smartphone size={16} />}
+                  disabled
+                >
+                  Get the Technician App
+                </Button>
+              </span>
+            )}
             {isUserAdmin && (
               <Button
                 leftIcon={<UserPlus size={16} />}

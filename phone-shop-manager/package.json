@@ -1,7 +1,7 @@
 {
   "name": "phone-shop-manager",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "PhoneShop Manager Pro — Complete phone repair shop POS, inventory, repairs, and thermal printing management system",
   "author": "PhoneShop Manager Team",
   "type": "module",
@@ -20,10 +20,10 @@
     "sync:print-script": "cp print-server/print-raw.ps1 electron/print-raw.ps1",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
     "electron:build:mac": "electron-builder --mac",
-    "electron:build:mac:arm64": "electron-builder --mac --arm64 -c.mac.artifactName=\"PhoneShop Manager Pro-1.0.0-arm64.dmg\"",
-    "electron:build:mac:intel": "electron-builder --mac --x64 -c.mac.artifactName=\"PhoneShop Manager Pro-1.0.0-intel-x64.dmg\"",
+    "electron:build:mac:arm64": "electron-builder --mac --arm64",
+    "electron:build:mac:intel": "electron-builder --mac --x64",
     "electron:build:win": "electron-builder --win --x64",
-    "electron:build:win7": "electron-builder --win --ia32 -c.electronVersion=22.3.27 -c.win.artifactName=\"PhoneShop-Manager-Pro-Setup-1.0.0-win7-32bit.exe\""
+    "electron:build:win7": "electron-builder --win --ia32 -c.electronVersion=22.3.27 -c.directories.output=../releases/win7-ia32"
   },
   "build": {
     "appId": "com.automanager.phoneshop",
@@ -33,11 +33,13 @@
     },
     "mac": {
       "category": "public.app-category.business",
+      "artifactName": "PhoneShopPro-${version}-mac-${arch}.${ext}",
       "target": [
         "dmg"
       ]
     },
     "win": {
+      "artifactName": "PhoneShopPro-Setup-${version}-win-${arch}.${ext}",
       "target": [
         {
           "target": "nsis"
@@ -50,6 +52,7 @@
     },
     "files": [
       "dist/**/*",
+      "!dist/downloads/**",
       "electron/**/*",
       "print-server/**/*"
     ],
