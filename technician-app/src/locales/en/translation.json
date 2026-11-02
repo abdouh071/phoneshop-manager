@@ -534,12 +534,29 @@
     "submitRequest": "Submit Approval Request"
   },
   "reports": {
-    "modeTaken": "Real Profit Report (Taken Phones Only)",
-    "modeRepaired": "Repaired Production Report (All Work Done)",
-    "countTaken": "Taken Repairs: {{n}}",
-    "countRepaired": "Repaired Phones: {{n}} ({{taken}} taken, {{ready}} on shelf)",
-    "shareBody": "Gross: {{gross}} DA\nParts: -{{parts}} DA\nNet: {{net}} DA\n\nMy Cut ({{pct}}%): {{cut}} DA",
-    "shareTitle": "Auto-Manager Report - {{period}}",
-    "shareFailed": "Could not share report."
+    "viewDaily": "Daily",
+    "viewWeekly": "Weekly",
+    "modeBtnTaken": "Real Profit (Taken)",
+    "modeBtnWork": "All Repaired (Work)",
+    "badgeTaken": "REALIZED CASH (TAKEN ONLY)",
+    "badgeWork": "TOTAL PRODUCTION (WORK DONE)",
+    "subtSettled": "Settled upon customer pickup",
+    "takenVsShelf": "{{taken}} taken • {{ready}} on shelf",
+    "cutTaken": "Realized Profit ({{pct}}%)",
+    "cutWork": "Work Revenue ({{pct}}%)",
+    "breakdown": "Breakdown",
+    "grossRevenue": "Gross Revenue",
+    "partsCost": "Parts Cost",
+    "netProfit": "Net Profit",
+    "listTaken": "Taken Phones ({{n}})",
+    "listWork": "All Repaired Phones ({{n}})",
+    "statusReady": "READY (ON SHELF)",
+    "statusClaimed": "CLAIMED / TAKEN",
+    "partsMinus": "Parts: -{{n}} DA",
+    "netLabel": "Net: {{n}} DA",
+    "emptyTakenTitle": "No taken phones yet",
+    "emptyWorkTitle": "All caught up!",
+    "emptyTakenBody": "No phones were picked up and settled in this period.",
+    "emptyWorkBody": "No repairs completed in this period."
   }
 }

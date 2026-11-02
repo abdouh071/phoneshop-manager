@@ -534,12 +534,29 @@
     "submitRequest": "إرسال طلب الموافقة"
   },
   "reports": {
-    "modeTaken": "تقرير الربح الحقيقي (الهواتف المسلّمة فقط)",
-    "modeRepaired": "تقرير الإنتاج المصلّح (كل الأعمال المنجزة)",
-    "countTaken": "التصليحات المسلّمة: {{n}}",
-    "countRepaired": "الهواتف المصلّحة: {{n}} ({{taken}} مسلّمة، {{ready}} على الرف)",
-    "shareBody": "الإجمالي: {{gross}} دج\nقطع الغيار: -{{parts}} دج\nالصافي: {{net}} دج\n\nحصتي ({{pct}}%): {{cut}} دج",
-    "shareTitle": "تقرير Auto-Manager - {{period}}",
-    "shareFailed": "لم يمكن مشاركة التقرير."
+    "viewDaily": "يومي",
+    "viewWeekly": "أسبوعي",
+    "modeBtnTaken": "الربح الحقيقي (المسلّمة)",
+    "modeBtnWork": "كل المصلّحة (العمل)",
+    "badgeTaken": "المبلغ المحصّل (المسلّمة فقط)",
+    "badgeWork": "إجمالي الإنتاج (العمل المنجز)",
+    "subtSettled": "يُحصّل عند استلام العميل",
+    "takenVsShelf": "{{taken}} مسلّمة • {{ready}} على الرف",
+    "cutTaken": "الربح المحصّل ({{pct}}%)",
+    "cutWork": "رقم أعمال الإنتاج ({{pct}}%)",
+    "breakdown": "التفاصيل",
+    "grossRevenue": "الإجمالي",
+    "partsCost": "تكلفة القطع",
+    "netProfit": "الصافي",
+    "listTaken": "الهواتف المسلّمة ({{n}})",
+    "listWork": "كل الهواتف المصلّحة ({{n}})",
+    "statusReady": "جاهز (على الرف)",
+    "statusClaimed": "مُسلَّمة / مأخوذة",
+    "partsMinus": "قطع الغيار: -{{n}} دج",
+    "netLabel": "الصافي: {{n}} دج",
+    "emptyTakenTitle": "لا توجد هواتف مسلّمة بعد",
+    "emptyWorkTitle": "كل شيء منجز!",
+    "emptyTakenBody": "لم يتم استلام أو تسوية أي هاتف في هذه الفترة.",
+    "emptyWorkBody": "لا توجد إصلاحات منجزة في هذه الفترة."
   }
 }

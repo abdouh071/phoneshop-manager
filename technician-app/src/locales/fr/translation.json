@@ -534,12 +534,29 @@
     "submitRequest": "Envoyer la demande d'approbation"
   },
   "reports": {
-    "modeTaken": "Rapport de bénéfice réel (téléphones pris uniquement)",
-    "modeRepaired": "Rapport de production réparée (tout le travail effectué)",
-    "countTaken": "Réparations prises : {{n}}",
-    "countRepaired": "Téléphones réparés : {{n}} ({{taken}} pris, {{ready}} en rayon)",
-    "shareBody": "Brut : {{gross}} DA\nPièces : -{{parts}} DA\nNet : {{net}} DA\n\nMa part ({{pct}}%) : {{cut}} DA",
-    "shareTitle": "Rapport Auto-Manager - {{period}}",
-    "shareFailed": "Impossible de partager le rapport."
+    "viewDaily": "Journée",
+    "viewWeekly": "Semaine",
+    "modeBtnTaken": "Profit réel (pris)",
+    "modeBtnWork": "Tous réparés (travail)",
+    "badgeTaken": "ENCAISSE RÉALISÉE (PRIS SEULEMENT)",
+    "badgeWork": "PRODUCTION TOTALE (TRAVAIL EFFECTUÉ)",
+    "subtSettled": "Réglé au retrait par le client",
+    "takenVsShelf": "{{taken}} pris • {{ready}} en rayon",
+    "cutTaken": "Bénéfice réel ({{pct}}%)",
+    "cutWork": "Chiffre de production ({{pct}}%)",
+    "breakdown": "Détail",
+    "grossRevenue": "Recettes brutes",
+    "partsCost": "Coût des pièces",
+    "netProfit": "Bénéfice net",
+    "listTaken": "Téléphones pris ({{n}})",
+    "listWork": "Téléphones réparés ({{n}})",
+    "statusReady": "PRÊT (EN RAYON)",
+    "statusClaimed": "REMIS / PRIS",
+    "partsMinus": "Pièces : -{{n}} DA",
+    "netLabel": "Net : {{n}} DA",
+    "emptyTakenTitle": "Aucun téléphone pris pour le moment",
+    "emptyWorkTitle": "Tout est à jour !",
+    "emptyTakenBody": "Aucun téléphone n'a été retiré et réglé sur cette période.",
+    "emptyWorkBody": "Aucune réparation terminée sur cette période."
   }
 }

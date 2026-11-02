@@ -138,6 +138,21 @@ export const colors = {
    * screen's style sheet.
    */
   whatsapp: '#25d366',
+
+  /**
+   * The two profit-report modes. Green is cash actually collected at the
+   * counter; blue is every repair the technician finished, picked up or not.
+   */
+  modeTaken: ramp.green700,
+  modeWork: ramp.blue600,
+
+  /** Copy, dividers and scrims that sit on top of a `mode*` / brand surface. */
+  onBrandSoft: 'rgba(255, 255, 255, 0.88)',
+  onBrandFaint: 'rgba(255, 255, 255, 0.25)',
+  onBrandHairline: 'rgba(255, 255, 255, 0.15)',
+  onBrandScrim: 'rgba(0, 0, 0, 0.2)',
+  /** A negative money figure printed on that same saturated surface. */
+  lossOnBrand: ramp.red200,
 } as const;
 
 /** 4pt spacing scale. */
@@ -163,6 +178,8 @@ export const radius = {
 } as const;
 
 export const fontSize = {
+  /** Badge and pill labels — the only size below `caption`. */
+  micro: 10,
   caption: 11,
   label: 12,
   body: 13,
@@ -230,10 +247,16 @@ export const statusAppearance = (
 ): StatusAppearance => (status && table[status]) || NEUTRAL;
 
 /**
+ * The ~12 % wash that goes behind an `ink` colour — icon circles, pills. One
+ * alpha value so a tint means the same thing on every screen.
+ */
+export const softTint = (ink: string): string => `${ink}1F`;
+
+/**
  * A tinted pill: soft background with the ink as the label colour. Falls back
  * to the brand when no colour is passed, which is what the filter chips want.
  */
 export const tintedPill = (ink?: string): { backgroundColor: string; color: string } => {
   const base = ink ?? colors.brand;
-  return { backgroundColor: `${base}1F`, color: base };
+  return { backgroundColor: softTint(base), color: base };
 };
