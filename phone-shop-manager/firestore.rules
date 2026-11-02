@@ -34,6 +34,14 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    // The technician app still resolves a part by trying `inventory` first and falling
+    // back to `products` (posStore, stockService, the admin stock KPIs), so this needs the
+    // same policy as inventory — the catch-all at the bottom would otherwise deny the
+    // phone's whole product catalogue and every stock write that lands there.
+    match /products/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
     // ─── Transactions ────────────────────────────────────────────────────────
     // All signed-in users can create/read. Nobody can ever delete a transaction.
     match /transactions/{docId} {
