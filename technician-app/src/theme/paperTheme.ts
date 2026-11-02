@@ -59,7 +59,7 @@ export const paperTheme: MD3Theme = {
 
     shadow: ramp.slate900,
     scrim: ramp.slate900,
-    backdrop: 'rgba(15, 23, 42, 0.4)',
+    backdrop: colors.backdrop,
 
     // Solid tints, not alpha: transparent elevations make React Native push the
     // shadow onto child views instead of the surface.

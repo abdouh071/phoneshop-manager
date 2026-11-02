@@ -37,6 +37,148 @@ import { activityLogService } from '../services/activityLogService';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import { useTranslation } from 'react-i18next';
 import type { PhoneModel, ProductCategory, StockStatus } from '../types';
+import { buildSearch, matchesSearch } from '../utils/search';
+import { colors, fontSize, radius, ramp, spacing, stockStatusColors } from '../theme/tokens';
+
+type InventoryMetrics = {
+  totalProducts: number;
+  totalItems: number;
+  inStockCount: number;
+  lowStockCount: number;
+  outOfStockCount: number;
+  totalValuation: number;
+};
+
+const CATEGORY_TABS = [
+  { id: 'all', labelKey: 'common.all', fallback: 'All' },
+  { id: 'low_stock_only', labelKey: 'inventory.catLowStock', fallback: 'Low Stock' },
+  { id: 'smartphone', labelKey: 'inventory.catPhones', fallback: 'Phones' },
+  { id: 'accessory', labelKey: 'inventory.catAccessories', fallback: 'Accessories' },
+  { id: 'tablet', labelKey: 'inventory.catTablets', fallback: 'Tablets' },
+  { id: 'repair_part', labelKey: 'inventory.catParts', fallback: 'Parts' },
+];
+
+/**
+ * `label` is the string that lands in the activity log, which the shop reads in
+ * one language whatever the phone is set to; only the chip text is translated.
+ */
+const ADJUST_REASONS = [
+  { id: 'restock', label: 'Restock / Shipment Arrival' },
+  { id: 'return', label: 'Customer Return / Exchange' },
+  { id: 'count', label: 'Inventory Count Correction' },
+  { id: 'damaged', label: 'Damaged / Defective Stock' },
+  { id: 'shrinkage', label: 'Lost / Shrinkage' },
+];
+
+const ADDABLE_CATEGORIES: ProductCategory[] = ['accessory', 'smartphone', 'tablet', 'repair_part', 'wearable'];
+
+const DEFAULT_ADJUST_REASON = ADJUST_REASONS[0].label;
+
+const QUICK_DELTAS = [-10, -5, -1, 1, 5, 10, 25];
+
+type InventoryHeaderProps = {
+  metrics: InventoryMetrics;
+  search: string;
+  onSearchChange: (value: string) => void;
+  selectedCategory: string;
+  onSelectCategory: (category: string) => void;
+};
+
+/**
+ * Module-level, and passed to `ListHeaderComponent` as an element. See the note in
+ * WorkbenchScreen: an inline arrow here was a new component type on every render,
+ * so the search bar remounted and closed the keyboard after one character.
+ */
+const InventoryHeader = ({
+  metrics,
+  search,
+  onSearchChange,
+  selectedCategory,
+  onSelectCategory,
+}: InventoryHeaderProps) => {
+  const { t } = useTranslation();
+
+  const kpis = [
+    { key: 'total', label: t('inventory.kpiTotalUnits', 'Total Units'), value: String(metrics.totalItems), ink: colors.brand },
+    { key: 'in', label: t('inventory.kpiInStock', 'In Stock'), value: String(metrics.inStockCount), ink: colors.success },
+    { key: 'low', label: t('inventory.kpiLowStock', 'Low Stock'), value: String(metrics.lowStockCount), ink: ramp.amber700, onPress: () => onSelectCategory('low_stock_only') },
+    { key: 'out', label: t('inventory.kpiOutStock', 'Out of Stock'), value: String(metrics.outOfStockCount), ink: colors.danger },
+    { key: 'value', label: t('inventory.kpiValuation', 'Valuation'), value: `${metrics.totalValuation.toLocaleString()} DA`, ink: colors.info },
+  ];
+
+  return (
+    <>
+      <View style={styles.kpiContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.kpiScroll}
+        >
+          {kpis.map((kpi) => {
+            const card = (
+              <>
+                <Text style={styles.kpiLabel}>{kpi.label}</Text>
+                <Text style={[styles.kpiValue, { color: kpi.ink }]} numberOfLines={1}>
+                  {kpi.value}
+                </Text>
+              </>
+            );
+            return kpi.onPress ? (
+              <TouchableOpacity
+                key={kpi.key}
+                style={[styles.kpiCard, styles.kpiCardAction]}
+                activeOpacity={0.7}
+                onPress={kpi.onPress}
+              >
+                {card}
+              </TouchableOpacity>
+            ) : (
+              <View key={kpi.key} style={styles.kpiCard}>
+                {card}
+              </View>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      <View style={styles.searchRow}>
+        <Searchbar
+          placeholder={t('inventory.searchPlaceholder', 'Search name, model, barcode...')}
+          value={search}
+          onChangeText={onSearchChange}
+          style={styles.searchbar}
+          inputStyle={styles.searchInput}
+        />
+      </View>
+
+      <View style={styles.categoriesRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.categoriesScroll}
+        >
+          {CATEGORY_TABS.map((tab) => {
+            const isActive = selectedCategory === tab.id;
+            return (
+              <TouchableOpacity
+                key={tab.id}
+                style={[styles.catChip, isActive && styles.catChipActive]}
+                activeOpacity={0.7}
+                onPress={() => onSelectCategory(tab.id)}
+              >
+                <Text style={[styles.catChipText, isActive && styles.catChipTextActive]}>
+                  {t(tab.labelKey, tab.fallback)}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+    </>
+  );
+};
 
 export const InventoryScreen = ({ navigation }: any) => {
   const { t } = useTranslation();
@@ -54,7 +196,7 @@ export const InventoryScreen = ({ navigation }: any) => {
   const [targetProduct, setTargetProduct] = useState<PhoneModel | null>(null);
   const [stockDelta, setStockDelta] = useState<number>(0);
   const [exactStockInput, setExactStockInput] = useState<string>('');
-  const [adjustReason, setAdjustReason] = useState<string>('Restock / Shipment Arrival');
+  const [adjustReason, setAdjustReason] = useState<string>(DEFAULT_ADJUST_REASON);
   const [isUpdatingStock, setIsUpdatingStock] = useState(false);
 
   // Add Product Modal
@@ -141,26 +283,32 @@ export const InventoryScreen = ({ navigation }: any) => {
     };
   }, [products]);
 
-  // Filtered products list
-  const filteredProducts = useMemo(() => {
-    return products.filter((p) => {
-      if (selectedCategory === 'low_stock_only') {
-        const threshold = p.lowStockThreshold ?? 1;
-        if (p.stock > threshold) return false;
-      } else if (selectedCategory !== 'all' && p.category !== selectedCategory) {
-        return false;
-      }
+  // Filtered products list. The haystack per product is built when the list
+  // changes, not on every keystroke.
+  const searchableProducts = useMemo(
+    () =>
+      products.map((product) => ({
+        product,
+        search: buildSearch(product.name, product.model, product.sku, product.barcode),
+      })),
+    [products]
+  );
 
-      if (!search.trim()) return true;
-      const q = search.toLowerCase();
-      return (
-        p.name?.toLowerCase().includes(q) ||
-        p.model?.toLowerCase().includes(q) ||
-        p.sku?.toLowerCase().includes(q) ||
-        p.barcode?.toLowerCase().includes(q)
-      );
-    });
-  }, [products, selectedCategory, search]);
+  const filteredProducts = useMemo(
+    () =>
+      searchableProducts
+        .filter(({ product, search: haystack }) => {
+          if (selectedCategory === 'low_stock_only') {
+            const threshold = product.lowStockThreshold ?? 1;
+            if (product.stock > threshold) return false;
+          } else if (selectedCategory !== 'all' && product.category !== selectedCategory) {
+            return false;
+          }
+          return matchesSearch(haystack, search);
+        })
+        .map(({ product }) => product),
+    [searchableProducts, selectedCategory, search]
+  );
 
   // Barcode scanner integration
   const handleOpenScanner = () => {
@@ -195,7 +343,7 @@ export const InventoryScreen = ({ navigation }: any) => {
     setTargetProduct(product);
     setStockDelta(0);
     setExactStockInput(product.stock.toString());
-    setAdjustReason('Restock / Shipment Arrival');
+    setAdjustReason(DEFAULT_ADJUST_REASON);
     setIsAdjustModalOpen(true);
   };
 
@@ -373,147 +521,83 @@ export const InventoryScreen = ({ navigation }: any) => {
     }
   };
 
-  const CATEGORY_TABS = [
-    { id: 'all', label: 'All', icon: 'apps' },
-    { id: 'low_stock_only', label: '⚠️ Low Stock', icon: 'alert' },
-    { id: 'smartphone', label: 'Phones', icon: 'cellphone' },
-    { id: 'accessory', label: 'Accessories', icon: 'headphones' },
-    { id: 'tablet', label: 'Tablets', icon: 'tablet' },
-    { id: 'repair_part', label: 'Parts', icon: 'cog' },
-  ];
-
-  const ADJUST_REASONS = [
-    'Restock / Shipment Arrival',
-    'Customer Return / Exchange',
-    'Inventory Count Correction',
-    'Damaged / Defective Stock',
-    'Lost / Shrinkage',
-  ];
-
   if (user?.role === 'repair_agent') {
     return (
       <View style={styles.restrictedContainer}>
-        <MaterialCommunityIcons name="shield-lock-outline" size={64} color="#ef4444" />
-        <Text style={styles.restrictedTitle}>Access Restricted</Text>
+        <MaterialCommunityIcons name="shield-lock-outline" size={64} color={colors.danger} />
+        <Text style={styles.restrictedTitle}>{t('common.accessRestricted', 'Access Restricted')}</Text>
         <Text style={styles.restrictedSub}>
-          Inventory management is restricted to Sales Agents and Administrators.
+          {t('inventory.restrictedBody', 'Inventory management is restricted to Sales Agents and Administrators.')}
         </Text>
         <Button
           mode="contained"
-          buttonColor="#4f46e5"
-          style={{ marginTop: 20 }}
+          buttonColor={colors.brand}
+          textColor={colors.onBrand}
+          style={styles.restrictedButton}
           onPress={() => navigation.navigate('Workbench')}
         >
-          Return to Workbench
+          {t('inventory.returnToWorkbench', 'Return to Workbench')}
         </Button>
       </View>
     );
   }
-
-  const renderHeader = () => (
-    <>
-      {/* KPI Cards Horizontal Scroll */}
-      <View style={styles.kpiContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.kpiScroll}>
-          <View style={[styles.kpiCard, { borderColor: '#4f46e5' }]}>
-            <Text style={styles.kpiLabel}>Total Units</Text>
-            <Text style={[styles.kpiValue, { color: '#4f46e5' }]}>{metrics.totalItems}</Text>
-          </View>
-          <View style={[styles.kpiCard, { borderColor: '#16a34a' }]}>
-            <Text style={styles.kpiLabel}>In Stock</Text>
-            <Text style={[styles.kpiValue, { color: '#16a34a' }]}>{metrics.inStockCount}</Text>
-          </View>
-          <TouchableOpacity
-            style={[styles.kpiCard, { borderColor: '#f59e0b' }]}
-            onPress={() => setSelectedCategory('low_stock_only')}
-          >
-            <Text style={styles.kpiLabel}>Low Stock</Text>
-            <Text style={[styles.kpiValue, { color: '#d97706' }]}>{metrics.lowStockCount}</Text>
-          </TouchableOpacity>
-          <View style={[styles.kpiCard, { borderColor: '#ef4444' }]}>
-            <Text style={styles.kpiLabel}>Out of Stock</Text>
-            <Text style={[styles.kpiValue, { color: '#dc2626' }]}>{metrics.outOfStockCount}</Text>
-          </View>
-          <View style={[styles.kpiCard, { borderColor: '#0284c7' }]}>
-            <Text style={styles.kpiLabel}>Valuation</Text>
-            <Text style={[styles.kpiValue, { color: '#0284c7', fontSize: 13 }]}>
-              {metrics.totalValuation.toLocaleString()} DA
-            </Text>
-          </View>
-        </ScrollView>
-      </View>
-
-      {/* Search Bar */}
-      <View style={styles.searchRow}>
-        <Searchbar
-          placeholder="Search name, model, barcode..."
-          value={search}
-          onChangeText={setSearch}
-          style={styles.searchbar}
-        />
-      </View>
-
-      {/* Category Pills */}
-      <View style={styles.categoriesRow}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, gap: 6 }}>
-          {CATEGORY_TABS.map((tab) => {
-            const isActive = selectedCategory === tab.id;
-            return (
-              <TouchableOpacity
-                key={tab.id}
-                style={[styles.catChip, isActive && styles.catChipActive]}
-                onPress={() => setSelectedCategory(tab.id)}
-              >
-                <Text style={[styles.catChipText, isActive && styles.catChipTextActive]}>
-                  {tab.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
-    </>
-  );
 
   return (
     <View style={styles.container}>
       {/* Header */}
       <Appbar.Header style={styles.header}>
         <Appbar.Content
-          title="Inventory & Stock"
-          subtitle={`${metrics.totalProducts} products · ${metrics.totalItems} units`}
+          title={t('inventory.title', 'Inventory & Stock')}
+          subtitle={t('inventory.subtitle', '{{products}} products · {{units}} units', {
+            products: metrics.totalProducts,
+            units: metrics.totalItems,
+          })}
           titleStyle={styles.headerTitle}
           subtitleStyle={styles.headerSub}
         />
-        <Appbar.Action icon="barcode-scan" color="#ffffff" onPress={handleOpenScanner} />
-        <Appbar.Action icon="plus-box" color="#ffffff" onPress={() => setIsAddModalOpen(true)} />
+        <Appbar.Action icon="barcode-scan" color={colors.onBrand} onPress={handleOpenScanner} />
+        <Appbar.Action icon="plus-box" color={colors.onBrand} onPress={() => setIsAddModalOpen(true)} />
       </Appbar.Header>
 
       {/* Product List */}
       {isLoading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color="#4f46e5" />
-          <Text style={{ marginTop: 12, color: '#64748b' }}>Loading inventory...</Text>
+          <ActivityIndicator size="large" color={colors.brand} />
+          <Text style={styles.loadingText}>{t('inventory.loading', 'Loading inventory...')}</Text>
         </View>
       ) : (
         <FlatList
           data={filteredProducts}
           keyExtractor={(item) => item.id}
-          ListHeaderComponent={renderHeader}
+          ListHeaderComponent={
+            <InventoryHeader
+              metrics={metrics}
+              search={search}
+              onSearchChange={setSearch}
+              selectedCategory={selectedCategory}
+              onSelectCategory={setSelectedCategory}
+            />
+          }
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
             const threshold = item.lowStockThreshold ?? 1;
             const isOut = item.stock <= 0;
             const isLow = !isOut && item.stock <= threshold;
+            const stockAppearance = isOut
+              ? stockStatusColors.out_of_stock
+              : isLow
+                ? stockStatusColors.low_stock
+                : stockStatusColors.in_stock;
 
             return (
               <Card style={styles.productCard}>
                 <Card.Content>
                   <View style={styles.productCardHeader}>
-                    <View style={{ flex: 1, marginRight: 8 }}>
+                    <View style={styles.productTitleBlock}>
                       <Text style={styles.productName}>{item.name}</Text>
                       {Boolean(item.model) && <Text style={styles.productModel}>{item.model}</Text>}
-                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+                      <View style={styles.skuRow}>
                         <Text style={styles.skuText}>SKU: {item.sku || 'N/A'}</Text>
                         {Boolean(item.barcode) && <Text style={styles.skuText}>· {item.barcode}</Text>}
                       </View>
@@ -523,16 +607,15 @@ export const InventoryScreen = ({ navigation }: any) => {
                     <View
                       style={[
                         styles.stockBadge,
-                        isOut ? styles.stockBadgeOut : isLow ? styles.stockBadgeLow : styles.stockBadgeIn,
+                        { backgroundColor: stockAppearance.tint },
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.stockBadgeText,
-                          isOut ? { color: '#dc2626' } : isLow ? { color: '#d97706' } : { color: '#16a34a' },
-                        ]}
-                      >
-                        {isOut ? 'OUT OF STOCK' : isLow ? `${item.stock} left (Low)` : `${item.stock} in stock`}
+                      <Text style={[styles.stockBadgeText, { color: stockAppearance.ink }]}>
+                        {isOut
+                          ? t('common.outOfStock', 'Out of Stock')
+                          : isLow
+                            ? t('inventory.stockLow', { units: item.stock })
+                            : t('inventory.stockIn', { units: item.stock })}
                       </Text>
                     </View>
                   </View>
@@ -540,12 +623,14 @@ export const InventoryScreen = ({ navigation }: any) => {
                   {/* Pricing Row */}
                   <View style={styles.productPricingRow}>
                     <View>
-                      <Text style={styles.priceLabel}>Selling Price</Text>
+                      <Text style={styles.priceLabel}>{t('inventory.sellingPrice', 'Selling Price')}</Text>
                       <Text style={styles.priceValue}>{item.price.toLocaleString()} DA</Text>
                     </View>
                     {Boolean(item.costPrice) && (
                       <View>
-                        <Text style={styles.costPriceLabel}>Cost: {item.costPrice.toLocaleString()} DA</Text>
+                        <Text style={styles.costPriceLabel}>
+                          {t('inventory.costPrice', { price: item.costPrice.toLocaleString() })}
+                        </Text>
                       </View>
                     )}
                   </View>
@@ -556,28 +641,28 @@ export const InventoryScreen = ({ navigation }: any) => {
                       style={styles.actionChip}
                       onPress={() => handleOpenEditModal(item)}
                     >
-                      <MaterialCommunityIcons name="pencil-outline" size={16} color="#475569" />
-                      <Text style={styles.actionChipText}>Edit Price</Text>
+                      <MaterialCommunityIcons name="pencil-outline" size={16} color={colors.textSecondary} />
+                      <Text style={styles.actionChipText}>{t('inventory.editPrice', 'Edit Price')}</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
                       style={[styles.actionChip, styles.stockAdjustBtn]}
                       onPress={() => openStockAdjustModal(item)}
                     >
-                      <MaterialCommunityIcons name="swap-vertical" size={16} color="#4f46e5" />
-                      <Text style={[styles.actionChipText, { color: '#4f46e5', fontWeight: '700' }]}>
-                        Adjust Stock
+                      <MaterialCommunityIcons name="swap-vertical" size={16} color={colors.brand} />
+                      <Text style={[styles.actionChipText, styles.actionChipTextBrand]}>
+                        {t('inventory.adjustStock', 'Adjust Stock')}
                       </Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
                       disabled={isOut}
-                      style={[styles.actionChip, styles.posAddBtn, isOut && { opacity: 0.5 }]}
+                      style={[styles.actionChip, styles.posAddBtn, isOut && styles.actionChipDisabled]}
                       onPress={() => handleAddToCart(item)}
                     >
-                      <MaterialCommunityIcons name="cart-plus" size={16} color="#ffffff" />
-                      <Text style={[styles.actionChipText, { color: '#ffffff', fontWeight: '700' }]}>
-                        Sell in POS
+                      <MaterialCommunityIcons name="cart-plus" size={16} color={colors.onBrand} />
+                      <Text style={[styles.actionChipText, styles.actionChipTextInverse]}>
+                        {t('inventory.sellInPos', 'Sell in POS')}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -587,18 +672,22 @@ export const InventoryScreen = ({ navigation }: any) => {
           }}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="package-variant" size={56} color="#cbd5e1" />
-              <Text style={styles.emptyTitle}>No Products Found</Text>
+              <MaterialCommunityIcons name="package-variant" size={56} color={colors.borderStrong} />
+              <Text style={styles.emptyTitle}>{t('inventory.noProducts', 'No Products Found')}</Text>
               <Text style={styles.emptySub}>
-                {search ? 'No products matched your search.' : 'Add your first inventory product below.'}
+                {search
+                  ? t('inventory.noProductsSearch', 'No products matched your search.')
+                  : t('inventory.addFirstProduct', 'Add your first inventory product below.')}
               </Text>
               <Button
                 mode="contained"
-                buttonColor="#4f46e5"
-                style={{ marginTop: 14 }}
+                buttonColor={colors.brand}
+                textColor={colors.onBrand}
+                style={styles.emptyButton}
+                icon="plus"
                 onPress={() => setIsAddModalOpen(true)}
               >
-                + Add Product
+                {t('inventory.addProduct', 'Add Product')}
               </Button>
             </View>
           }
@@ -611,28 +700,34 @@ export const InventoryScreen = ({ navigation }: any) => {
       {/* STOCK ADJUSTMENT MODAL */}
       <Modal visible={isAdjustModalOpen} animationType="slide" transparent>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+          <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, spacing.xl) }]}>
             <View style={styles.modalHeader}>
               <View>
-                <Text style={styles.modalTitle}>Adjust Stock Quantity</Text>
+                <Text style={styles.modalTitle}>{t('inventory.adjust.title', 'Adjust Stock Quantity')}</Text>
                 <Text style={styles.modalSub}>
-                  {targetProduct?.name} ({targetProduct?.model || ''})
+                  {targetProduct?.model
+                    ? `${targetProduct.name} (${targetProduct.model})`
+                    : targetProduct?.name}
                 </Text>
               </View>
               <TouchableOpacity onPress={() => setIsAdjustModalOpen(false)}>
-                <MaterialCommunityIcons name="close" size={24} color="#64748b" />
+                <MaterialCommunityIcons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
             <View style={styles.currentStockPill}>
-              <Text style={styles.currentStockLabel}>Current Stock:</Text>
-              <Text style={styles.currentStockVal}>{targetProduct?.stock ?? 0} units</Text>
+              <Text style={styles.currentStockLabel}>{t('inventory.adjust.currentStock', 'Current Stock:')}</Text>
+              <Text style={styles.currentStockVal}>
+                {t('inventory.adjust.units', { units: targetProduct?.stock ?? 0 })}
+              </Text>
             </View>
 
             {/* Quick Delta Steppers */}
-            <Text style={styles.adjustSectionLabel}>Quick Adjust Quantity (+ / -):</Text>
+            <Text style={styles.adjustSectionLabel}>
+              {t('inventory.adjust.quick', 'Quick Adjust Quantity (+ / -):')}
+            </Text>
             <View style={styles.quickDeltasRow}>
-              {[-10, -5, -1, 1, 5, 10, 25].map((delta) => (
+              {QUICK_DELTAS.map((delta) => (
                 <TouchableOpacity
                   key={delta}
                   style={[styles.deltaBtn, delta > 0 ? styles.deltaBtnPlus : styles.deltaBtnMinus]}
@@ -642,7 +737,9 @@ export const InventoryScreen = ({ navigation }: any) => {
                     setExactStockInput(next.toString());
                   }}
                 >
-                  <Text style={[styles.deltaBtnText, delta > 0 ? { color: '#16a34a' } : { color: '#dc2626' }]}>
+                  <Text
+                    style={[styles.deltaBtnText, { color: delta > 0 ? colors.success : colors.danger }]}
+                  >
                     {delta > 0 ? `+${delta}` : delta}
                   </Text>
                 </TouchableOpacity>
@@ -651,25 +748,30 @@ export const InventoryScreen = ({ navigation }: any) => {
 
             {/* Exact New Stock Input */}
             <TextInput
-              label="New Exact Stock Count"
+              label={t('inventory.adjust.newCount', 'New Exact Stock Count')}
               value={exactStockInput}
               onChangeText={setExactStockInput}
               keyboardType="numeric"
               mode="outlined"
-              style={{ backgroundColor: '#ffffff', marginBottom: 12 }}
+              style={styles.fieldMd}
             />
 
             {/* Adjustment Reason */}
-            <Text style={styles.adjustSectionLabel}>Adjustment Reason:</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginBottom: 16 }}>
+            <Text style={styles.adjustSectionLabel}>{t('inventory.adjust.reason', 'Adjustment Reason:')}</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.chipRowContent}
+            >
               {ADJUST_REASONS.map((r) => (
                 <TouchableOpacity
-                  key={r}
-                  style={[styles.reasonChip, adjustReason === r && styles.reasonChipActive]}
-                  onPress={() => setAdjustReason(r)}
+                  key={r.id}
+                  style={[styles.reasonChip, adjustReason === r.label && styles.reasonChipActive]}
+                  onPress={() => setAdjustReason(r.label)}
                 >
-                  <Text style={[styles.reasonChipText, adjustReason === r && styles.reasonChipTextActive]}>
-                    {r}
+                  <Text style={[styles.reasonChipText, adjustReason === r.label && styles.reasonChipTextActive]}>
+                    {t(`inventory.reasons.${r.id}`, r.label)}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -677,13 +779,18 @@ export const InventoryScreen = ({ navigation }: any) => {
 
             <Button
               mode="contained"
-              buttonColor="#4f46e5"
+              buttonColor={colors.brand}
+              textColor={colors.onBrand}
               loading={isUpdatingStock}
               disabled={isUpdatingStock}
               onPress={handleConfirmStockAdjust}
-              style={{ paddingVertical: 4 }}
+              style={styles.sheetButton}
             >
-              Update Stock ({exactStockInput || targetProduct?.stock || 0} units)
+              {t(
+                'inventory.adjust.submit',
+                'Update Stock ({{units}} units)',
+                { units: exactStockInput || targetProduct?.stock || 0 }
+              )}
             </Button>
           </View>
         </View>
@@ -692,106 +799,107 @@ export const InventoryScreen = ({ navigation }: any) => {
       {/* ADD NEW PRODUCT MODAL */}
       <Modal visible={isAddModalOpen} animationType="slide" transparent>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+          <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, spacing.xl) }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add New Product</Text>
+              <Text style={styles.modalTitle}>{t('inventory.add.title', 'Add New Product')}</Text>
               <TouchableOpacity onPress={() => setIsAddModalOpen(false)}>
-                <MaterialCommunityIcons name="close" size={24} color="#64748b" />
+                <MaterialCommunityIcons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ maxHeight: 380 }}>
+            <ScrollView style={styles.formScroll} keyboardShouldPersistTaps="handled">
               <TextInput
-                label="Product Name *"
-                placeholder="e.g. iPhone 15 Silicone Case"
+                label={t('inventory.add.name', 'Product Name *')}
+                placeholder={t('inventory.add.namePlaceholder', 'e.g. iPhone 15 Silicone Case')}
                 value={newProdName}
                 onChangeText={setNewProdName}
                 mode="outlined"
-                style={{ backgroundColor: '#ffffff', marginBottom: 10 }}
+                style={styles.fieldSm}
               />
 
               <TextInput
-                label="Model / Variant"
-                placeholder="e.g. Midnight Blue / MagSafe"
+                label={t('inventory.add.model', 'Model / Variant')}
+                placeholder={t('inventory.add.modelPlaceholder', 'e.g. Midnight Blue / MagSafe')}
                 value={newProdModel}
                 onChangeText={setNewProdModel}
                 mode="outlined"
-                style={{ backgroundColor: '#ffffff', marginBottom: 10 }}
+                style={styles.fieldSm}
               />
 
               {/* Category Picker */}
-              <Text style={styles.adjustSectionLabel}>Category:</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                {(['accessory', 'smartphone', 'tablet', 'repair_part', 'wearable'] as ProductCategory[]).map((cat) => (
+              <Text style={styles.adjustSectionLabel}>{t('inventory.add.category', 'Category:')}</Text>
+              <View style={styles.chipWrapRow}>
+                {ADDABLE_CATEGORIES.map((cat) => (
                   <TouchableOpacity
                     key={cat}
                     style={[styles.catPickChip, newProdCategory === cat && styles.catPickChipActive]}
                     onPress={() => setNewProdCategory(cat)}
                   >
                     <Text style={[styles.catPickChipText, newProdCategory === cat && styles.catPickChipTextActive]}>
-                      {cat.replace('_', ' ').toUpperCase()}
+                      {t(`inventory.category.${cat}`, cat.replace('_', ' ').toUpperCase())}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
 
-              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+              <View style={styles.formRow}>
                 <TextInput
-                  label="Selling Price (DA) *"
+                  label={t('inventory.add.sellingPrice', 'Selling Price (DA) *')}
                   value={newProdPrice}
                   onChangeText={setNewProdPrice}
                   keyboardType="numeric"
                   mode="outlined"
-                  style={{ flex: 1, backgroundColor: '#ffffff' }}
+                  style={styles.fieldHalf}
                 />
                 <TextInput
-                  label="Cost Price (DA)"
+                  label={t('inventory.add.costPrice', 'Cost Price (DA)')}
                   value={newProdCostPrice}
                   onChangeText={setNewProdCostPrice}
                   keyboardType="numeric"
                   mode="outlined"
-                  style={{ flex: 1, backgroundColor: '#ffffff' }}
+                  style={styles.fieldHalf}
                 />
               </View>
 
-              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+              <View style={styles.formRow}>
                 <TextInput
-                  label="Initial Stock *"
+                  label={t('inventory.add.initialStock', 'Initial Stock *')}
                   value={newProdStock}
                   onChangeText={setNewProdStock}
                   keyboardType="numeric"
                   mode="outlined"
-                  style={{ flex: 1, backgroundColor: '#ffffff' }}
+                  style={styles.fieldHalf}
                 />
                 <TextInput
-                  label="Low Stock Alert"
+                  label={t('inventory.add.lowStockAlert', 'Low Stock Alert')}
                   value={newProdThreshold}
                   onChangeText={setNewProdThreshold}
                   keyboardType="numeric"
                   mode="outlined"
-                  style={{ flex: 1, backgroundColor: '#ffffff' }}
+                  style={styles.fieldHalf}
                 />
               </View>
 
               <TextInput
-                label="Barcode / SKU (Optional)"
-                placeholder="Auto-generated if blank"
+                label={t('inventory.add.barcode', 'Barcode / SKU (Optional)')}
+                placeholder={t('inventory.add.barcodePlaceholder', 'Auto-generated if blank')}
                 value={newProdBarcode}
                 onChangeText={setNewProdBarcode}
                 mode="outlined"
-                style={{ backgroundColor: '#ffffff', marginBottom: 14 }}
+                style={styles.fieldLg}
               />
             </ScrollView>
 
             <Button
               mode="contained"
-              buttonColor="#16a34a"
+              buttonColor={colors.success}
+              textColor={colors.onBrand}
               loading={isSavingNewProduct}
               disabled={isSavingNewProduct}
               onPress={handleSaveNewProduct}
-              style={{ marginTop: 10, paddingVertical: 4 }}
+              style={styles.sheetSubmit}
             >
-              Save Product to Stock
+              {t('inventory.add.save', 'Save Product to Stock')}
             </Button>
           </View>
         </View>
@@ -800,53 +908,54 @@ export const InventoryScreen = ({ navigation }: any) => {
       {/* QUICK EDIT PRICE MODAL */}
       <Modal visible={isEditModalOpen} animationType="slide" transparent>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+          <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, spacing.xl) }]}>
             <View style={styles.modalHeader}>
               <View>
-                <Text style={styles.modalTitle}>Edit Product Pricing</Text>
+                <Text style={styles.modalTitle}>{t('inventory.edit.title', 'Edit Product Pricing')}</Text>
                 <Text style={styles.modalSub}>{editProduct?.name}</Text>
               </View>
               <TouchableOpacity onPress={() => setIsEditModalOpen(false)}>
-                <MaterialCommunityIcons name="close" size={24} color="#64748b" />
+                <MaterialCommunityIcons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
             <TextInput
-              label="Selling Price (DA) *"
+              label={t('inventory.add.sellingPrice', 'Selling Price (DA) *')}
               value={editPrice}
               onChangeText={setEditPrice}
               keyboardType="numeric"
               mode="outlined"
-              style={{ backgroundColor: '#ffffff', marginBottom: 12 }}
+              style={styles.fieldMd}
             />
 
             <TextInput
-              label="Cost Price (DA)"
+              label={t('inventory.add.costPrice', 'Cost Price (DA)')}
               value={editCostPrice}
               onChangeText={setEditCostPrice}
               keyboardType="numeric"
               mode="outlined"
-              style={{ backgroundColor: '#ffffff', marginBottom: 12 }}
+              style={styles.fieldMd}
             />
 
             <TextInput
-              label="Low Stock Alert Threshold"
+              label={t('inventory.edit.threshold', 'Low Stock Alert Threshold')}
               value={editThreshold}
               onChangeText={setEditThreshold}
               keyboardType="numeric"
               mode="outlined"
-              style={{ backgroundColor: '#ffffff', marginBottom: 16 }}
+              style={styles.fieldLg}
             />
 
             <Button
               mode="contained"
-              buttonColor="#4f46e5"
+              buttonColor={colors.brand}
+              textColor={colors.onBrand}
               loading={isSavingEdit}
               disabled={isSavingEdit}
               onPress={handleSaveEditProduct}
-              style={{ paddingVertical: 4 }}
+              style={styles.sheetButton}
             >
-              Save Changes
+              {t('inventory.edit.save', 'Save Changes')}
             </Button>
           </View>
         </View>
@@ -858,350 +967,418 @@ export const InventoryScreen = ({ navigation }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: colors.background,
   },
   header: {
-    backgroundColor: '#4f46e5',
+    backgroundColor: colors.brand,
   },
   headerTitle: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 20,
+    color: colors.textInverse,
+    fontWeight: '700',
+    fontSize: fontSize.title,
   },
   headerSub: {
-    color: '#c7d2fe',
-    fontSize: 12,
+    color: colors.brandBorder,
+    fontSize: fontSize.label,
   },
   kpiContainer: {
-    backgroundColor: '#ffffff',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+    backgroundColor: colors.surface,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
   kpiScroll: {
-    paddingHorizontal: 12,
-    gap: 8,
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
   },
   kpiCard: {
-    backgroundColor: '#f8fafc',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1.5,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     minWidth: 90,
   },
+  kpiCardAction: {
+    borderColor: ramp.amber500,
+  },
   kpiLabel: {
-    fontSize: 10,
-    color: '#64748b',
+    fontSize: fontSize.caption,
+    color: colors.textMuted,
     fontWeight: '700',
-    textTransform: 'uppercase',
   },
   kpiValue: {
-    fontSize: 16,
-    fontWeight: '900',
-    marginTop: 2,
+    fontSize: fontSize.subtitle,
+    fontWeight: '700',
+    marginTop: spacing.xxs,
   },
   searchRow: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
   },
   searchbar: {
-    height: 44,
-    backgroundColor: '#ffffff',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    height: 46,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderStrong,
+  },
+  searchInput: {
+    fontSize: fontSize.bodyStrong,
   },
   categoriesRow: {
-    paddingVertical: 10,
+    paddingVertical: spacing.sm,
+  },
+  categoriesScroll: {
+    paddingHorizontal: spacing.md,
+    gap: spacing.xs,
   },
   catChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.surface,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   catChipActive: {
-    backgroundColor: '#4f46e5',
-    borderColor: '#4f46e5',
+    backgroundColor: colors.brand,
+    borderColor: colors.brand,
   },
   catChipText: {
-    fontSize: 12,
+    fontSize: fontSize.label,
     fontWeight: '600',
-    color: '#475569',
+    color: colors.textSecondary,
   },
   catChipTextActive: {
-    color: '#ffffff',
+    color: colors.onBrand,
     fontWeight: '700',
   },
   listContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 24,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xxl,
   },
   productCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    marginBottom: spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   productCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 8,
+    marginBottom: spacing.sm,
+  },
+  productTitleBlock: {
+    flex: 1,
+    paddingRight: spacing.sm,
   },
   productName: {
-    fontSize: 15,
+    fontSize: fontSize.bodyStrong,
     fontWeight: '700',
-    color: '#0f172a',
+    color: colors.textPrimary,
   },
   productModel: {
-    fontSize: 12,
-    color: '#64748b',
-    marginTop: 2,
+    fontSize: fontSize.label,
+    color: colors.textSecondary,
+    marginTop: spacing.xxs,
+  },
+  skuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.xxs,
   },
   skuText: {
-    fontSize: 11,
-    color: '#94a3b8',
+    fontSize: fontSize.caption,
+    color: colors.textFaint,
   },
   stockBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  stockBadgeIn: {
-    backgroundColor: '#dcfce7',
-  },
-  stockBadgeLow: {
-    backgroundColor: '#fef3c7',
-  },
-  stockBadgeOut: {
-    backgroundColor: '#fee2e2',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+    borderRadius: radius.xs,
   },
   stockBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
+    fontSize: fontSize.caption,
+    fontWeight: '700',
   },
   productPricingRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
-    paddingVertical: 6,
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
-    marginBottom: 8,
+    paddingVertical: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    marginBottom: spacing.sm,
   },
   priceLabel: {
-    fontSize: 10,
-    color: '#64748b',
+    fontSize: fontSize.caption,
+    color: colors.textMuted,
     fontWeight: '600',
     textTransform: 'uppercase',
   },
   priceValue: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#4f46e5',
+    fontSize: fontSize.subtitle,
+    fontWeight: '700',
+    color: colors.brand,
   },
   costPriceLabel: {
-    fontSize: 11,
-    color: '#94a3b8',
+    fontSize: fontSize.caption,
+    color: colors.textFaint,
   },
   cardActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 8,
-    paddingTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
+    gap: spacing.sm,
+    paddingTop: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
   actionChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 6,
-    backgroundColor: '#f1f5f9',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceMuted,
   },
   actionChipText: {
-    fontSize: 12,
+    fontSize: fontSize.label,
     fontWeight: '600',
-    color: '#475569',
+    color: colors.textSecondary,
+  },
+  actionChipTextBrand: {
+    color: colors.brand,
+  },
+  actionChipTextInverse: {
+    color: colors.textInverse,
+    fontWeight: '700',
+  },
+  actionChipDisabled: {
+    opacity: 0.4,
   },
   stockAdjustBtn: {
-    backgroundColor: '#eef2ff',
-    borderWidth: 1,
-    borderColor: '#c7d2fe',
+    backgroundColor: colors.brandSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.brandBorder,
   },
   posAddBtn: {
-    backgroundColor: '#16a34a',
+    backgroundColor: colors.success,
   },
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 60,
+    paddingTop: spacing.xxxl * 2,
   },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 60,
-    paddingHorizontal: 24,
+    paddingTop: spacing.xxxl,
+    paddingHorizontal: spacing.xxl,
   },
   emptyTitle: {
-    fontSize: 17,
+    fontSize: fontSize.subtitle,
     fontWeight: '700',
-    color: '#0f172a',
-    marginTop: 12,
+    color: colors.textPrimary,
+    marginTop: spacing.md,
   },
   emptySub: {
-    fontSize: 13,
-    color: '#64748b',
+    fontSize: fontSize.body,
+    color: colors.textSecondary,
     textAlign: 'center',
-    marginTop: 6,
+    marginTop: spacing.xs,
+  },
+  emptyButton: {
+    marginTop: spacing.xl,
+    borderRadius: radius.pill,
   },
   restrictedContainer: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: spacing.xxl,
   },
   restrictedTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#0f172a',
-    marginTop: 16,
+    fontSize: fontSize.title,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginTop: spacing.lg,
   },
   restrictedSub: {
-    fontSize: 14,
-    color: '#64748b',
+    fontSize: fontSize.bodyStrong,
+    color: colors.textMuted,
     textAlign: 'center',
-    marginTop: 8,
+    marginTop: spacing.sm,
     lineHeight: 20,
+  },
+  restrictedButton: {
+    marginTop: spacing.xl,
+  },
+  loadingText: {
+    marginTop: spacing.md,
+    color: colors.textMuted,
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.backdrop,
     justifyContent: 'flex-end',
   },
   modalSheet: {
-    backgroundColor: '#ffffff',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    padding: 18,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.lg,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#0f172a',
+    fontSize: fontSize.subtitle,
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
   modalSub: {
-    fontSize: 12,
-    color: '#64748b',
-    marginTop: 2,
+    fontSize: fontSize.label,
+    color: colors.textSecondary,
+    marginTop: spacing.xxs,
   },
   currentStockPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#eef2ff',
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 12,
+    gap: spacing.sm,
+    backgroundColor: colors.brandSoft,
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+    marginBottom: spacing.md,
   },
   currentStockLabel: {
-    fontSize: 13,
-    color: '#4f46e5',
+    fontSize: fontSize.body,
+    color: colors.brand,
     fontWeight: '600',
   },
   currentStockVal: {
-    fontSize: 15,
-    color: '#4f46e5',
-    fontWeight: '800',
+    fontSize: fontSize.bodyStrong,
+    color: colors.brand,
+    fontWeight: '700',
   },
   adjustSectionLabel: {
-    fontSize: 12,
+    fontSize: fontSize.label,
     fontWeight: '700',
-    color: '#334155',
-    marginBottom: 6,
+    color: ramp.slate700,
+    marginBottom: spacing.sm,
   },
   quickDeltasRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: spacing.sm,
     flexWrap: 'wrap',
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   deltaBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 6,
-    borderWidth: 1,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.pill,
   },
   deltaBtnPlus: {
-    backgroundColor: '#dcfce7',
-    borderColor: '#bbf7d0',
+    backgroundColor: colors.successSoft,
   },
   deltaBtnMinus: {
-    backgroundColor: '#fee2e2',
-    borderColor: '#fecaca',
+    backgroundColor: colors.dangerSoft,
   },
   deltaBtnText: {
-    fontSize: 12,
-    fontWeight: '800',
+    fontSize: fontSize.label,
+    fontWeight: '700',
+  },
+  chipRowContent: {
+    gap: spacing.sm,
+    paddingRight: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  chipWrapRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
   },
   reasonChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: '#f1f5f9',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   reasonChipActive: {
-    backgroundColor: '#4f46e5',
-    borderColor: '#4f46e5',
+    backgroundColor: colors.brand,
+    borderColor: colors.brand,
   },
   reasonChipText: {
-    fontSize: 12,
-    color: '#475569',
+    fontSize: fontSize.label,
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   reasonChipTextActive: {
-    color: '#ffffff',
+    color: colors.textInverse,
+    fontWeight: '700',
   },
   catPickChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: '#f1f5f9',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   catPickChipActive: {
-    backgroundColor: '#4f46e5',
-    borderColor: '#4f46e5',
+    backgroundColor: colors.brand,
+    borderColor: colors.brand,
   },
   catPickChipText: {
-    fontSize: 11,
+    fontSize: fontSize.caption,
     fontWeight: '700',
-    color: '#475569',
+    color: colors.textSecondary,
   },
   catPickChipTextActive: {
-    color: '#ffffff',
+    color: colors.textInverse,
+  },
+  formScroll: {
+    maxHeight: 380,
+  },
+  formRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  fieldHalf: {
+    flex: 1,
+    backgroundColor: colors.surface,
+  },
+  fieldSm: {
+    backgroundColor: colors.surface,
+    marginBottom: spacing.sm,
+  },
+  fieldMd: {
+    backgroundColor: colors.surface,
+    marginBottom: spacing.md,
+  },
+  fieldLg: {
+    backgroundColor: colors.surface,
+    marginBottom: spacing.lg,
+  },
+  sheetButton: {
+    paddingVertical: spacing.xs,
+  },
+  sheetSubmit: {
+    marginTop: spacing.md,
+    paddingVertical: spacing.xs,
   },
 });

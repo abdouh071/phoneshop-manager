@@ -86,6 +86,9 @@ export const colors = {
   border: ramp.slate200,
   borderStrong: ramp.slate300,
 
+  /** One scrim value for every hand-rolled modal and for Paper's dialogs. */
+  backdrop: 'rgba(15, 23, 42, 0.4)',
+
   // Brand
   brand: ramp.indigo600,
   brandPressed: ramp.indigo700,
