@@ -33,7 +33,8 @@
     "required": "Required",
     "outOfStock": "Out of Stock",
     "whatsappMissing": "WhatsApp is not installed.",
-    "accessRestricted": "Access Restricted"
+    "accessRestricted": "Access Restricted",
+    "offline": "Offline"
   },
   "error": {
     "notFound": "Not Found",
@@ -70,6 +71,19 @@
     "sales_agent": "Sales Agent",
     "repair_agent": "Repair Agent"
   },
+  "nav": {
+    "dashboard": "Dashboard",
+    "pos": "POS",
+    "sales": "Sales",
+    "stock": "Stock",
+    "repairs": "Repairs",
+    "settings": "Settings",
+    "history": "History",
+    "inventory": "Inventory",
+    "profile": "Profile",
+    "workbench": "Workbench",
+    "dailyReport": "Daily Report"
+  },
   "status": {
     "pending": "PENDING",
     "in_progress": "IN PROGRESS",
@@ -90,7 +104,18 @@
     "searchPlaceholder": "Search tickets...",
     "readyForPickup": "Ready for Pickup",
     "noTickets": "No tickets found",
-    "totalCount": "Total"
+    "totalCount": "Total",
+    "loadError": "Failed to load tickets.",
+    "empty": {
+      "all": { "title": "All caught up!", "sub": "No repair tickets yet." },
+      "my_repairs": { "title": "Nothing assigned", "sub": "No tickets are assigned to you right now." },
+      "others_repairs": { "title": "No other repairs", "sub": "No tickets assigned to other technicians." },
+      "unassigned": { "title": "All assigned!", "sub": "Every ticket has a technician." },
+      "pending": { "title": "No pending tickets", "sub": "All tickets have been picked up." },
+      "in_progress": { "title": "Nothing in progress", "sub": "No active repairs right now." },
+      "ready": { "title": "No ready tickets", "sub": "Nothing waiting for customer pickup." },
+      "other": { "title": "No tickets", "sub": "No tickets match this filter." }
+    }
   },
   "ticketDetail": {
     "printSticker": "Print Sticker",

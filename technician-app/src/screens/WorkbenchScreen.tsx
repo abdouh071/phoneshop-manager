@@ -1,12 +1,23 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { View, StyleSheet, FlatList, TouchableOpacity, Alert, ScrollView, RefreshControl, Linking, Vibration } from 'react-native';
-import { Appbar, Card, Title, Text, FAB, useTheme, ActivityIndicator, Searchbar, Chip } from 'react-native-paper';
+import { Appbar, Card, Text, FAB, useTheme, ActivityIndicator, Searchbar } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRepairStore } from '../store/repairStore';
 import { useAuthStore } from '../store/authStore';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RoleBottomNav } from '../components/RoleBottomNav';
+import { buildSearch, matchesSearch } from '../utils/search';
+import {
+  colors,
+  fontSize,
+  radius,
+  ramp,
+  repairStatusColors,
+  spacing,
+  statusAppearance,
+  tintedPill,
+} from '../theme/tokens';
 
 const getTimeAgo = (dateStr: string): string => {
   const now = new Date();
@@ -25,10 +36,175 @@ const getTimeAgo = (dateStr: string): string => {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
+const statusInk = (status: string) => statusAppearance(repairStatusColors, status).ink;
+
+/** Filters that narrow the list by ownership or date rather than by status. */
+const FILTER_SCOPES = ['all', 'today', 'my_repairs', 'others_repairs', 'unassigned'];
+
+const monthYear = (createdAt: string) =>
+  new Date(createdAt).toLocaleString('default', { month: 'long', year: 'numeric' });
+
+const FILTER_STATUSES = [
+  'all',
+  'my_repairs',
+  'others_repairs',
+  'unassigned',
+  'pending',
+  'in_progress',
+  'ready',
+  'completed',
+  'returned',
+  'cancelled',
+];
+
+const chipFill = (status: string, isActive: boolean): { bg: string; text: string } => {
+  if (!isActive) return { bg: colors.surface, text: colors.textSecondary };
+  switch (status) {
+    case 'others_repairs':
+      return { bg: colors.violet, text: colors.onBrand };
+    case 'unassigned':
+      return { bg: ramp.slate500, text: colors.onBrand };
+    case 'all':
+    case 'my_repairs':
+      return { bg: colors.brand, text: colors.onBrand };
+    default:
+      return { bg: statusInk(status), text: colors.onBrand };
+  }
+};
+
+const EMPTY_ICONS: Record<string, string> = {
+  all: 'clipboard-check-outline',
+  my_repairs: 'account-check',
+  others_repairs: 'account-group',
+  unassigned: 'account-question',
+  pending: 'clock-outline',
+  in_progress: 'wrench',
+  ready: 'check-circle-outline',
+};
+
+type WorkbenchHeaderProps = {
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
+  statusFilter: string;
+  onFilterChange: (status: string) => void;
+  statusCounts: Record<string, number>;
+  totalCount: number;
+};
+
+/**
+ * Module-level, and passed to `ListHeaderComponent` as an element: an inline
+ * arrow here would be a new component type on every render, so FlatList tore the
+ * header down and rebuilt it — which dropped keyboard focus after one keystroke.
+ */
+const WorkbenchHeader = ({
+  searchQuery,
+  onSearchChange,
+  statusFilter,
+  onFilterChange,
+  statusCounts,
+  totalCount,
+}: WorkbenchHeaderProps) => {
+  const { t } = useTranslation();
+
+  const stats = [
+    { key: 'pending', count: statusCounts['pending'] || 0 },
+    { key: 'in_progress', count: statusCounts['in_progress'] || 0 },
+    { key: 'ready', count: statusCounts['ready'] || 0 },
+  ];
+
+  return (
+    <>
+      <View style={styles.statsRow}>
+        {stats.map((stat, index) => (
+          <React.Fragment key={stat.key}>
+            {index > 0 && <View style={styles.statDivider} />}
+            <View style={styles.statItem}>
+              <View style={[styles.statDot, { backgroundColor: statusInk(stat.key) }]} />
+              <Text style={styles.statNumber}>{stat.count}</Text>
+              <Text style={styles.statLabel}>{String(t(`status.${stat.key}`, stat.key))}</Text>
+            </View>
+          </React.Fragment>
+        ))}
+        <View style={styles.statDivider} />
+        <View style={styles.statItem}>
+          <View style={[styles.statDot, { backgroundColor: colors.brand }]} />
+          <Text style={styles.statNumber}>{totalCount}</Text>
+          <Text style={styles.statLabel}>{t('workbench.totalCount', 'Total')}</Text>
+        </View>
+      </View>
+
+      <View style={styles.searchContainer}>
+        <Searchbar
+          placeholder={t('workbench.searchPlaceholder', 'Search tickets...')}
+          onChangeText={onSearchChange}
+          value={searchQuery}
+          style={styles.searchbar}
+          elevation={0}
+          inputStyle={styles.searchInput}
+        />
+      </View>
+
+      <View style={styles.filterContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.filterContent}
+        >
+          {FILTER_STATUSES.map(status => {
+            const isActive = statusFilter === status;
+            const fill = chipFill(status, isActive);
+            return (
+              <TouchableOpacity
+                key={status}
+                activeOpacity={0.7}
+                onPress={() => onFilterChange(status)}
+                style={[
+                  styles.filterChip,
+                  { backgroundColor: fill.bg },
+                  isActive && styles.filterChipActive,
+                  !isActive && styles.filterChipInactive,
+                ]}
+              >
+                <Text style={[styles.filterChipText, { color: fill.text }]}>
+                  {status === 'all'
+                    ? t('status.all', 'All')
+                    : status === 'my_repairs'
+                      ? t('status.myRepairs', 'My Repairs')
+                      : status === 'others_repairs'
+                        ? t('status.othersRepairs', 'Others')
+                        : status === 'unassigned'
+                          ? t('status.unassigned', 'Unassigned')
+                          : String(t(`status.${status}`, status.replace('_', ' ')))}
+                </Text>
+                <View
+                  style={[
+                    styles.filterChipBadge,
+                    isActive ? styles.filterChipBadgeActive : styles.filterChipBadgeInactive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.filterChipBadgeText,
+                      { color: isActive ? colors.onBrand : colors.textMuted },
+                    ]}
+                  >
+                    {statusCounts[status] || 0}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+    </>
+  );
+};
+
 export const WorkbenchScreen = ({ navigation }: any) => {
   const insets = useSafeAreaInsets();
   const { tickets, isLoading, error, subscribeToTickets, updateTicketStatus } = useRepairStore();
-  const { user, logout } = useAuthStore();
+  const { user } = useAuthStore();
   const theme = useTheme();
   const { t } = useTranslation();
   
@@ -51,59 +227,70 @@ export const WorkbenchScreen = ({ navigation }: any) => {
     }, 1200);
   }, [subscribeToTickets]);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending': return '#f59e0b';
-      case 'in_progress': return '#3b82f6';
-      case 'ready': return '#10b981';
-      case 'returned': return '#ef4444';
-      case 'completed': return '#8b5cf6';
-      case 'cancelled': return '#94a3b8';
-      default: return '#64748b';
-    }
-  };
-
-  // Ticket counts for filter chips
+  // Ticket counts for filter chips — one pass over the list, one `today` per run.
   const statusCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: tickets.length };
-    const statuses = ['pending', 'in_progress', 'ready', 'completed', 'returned', 'cancelled'];
-    statuses.forEach(s => { counts[s] = tickets.filter(t => t.status === s).length; });
-    counts['today'] = tickets.filter(t => t.createdAt && new Date(t.createdAt).toDateString() === new Date().toDateString()).length;
-    counts['my_repairs'] = tickets.filter(t => t.assignedTechnician === user?.name).length;
-    counts['others_repairs'] = tickets.filter(t => t.assignedTechnician && t.assignedTechnician !== user?.name).length;
-    counts['unassigned'] = tickets.filter(t => !t.assignedTechnician).length;
+    const counts: Record<string, number> = {
+      all: tickets.length,
+      today: 0,
+      my_repairs: 0,
+      others_repairs: 0,
+      unassigned: 0,
+    };
+    for (const status of FILTER_STATUSES) {
+      if (!FILTER_SCOPES.includes(status)) counts[status] = 0;
+    }
+    const today = new Date().toDateString();
+    for (const ticket of tickets) {
+      if (ticket.status in counts) counts[ticket.status] += 1;
+      if (ticket.createdAt && new Date(ticket.createdAt).toDateString() === today) counts.today += 1;
+      if (!ticket.assignedTechnician) counts.unassigned += 1;
+      else if (ticket.assignedTechnician === user?.name) counts.my_repairs += 1;
+      else counts.others_repairs += 1;
+    }
     return counts;
   }, [tickets, user]);
 
-  const filteredTickets = useMemo(() => {
-    return tickets.filter(t => {
-      if (statusFilter === 'today') {
-        return Boolean(t.createdAt && new Date(t.createdAt).toDateString() === new Date().toDateString());
-      }
-      if (statusFilter === 'my_repairs' && t.assignedTechnician !== user?.name) return false;
-      if (statusFilter === 'others_repairs' && (!t.assignedTechnician || t.assignedTechnician === user?.name)) return false;
-      if (statusFilter === 'unassigned' && t.assignedTechnician) return false;
-      
-      const isStatusString = !['all', 'today', 'my_repairs', 'others_repairs', 'unassigned'].includes(statusFilter);
-      if (isStatusString && t.status !== statusFilter) return false;
+  /**
+   * The haystack per ticket is rebuilt when the list changes rather than on every
+   * keystroke, and `buildSearch` tolerates records that arrive with a field
+   * missing — which `field.toLowerCase()` did not.
+   */
+  const searchableTickets = useMemo(
+    () =>
+      tickets.map((ticket) => ({
+        ticket,
+        search: buildSearch(
+          ticket.ticketNumber,
+          ticket.deviceBrand,
+          ticket.deviceModel,
+          ticket.customerName,
+          ticket.issueDescription,
+          ticket.assignedTechnician,
+          ticket.customerPhone,
+          ticket.createdAt ? monthYear(ticket.createdAt) : ''
+        ),
+      })),
+    [tickets]
+  );
 
-      // 2. Search query filter
-      if (!searchQuery) return true;
-      const lowerQ = searchQuery.toLowerCase();
-      
-      const dateStr = t.createdAt ? new Date(t.createdAt).toLocaleString('default', { month: 'long', year: 'numeric' }).toLowerCase() : '';
-      
-      return (
-        t.ticketNumber?.toLowerCase().includes(lowerQ) ||
-        t.deviceBrand?.toLowerCase().includes(lowerQ) ||
-        t.deviceModel?.toLowerCase().includes(lowerQ) ||
-        t.customerName?.toLowerCase().includes(lowerQ) ||
-        t.issueDescription?.toLowerCase().includes(lowerQ) ||
-        (t.assignedTechnician && t.assignedTechnician.toLowerCase().includes(lowerQ)) ||
-        dateStr.includes(lowerQ)
-      );
-    });
-  }, [tickets, searchQuery, statusFilter, user]);
+  const filteredTickets = useMemo(() => {
+    const today = new Date().toDateString();
+    const isStatusValue = !FILTER_SCOPES.includes(statusFilter);
+
+    return searchableTickets
+      .filter(({ ticket, search }) => {
+        if (statusFilter === 'today') {
+          return Boolean(ticket.createdAt) && new Date(ticket.createdAt).toDateString() === today;
+        }
+        if (statusFilter === 'my_repairs' && ticket.assignedTechnician !== user?.name) return false;
+        if (statusFilter === 'others_repairs' && (!ticket.assignedTechnician || ticket.assignedTechnician === user?.name)) return false;
+        if (statusFilter === 'unassigned' && ticket.assignedTechnician) return false;
+        if (isStatusValue && ticket.status !== statusFilter) return false;
+
+        return matchesSearch(search, searchQuery);
+      })
+      .map(({ ticket }) => ticket);
+  }, [searchableTickets, searchQuery, statusFilter, user]);
 
   const openScanner = () => {
     navigation.navigate('Scanner', {
@@ -123,43 +310,25 @@ export const WorkbenchScreen = ({ navigation }: any) => {
     });
   };
 
-  const getChipColor = (status: string): { bg: string; text: string } => {
-    if (statusFilter !== status) return { bg: '#ffffff', text: '#475569' };
-    switch (status) {
-      case 'all': return { bg: '#4f46e5', text: '#ffffff' };
-      case 'my_repairs': return { bg: '#4f46e5', text: '#ffffff' };
-      case 'others_repairs': return { bg: '#7c3aed', text: '#ffffff' };
-      case 'unassigned': return { bg: '#64748b', text: '#ffffff' };
-      case 'pending': return { bg: '#f59e0b', text: '#ffffff' };
-      case 'in_progress': return { bg: '#3b82f6', text: '#ffffff' };
-      case 'ready': return { bg: '#10b981', text: '#ffffff' };
-      case 'completed': return { bg: '#8b5cf6', text: '#ffffff' };
-      case 'returned': return { bg: '#ef4444', text: '#ffffff' };
-      case 'cancelled': return { bg: '#94a3b8', text: '#ffffff' };
-      default: return { bg: '#4f46e5', text: '#ffffff' };
-    }
-  };
-
   const getEmptyState = () => {
-    const iconMap: Record<string, { icon: string; title: string; sub: string; color: string }> = {
-      'all': { icon: 'clipboard-check-outline', title: 'All caught up!', sub: 'No repair tickets yet.', color: '#10b981' },
-      'my_repairs': { icon: 'account-check', title: 'Nothing assigned', sub: 'No tickets are assigned to you right now.', color: '#4f46e5' },
-      'others_repairs': { icon: 'account-group', title: 'No other repairs', sub: 'No tickets assigned to other technicians.', color: '#7c3aed' },
-      'unassigned': { icon: 'account-question', title: 'All assigned!', sub: 'Every ticket has a technician.', color: '#10b981' },
-      'pending': { icon: 'clock-outline', title: 'No pending tickets', sub: 'All tickets have been picked up.', color: '#f59e0b' },
-      'in_progress': { icon: 'wrench', title: 'Nothing in progress', sub: 'No active repairs right now.', color: '#3b82f6' },
-      'ready': { icon: 'check-circle-outline', title: 'No ready tickets', sub: 'Nothing waiting for customer pickup.', color: '#10b981' },
-    };
-    const state = iconMap[statusFilter] || { icon: 'clipboard-text-outline', title: 'No tickets', sub: 'No tickets match this filter.', color: '#94a3b8' };
-    const isPositive = statusFilter === 'all' || statusFilter === 'unassigned';
-    
+    const key = EMPTY_ICONS[statusFilter] ? statusFilter : 'other';
+    const ink =
+      key === 'all' || key === 'unassigned'
+        ? colors.success
+        : key === 'other'
+          ? colors.textFaint
+          : statusInk(key);
+    const isPositive = key === 'all' || key === 'unassigned';
+
     return (
       <View style={styles.emptyContainer}>
-        <View style={[styles.emptyIconCircle, { backgroundColor: state.color + '15' }]}>
-          <MaterialCommunityIcons name={state.icon as any} size={48} color={state.color} />
+        <View style={[styles.emptyIconCircle, { backgroundColor: `${ink}14` }]}>
+          <MaterialCommunityIcons name={(EMPTY_ICONS[key] ?? 'clipboard-text-outline') as any} size={44} color={ink} />
         </View>
-        <Text style={[styles.emptyTitle, isPositive && { color: state.color }]}>{state.title}</Text>
-        <Text style={styles.emptySub}>{state.sub}</Text>
+        <Text style={[styles.emptyTitle, isPositive && { color: ink }]}>
+          {t(`workbench.empty.${key}.title`, 'No tickets')}
+        </Text>
+        <Text style={styles.emptySub}>{t(`workbench.empty.${key}.sub`, 'No tickets match this filter.')}</Text>
       </View>
     );
   };
@@ -187,15 +356,15 @@ export const WorkbenchScreen = ({ navigation }: any) => {
         onPress={() => navigation.navigate('TicketDetail', { ticket: item })}
       >
         <Card style={styles.card}>
-          <View style={[styles.statusStrip, { backgroundColor: getStatusColor(item.status) }]} />
+          <View style={[styles.statusStrip, { backgroundColor: statusInk(item.status) }]} />
           <Card.Content style={styles.cardContent}>
             <View style={styles.cardHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View style={styles.ticketNumberRow}>
                 <Text style={styles.ticketNumber}>{item.ticketNumber}</Text>
                 {isOffline && (
                   <View style={styles.offlineBadge}>
-                    <MaterialCommunityIcons name="cloud-off-outline" size={11} color="#dc2626" />
-                    <Text style={styles.offlineBadgeText}>Offline</Text>
+                    <MaterialCommunityIcons name="cloud-off-outline" size={11} color={colors.danger} />
+                    <Text style={styles.offlineBadgeText}>{t('common.offline', 'Offline')}</Text>
                   </View>
                 )}
               </View>
@@ -203,17 +372,13 @@ export const WorkbenchScreen = ({ navigation }: any) => {
               <TouchableOpacity
                 activeOpacity={canCycle ? 0.6 : 1}
                 onPress={canCycle ? handleCycleStatus : undefined}
-                style={[
-                  styles.statusBadge,
-                  { backgroundColor: getStatusColor(item.status) + '1A' },
-                  canCycle && styles.statusBadgeClickable
-                ]}
+                style={[styles.statusBadge, { backgroundColor: tintedPill(statusInk(item.status)).backgroundColor }]}
               >
-                <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+                <Text style={[styles.statusText, { color: statusInk(item.status) }]}>
                   {String(t(`status.${item.status}`, item.status.replace('_', ' ').toUpperCase()))}
                 </Text>
                 {canCycle && (
-                  <MaterialCommunityIcons name="chevron-right" size={14} color={getStatusColor(item.status)} style={{ marginLeft: 2 }} />
+                  <MaterialCommunityIcons name="chevron-right" size={14} color={statusInk(item.status)} style={styles.statusBadgeChevron} />
                 )}
               </TouchableOpacity>
             </View>
@@ -222,7 +387,7 @@ export const WorkbenchScreen = ({ navigation }: any) => {
             
             {/* Customer name + Call button + time ago */}
             <View style={styles.customerRow}>
-              <MaterialCommunityIcons name="account" size={14} color="#94a3b8" />
+              <MaterialCommunityIcons name="account" size={14} color={colors.textFaint} />
               <Text style={styles.customerText} numberOfLines={1}>
                 {item.customerName}
               </Text>
@@ -235,7 +400,7 @@ export const WorkbenchScreen = ({ navigation }: any) => {
                     Linking.openURL(`tel:${item.customerPhone}`);
                   }}
                 >
-                  <MaterialCommunityIcons name="phone" size={12} color="#16a34a" />
+                  <MaterialCommunityIcons name="phone" size={12} color={colors.success} />
                   <Text style={styles.callChipText}>{item.customerPhone}</Text>
                 </TouchableOpacity>
               ) : null}
@@ -246,7 +411,7 @@ export const WorkbenchScreen = ({ navigation }: any) => {
             </View>
             
             <View style={styles.issueContainer}>
-              <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#64748b" />
+              <MaterialCommunityIcons name="alert-circle-outline" size={16} color={colors.textMuted} />
               <Text style={styles.issueText} numberOfLines={1}>
                 {item.issueDescription}
               </Text>
@@ -254,8 +419,12 @@ export const WorkbenchScreen = ({ navigation }: any) => {
             
             <View style={styles.footerRow}>
               <View style={styles.techContainer}>
-                <MaterialCommunityIcons name="account-wrench" size={16} color={item.assignedTechnician ? '#4f46e5' : '#94a3b8'} />
-                <Text style={[styles.techText, !item.assignedTechnician && { color: '#94a3b8', fontStyle: 'italic' }]}>
+                <MaterialCommunityIcons
+                  name="account-wrench"
+                  size={16}
+                  color={item.assignedTechnician ? colors.brand : colors.textFaint}
+                />
+                <Text style={[styles.techText, !item.assignedTechnician && styles.techTextEmpty]}>
                   {item.assignedTechnician || t('workbench.unassigned', 'Unassigned')}
                 </Text>
               </View>
@@ -271,89 +440,6 @@ export const WorkbenchScreen = ({ navigation }: any) => {
     );
   };
 
-  // Inline stats
-  const pendingCount = statusCounts['pending'] || 0;
-  const inProgressCount = statusCounts['in_progress'] || 0;
-  const readyCount = statusCounts['ready'] || 0;
-
-  const renderHeader = () => (
-    <>
-      {/* Inline Stats Row — visible to all roles */}
-      <View style={styles.statsRow}>
-        <View style={styles.statItem}>
-          <View style={[styles.statDot, { backgroundColor: '#f59e0b' }]} />
-          <Text style={styles.statNumber}>{pendingCount}</Text>
-          <Text style={styles.statLabel}>{t('status.pending', 'Pending')}</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <View style={[styles.statDot, { backgroundColor: '#3b82f6' }]} />
-          <Text style={styles.statNumber}>{inProgressCount}</Text>
-          <Text style={styles.statLabel}>{t('status.in_progress', 'In Progress')}</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <View style={[styles.statDot, { backgroundColor: '#10b981' }]} />
-          <Text style={styles.statNumber}>{readyCount}</Text>
-          <Text style={styles.statLabel}>{t('status.ready', 'Ready')}</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <View style={[styles.statDot, { backgroundColor: '#4f46e5' }]} />
-          <Text style={styles.statNumber}>{tickets.length}</Text>
-          <Text style={styles.statLabel}>{t('workbench.totalCount', 'Total')}</Text>
-        </View>
-      </View>
-
-      <View style={styles.searchContainer}>
-        <Searchbar
-          placeholder={t('workbench.searchPlaceholder', 'Search tickets...')}
-          onChangeText={setSearchQuery}
-          value={searchQuery}
-          style={styles.searchbar}
-          elevation={0}
-          inputStyle={{ fontSize: 15 }}
-        />
-      </View>
-
-      <View style={styles.filterContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterContent}>
-          {['all', 'my_repairs', 'others_repairs', 'unassigned', 'pending', 'in_progress', 'ready', 'completed', 'returned', 'cancelled'].map(status => {
-            const chipColors = getChipColor(status);
-            const count = statusCounts[status] || 0;
-            const isActive = statusFilter === status;
-            return (
-              <TouchableOpacity
-                key={status}
-                activeOpacity={0.7}
-                onPress={() => setStatusFilter(status)}
-                style={[
-                  styles.filterChip,
-                  { backgroundColor: chipColors.bg },
-                  isActive && styles.filterChipActive,
-                  !isActive && styles.filterChipInactive,
-                ]}
-              >
-                <Text style={[styles.filterChipText, { color: chipColors.text }]}>
-                  {status === 'all' ? t('status.all', 'All') 
-                    : status === 'my_repairs' ? t('status.myRepairs', 'My Repairs')
-                    : status === 'others_repairs' ? t('status.othersRepairs', 'Others')
-                    : status === 'unassigned' ? t('status.unassigned', 'Unassigned')
-                    : String(t(`status.${status}`, status.replace('_', ' ')))}
-                </Text>
-                <View style={[styles.filterChipBadge, isActive ? { backgroundColor: 'rgba(255,255,255,0.3)' } : { backgroundColor: '#f1f5f9' }]}>
-                  <Text style={[styles.filterChipBadgeText, { color: isActive ? '#ffffff' : '#64748b' }]}>
-                    {count}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
-    </>
-  );
-
   return (
     <View style={styles.container}>
       <Appbar.Header style={styles.header}>
@@ -363,11 +449,11 @@ export const WorkbenchScreen = ({ navigation }: any) => {
           subtitle={t('workbench.welcome', 'Welcome, {{name}}', { name: user?.name?.split(' ')[0] })}
           subtitleStyle={styles.headerSubtitle}
         />
-        <Appbar.Action icon="qrcode-scan" onPress={openScanner} color="#fff" />
+        <Appbar.Action icon="qrcode-scan" onPress={openScanner} color={colors.onBrand} />
         {user?.role !== 'sales_agent' && (
-          <Appbar.Action icon="chart-bar" onPress={() => navigation.navigate('Reports')} color="#fff" />
+          <Appbar.Action icon="chart-bar" onPress={() => navigation.navigate('Reports')} color={colors.onBrand} />
         )}
-        <Appbar.Action icon="cog" onPress={() => navigation.navigate('Settings')} color="#fff" />
+        <Appbar.Action icon="cog" onPress={() => navigation.navigate('Settings')} color={colors.onBrand} />
       </Appbar.Header>
 
       {isLoading && tickets.length === 0 ? (
@@ -376,23 +462,33 @@ export const WorkbenchScreen = ({ navigation }: any) => {
         </View>
       ) : error ? (
         <View style={styles.centerContainer}>
-          <MaterialCommunityIcons name="alert" size={48} color="#ef4444" />
-          <Text style={styles.errorText}>Failed to load tickets.</Text>
+          <MaterialCommunityIcons name="alert-outline" size={44} color={colors.danger} />
+          <Text style={styles.errorText}>{t('workbench.loadError', 'Failed to load tickets.')}</Text>
         </View>
       ) : (
         <FlatList
           data={filteredTickets}
           keyExtractor={(item) => item.id}
           renderItem={renderTicket}
-          ListHeaderComponent={renderHeader}
+          ListHeaderComponent={
+            <WorkbenchHeader
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              statusFilter={statusFilter}
+              onFilterChange={setStatusFilter}
+              statusCounts={statusCounts}
+              totalCount={tickets.length}
+            />
+          }
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={['#4f46e5']}
-              tintColor="#4f46e5"
+              colors={[colors.brand]}
+              tintColor={colors.brand}
             />
           }
           ListEmptyComponent={getEmptyState()}
@@ -403,7 +499,7 @@ export const WorkbenchScreen = ({ navigation }: any) => {
         <FAB
           style={[styles.fab, { bottom: 68 + Math.max(insets.bottom, 0) }]}
           icon="plus"
-          color="#fff"
+          color={colors.onBrand}
           onPress={() => navigation.navigate('NewTicket')}
         />
       )}
@@ -416,287 +512,295 @@ export const WorkbenchScreen = ({ navigation }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f1f5f9',
+    backgroundColor: colors.background,
   },
   header: {
-    backgroundColor: '#4f46e5',
+    backgroundColor: colors.brand,
     elevation: 0,
   },
   headerTitle: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 22,
+    color: colors.textInverse,
+    fontWeight: '700',
+    fontSize: fontSize.title,
   },
   headerSubtitle: {
-    color: '#e0e7ff',
-    fontSize: 14,
+    color: colors.brandSoftStrong,
+    fontSize: fontSize.body,
   },
-  // Inline Stats Row
+  // Inline stats row
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    backgroundColor: '#ffffff',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
+    backgroundColor: colors.surface,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
   statItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: spacing.xs,
   },
   statDot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
+    borderRadius: radius.circle,
   },
   statNumber: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#0f172a',
+    fontSize: fontSize.title,
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
   statLabel: {
-    fontSize: 11,
-    color: '#94a3b8',
-    fontWeight: '600',
+    fontSize: fontSize.caption,
+    color: colors.textMuted,
+    fontWeight: '500',
   },
   statDivider: {
-    width: 1,
+    width: StyleSheet.hairlineWidth,
     height: 24,
-    backgroundColor: '#f1f5f9',
+    backgroundColor: colors.border,
   },
   // Search
   searchContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-    backgroundColor: '#f8fafc',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+    backgroundColor: colors.background,
   },
   searchbar: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     height: 46,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderStrong,
   },
-  // Filter Chips
+  searchInput: {
+    fontSize: fontSize.bodyStrong,
+  },
+  // Filter chips
   filterContainer: {
-    backgroundColor: '#f8fafc',
+    backgroundColor: colors.background,
   },
   filterContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    gap: 8,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    gap: spacing.sm,
   },
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    gap: spacing.xs,
   },
-  filterChipActive: {
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-  },
+  filterChipActive: {},
   filterChipInactive: {
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   filterChipText: {
-    fontSize: 13,
+    fontSize: fontSize.body,
     fontWeight: '700',
-    textTransform: 'capitalize',
   },
   filterChipBadge: {
     minWidth: 20,
     height: 20,
-    borderRadius: 10,
+    borderRadius: radius.circle,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 5,
   },
-  filterChipBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
+  filterChipBadgeActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.24)',
   },
-  // Card
+  filterChipBadgeInactive: {
+    backgroundColor: colors.surfaceMuted,
+  },
+  filterChipBadgeText: {
+    fontSize: fontSize.caption,
+    fontWeight: '700',
+  },
+  // Ticket card
   listContent: {
-    padding: 16,
+    padding: spacing.lg,
     paddingBottom: 80,
   },
   card: {
-    marginBottom: 12,
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
+    marginBottom: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
     overflow: 'hidden',
-    elevation: 1,
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   statusStrip: {
     position: 'absolute',
     top: 0,
     bottom: 0,
     left: 0,
-    width: 5,
+    width: 4,
     zIndex: 1,
   },
   cardContent: {
-    paddingLeft: 18,
+    paddingLeft: spacing.xl,
     paddingVertical: 14,
-    paddingRight: 14,
+    paddingRight: spacing.md,
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: spacing.xs,
+  },
+  ticketNumberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   ticketNumber: {
-    fontSize: 13,
+    fontSize: fontSize.label,
     fontWeight: '700',
-    color: '#94a3b8',
+    color: colors.textFaint,
     letterSpacing: 0.5,
   },
   statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusBadgeClickable: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.xxs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xxs,
+    borderRadius: radius.md,
+  },
+  statusBadgeChevron: {
+    marginLeft: spacing.xxs,
   },
   offlineBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fee2e2',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-    gap: 3,
+    backgroundColor: colors.dangerSoft,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.xxs,
+    borderRadius: radius.sm,
+    gap: spacing.xxs,
   },
   offlineBadgeText: {
-    fontSize: 10,
+    fontSize: fontSize.caption,
     fontWeight: '700',
-    color: '#dc2626',
+    color: colors.danger,
   },
   callChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#dcfce7',
-    paddingHorizontal: 8,
+    backgroundColor: colors.successSoft,
+    paddingHorizontal: spacing.sm,
     paddingVertical: 3,
-    borderRadius: 12,
-    gap: 4,
-    marginRight: 6,
+    borderRadius: radius.md,
+    gap: spacing.xs,
+    marginRight: spacing.xs,
   },
   callChipText: {
-    fontSize: 11,
+    fontSize: fontSize.caption,
     fontWeight: '700',
-    color: '#16a34a',
+    color: colors.success,
   },
   statusText: {
-    fontSize: 11,
+    fontSize: fontSize.caption,
     fontWeight: '700',
     letterSpacing: 0.5,
   },
   deviceTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#0f172a',
-    marginBottom: 4,
+    fontSize: fontSize.subtitle,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
   },
   customerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
-    gap: 4,
+    marginBottom: spacing.sm,
+    gap: spacing.xs,
   },
   customerText: {
-    fontSize: 13,
-    color: '#64748b',
+    fontSize: fontSize.body,
+    color: colors.textMuted,
     fontWeight: '500',
     flex: 1,
   },
   timeAgoText: {
-    fontSize: 12,
-    color: '#94a3b8',
+    fontSize: fontSize.label,
+    color: colors.textFaint,
     fontWeight: '600',
   },
   issueContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
-    backgroundColor: '#f8fafc',
-    padding: 8,
-    borderRadius: 8,
+    marginBottom: spacing.md,
+    backgroundColor: colors.surfaceMuted,
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+    gap: spacing.xs,
   },
   issueText: {
-    marginLeft: 6,
-    color: '#475569',
+    color: colors.textSecondary,
     flex: 1,
-    fontSize: 14,
+    fontSize: fontSize.bodyStrong,
   },
   footerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: '#f1f5f9',
-    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    paddingTop: spacing.md,
   },
   techContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.xs,
   },
   techText: {
-    marginLeft: 6,
-    fontSize: 13,
+    fontSize: fontSize.body,
     fontWeight: '600',
-    color: '#1e293b',
+    color: colors.textPrimary,
+  },
+  techTextEmpty: {
+    color: colors.textFaint,
+    fontStyle: 'italic',
   },
   costBadge: {
-    backgroundColor: '#f0fdf4',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#bbf7d0',
+    backgroundColor: colors.successSoft,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
   },
   costText: {
-    fontSize: 12,
+    fontSize: fontSize.label,
     fontWeight: '700',
-    color: '#16a34a',
+    color: colors.success,
   },
   // FAB
   fab: {
     position: 'absolute',
-    margin: 16,
+    margin: spacing.lg,
     right: 0,
     bottom: 72,
-    backgroundColor: '#4f46e5',
-    borderRadius: 28,
+    backgroundColor: colors.brand,
+    borderRadius: radius.xl,
   },
-  // Empty & Error
+  // Empty & error
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
   errorText: {
-    marginTop: 12,
-    color: '#ef4444',
-    fontSize: 16,
+    marginTop: spacing.md,
+    color: colors.danger,
+    fontSize: fontSize.subtitle,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -704,23 +808,23 @@ const styles = StyleSheet.create({
     paddingTop: 60,
   },
   emptyIconCircle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: 88,
+    height: 88,
+    borderRadius: radius.circle,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: spacing.lg,
   },
   emptyTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#475569',
+    fontSize: fontSize.title,
+    fontWeight: '700',
+    color: colors.textSecondary,
   },
   emptySub: {
-    fontSize: 15,
-    color: '#94a3b8',
-    marginTop: 6,
+    fontSize: fontSize.bodyStrong,
+    color: colors.textFaint,
+    marginTop: spacing.sm,
     textAlign: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: spacing.xxxl,
   },
 });

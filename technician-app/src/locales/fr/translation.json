@@ -33,7 +33,8 @@
     "required": "Requis",
     "outOfStock": "Rupture de stock",
     "whatsappMissing": "WhatsApp n’est pas installé.",
-    "accessRestricted": "Accès restreint"
+    "accessRestricted": "Accès restreint",
+    "offline": "Hors ligne"
   },
   "error": {
     "notFound": "Introuvable",
@@ -70,6 +71,19 @@
     "sales_agent": "Agent Commercial",
     "repair_agent": "Technicien"
   },
+  "nav": {
+    "dashboard": "Tableau",
+    "pos": "Caisse",
+    "sales": "Ventes",
+    "stock": "Stock",
+    "repairs": "Réparations",
+    "settings": "Réglages",
+    "history": "Historique",
+    "inventory": "Inventaire",
+    "profile": "Profil",
+    "workbench": "Atelier",
+    "dailyReport": "Rapport"
+  },
   "status": {
     "pending": "EN ATTENTE",
     "in_progress": "EN COURS",
@@ -90,7 +104,18 @@
     "searchPlaceholder": "Rechercher des tickets...",
     "readyForPickup": "Prêt à retirer",
     "noTickets": "Aucun ticket trouvé",
-    "totalCount": "Total"
+    "totalCount": "Total",
+    "loadError": "Échec du chargement des tickets.",
+    "empty": {
+      "all": { "title": "Tout est fait !", "sub": "Aucun ticket de réparation." },
+      "my_repairs": { "title": "Rien d'assigné", "sub": "Aucun ticket ne vous est assigné." },
+      "others_repairs": { "title": "Pas d'autres réparations", "sub": "Aucun ticket assigné à d'autres techniciens." },
+      "unassigned": { "title": "Tout est assigné !", "sub": "Chaque ticket a un technicien." },
+      "pending": { "title": "Aucun ticket en attente", "sub": "Tous les tickets ont été pris." },
+      "in_progress": { "title": "Aucune réparation en cours", "sub": "Aucune réparation active." },
+      "ready": { "title": "Aucun ticket prêt", "sub": "Rien en attente de retrait client." },
+      "other": { "title": "Aucun ticket", "sub": "Aucun ticket ne correspond à ce filtre." }
+    }
   },
   "ticketDetail": {
     "printSticker": "Imprimer l'étiquette",

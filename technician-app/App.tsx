@@ -2,9 +2,12 @@ import './src/i18n';
 import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Provider as PaperProvider, DefaultTheme } from 'react-native-paper';
+import { Provider as PaperProvider } from 'react-native-paper';
 import { ActivityIndicator, View, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+import { paperTheme } from './src/theme/paperTheme';
+import { colors } from './src/theme/tokens';
 
 import { useAuthStore } from './src/store/authStore';
 import { useSettingsStore } from './src/store/settingsStore';
@@ -26,21 +29,6 @@ import { ApprovalsScreen } from './src/screens/ApprovalsScreen';
 import { notificationService } from './src/services/notificationService';
 
 const Stack = createNativeStackNavigator();
-
-const theme = {
-  ...DefaultTheme,
-  roundness: 12,
-  colors: {
-    ...DefaultTheme.colors,
-    primary: '#4f46e5', // Modern Indigo
-    accent: '#14b8a6', // Modern Teal
-    background: '#f8fafc', // Slate 50
-    surface: '#ffffff',
-    text: '#0f172a', // Slate 900
-    placeholder: '#94a3b8',
-    backdrop: 'rgba(15, 23, 42, 0.4)',
-  },
-};
 
 export default function App() {
   const { user, isAuthenticated, isInitializing } = useAuthStore();
@@ -85,7 +73,7 @@ export default function App() {
   if (isInitializing) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#4f46e5" />
+        <ActivityIndicator size="large" color={colors.brand} />
       </View>
     );
   }
@@ -99,7 +87,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <PaperProvider theme={theme}>
+      <PaperProvider theme={paperTheme}>
         <View style={styles.appContainer}>
           {/* Universal Offline / Syncing Banner */}
           <OfflineBanner />
@@ -108,8 +96,8 @@ export default function App() {
             <Stack.Navigator
               initialRouteName={!isAuthenticated ? 'Login' : getInitialRouteName()}
               screenOptions={{
-                headerStyle: { backgroundColor: '#4f46e5' },
-                headerTintColor: '#fff',
+                headerStyle: { backgroundColor: colors.brand },
+                headerTintColor: colors.textInverse,
                 headerTitleStyle: { fontWeight: 'bold' },
               }}
             >
@@ -210,7 +198,7 @@ export default function App() {
 const styles = StyleSheet.create({
   appContainer: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: colors.background,
   },
   centerContainer: {
     flex: 1,

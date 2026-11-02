@@ -33,7 +33,8 @@
     "required": "مطلوب",
     "outOfStock": "نفد المخزون",
     "whatsappMissing": "لم يتم تثبيت واتساب.",
-    "accessRestricted": "الوصول مقيّد"
+    "accessRestricted": "الوصول مقيّد",
+    "offline": "غير متصل"
   },
   "error": {
     "notFound": "غير موجود",
@@ -70,6 +71,19 @@
     "sales_agent": "وكيل مبيعات",
     "repair_agent": "تقني تصليح"
   },
+  "nav": {
+    "dashboard": "الرئيسية",
+    "pos": "الصندوق",
+    "sales": "المبيعات",
+    "stock": "المخزون",
+    "repairs": "الإصلاحات",
+    "settings": "الإعدادات",
+    "history": "السجل",
+    "inventory": "المخزون",
+    "profile": "حسابي",
+    "workbench": "الورشة",
+    "dailyReport": "التقرير"
+  },
   "status": {
     "pending": "قيد الانتظار",
     "in_progress": "قيد التصليح",
@@ -90,7 +104,18 @@
     "searchPlaceholder": "بحث عن تذكرة...",
     "readyForPickup": "جاهز للاستلام",
     "noTickets": "لا توجد تذاكر",
-    "totalCount": "المجموع"
+    "totalCount": "المجموع",
+    "loadError": "فشل تحميل التذاكر.",
+    "empty": {
+      "all": { "title": "كل شيء منجز!", "sub": "لا توجد تذاكر إصلاح بعد." },
+      "my_repairs": { "title": "لا شيء مسند إليك", "sub": "لا توجد تذاكر مسندة إليك حالياً." },
+      "others_repairs": { "title": "لا إصلاحات للآخرين", "sub": "لا تذاكر مسندة إلى تقنيين آخرين." },
+      "unassigned": { "title": "كلها مسندة!", "sub": "كل تذكرة لها تقني." },
+      "pending": { "title": "لا تذاكر معلقة", "sub": "تم استلام جميع التذاكر." },
+      "in_progress": { "title": "لا إصلاح جارٍ", "sub": "لا توجد إصلاحات نشطة حالياً." },
+      "ready": { "title": "لا تذاكر جاهزة", "sub": "لا شيء بانتظار استلام العميل." },
+      "other": { "title": "لا توجد تذاكر", "sub": "لا توجد تذاكر مطابقة لهذا الفلتر." }
+    }
   },
   "ticketDetail": {
     "printSticker": "طباعة الملصق",
