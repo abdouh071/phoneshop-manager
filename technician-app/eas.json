@@ -18,21 +18,19 @@
         "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "phoneshop-mgr-pro-2026.firebaseapp.com",
         "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "phoneshop-mgr-pro-2026",
         "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "phoneshop-mgr-pro-2026.firebasestorage.app",
-        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "382569044952",
-        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:382569044952:web:3081c612d39e1f7fc2f0ad"
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "382569044952"
       }
     },
     "production": {
       "android": {
-        "buildType": "apk"
+        "buildType": "app-bundle"
       },
       "env": {
         "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyCYQopJt3Ppyd8BV-o0c1pd-AONwEqBFXw",
         "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "phoneshop-mgr-pro-2026.firebaseapp.com",
         "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "phoneshop-mgr-pro-2026",
         "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "phoneshop-mgr-pro-2026.firebasestorage.app",
-        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "382569044952",
-        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:382569044952:web:3081c612d39e1f7fc2f0ad"
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "382569044952"
       }
     }
   },

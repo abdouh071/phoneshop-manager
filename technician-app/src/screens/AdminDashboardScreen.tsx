@@ -389,7 +389,7 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
             <Card style={styles.heroCard}>
               <View style={styles.heroHeader}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.heroSubLabel}>TODAY'S REVENUE</Text>
+                  <Text style={styles.heroSubLabel}>TODAY&#39;S REVENUE</Text>
                   <Text style={styles.heroMainAmount}>{revenueStats.todayTotal.toLocaleString()} DA</Text>
                 </View>
                 <View style={[styles.growthChip, revenueStats.growthPercent >= 0 ? styles.growthPositive : styles.growthNegative]}>

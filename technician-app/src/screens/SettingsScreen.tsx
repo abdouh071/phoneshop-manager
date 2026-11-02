@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, KeyboardAvoidingView, Platform, Alert, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { TextInput, Button, Title, Text, useTheme, Card, Divider } from 'react-native-paper';
 import { useSettingsStore } from '../store/settingsStore';
@@ -8,30 +8,58 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import i18next from 'i18next';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { restartForDirection, setLanguage } from '../i18n';
 import { RoleBottomNav } from '../components/RoleBottomNav';
+import appConfig from '../../app.json';
+
+// Read from app.json so the About screen can never drift from what is actually built.
+// It used to say 1.2.0 while every build carried 1.0.0.
+const APP_VERSION = appConfig?.expo?.version ?? '—';
 
 export const SettingsScreen = ({ navigation }: any) => {
   const theme = useTheme();
-  const { profitPercentage, setProfitPercentage } = useSettingsStore();
+  const { profitPercentage, personalPercentage, shopPercentage, saveProfitPercentage, followShopDefault } = useSettingsStore();
   const { user, logout } = useAuthStore();
   const { t } = useTranslation();
   
   const [localPercentage, setLocalPercentage] = useState(profitPercentage);
+  const [saving, setSaving] = useState(false);
+
+  // The store may resolve the personal number from the profile after this screen
+  // mounted; re-seed the field so the input is never left showing a stale default.
+  useEffect(() => {
+    setLocalPercentage(profitPercentage);
+  }, [profitPercentage]);
 
   const [currentLang, setCurrentLang] = useState(i18next.language || 'en');
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const parsed = parseFloat(localPercentage);
     if (isNaN(parsed) || parsed < 0 || parsed > 100) {
       Alert.alert(t('error.invalidInput', 'Invalid Input'), t('settings.invalidPercentage', 'Please enter a valid percentage between 0 and 100.'));
       return;
     }
-    setProfitPercentage(localPercentage);
+    setSaving(true);
+    const ok = await saveProfitPercentage(localPercentage);
+    setSaving(false);
+    if (!ok) {
+      Alert.alert(
+        t('common.error', 'Error'),
+        t('settings.saveFailed', 'Saved on this device, but it could not be stored on your profile. It will not follow you to another phone.')
+      );
+      return;
+    }
     Alert.alert(t('common.success', 'Success'), t('settings.saved', 'Settings saved successfully!'));
   };
 
+  const handleFollowShop = async () => {
+    setSaving(true);
+    await followShopDefault();
+    setSaving(false);
+  };
+
   const changeLanguage = async (lang: string) => {
-    i18next.changeLanguage(lang);
+    const needsRestart = await setLanguage(lang);
     setCurrentLang(lang);
     if (user?.id) {
       try {
@@ -41,6 +69,27 @@ export const SettingsScreen = ({ navigation }: any) => {
       } catch (err) {
         console.warn('Failed to update preferredLanguage in Firestore:', err);
       }
+    }
+    if (needsRestart) {
+      Alert.alert(
+        t('settings.languageChangedTitle', 'Restart required'),
+        t('settings.languageChangedBody', 'The app must restart before the new reading direction applies.'),
+        [
+          { text: t('common.cancel', 'Cancel'), style: 'cancel' },
+          {
+            text: t('settings.restartNow', 'Restart now'),
+            onPress: async () => {
+              const restarted = await restartForDirection();
+              if (!restarted) {
+                Alert.alert(
+                  t('settings.languageChangedTitle', 'Restart required'),
+                  t('settings.restartManually', 'Close the app completely and open it again.')
+                );
+              }
+            },
+          },
+        ]
+      );
     }
   };
 
@@ -105,9 +154,21 @@ export const SettingsScreen = ({ navigation }: any) => {
               style={styles.input}
               right={<TextInput.Affix text="%" />}
             />
-            <Button mode="contained" onPress={handleSave} style={styles.saveButton}>
+            {shopPercentage !== null && (
+              <Text style={styles.shopHint}>
+                {personalPercentage
+                  ? t('settings.usingOwn', { shop: shopPercentage, own: personalPercentage })
+                  : t('settings.usingShop', { shop: shopPercentage })}
+              </Text>
+            )}
+            <Button mode="contained" onPress={handleSave} loading={saving} disabled={saving} style={styles.saveButton}>
               {t('settings.saveSettings', 'Save Settings')}
             </Button>
+            {personalPercentage && (
+              <Button mode="text" onPress={handleFollowShop} disabled={saving} style={styles.followButton}>
+                {t('settings.followShop', 'Use the shop default instead')}
+              </Button>
+            )}
           </Card.Content>
         </Card>
 
@@ -117,7 +178,7 @@ export const SettingsScreen = ({ navigation }: any) => {
           <Card.Content style={styles.aboutContent}>
             <Image source={require('../../assets/icon.png')} style={styles.aboutLogo} />
             <Text style={styles.aboutTitle}>Auto-Manager</Text>
-            <Text style={styles.aboutVersion}>Version 1.2.0</Text>
+            <Text style={styles.aboutVersion}>Version {APP_VERSION}</Text>
             <Text style={styles.aboutFooter}>© 2026 Abdouh71. All rights reserved.</Text>
           </Card.Content>
         </Card>
@@ -259,6 +320,15 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     borderRadius: 8,
+  },
+  followButton: {
+    marginTop: 4,
+  },
+  shopHint: {
+    fontSize: 12,
+    color: '#64748b',
+    marginBottom: 12,
+    marginTop: -8,
   },
   // About
   aboutContent: {

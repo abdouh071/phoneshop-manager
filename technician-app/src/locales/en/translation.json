@@ -30,7 +30,10 @@
     "phone": "Phone",
     "amount": "Amount",
     "notes": "Notes",
-    "required": "Required"
+    "required": "Required",
+    "outOfStock": "Out of Stock",
+    "whatsappMissing": "WhatsApp is not installed.",
+    "accessRestricted": "Access Restricted"
   },
   "error": {
     "notFound": "Not Found",
@@ -44,7 +47,8 @@
     "subtitle": "Sign in to your workspace",
     "email": "Email Address",
     "password": "Password",
-    "signIn": "Sign In"
+    "signIn": "Sign In",
+    "poweredBy": "Powered by Auto-Manager"
   },
   "sidebar": {
     "mainMenu": "Main Menu",
@@ -72,7 +76,11 @@
     "ready": "READY",
     "returned": "RETURNED",
     "completed": "COMPLETED",
-    "cancelled": "CANCELLED"
+    "cancelled": "CANCELLED",
+    "all": "All",
+    "myRepairs": "My Repairs",
+    "othersRepairs": "Others",
+    "unassigned": "Unassigned"
   },
   "workbench": {
     "title": "Workbench",
@@ -81,7 +89,8 @@
     "unassigned": "Unassigned",
     "searchPlaceholder": "Search tickets...",
     "readyForPickup": "Ready for Pickup",
-    "noTickets": "No tickets found"
+    "noTickets": "No tickets found",
+    "totalCount": "Total"
   },
   "ticketDetail": {
     "printSticker": "Print Sticker",
@@ -100,6 +109,8 @@
     "buyPrice": "Buy Price",
     "totalPartsCost": "Total Parts Cost",
     "noPartsYet": "No parts added yet.",
+    "inStockShort": "stock: {{n}}",
+    "partUnlinked": "No matching stock item — this part will be recorded but will not move inventory.",
     "startRepair": "Start Repair",
     "markRepaired": "Mark as Repaired",
     "readyForCustomer": "Ready For Customer",
@@ -112,7 +123,12 @@
     "confirmHandover": "Confirm Handover",
     "confirmHandoverMsg": "Are you sure you want to mark this device as claimed by the customer?",
     "yesClaimed": "Yes, Claimed",
-    "phoneClaimed": "Phone marked as claimed/completed."
+    "phoneClaimed": "Phone marked as claimed/completed.",
+    "remarksSaved": "Remarks updated successfully.",
+    "remarksSaveFailed": "Failed to save remarks.",
+    "validPrice": "Please enter a valid price.",
+    "negativeAmount": "Amount paid cannot be negative.",
+    "handoverFailed": "Failed to settle ticket handover."
   },
   "newTicket": {
     "title": "New Repair Ticket",
@@ -124,22 +140,39 @@
     "brand": "Brand *",
     "model": "Model *",
     "issueDescription": "Issue Description *",
+    "remarks": "Condition / Findings (Optional)",
+    "financials": "Pricing & Deposit",
     "security": "Security (Optional)",
     "none": "None",
     "pin": "PIN",
     "pattern": "Pattern",
     "enterPin": "Enter PIN / Password",
     "estimatedCost": "Estimated Cost",
+    "assignment": "Technician Assignment (Optional)",
+    "selectTech": "Select Technician...",
+    "unassigned": "Unassigned",
     "createTicket": "Create Ticket",
     "createFailed": "Failed to create ticket. Please try again."
   },
   "settings": {
     "title": "App Settings",
+    "account": "Account",
+    "preferences": "Preferences",
+    "language": "Language",
+    "about": "About",
     "profitCalc": "Profit Calculation",
     "profitPercentage": "Profit Percentage (%)",
     "saveSettings": "Save Settings",
     "saved": "Settings saved successfully!",
-    "invalidPercentage": "Please enter a valid percentage between 0 and 100."
+    "invalidPercentage": "Please enter a valid percentage between 0 and 100.",
+    "saveFailed": "Saved on this device, but it could not be stored on your profile. It will not follow you to another phone.",
+    "usingOwn": "Your own setting. The shop default is {{shop}}%.",
+    "usingShop": "Following the shop default ({{shop}}%). Saving here sets your own number.",
+    "followShop": "Use the shop default instead",
+    "languageChangedTitle": "Restart required",
+    "languageChangedBody": "The app must restart before the new reading direction applies.",
+    "restartNow": "Restart now",
+    "restartManually": "Close the app completely and open it again."
   },
   "ticket": {
     "repairTicket": "Repair Ticket",
@@ -187,6 +220,103 @@
     "rejectSubtitle": "Please provide a reason so {{name}} knows why this action was declined:",
     "reasonPlaceholder": "e.g. Discount too high, manager approval required...",
     "confirmReject": "Confirm Reject",
-    "rejectedSuccess": "The staff member has been notified."
+    "rejectedSuccess": "The staff member has been notified.",
+    "approveFailed": "Failed to approve request.",
+    "rejectFailed": "Failed to reject request.",
+    "adminOnlyNotice": "Staff Approvals are strictly reserved for Administrators."
+  },
+  "offline": {
+    "pending": "Offline mode — {{n}} change(s) will auto-sync when connected.",
+    "syncing": "Back online — syncing {{n}} offline change(s)...",
+    "syncedToast": "Connection restored — all offline data synced to the database!",
+    "dropped": "{{n}} change(s) could not be saved. Tap to review.",
+    "droppedAria": "{{n}} unsynced changes need attention",
+    "review": "Review",
+    "droppedTitle": "Changes that did not sync",
+    "droppedSubtitle": "These were retried too many times and parked on this device. Retry them on a good connection, or discard them if they were a mistake.",
+    "attempts": "Gave up after {{n}} attempts",
+    "retry": "Retry",
+    "retryAll": "Retry all",
+    "clearAll": "Discard all",
+    "kind": {
+      "ticket": "New repair ticket",
+      "sale": "POS sale",
+      "status": "Ticket status change",
+      "debt": "Customer debt",
+      "remark": "Ticket remark",
+      "parts": "Parts allocation",
+      "stock": "Stock movement"
+    }
+  },
+  "notifications": {
+    "channel": {
+      "general": "General alerts",
+      "repairs": "Repair updates",
+      "approvals": "Admin approvals"
+    }
+  },
+  "inventory": {
+    "scannedTitle": "Scanned",
+    "scannedBody": "Barcode \"{{code}}\" filtered in inventory.",
+    "adjustFailedTitle": "Adjustment Failed",
+    "adjustFailed": "Could not update stock.",
+    "zeroUnits": "This product has 0 units available.",
+    "addedToCart": "Added to Cart",
+    "addedToCartBody": "{{name}} added to cart. Tap POS to complete the sale.",
+    "keepBrowsing": "Keep Browsing",
+    "goToPos": "Go to POS",
+    "missingInfo": "Missing Info",
+    "missingInfoBody": "Please enter at least a product name and selling price.",
+    "productCreated": "Product Created",
+    "productCreatedBody": "{{name}} added to inventory.",
+    "saveProductFailed": "Could not save product.",
+    "updateDetailsFailed": "Failed to update details."
+  },
+  "pos": {
+    "outOfStockBody": "{{name}} has 0 available units.",
+    "scannedToCart": "Scanned to Cart",
+    "scannedToCardBody": "{{name}} {{model}} added to cart.",
+    "productNotFound": "Product Not Found",
+    "productNotFoundBody": "No product matching SKU/Barcode: {{code}}",
+    "requiredFields": "Required Fields",
+    "requiredFieldsBody": "Please enter customer name and phone number.",
+    "createCustomerFailed": "Failed to create customer.",
+    "checkoutFailedTitle": "Checkout Failed",
+    "checkoutFailed": "Could not complete sale.",
+    "cartEmptyTitle": "Cart is Empty",
+    "cartEmptyBody": "Select products below to add them to your cart.",
+    "maxStockTitle": "Max Stock",
+    "maxStockBody": "Only {{n}} unit(s) available."
+  },
+  "salesHistory": {
+    "voidTitle": "Void Today's Sale",
+    "voidBody": "Are you sure you want to void and refund Invoice #{{invoice}} ({{total}} DA)? All items will be returned to inventory.",
+    "confirmVoid": "Confirm Void",
+    "saleVoided": "Sale Voided",
+    "saleVoidedBody": "Stock restored and transaction marked as voided.",
+    "voidFailedTitle": "Void Failed",
+    "voidFailed": "Could not void sale.",
+    "editCartTitle": "Edit Today's Cart",
+    "editCartBody": "Would you like to load the items from Invoice #{{invoice}} back into your active cart to make changes?",
+    "loadIntoCart": "Load into Cart",
+    "reasonRequired": "Reason Required",
+    "reasonRequiredBody": "Please enter a clear reason for requesting this change.",
+    "requestSubmitted": "Approval Request Submitted",
+    "requestSubmittedBody": "Your request has been sent to the store administrator for review and approval.",
+    "requestFailed": "Request Failed",
+    "requestFailedBody": "Could not submit approval request.",
+    "noPhone": "No Phone",
+    "noPhoneBody": "No customer phone number attached to this transaction.",
+    "receiptMessage": "Hello {{name}}, here is your receipt #{{invoice}} from PhoneShop Pro: Total: {{total}} DA. Thank you!",
+    "valuedCustomer": "valued customer"
+  },
+  "reports": {
+    "modeTaken": "Real Profit Report (Taken Phones Only)",
+    "modeRepaired": "Repaired Production Report (All Work Done)",
+    "countTaken": "Taken Repairs: {{n}}",
+    "countRepaired": "Repaired Phones: {{n}} ({{taken}} taken, {{ready}} on shelf)",
+    "shareBody": "Gross: {{gross}} DA\nParts: -{{parts}} DA\nNet: {{net}} DA\n\nMy Cut ({{pct}}%): {{cut}} DA",
+    "shareTitle": "Auto-Manager Report - {{period}}",
+    "shareFailed": "Could not share report."
   }
 }

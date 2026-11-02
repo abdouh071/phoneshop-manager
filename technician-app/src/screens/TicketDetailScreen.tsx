@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, StyleSheet, ScrollView, Alert, TouchableOpacity, Linking, Modal } from 'react-native';
 import { Text, Card, Title, Paragraph, Button, Divider, TextInput, IconButton, Portal, Dialog, useTheme, Chip } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRepairStore } from '../store/repairStore';
 import { useAuthStore } from '../store/authStore';
+import { usePosStore } from '../store/posStore';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useTranslation } from 'react-i18next';
@@ -24,6 +25,26 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
   const [parts, setParts] = useState<{ name: string; cost: number; productId?: string; quantity?: number }[]>(ticket.partsUsed || []);
   const [partName, setPartName] = useState('');
   const [partCost, setPartCost] = useState('');
+  // The shelf item the typed name resolved to. Stock only moves for a line that
+  // carries a real product id; a hand-written part stays unlinked on purpose.
+  const [partProductId, setPartProductId] = useState<string | null>(null);
+
+  // Parts are ordinary inventory rows, so the same list the POS sells from feeds
+  // the lookup. Repair agents never open the POS screen, hence the lazy fetch.
+  const products = usePosStore(s => s.products);
+  const fetchProducts = usePosStore(s => s.fetchProducts);
+  useEffect(() => {
+    if (products.length === 0) void fetchProducts();
+  }, [products.length, fetchProducts]);
+
+  const partSuggestions = useMemo(() => {
+    const term = partName.trim().toLowerCase();
+    if (term.length < 2) return [];
+    return products
+      .filter(p => (p.category as string) === 'repair_part')
+      .filter(p => `${p.name} ${p.brand ?? ''} ${p.model ?? ''}`.toLowerCase().includes(term))
+      .slice(0, 6);
+  }, [partName, products]);
 
   // Remark editing state
   const [remarkModalVisible, setRemarkModalVisible] = useState(false);
@@ -57,15 +78,29 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
       Alert.alert(t('error.invalidInput', 'Invalid Input'), t('error.validPart', 'Please enter a valid part name and positive cost.'));
       return;
     }
-    const newParts = [...parts, { name: partName.trim(), cost, productId: 'custom-mobile-part', quantity: 1 }];
+    const newParts = [...parts, {
+      name: partName.trim(),
+      cost,
+      productId: partProductId || 'custom-mobile-part',
+      quantity: 1,
+    }];
     setParts(newParts);
     setPartName('');
     setPartCost('');
+    setPartProductId(null);
     try {
       await updateTicketParts(ticket.id, newParts);
     } catch (e) {
       console.error('Failed to save parts:', e);
     }
+  };
+
+  const handlePickPart = (product: { id: string; name: string; costPrice: number; stock: number }) => {
+    setPartName(product.name);
+    setPartProductId(product.id);
+    // The till price is the shop's own buy price for the part; the technician can
+    // still overwrite it (a borrowed or warranty part genuinely costs nothing).
+    if (!partCost.trim()) setPartCost(String(product.costPrice ?? 0));
   };
 
   const handleRemovePart = async (index: number) => {
@@ -84,9 +119,9 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
       setLoading(true);
       await updateTicketRemark(ticket.id, editedRemark.trim());
       setRemarkModalVisible(false);
-      Alert.alert(t('common.success', 'Success'), 'Remarks updated successfully.');
+      Alert.alert(t('common.success', 'Success'), t('ticketDetail.remarksSaved', 'Remarks updated successfully.'));
     } catch (error) {
-      Alert.alert(t('common.error', 'Error'), 'Failed to save remarks.');
+      Alert.alert(t('common.error', 'Error'), t('ticketDetail.remarksSaveFailed', 'Failed to save remarks.'));
     } finally {
       setLoading(false);
     }
@@ -114,13 +149,10 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
           onPress: async () => {
             setLoading(true);
             try {
+              // The parts list is already persisted line by line, and going through
+              // updateTicketParts is what moves the shelf stock. Re-sending it here
+              // with a hard-coded quantity of 1 used to overwrite the real counts.
               const additionalUpdates = {
-                partsUsed: parts.map(p => ({
-                  name: p.name,
-                  cost: p.cost,
-                  quantity: 1,
-                  productId: p.productId || 'custom-mobile-part'
-                })),
                 repairedAt: new Date().toISOString(),
               };
               
@@ -148,12 +180,12 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
   const handleConfirmSettlement = async () => {
     const pPrice = parseFloat(finalPrice);
     if (isNaN(pPrice) || pPrice < 0) {
-      Alert.alert(t('error.invalidInput', 'Invalid Input'), 'Please enter a valid price.');
+      Alert.alert(t('error.invalidInput', 'Invalid Input'), t('ticketDetail.validPrice', 'Please enter a valid price.'));
       return;
     }
     const pHandoverPaid = parseFloat(handoverPaid) || 0;
     if (pHandoverPaid < 0) {
-      Alert.alert(t('error.invalidInput', 'Invalid Input'), 'Amount paid cannot be negative.');
+      Alert.alert(t('error.invalidInput', 'Invalid Input'), t('ticketDetail.negativeAmount', 'Amount paid cannot be negative.'));
       return;
     }
 
@@ -173,7 +205,7 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
       Alert.alert(t('common.success', 'Success'), t('ticketDetail.phoneClaimed', 'Phone marked as claimed and payment settled.'));
       navigation.goBack();
     } catch (error) {
-      Alert.alert(t('common.error', 'Error'), 'Failed to settle ticket handover.');
+      Alert.alert(t('common.error', 'Error'), t('ticketDetail.handoverFailed', 'Failed to settle ticket handover.'));
     } finally {
       setLoading(false);
     }
@@ -401,7 +433,7 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
                 <TextInput
                   label={t('ticketDetail.partName', 'Part Name')}
                   value={partName}
-                  onChangeText={setPartName}
+                  onChangeText={(v) => { setPartName(v); setPartProductId(null); }}
                   mode="outlined"
                   style={[styles.partInput, { flex: 2 }]}
                   dense
@@ -427,10 +459,45 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
               </View>
             )}
 
+            {partSuggestions.length > 0 && (
+              <View style={styles.suggestions}>
+                {partSuggestions.map((p) => (
+                  <TouchableOpacity
+                    key={p.id}
+                    style={styles.suggestionRow}
+                    onPress={() => handlePickPart(p)}
+                  >
+                    <MaterialCommunityIcons
+                      name={p.stock > 0 ? 'warehouse' : 'alert-circle-outline'}
+                      size={16}
+                      color={p.stock > 0 ? '#10b981' : '#ef4444'}
+                    />
+                    <Text style={styles.suggestionName} numberOfLines={1}>{p.name}</Text>
+                    <Text style={styles.suggestionStock}>{t('ticketDetail.inStockShort', { n: p.stock })}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {partName.trim().length >= 2 && !partProductId && partSuggestions.length === 0 && (
+              <Text style={styles.unlinkedHint}>
+                {t('ticketDetail.partUnlinked', 'No matching stock item — this part will be recorded but will not move inventory.')}
+              </Text>
+            )}
+
             {parts.map((p, idx) => (
               <View key={idx} style={styles.partItem}>
-                <Text style={{ flex: 1, fontSize: 15, color: '#1e293b' }}>{p.name}</Text>
-                <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#0f172a' }}>{p.cost} DA</Text>
+                <Text style={{ flex: 1, fontSize: 15, color: '#1e293b' }}>
+                  {p.quantity && p.quantity > 1 ? `${p.name} ×${p.quantity}` : p.name}
+                </Text>
+                {!p.productId || p.productId === 'custom-mobile-part' ? (
+                  <MaterialCommunityIcons name="link-off" size={16} color="#cbd5e1" style={{ marginRight: 6 }} />
+                ) : (
+                  <MaterialCommunityIcons name="link-variant" size={16} color="#10b981" style={{ marginRight: 6 }} />
+                )}
+                <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#0f172a' }}>
+                  {p.cost * Math.max(1, p.quantity || 1)} DA
+                </Text>
                 {(user?.role === 'repair_agent' || user?.role === 'admin' || user?.permissions?.repair_edit) && (
                   <TouchableOpacity onPress={() => handleRemovePart(idx)}>
                     <MaterialCommunityIcons name="delete" size={22} color="#ef4444" style={{ marginLeft: 12 }} />
@@ -443,7 +510,7 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
               <View style={styles.partsTotalRow}>
                 <Text style={styles.partsTotalLabel}>{t('ticketDetail.totalPartsCost', 'Total Parts Cost')}:</Text>
                 <Text style={styles.partsTotalValue}>
-                  {parts.reduce((sum, p) => sum + p.cost, 0)} DA
+                  {parts.reduce((sum, p) => sum + p.cost * Math.max(1, p.quantity || 1), 0)} DA
                 </Text>
               </View>
             )}
@@ -867,6 +934,38 @@ const styles = StyleSheet.create({
   },
   partInput: {
     backgroundColor: '#fff',
+  },
+  suggestions: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 10,
+    backgroundColor: '#f8fafc',
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e2e8f0',
+  },
+  suggestionName: {
+    flex: 1,
+    fontSize: 13,
+    color: '#0f172a',
+    fontWeight: '600',
+  },
+  suggestionStock: {
+    fontSize: 12,
+    color: '#64748b',
+  },
+  unlinkedHint: {
+    fontSize: 12,
+    color: '#b45309',
+    marginBottom: 10,
   },
   partItem: {
     flexDirection: 'row',

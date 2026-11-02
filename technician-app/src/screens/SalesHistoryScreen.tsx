@@ -29,7 +29,6 @@ import {
   where,
   getDocs,
   doc,
-  getDoc,
   updateDoc,
   addDoc,
   serverTimestamp,
@@ -41,10 +40,13 @@ import { usePosStore } from '../store/posStore';
 import { useApprovalStore } from '../store/approvalStore';
 import { activityLogService } from '../services/activityLogService';
 import { notificationService } from '../services/notificationService';
+import { applyStockLines } from '../services/stockService';
 import { RoleBottomNav } from '../components/RoleBottomNav';
-import type { SaleTransaction, StockStatus } from '../types';
+import { useTranslation } from 'react-i18next';
+import type { SaleTransaction } from '../types';
 
 export const SalesHistoryScreen = ({ navigation }: any) => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const { addToCart, clearCart } = usePosStore();
@@ -164,53 +166,31 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
   // TODAY: Direct Void / Refund handler
   const handleDirectVoidToday = (tx: SaleTransaction) => {
     Alert.alert(
-      'Void Today’s Sale',
-      `Are you sure you want to void and refund Invoice #${tx.invoiceNumber || tx.id.slice(-6)} (${tx.total.toLocaleString()} DA)? All items will be returned to inventory.`,
+      t('salesHistory.voidTitle', "Void Today's Sale"),
+      t('salesHistory.voidBody', 'Are you sure you want to void and refund Invoice #{{invoice}} ({{total}} DA)? All items will be returned to inventory.', {
+        invoice: tx.invoiceNumber || tx.id.slice(-6),
+        total: tx.total.toLocaleString(),
+      }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel', 'Cancel'), style: 'cancel' },
         {
-          text: 'Confirm Void',
+          text: t('salesHistory.confirmVoid', 'Confirm Void'),
           style: 'destructive',
           onPress: async () => {
             setIsVoiding(true);
             try {
-              // 1. Restore inventory stock
-              for (const item of tx.items) {
-                try {
-                  const invRef = doc(db, 'inventory', item.product.id);
-                  const invSnap = await getDoc(invRef);
-                  if (invSnap.exists()) {
-                    const data = invSnap.data();
-                    const currentStock = data.stock ?? 0;
-                    const newStock = currentStock + item.quantity;
-                    const threshold = data.lowStockThreshold ?? 1;
-                    const stockStatus: StockStatus =
-                      newStock === 0
-                        ? 'out_of_stock'
-                        : newStock <= threshold
-                        ? 'low_stock'
-                        : 'in_stock';
-                    await updateDoc(invRef, { stock: newStock, stockStatus });
-                  } else {
-                    const prodRef = doc(db, 'products', item.product.id);
-                    const prodSnap = await getDoc(prodRef);
-                    if (prodSnap.exists()) {
-                      const data = prodSnap.data();
-                      const currentStock = data.stock ?? 0;
-                      const newStock = currentStock + item.quantity;
-                      const threshold = data.lowStockThreshold ?? 1;
-                      const stockStatus: StockStatus =
-                        newStock === 0
-                          ? 'out_of_stock'
-                          : newStock <= threshold
-                          ? 'low_stock'
-                          : 'in_stock';
-                      await updateDoc(prodRef, { stock: newStock, stockStatus });
-                    }
-                  }
-                } catch (e) {
-                  console.warn('Failed to restore item stock:', e);
-                }
+              // 1. Restore inventory stock. Mirrors the quantities the POS took out and
+              // goes through the same atomic primitive, so a count another till moved
+              // between the read and the write cannot be overwritten by this loop.
+              const restoreLines = tx.items.map((item) => ({
+                productId: String(item?.product?.id || ''),
+                name: String(item?.product?.name || ''),
+                quantity: Math.max(1, Math.trunc(Number(item?.quantity) || 1)),
+              }));
+
+              const { failed: stockFailures } = await applyStockLines(restoreLines, 1);
+              for (const failure of stockFailures) {
+                console.warn(`Failed to restore stock for ${failure.line.name}:`, failure.error);
               }
 
               // 2. Mark transaction as voided
@@ -233,9 +213,9 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
               );
 
               Vibration.vibrate(50);
-              Alert.alert('Sale Voided', 'Stock restored and transaction marked as voided.');
+              Alert.alert(t('salesHistory.saleVoided', 'Sale Voided'), t('salesHistory.saleVoidedBody', 'Stock restored and transaction marked as voided.'));
             } catch (err: any) {
-              Alert.alert('Void Failed', err.message || 'Could not void sale.');
+              Alert.alert(t('salesHistory.voidFailedTitle', 'Void Failed'), err.message || t('salesHistory.voidFailed', 'Could not void sale.'));
             } finally {
               setIsVoiding(false);
             }
@@ -248,12 +228,14 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
   // TODAY: Re-open Cart / Edit Sale
   const handleEditCartToday = (tx: SaleTransaction) => {
     Alert.alert(
-      'Edit Today’s Cart',
-      `Would you like to load the items from Invoice #${tx.invoiceNumber || tx.id.slice(-6)} back into your active cart to make changes?`,
+      t('salesHistory.editCartTitle', "Edit Today's Cart"),
+      t('salesHistory.editCartBody', 'Would you like to load the items from Invoice #{{invoice}} back into your active cart to make changes?', {
+        invoice: tx.invoiceNumber || tx.id.slice(-6),
+      }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('common.cancel', 'Cancel'), style: 'cancel' },
         {
-          text: 'Load into Cart',
+          text: t('salesHistory.loadIntoCart', 'Load into Cart'),
           onPress: () => {
             clearCart();
             tx.items.forEach((item) => {
@@ -271,7 +253,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
   const handleSubmitApprovalRequest = async () => {
     if (!targetTxForApproval) return;
     if (!requestReason.trim()) {
-      Alert.alert('Reason Required', 'Please enter a clear reason for requesting this change.');
+      Alert.alert(t('salesHistory.reasonRequired', 'Reason Required'), t('salesHistory.reasonRequiredBody', 'Please enter a clear reason for requesting this change.'));
       return;
     }
 
@@ -317,11 +299,11 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
       setTargetTxForApproval(null);
 
       Alert.alert(
-        'Approval Request Submitted',
-        'Your request has been sent to the store administrator for review and approval.'
+        t('salesHistory.requestSubmitted', 'Approval Request Submitted'),
+        t('salesHistory.requestSubmittedBody', 'Your request has been sent to the store administrator for review and approval.')
       );
     } catch (err: any) {
-      Alert.alert('Request Failed', err.message || 'Could not submit approval request.');
+      Alert.alert(t('salesHistory.requestFailed', 'Request Failed'), err.message || t('salesHistory.requestFailedBody', 'Could not submit approval request.'));
     } finally {
       setIsSubmittingRequest(false);
     }
@@ -358,14 +340,18 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
   const handleWhatsAppCustomer = (tx: SaleTransaction) => {
     const phone = (tx.customerPhone || '').replace(/\D/g, '');
     if (!phone) {
-      Alert.alert('No Phone', 'No customer phone number attached to this transaction.');
+      Alert.alert(t('salesHistory.noPhone', 'No Phone'), t('salesHistory.noPhoneBody', 'No customer phone number attached to this transaction.'));
       return;
     }
     const lines = [
-      `Hello ${tx.customerName || 'valued customer'}, here is your receipt #${tx.invoiceNumber || tx.id.slice(-6)} from PhoneShop Pro: Total: ${tx.total.toLocaleString()} DA. Thank you!`,
+      t('salesHistory.receiptMessage', 'Hello {{name}}, here is your receipt #{{invoice}} from PhoneShop Pro: Total: {{total}} DA. Thank you!', {
+        name: tx.customerName || t('salesHistory.valuedCustomer', 'valued customer'),
+        invoice: tx.invoiceNumber || tx.id.slice(-6),
+        total: tx.total.toLocaleString(),
+      }),
     ];
     Linking.openURL(`https://wa.me/${phone}?text=${encodeURIComponent(lines.join('\n'))}`).catch(
-      () => Alert.alert('Error', 'WhatsApp is not installed.')
+      () => Alert.alert(t('common.error', 'Error'), t('common.whatsappMissing', 'WhatsApp is not installed.'))
     );
   };
 
@@ -423,7 +409,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
           onPress={() => setFilterTab('today')}
         >
           <Text style={[styles.filterTabText, filterTab === 'today' && styles.filterTabTextActive]}>
-            📅 Today's Sales
+            📅 Today&#39;s Sales
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -457,7 +443,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
         <>
           <View style={styles.todaySummaryBar}>
             <View style={styles.todaySummaryItem}>
-              <Text style={styles.todaySummaryLabel}>Today's Revenue</Text>
+              <Text style={styles.todaySummaryLabel}>Today&#39;s Revenue</Text>
               <Text style={styles.todaySummaryAmount}>{todayValidTotal.toLocaleString()} DA</Text>
             </View>
             <View style={styles.todaySummaryDivider} />

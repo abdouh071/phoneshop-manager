@@ -30,7 +30,10 @@
     "phone": "الهاتف",
     "amount": "المبلغ",
     "notes": "ملاحظات",
-    "required": "مطلوب"
+    "required": "مطلوب",
+    "outOfStock": "نفد المخزون",
+    "whatsappMissing": "لم يتم تثبيت واتساب.",
+    "accessRestricted": "الوصول مقيّد"
   },
   "error": {
     "notFound": "غير موجود",
@@ -44,7 +47,8 @@
     "subtitle": "تسجيل الدخول إلى مساحة العمل",
     "email": "البريد الإلكتروني",
     "password": "كلمة المرور",
-    "signIn": "دخول"
+    "signIn": "دخول",
+    "poweredBy": "مدعوم من Auto-Manager"
   },
   "sidebar": {
     "mainMenu": "القائمة الرئيسية",
@@ -72,7 +76,11 @@
     "ready": "جاهز للاستلام",
     "returned": "مسترجع",
     "completed": "تم الاستلام",
-    "cancelled": "ملغى"
+    "cancelled": "ملغى",
+    "all": "الكل",
+    "myRepairs": "تصليحاتي",
+    "othersRepairs": "أخرى",
+    "unassigned": "غير معين"
   },
   "workbench": {
     "title": "ورشة العمل",
@@ -81,7 +89,8 @@
     "unassigned": "غير معين",
     "searchPlaceholder": "بحث عن تذكرة...",
     "readyForPickup": "جاهز للاستلام",
-    "noTickets": "لا توجد تذاكر"
+    "noTickets": "لا توجد تذاكر",
+    "totalCount": "المجموع"
   },
   "ticketDetail": {
     "printSticker": "طباعة الملصق",
@@ -100,6 +109,8 @@
     "buyPrice": "سعر الشراء",
     "totalPartsCost": "تكلفة قطع الغيار الإجمالية",
     "noPartsYet": "لم تتم إضافة أي قطع بعد.",
+    "inStockShort": "المخزون: {{n}}",
+    "partUnlinked": "لا يوجد صنف مطابق — ستُسجَّل هذه القطعة دون خصمها من المخزون.",
     "startRepair": "بدء التصليح",
     "markRepaired": "تحديد كـ تم التصليح",
     "readyForCustomer": "جاهز للاستلام",
@@ -112,7 +123,12 @@
     "confirmHandover": "تأكيد التسليم",
     "confirmHandoverMsg": "هل أنت متأكد من تسليم الجهاز للزبون؟",
     "yesClaimed": "نعم، تم التسليم",
-    "phoneClaimed": "تم تسليم الجهاز للزبون وتسوية الدفع."
+    "phoneClaimed": "تم تسليم الجهاز للزبون وتسوية الدفع.",
+    "remarksSaved": "تم تحديث الملاحظات بنجاح.",
+    "remarksSaveFailed": "فشل حفظ الملاحظات.",
+    "validPrice": "يرجى إدخال سعر صالح.",
+    "negativeAmount": "المبلغ المدفوع لا يمكن أن يكون سالبًا.",
+    "handoverFailed": "فشلت تسوية تسليم التذكرة."
   },
   "newTicket": {
     "title": "تذكرة تصليح جديدة",
@@ -148,7 +164,15 @@
     "saveSettings": "حفظ الإعدادات",
     "saved": "تم حفظ الإعدادات بنجاح!",
     "invalidPercentage": "يرجى إدخال نسبة مئوية صالحة بين 0 و 100.",
-    "about": "حول التطبيق"
+    "saveFailed": "تم الحفظ على هذا الجهاز، لكن لم يمكن حفظه في ملفك الشخصي. لن يتبعك إلى هاتف آخر.",
+    "usingOwn": "هذا إعدادك الشخصي. نسبة المتجر الافتراضية {{shop}}%.",
+    "usingShop": "تستخدم نسبة المتجر ({{shop}}%). الحفظ هنا يحدد نسبة خاصة بك.",
+    "followShop": "استخدم نسبة المتجر بدلاً من ذلك",
+    "about": "حول التطبيق",
+    "languageChangedTitle": "إعادة التشغيل مطلوبة",
+    "languageChangedBody": "يجب إعادة تشغيل التطبيق قبل تطبيق اتجاه القراءة الجديد.",
+    "restartNow": "إعادة التشغيل الآن",
+    "restartManually": "أغلق التطبيق تمامًا ثم افتحه مجددًا."
   },
   "ticket": {
     "repairTicket": "تذكرة تصليح",
@@ -196,6 +220,103 @@
     "rejectSubtitle": "يرجى توضيح سبب الرفض حتى يطّلع عليه الموظف {{name}}:",
     "reasonPlaceholder": "مثال: التخفيض مرتفع، يجب استشارة المدير...",
     "confirmReject": "تأكيد الرفض",
-    "rejectedSuccess": "تم إشعار الموظف بقرار الرفض."
+    "rejectedSuccess": "تم إشعار الموظف بقرار الرفض.",
+    "approveFailed": "فشل الموافقة على الطلب.",
+    "rejectFailed": "فشل رفض الطلب.",
+    "adminOnlyNotice": "الموافقات الخاصة بالموظفين مخصصة للإدارة فقط."
+  },
+  "offline": {
+    "pending": "وضع عدم الاتصال — {{n}} تغييرات ستتم مزامنتها تلقائياً عند توفر الشبكة.",
+    "syncing": "عاد الاتصال — جاري مزامنة {{n}} تغييرات...",
+    "syncedToast": "تم استرجاع الاتصال — تمت مزامنة جميع البيانات مع الخادم!",
+    "dropped": "{{n}} تغييرات لم يتم حفظها. اضغط للمراجعة.",
+    "droppedAria": "{{n}} تغييرات غير متزامنة تحتاج انتباهك",
+    "review": "مراجعة",
+    "droppedTitle": "تغييرات لم تتم مزامنتها",
+    "droppedSubtitle": "حاول التطبيق حفظها أكثر من مرة وفشل، فاحتفظت بها على هذا الجهاز. أعد المحاولة عند توفر اتصال جيد، أو احذفها إذا كانت خطأ.",
+    "attempts": "توقف بعد {{n}} محاولات",
+    "retry": "إعادة المحاولة",
+    "retryAll": "إعادة المحاولة للكل",
+    "clearAll": "حذف الكل",
+    "kind": {
+      "ticket": "تذكرة إصلاح جديدة",
+      "sale": "عملية بيع",
+      "status": "تغيير حالة التذكرة",
+      "debt": "دين على الزبون",
+      "remark": "ملاحظة التذكرة",
+      "parts": "قطع مستعملة",
+      "stock": "حركة مخزون"
+    }
+  },
+  "notifications": {
+    "channel": {
+      "general": "التنبيهات العامة",
+      "repairs": "تحديثات الإصلاح",
+      "approvals": "طلبات الموافقة"
+    }
+  },
+  "inventory": {
+    "scannedTitle": "تم المسح",
+    "scannedBody": "تم تصفية المخزون حسب الباركود \"{{code}}\".",
+    "adjustFailedTitle": "فشل التعديل",
+    "adjustFailed": "لم يمكن تحديث المخزون.",
+    "zeroUnits": "هذا المنتج لا يحتوي على أي وحدة متاحة.",
+    "addedToCart": "أُضيف إلى السلة",
+    "addedToCartBody": "تمت إضافة {{name}} إلى السلة. اضغط على نقطة البيع لإتمام العملية.",
+    "keepBrowsing": "متابعة التصفح",
+    "goToPos": "الذهاب إلى نقطة البيع",
+    "missingInfo": "معلومات ناقصة",
+    "missingInfoBody": "يرجى إدخال اسم المنتج وسعر البيع على الأقل.",
+    "productCreated": "تم إنشاء المنتج",
+    "productCreatedBody": "تمت إضافة {{name}} إلى المخزون.",
+    "saveProductFailed": "لم يمكن حفظ المنتج.",
+    "updateDetailsFailed": "فشل تحديث التفاصيل."
+  },
+  "pos": {
+    "outOfStockBody": "لا توجد وحدات متاحة من {{name}}.",
+    "scannedToCart": "أُضيف بالمسح إلى السلة",
+    "scannedToCardBody": "تمت إضافة {{name}} {{model}} إلى السلة.",
+    "productNotFound": "المنتج غير موجود",
+    "productNotFoundBody": "لا يوجد منتج مطابق للـ SKU أو الباركود: {{code}}",
+    "requiredFields": "حقول إلزامية",
+    "requiredFieldsBody": "يرجى إدخال اسم الزبون ورقم هاتفه.",
+    "createCustomerFailed": "فشل إنشاء الزبون.",
+    "checkoutFailedTitle": "فشلت إتمام البيع",
+    "checkoutFailed": "لم يمكن إتمام عملية البيع.",
+    "cartEmptyTitle": "السلة فارغة",
+    "cartEmptyBody": "اختر المنتجات أدناه لإضافتها إلى سلتك.",
+    "maxStockTitle": "الحد الأقصى للمخزون",
+    "maxStockBody": "متاح {{n}} وحدة فقط."
+  },
+  "salesHistory": {
+    "voidTitle": "إلغاء بيع اليوم",
+    "voidBody": "هل أنت متأكد من إلغاء الفاتورة رقم {{invoice}} ({{total}} دج) وإرجاع المبلغ؟ ستعاد كل المنتجات إلى المخزون.",
+    "confirmVoid": "تأكيد الإلغاء",
+    "saleVoided": "تم إلغاء البيع",
+    "saleVoidedBody": "تمت استعادة المخزون ووضع علامة إلغاء على العملية.",
+    "voidFailedTitle": "فشل الإلغاء",
+    "voidFailed": "لم يمكن إلغاء البيع.",
+    "editCartTitle": "تعديل سلة اليوم",
+    "editCartBody": "هل تريد تحميل منتجات الفاتورة رقم {{invoice}} إلى سلتك النشطة لتعديلها؟",
+    "loadIntoCart": "تحميل في السلة",
+    "reasonRequired": "السبب مطلوب",
+    "reasonRequiredBody": "يرجى إدخال سبب واضح لطلب هذا التعديل.",
+    "requestSubmitted": "تم إرسال طلب الموافقة",
+    "requestSubmittedBody": "تم إرسال طلبك إلى مدير المتجر للمراجعة والموافقة.",
+    "requestFailed": "فشل الطلب",
+    "requestFailedBody": "لم يمكن إرسال طلب الموافقة.",
+    "noPhone": "لا يوجد رقم هاتف",
+    "noPhoneBody": "لا يوجد رقم هاتف زبون مرتبط بهذه العملية.",
+    "receiptMessage": "مرحبًا {{name}}، هذه تذكرتك رقم {{invoice}} من PhoneShop Pro: المجموع: {{total}} دج. شكرًا لك!",
+    "valuedCustomer": "زبوننا العزيز"
+  },
+  "reports": {
+    "modeTaken": "تقرير الربح الحقيقي (الهواتف المسلّمة فقط)",
+    "modeRepaired": "تقرير الإنتاج المصلّح (كل الأعمال المنجزة)",
+    "countTaken": "التصليحات المسلّمة: {{n}}",
+    "countRepaired": "الهواتف المصلّحة: {{n}} ({{taken}} مسلّمة، {{ready}} على الرف)",
+    "shareBody": "الإجمالي: {{gross}} دج\nقطع الغيار: -{{parts}} دج\nالصافي: {{net}} دج\n\nحصتي ({{pct}}%): {{cut}} دج",
+    "shareTitle": "تقرير Auto-Manager - {{period}}",
+    "shareFailed": "لم يمكن مشاركة التقرير."
   }
 }

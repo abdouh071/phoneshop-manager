@@ -86,7 +86,7 @@ export const ApprovalsScreen = ({ navigation }: any) => {
                 })
               );
             } catch (err: any) {
-              Alert.alert(t('common.error', 'Error'), err.message || 'Failed to approve request.');
+              Alert.alert(t('common.error', 'Error'), err.message || t('approvals.approveFailed', 'Failed to approve request.'));
             } finally {
               setActionInProgress(null);
             }
@@ -141,7 +141,7 @@ export const ApprovalsScreen = ({ navigation }: any) => {
           {item.reason ? (
             <View style={styles.reasonContainer}>
               <Text style={styles.reasonLabel}>{t('approvals.reason', 'Reason')}:</Text>
-              <Text style={styles.reasonText}>"{item.reason}"</Text>
+              <Text style={styles.reasonText}>&quot;{item.reason}&quot;</Text>
             </View>
           ) : null}
 

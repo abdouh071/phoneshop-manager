@@ -6,6 +6,8 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
+import { offlineSyncService } from '../services/offlineSyncService';
+import { notificationService } from '../services/notificationService';
 import type { User } from '../types';
 
 interface AuthState {
@@ -20,9 +22,13 @@ interface AuthState {
   fetchStaff: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>((set) => {
+export const useAuthStore = create<AuthState>((set, get) => {
   // Listen to Auth State globally
   onAuthStateChanged(auth, async (firebaseUser) => {
+    // The offline queue is owned by whoever is signed in. Setting it before any
+    // other work also folds in records left by the pre-namespacing build.
+    await offlineSyncService.setQueueOwner(firebaseUser?.uid ?? null);
+
     if (firebaseUser) {
       try {
         const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
@@ -116,8 +122,14 @@ export const useAuthStore = create<AuthState>((set) => {
     },
 
     logout: async () => {
+      const signingOut = get().user?.id;
+      // Unsent work stays on the device under this account's queue — it belongs to
+      // them and syncs when they sign in again — but the push token must stop
+      // pointing at whoever signs in next on this tablet.
+      await notificationService.clearDevicePushToken(signingOut).catch(() => undefined);
       await signOut(auth);
-      set({ user: null, isAuthenticated: false });
+      await offlineSyncService.setQueueOwner(null);
+      set({ user: null, isAuthenticated: false, staff: [] });
     },
 
     clearError: () => set({ error: null })

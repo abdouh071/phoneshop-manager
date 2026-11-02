@@ -4,14 +4,20 @@
     "slug": "abdouh71",
     "version": "1.0.0",
     "orientation": "portrait",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/f7f4d1c2-b95d-40c1-a983-a63e235cb403",
+      "fallbackToCacheTimeout": 0
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#4338ca"
-    },
     "ios": {
+      "bundleIdentifier": "com.phoneshop.technicianapp",
       "supportsTablet": true
     },
     "android": {
@@ -20,11 +26,6 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#4338ca"
-      },
-      "androidNavigationBar": {
-        "visible": "always",
-        "barStyle": "dark-content",
-        "backgroundColor": "#ffffff"
       }
     },
     "extra": {
@@ -46,6 +47,15 @@
           "icon": "./assets/icon.png",
           "color": "#4f46e5",
           "sounds": []
+        }
+      ],
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#4338ca"
         }
       ]
     ]

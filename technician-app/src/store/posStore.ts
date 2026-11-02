@@ -3,10 +3,7 @@ import {
   collection,
   query,
   getDocs,
-  getDoc,
   addDoc,
-  doc,
-  updateDoc,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuthStore } from './authStore';
@@ -14,6 +11,7 @@ import { activityLogService } from '../services/activityLogService';
 import { offlineSyncService } from '../services/offlineSyncService';
 import { customerService } from '../services/customerService';
 import { notificationService } from '../services/notificationService';
+import { applyStockLines, type StockLine } from '../services/stockService';
 import type { PhoneModel, CartItem, SaleTransaction, Customer, PaymentMethod, CustomerDebtEntry, StockStatus } from '../types';
 
 interface CheckoutParams {
@@ -204,11 +202,13 @@ export const usePosStore = create<PosState>((set, get) => ({
     };
 
     let realTx: SaleTransaction;
+    let saleUploaded = false;
 
     try {
       const { id: _, ...dataToSave } = newTx;
       const docRef = await addDoc(collection(db, 'transactions'), dataToSave);
       realTx = { ...newTx, id: docRef.id };
+      saleUploaded = true;
 
       // Log sale activity
       await activityLogService.log(
@@ -229,42 +229,33 @@ export const usePosStore = create<PosState>((set, get) => ({
       await offlineSyncService.saveOfflineSale(realTx);
     }
 
-    // Deduct stock in Firestore collection 'inventory' (with fallback to 'products')
-    for (const item of cart) {
-      try {
-        const invRef = doc(db, 'inventory', item.product.id);
-        const invSnap = await getDoc(invRef);
-        if (invSnap.exists()) {
-          const curData = invSnap.data();
-          const currentStock = curData.stock ?? item.product.stock;
-          const newStock = Math.max(0, currentStock - item.quantity);
-          const threshold = curData.lowStockThreshold ?? item.product.lowStockThreshold ?? 1;
-          const stockStatus = newStock === 0 ? 'out_of_stock' : newStock <= threshold ? 'low_stock' : 'in_stock';
-          await updateDoc(invRef, { stock: newStock, stockStatus });
+    // Stock moves only for a sale this device actually wrote. A queued sale is
+    // deducted by the sync pass that creates its document — deducting here as well
+    // would take the units off the shelf twice.
+    if (saleUploaded) {
+      const lines: StockLine[] = cart.map((item) => ({
+        productId: item.product.id,
+        name: item.product.name,
+        quantity: Math.max(1, Math.trunc(item.quantity || 1)),
+      }));
 
-          if (newStock <= threshold) {
-            notificationService.notifyLowStock(item.product.name, newStock)
-              .catch(err => console.warn('[PosStore] Low stock notification error:', err));
-          }
-        } else {
-          const prodRef = doc(db, 'products', item.product.id);
-          const prodSnap = await getDoc(prodRef);
-          if (prodSnap.exists()) {
-            const curData = prodSnap.data();
-            const currentStock = curData.stock ?? item.product.stock;
-            const newStock = Math.max(0, currentStock - item.quantity);
-            const threshold = curData.lowStockThreshold ?? item.product.lowStockThreshold ?? 1;
-            const stockStatus = newStock === 0 ? 'out_of_stock' : newStock <= threshold ? 'low_stock' : 'in_stock';
-            await updateDoc(prodRef, { stock: newStock, stockStatus });
+      const { ok, failed } = await applyStockLines(lines, -1);
 
-            if (newStock <= threshold) {
-              notificationService.notifyLowStock(item.product.name, newStock)
-                .catch(err => console.warn('[PosStore] Low stock notification error:', err));
-            }
-          }
+      for (const applied of ok) {
+        if (applied.result.stockStatus !== 'in_stock') {
+          notificationService.notifyLowStock(applied.line.name, applied.result.stock)
+            .catch(err => console.warn('[PosStore] Low stock notification error:', err));
         }
-      } catch (sErr) {
-        console.warn(`[PosStore] Failed to update Firestore stock for ${item.product.name}:`, sErr);
+      }
+      // A delta the server never took is not lost: the stock queue replays it.
+      for (const f of failed) {
+        console.warn(`[PosStore] Stock delta failed for ${f.line.name}, queued:`, f.error);
+        await offlineSyncService.saveOfflineStockDelta({
+          productId: f.line.productId,
+          name: f.line.name,
+          delta: -f.line.quantity,
+          reason: `Sale ${invoiceNumber}`,
+        });
       }
     }
 

@@ -7,8 +7,10 @@ import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import { getClaimedRepairRevenue, isClaimedAndPaidRepair } from '../utils/repairFinancials';
+import { useTranslation } from 'react-i18next';
 
 export const ReportsScreen = ({ navigation }: any) => {
+  const { t } = useTranslation();
   const { fetchMyCompletedTickets } = useRepairStore();
   const { user } = useAuthStore();
   const { profitPercentage, weekStartDay, getTechnicianRate, technicianRates } = useSettingsStore();
@@ -55,10 +57,6 @@ export const ReportsScreen = ({ navigation }: any) => {
     setCurrentWeekStart(d);
   }, [weekStartDay]);
 
-  useEffect(() => {
-    loadTickets();
-  }, []);
-
   const loadTickets = async () => {
     setLoading(true);
     if (user?.name) {
@@ -67,6 +65,10 @@ export const ReportsScreen = ({ navigation }: any) => {
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    loadTickets();
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -191,22 +193,32 @@ export const ReportsScreen = ({ navigation }: any) => {
   }, [filteredTickets, effectiveCommission, profitType]);
 
   const handleShareReport = async () => {
-    const modeTitle = profitType === 'taken' 
-      ? 'Real Profit Report (Taken Phones Only)' 
-      : 'Repaired Production Report (All Work Done)';
+    const modeTitle = profitType === 'taken'
+      ? t('reports.modeTaken', 'Real Profit Report (Taken Phones Only)')
+      : t('reports.modeRepaired', 'Repaired Production Report (All Work Done)');
     const countDetail = profitType === 'taken'
-      ? `Taken Repairs: ${filteredTickets.length}`
-      : `Repaired Phones: ${filteredTickets.length} (${completedCount} taken, ${readyCount} on shelf)`;
+      ? t('reports.countTaken', 'Taken Repairs: {{n}}', { n: filteredTickets.length })
+      : t('reports.countRepaired', 'Repaired Phones: {{n}} ({{taken}} taken, {{ready}} on shelf)', {
+          n: filteredTickets.length,
+          taken: completedCount,
+          ready: readyCount,
+        });
 
-    const reportText = `${modeTitle} (${periodLabel})\n\nGross: ${grossRevenue} DA\nParts: -${totalPartsCost} DA\nNet: ${netRevenue} DA\n\nMy Cut (${effectiveCommission}%): ${myProfit.toFixed(2)} DA\n\n${countDetail}`;
-    
+    const reportText = `${modeTitle} (${periodLabel})\n\n${t('reports.shareBody', 'Gross: {{gross}} DA\nParts: -{{parts}} DA\nNet: {{net}} DA\n\nMy Cut ({{pct}}%): {{cut}} DA', {
+      gross: grossRevenue,
+      parts: totalPartsCost,
+      net: netRevenue,
+      pct: effectiveCommission,
+      cut: myProfit.toFixed(2),
+    })}\n\n${countDetail}`;
+
     try {
       await Share.share({
         message: reportText,
-        title: `Auto-Manager Report - ${periodLabel}`
+        title: t('reports.shareTitle', 'Auto-Manager Report - {{period}}', { period: periodLabel })
       });
     } catch (error) {
-      Alert.alert('Error', 'Could not share report.');
+      Alert.alert(t('common.error', 'Error'), t('reports.shareFailed', 'Could not share report.'));
     }
   };
 

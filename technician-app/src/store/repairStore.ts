@@ -9,8 +9,7 @@ import {
   doc,
   getDoc,
   updateDoc,
-  addDoc,
-  runTransaction
+  addDoc
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuthStore } from './authStore';
@@ -18,6 +17,8 @@ import { activityLogService } from '../services/activityLogService';
 import { customerService } from '../services/customerService';
 import { offlineSyncService } from '../services/offlineSyncService';
 import { notificationService } from '../services/notificationService';
+import { applyPartsDelta } from '../services/stockService';
+import { allocateTicketNumber } from '../services/ticketCounter';
 import type { RepairTicket, RepairStatus, RepairStatusHistoryEntry } from '../types';
 
 // Active statuses that must always be visible regardless of creation date
@@ -157,11 +158,11 @@ export const useRepairStore = create<RepairState>((set, get) => ({
   },
 
   updateTicketStatus: async (id: string, status: RepairStatus, changerName?: string, additionalUpdates?: any) => {
+    const currentUser = useAuthStore.getState().user;
+    const changerId = currentUser?.id || 'technician-app';
     try {
       const docRef = doc(db, 'repairs', id);
       const now = new Date().toISOString();
-      const currentUser = useAuthStore.getState().user;
-      const changerId = currentUser?.id || 'technician-app';
       const actorName = changerName || currentUser?.name || 'Technician';
 
       // Find local or current ticket state to safely preserve assignedTechnician & history
@@ -238,7 +239,13 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       }
     } catch (error) {
       console.warn('Failed to update ticket status on Firestore (offline), queuing for auto-sync:', error);
-      await offlineSyncService.saveOfflineStatusUpdate(id, status, changerName, additionalUpdates);
+      await offlineSyncService.saveOfflineStatusUpdate(
+        id,
+        status,
+        changerName || currentUser?.name || 'Technician',
+        additionalUpdates,
+        changerId
+      );
     }
   },
 
@@ -359,10 +366,10 @@ export const useRepairStore = create<RepairState>((set, get) => ({
   },
 
   updateTicketRemark: async (id: string, remark: string) => {
+    const currentUser = useAuthStore.getState().user;
     try {
       const docRef = doc(db, 'repairs', id);
       const now = new Date().toISOString();
-      const currentUser = useAuthStore.getState().user;
 
       await updateDoc(docRef, {
         remark,
@@ -382,49 +389,69 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         }
       );
     } catch (error) {
-      console.error('Failed to update remark:', error);
-      throw error;
+      // The remark queue existed but nothing ever wrote to it, so a note typed with
+      // no signal was simply lost. Park it and let the optimistic UI stand.
+      console.warn('Failed to update remark on Firestore (offline), queuing for auto-sync:', error);
+      await offlineSyncService.saveOfflineRemark(id, remark);
     }
   },
 
   updateTicketParts: async (id: string, parts: { productId?: string; name: string; cost: number; quantity?: number }[]) => {
+    const currentUser = useAuthStore.getState().user;
+    const normalized = parts.map(p => ({
+      name: p.name,
+      cost: p.cost,
+      quantity: p.quantity || 1,
+      productId: p.productId || 'custom-mobile-part'
+    }));
+
     try {
       const docRef = doc(db, 'repairs', id);
+      // Diff against what the ticket already carried, so editing a list returns the
+      // dropped part to the shelf instead of deducting the whole list a second time.
+      const liveSnap = await getDoc(docRef);
+      const previous = (liveSnap.data() as RepairTicket | undefined)?.partsUsed
+        ?? get().tickets.find(t => t.id === id)?.partsUsed
+        ?? [];
+
       await updateDoc(docRef, {
-        partsUsed: parts.map(p => ({
-          name: p.name,
-          cost: p.cost,
-          quantity: p.quantity || 1,
-          productId: p.productId || 'custom-mobile-part'
-        })),
+        partsUsed: normalized,
         updatedAt: new Date().toISOString()
       });
+
+      const { failed } = await applyPartsDelta(previous, normalized);
+      for (const f of failed) {
+        console.warn(`[RepairStore] Parts stock delta failed for ${f.delta.name}, queuing:`, f.error);
+        await offlineSyncService.saveOfflineStockDelta({
+          productId: f.delta.productId,
+          name: f.delta.name,
+          // A part added to the ticket leaves the shelf; a removed one returns to it.
+          delta: -f.delta.delta,
+          reason: `Repair #${liveSnap.data()?.ticketNumber || id} parts`,
+        });
+      }
     } catch (error) {
-      console.error('Failed to update parts:', error);
-      throw error;
+      console.warn('Failed to update parts on Firestore (offline), queuing for auto-sync:', error);
+      await offlineSyncService.saveOfflineParts(id, normalized, {
+        id: currentUser?.id,
+        name: currentUser?.name,
+      });
     }
   },
 
   createTicket: async (ticket) => {
     try {
-      // Atomic counter for sequential ticket numbers: TKT-XXXX (synchronized with desktop app)
-      const counterRef = doc(db, 'counters', 'repairs');
-      let ticketNumber: string;
+      // Sequential TKT-#### from the shared counter, the same document the desktop
+      // till advances. A random number used to be invented when the counter was
+      // unreachable, and it stayed in the shop's ledger forever; now the ticket is
+      // flagged provisional and the sync pass claims a real number as it uploads.
+      let ticketNumber = 'TKT-PENDING';
+      let ticketNumberProvisional = true;
       try {
-        const txPromise = runTransaction(db, async (tx) => {
-          const snap = await tx.get(counterRef);
-          const current = snap.exists() ? (snap.data()?.lastNumber || 0) : 0;
-          const nextNum = current + 1;
-          tx.set(counterRef, { lastNumber: nextNum }, { merge: true });
-          return `TKT-${String(nextNum).padStart(4, '0')}`;
-        });
-        const timeoutPromise = new Promise<string>((_, reject) =>
-          setTimeout(() => reject(new Error('Counter transaction timeout')), 2000)
-        );
-        ticketNumber = await Promise.race([txPromise, timeoutPromise]);
+        ticketNumber = await allocateTicketNumber();
+        ticketNumberProvisional = false;
       } catch (counterErr) {
-        console.warn('Failed atomic counter transaction, using fallback ticket number:', counterErr);
-        ticketNumber = 'TKT-' + Math.floor(100000 + Math.random() * 900000);
+        console.warn('Counter unreachable — the ticket will be numbered when it syncs:', counterErr);
       }
 
       // 4-character alphanumeric tracking PIN for customer tracking portal
@@ -461,6 +488,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       const newTicket = {
         ...ticket,
         ticketNumber,
+        ticketNumberProvisional,
         trackingPin,
         customerId: customerId || null,
         status: 'pending',

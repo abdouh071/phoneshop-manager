@@ -1,5 +1,5 @@
 import './src/i18n';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Provider as PaperProvider, DefaultTheme } from 'react-native-paper';
@@ -45,7 +45,6 @@ const theme = {
 export default function App() {
   const { user, isAuthenticated, isInitializing } = useAuthStore();
   const { subscribeToSettings } = useSettingsStore();
-  const [ready, setReady] = useState(false);
 
   // Initialize offline sync runner (periodic check & push to Firestore)
   useEffect(() => {
@@ -65,21 +64,25 @@ export default function App() {
     };
   }, [isAuthenticated]);
 
-  useEffect(() => {
-    // Wait a brief moment to avoid flashing the login screen while Firebase checks auth state
-    if (!isInitializing) {
-      setTimeout(() => setReady(true), 100);
-    }
-  }, [isInitializing]);
-
   // Register push notifications when user logs in
   useEffect(() => {
     if (isAuthenticated && user?.id) {
-      notificationService.registerForPushNotificationsAsync(user.id);
+      notificationService
+        .registerForPushNotificationsAsync(user.id)
+        .catch(err => console.warn('[App] Push registration failed:', err));
+      // On the Spark plan there is no Cloud Function to push when the desktop app
+      // creates a ticket, so this device listens for those writes itself.
+      notificationService
+        .startRepairAlertWatcher(user.id)
+        .catch(err => console.warn('[App] Repair alert watcher failed to start:', err));
+    } else {
+      notificationService.stopRepairAlertWatcher();
     }
   }, [isAuthenticated, user?.id]);
 
-  if (!ready) {
+  // isInitializing stays true until the Firebase auth callback has resolved, so this splash
+  // cannot flash the login screen — and a restored session no longer waits on a fixed delay.
+  if (isInitializing) {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#4f46e5" />

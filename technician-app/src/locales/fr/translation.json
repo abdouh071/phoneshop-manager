@@ -30,7 +30,10 @@
     "phone": "Téléphone",
     "amount": "Montant",
     "notes": "Notes",
-    "required": "Requis"
+    "required": "Requis",
+    "outOfStock": "Rupture de stock",
+    "whatsappMissing": "WhatsApp n’est pas installé.",
+    "accessRestricted": "Accès restreint"
   },
   "error": {
     "notFound": "Introuvable",
@@ -44,7 +47,8 @@
     "subtitle": "Connectez-vous à votre espace de travail",
     "email": "Adresse e-mail",
     "password": "Mot de passe",
-    "signIn": "Se connecter"
+    "signIn": "Se connecter",
+    "poweredBy": "Propulsé par Auto-Manager"
   },
   "sidebar": {
     "mainMenu": "Menu principal",
@@ -72,7 +76,11 @@
     "ready": "PRÊT",
     "returned": "RETOURNÉ",
     "completed": "TERMINÉ",
-    "cancelled": "ANNULÉ"
+    "cancelled": "ANNULÉ",
+    "all": "Tous",
+    "myRepairs": "Mes réparations",
+    "othersRepairs": "Autres",
+    "unassigned": "Non attribué"
   },
   "workbench": {
     "title": "Atelier",
@@ -81,7 +89,8 @@
     "unassigned": "Non assigné",
     "searchPlaceholder": "Rechercher des tickets...",
     "readyForPickup": "Prêt à retirer",
-    "noTickets": "Aucun ticket trouvé"
+    "noTickets": "Aucun ticket trouvé",
+    "totalCount": "Total"
   },
   "ticketDetail": {
     "printSticker": "Imprimer l'étiquette",
@@ -100,6 +109,8 @@
     "buyPrice": "Prix d'achat",
     "totalPartsCost": "Coût total des pièces",
     "noPartsYet": "Aucune pièce ajoutée pour l'instant.",
+    "inStockShort": "stock : {{n}}",
+    "partUnlinked": "Aucun article correspondant — cette pièce sera enregistrée sans déplacer le stock.",
     "startRepair": "Démarrer la réparation",
     "markRepaired": "Marquer comme réparé",
     "readyForCustomer": "Prêt pour le client",
@@ -112,7 +123,12 @@
     "confirmHandover": "Confirmer la remise",
     "confirmHandoverMsg": "Êtes-vous sûr de vouloir marquer cet appareil comme réclamé par le client ?",
     "yesClaimed": "Oui, réclamé",
-    "phoneClaimed": "Téléphone marqué comme réclamé/terminé."
+    "phoneClaimed": "Téléphone marqué comme réclamé/terminé.",
+    "remarksSaved": "Les remarques ont été mises à jour.",
+    "remarksSaveFailed": "Échec de l’enregistrement des remarques.",
+    "validPrice": "Veuillez saisir un prix valide.",
+    "negativeAmount": "Le montant payé ne peut pas être négatif.",
+    "handoverFailed": "Échec de la clôture de la remise du ticket."
   },
   "newTicket": {
     "title": "Nouveau Ticket de Réparation",
@@ -124,22 +140,39 @@
     "brand": "Marque *",
     "model": "Modèle *",
     "issueDescription": "Description du problème *",
+    "remarks": "État de l'appareil / Constat (facultatif)",
+    "financials": "Tarification et avance",
     "security": "Sécurité (Optionnel)",
     "none": "Aucun",
     "pin": "Code PIN",
     "pattern": "Schéma",
     "enterPin": "Entrez le code PIN / Mot de passe",
     "estimatedCost": "Coût estimé",
+    "assignment": "Attribution au technicien (facultatif)",
+    "selectTech": "Choisir un technicien...",
+    "unassigned": "Non assigné",
     "createTicket": "Créer le ticket",
     "createFailed": "Échec de la création du ticket. Veuillez réessayer."
   },
   "settings": {
     "title": "Paramètres de l'application",
+    "account": "Compte",
+    "preferences": "Préférences",
+    "language": "Langue",
+    "about": "À propos",
     "profitCalc": "Calcul des bénéfices",
     "profitPercentage": "Pourcentage de bénéfice (%)",
     "saveSettings": "Enregistrer les paramètres",
     "saved": "Paramètres enregistrés avec succès !",
-    "invalidPercentage": "Veuillez entrer un pourcentage valide entre 0 et 100."
+    "invalidPercentage": "Veuillez entrer un pourcentage valide entre 0 et 100.",
+    "saveFailed": "Enregistré sur cet appareil, mais impossible de le conserver sur votre profil. Il ne vous suivra pas sur un autre téléphone.",
+    "usingOwn": "C'est votre propre réglage. La valeur du magasin est {{shop}}%.",
+    "usingShop": "Vous suivez la valeur du magasin ({{shop}}%). Enregistrer ici définit votre propre valeur.",
+    "followShop": "Utiliser plutôt la valeur du magasin",
+    "languageChangedTitle": "Redémarrage requis",
+    "languageChangedBody": "L’application doit redémarrer avant que le nouveau sens de lecture ne s’applique.",
+    "restartNow": "Redémarrer maintenant",
+    "restartManually": "Fermez complètement l’application, puis rouvrez-la."
   },
   "ticket": {
     "repairTicket": "Ticket de Réparation",
@@ -187,6 +220,103 @@
     "rejectSubtitle": "Veuillez fournir un motif afin que {{name}} comprenne la décision :",
     "reasonPlaceholder": "ex. Remise trop élevée, accord responsable requis...",
     "confirmReject": "Confirmer le rejet",
-    "rejectedSuccess": "Le membre du personnel a été notifié."
+    "rejectedSuccess": "Le membre du personnel a été notifié.",
+    "approveFailed": "Échec de l’approbation de la demande.",
+    "rejectFailed": "Échec du rejet de la demande.",
+    "adminOnlyNotice": "Les validations du personnel sont strictement réservées aux administrateurs."
+  },
+  "offline": {
+    "pending": "Mode hors ligne — {{n}} modification(s) seront synchronisées à la connexion.",
+    "syncing": "Retour en ligne — synchronisation de {{n}} modification(s)...",
+    "syncedToast": "Connexion rétablie — toutes les données hors ligne ont été synchronisées !",
+    "dropped": "{{n}} modification(s) n'ont pas pu être enregistrées. Touchez pour vérifier.",
+    "droppedAria": "{{n}} modifications non synchronisées nécessitent votre attention",
+    "review": "Vérifier",
+    "droppedTitle": "Modifications non synchronisées",
+    "droppedSubtitle": "Trop de tentatives échouées : elles sont gardées sur cet appareil. Réessayez avec une bonne connexion ou supprimez-les si c'était une erreur.",
+    "attempts": "Abandonné après {{n}} tentatives",
+    "retry": "Réessayer",
+    "retryAll": "Tout réessayer",
+    "clearAll": "Tout supprimer",
+    "kind": {
+      "ticket": "Nouveau ticket de réparation",
+      "sale": "Vente caisse",
+      "status": "Changement de statut du ticket",
+      "debt": "Dette client",
+      "remark": "Remarque du ticket",
+      "parts": "Attribution de pièces",
+      "stock": "Mouvement de stock"
+    }
+  },
+  "notifications": {
+    "channel": {
+      "general": "Alertes générales",
+      "repairs": "Nouvelles réparations",
+      "approvals": "Approbations administrateur"
+    }
+  },
+  "inventory": {
+    "scannedTitle": "Scanné",
+    "scannedBody": "Code-barres « {{code}} » filtré dans l’inventaire.",
+    "adjustFailedTitle": "Échec de l’ajustement",
+    "adjustFailed": "Impossible de mettre à jour le stock.",
+    "zeroUnits": "Ce produit n’a aucune unité disponible.",
+    "addedToCart": "Ajouté au panier",
+    "addedToCartBody": "{{name}} ajouté au panier. Touchez Caisse pour finaliser la vente.",
+    "keepBrowsing": "Continuer les achats",
+    "goToPos": "Aller à la caisse",
+    "missingInfo": "Informations manquantes",
+    "missingInfoBody": "Veuillez saisir au moins un nom de produit et un prix de vente.",
+    "productCreated": "Produit créé",
+    "productCreatedBody": "{{name}} ajouté à l’inventaire.",
+    "saveProductFailed": "Impossible d’enregistrer le produit.",
+    "updateDetailsFailed": "Échec de la mise à jour des détails."
+  },
+  "pos": {
+    "outOfStockBody": "{{name}} n’a aucune unité disponible.",
+    "scannedToCart": "Scanné dans le panier",
+    "scannedToCardBody": "{{name}} {{model}} ajouté au panier.",
+    "productNotFound": "Produit introuvable",
+    "productNotFoundBody": "Aucun produit correspondant à la SKU / au code-barres : {{code}}",
+    "requiredFields": "Champs obligatoires",
+    "requiredFieldsBody": "Veuillez saisir le nom du client et son numéro de téléphone.",
+    "createCustomerFailed": "Échec de la création du client.",
+    "checkoutFailedTitle": "Échec de l’encaissement",
+    "checkoutFailed": "Impossible de finaliser la vente.",
+    "cartEmptyTitle": "Le panier est vide",
+    "cartEmptyBody": "Sélectionnez des produits ci-dessous pour les ajouter à votre panier.",
+    "maxStockTitle": "Stock maximum",
+    "maxStockBody": "Seulement {{n}} unité(s) disponible(s)."
+  },
+  "salesHistory": {
+    "voidTitle": "Annuler la vente du jour",
+    "voidBody": "Voulez-vous vraiment annuler et rembourser la facture #{{invoice}} ({{total}} DA) ? Tous les articles seront remis en inventaire.",
+    "confirmVoid": "Confirmer l’annulation",
+    "saleVoided": "Vente annulée",
+    "saleVoidedBody": "Stock restauré et transaction marquée comme annulée.",
+    "voidFailedTitle": "Échec de l’annulation",
+    "voidFailed": "Impossible d’annuler la vente.",
+    "editCartTitle": "Modifier le panier du jour",
+    "editCartBody": "Souhaitez-vous recharger les articles de la facture #{{invoice}} dans votre panier actif pour les modifier ?",
+    "loadIntoCart": "Charger dans le panier",
+    "reasonRequired": "Motif obligatoire",
+    "reasonRequiredBody": "Veuillez saisir un motif clair pour cette demande de modification.",
+    "requestSubmitted": "Demande d’approbation soumise",
+    "requestSubmittedBody": "Votre demande a été envoyée à l’administrateur du magasin pour examen et approbation.",
+    "requestFailed": "Échec de la demande",
+    "requestFailedBody": "Impossible de soumettre la demande d’approbation.",
+    "noPhone": "Aucun téléphone",
+    "noPhoneBody": "Aucun numéro de téléphone client associé à cette transaction.",
+    "receiptMessage": "Bonjour {{name}}, voici votre ticket #{{invoice}} de PhoneShop Pro : Total : {{total}} DA. Merci !",
+    "valuedCustomer": "cher client"
+  },
+  "reports": {
+    "modeTaken": "Rapport de bénéfice réel (téléphones pris uniquement)",
+    "modeRepaired": "Rapport de production réparée (tout le travail effectué)",
+    "countTaken": "Réparations prises : {{n}}",
+    "countRepaired": "Téléphones réparés : {{n}} ({{taken}} pris, {{ready}} en rayon)",
+    "shareBody": "Brut : {{gross}} DA\nPièces : -{{parts}} DA\nNet : {{net}} DA\n\nMa part ({{pct}}%) : {{cut}} DA",
+    "shareTitle": "Rapport Auto-Manager - {{period}}",
+    "shareFailed": "Impossible de partager le rapport."
   }
 }

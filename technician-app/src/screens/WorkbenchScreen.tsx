@@ -301,7 +301,7 @@ export const WorkbenchScreen = ({ navigation }: any) => {
         <View style={styles.statItem}>
           <View style={[styles.statDot, { backgroundColor: '#4f46e5' }]} />
           <Text style={styles.statNumber}>{tickets.length}</Text>
-          <Text style={styles.statLabel}>{t('status.all', 'Total')}</Text>
+          <Text style={styles.statLabel}>{t('workbench.totalCount', 'Total')}</Text>
         </View>
       </View>
 

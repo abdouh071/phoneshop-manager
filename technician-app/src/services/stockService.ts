@@ -1,0 +1,262 @@
+/**
+ * Atomic stock writes for the technician app.
+ * =============================================
+ * The previous code did `getDoc` → compute → `updateDoc` with a value read from the
+ * phone's own copy of the product. Two tills selling the last screen, or a till
+ * coming back online with a stale cache, produced last-write-wins stock. The
+ * desktop app fixed this with a Firestore transaction (`commitStockDelta`); this is
+ * the same primitive so both apps agree.
+ *
+ * Reads happen INSIDE the transaction, so the delta is always applied to the
+ * server's current value rather than to anything the device remembered.
+ */
+import { doc, getDoc, runTransaction } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { clampStock, deriveStockStatus } from './offlineQueuePolicy';
+import type { StockStatus } from '../types';
+
+/** A till must not hang on a locked counter; the queue retries the delta later. */
+const STOCK_TX_TIMEOUT_MS = 6_000;
+
+const COLLECTIONS = ['inventory', 'products'] as const;
+export type StockCollection = (typeof COLLECTIONS)[number];
+
+export interface StockResult {
+  collection: StockCollection;
+  previousStock: number;
+  stock: number;
+  stockStatus: StockStatus;
+}
+
+const withTimeout = <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+
+const readCurrentStock = async (id: string): Promise<{ collection: StockCollection; data: Record<string, unknown> } | null> => {
+  for (const collectionName of COLLECTIONS) {
+    const snap = await getDoc(doc(db, collectionName, id));
+    if (snap.exists()) return { collection: collectionName, data: snap.data() as Record<string, unknown> };
+  }
+  return null;
+};
+
+/**
+ * Independent product counters do not need to wait on each other. Each line still owns its
+ * own transaction, so a contention abort on one SKU retries alone instead of taking the
+ * whole sale with it.
+ */
+const STOCK_CONCURRENCY = 3;
+
+const mapWithConcurrency = async <T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> => {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+};
+
+/**
+ * Applies `delta` (+ for returns, - for sales) to the server's current value.
+ * Throws when the product exists in neither collection, so the caller can record
+ * the failure instead of pretending stock moved.
+ */
+export const commitStockDelta = async (id: string, delta: number): Promise<StockResult> => {
+  if (!id) throw new Error('commitStockDelta: missing product id');
+  const amount = Math.trunc(Number(delta) || 0);
+
+  return withTimeout(
+    runTransaction(db, async (tx) => {
+      // Try the collection the desktop app actually uses first.
+      const invRef = doc(db, 'inventory', id);
+      const invSnap = await tx.get(invRef);
+      let ref = invRef;
+      let data: Record<string, unknown> = invSnap.exists() ? (invSnap.data() as Record<string, unknown>) : {};
+      let collection: StockCollection = 'inventory';
+
+      if (!invSnap.exists()) {
+        ref = doc(db, 'products', id);
+        const prodSnap = await tx.get(ref);
+        if (!prodSnap.exists()) throw new Error(`Product ${id} not found in inventory or products`);
+        data = prodSnap.data() as Record<string, unknown>;
+        collection = 'products';
+      }
+
+      const currentStock = clampStock(data.stock);
+      const threshold = data.lowStockThreshold ?? 1;
+      // Never below zero: an oversold line reads as 0, not as -3.
+      const nextStock = Math.max(0, currentStock + amount);
+      const stockStatus = deriveStockStatus(nextStock, threshold) as StockStatus;
+      tx.update(ref, { stock: nextStock, stockStatus });
+      return { collection, previousStock: currentStock, stock: nextStock, stockStatus };
+    }),
+    STOCK_TX_TIMEOUT_MS,
+    'stockTransaction'
+  );
+};
+
+export interface StockLine {
+  productId: string;
+  name: string;
+  quantity: number;
+}
+
+export interface AppliedStockLine {
+  line: StockLine;
+  result: StockResult;
+}
+
+/**
+ * A sale takes stock out; an old parts list goes back in; a new one comes out.
+ * Per-line failures are reported rather than thrown, because one unknown SKU must
+ * not abort the rest of a settled sale.
+ *
+ * Lines for the same product are folded into one delta before they reach Firestore:
+ * the shelf count only has to be read and committed once per SKU, and the caller
+ * gets a single final stock value instead of an alert per duplicate line.
+ */
+export const applyStockLines = async (
+  lines: StockLine[],
+  direction: -1 | 1
+): Promise<{ ok: AppliedStockLine[]; failed: { line: StockLine; error: string }[] }> => {
+  const ok: AppliedStockLine[] = [];
+  const failed: { line: StockLine; error: string }[] = [];
+  const grouped = new Map<string, { name: string; quantity: number }>();
+
+  for (const line of lines) {
+    const quantity = Math.trunc(Number(line.quantity) || 0);
+    if (!line.productId) {
+      failed.push({ line, error: 'missing product id' });
+      continue;
+    }
+    // A zero-quantity line moves nothing; reporting it as a failure would be a lie
+    // and as a success would invite a bogus low-stock alert.
+    if (quantity <= 0) continue;
+    const existing = grouped.get(line.productId);
+    grouped.set(line.productId, {
+      name: existing?.name || line.name,
+      quantity: (existing?.quantity || 0) + quantity,
+    });
+  }
+
+  await mapWithConcurrency([...grouped], STOCK_CONCURRENCY, async ([productId, group]) => {
+    const line: StockLine = { productId, name: group.name, quantity: group.quantity };
+    try {
+      const result = await commitStockDelta(productId, direction * group.quantity);
+      ok.push({ line, result });
+    } catch (err) {
+      failed.push({ line, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  return { ok, failed };
+};
+
+/** Signed change in units of a part between two allocations of the same ticket. */
+export interface PartsDelta {
+  productId: string;
+  name: string;
+  /** Positive when the new list uses more of the part than the old one did. */
+  delta: number;
+}
+
+/**
+ * Diff between two parts lists, used when a technician edits an existing
+ * allocation: a part removed from the ticket goes back on the shelf, a part added
+ * comes off it, and an unchanged line moves nothing.
+ */
+export const diffParts = (
+  previous: { productId?: string | null; name?: string; quantity?: number }[],
+  next: { productId?: string | null; name?: string; quantity?: number }[]
+): PartsDelta[] => {
+  const key = (p: { productId?: string | null }) => String(p.productId || '').trim();
+  // Parts typed by hand have no SKU on the shelf to move, so they are skipped.
+  const usable = (p: { productId?: string | null }) => {
+    const k = key(p);
+    return !!k && k !== 'custom-mobile-part';
+  };
+
+  const tally = (list: { productId?: string | null; name?: string; quantity?: number }[]) => {
+    const counts = new Map<string, { qty: number; name: string }>();
+    for (const p of list || []) {
+      if (!usable(p)) continue;
+      const k = key(p);
+      const prev = counts.get(k);
+      counts.set(k, {
+        qty: (prev?.qty || 0) + Math.max(1, Math.trunc(Number(p.quantity) || 1)),
+        name: prev?.name || p.name || k,
+      });
+    }
+    return counts;
+  };
+
+  const before = tally(previous);
+  const after = tally(next);
+  const deltas: PartsDelta[] = [];
+
+  for (const [id, cur] of after) {
+    const was = before.get(id)?.qty || 0;
+    if (cur.qty !== was) deltas.push({ productId: id, name: cur.name, delta: cur.qty - was });
+  }
+  for (const [id, was] of before) {
+    if (!after.has(id)) deltas.push({ productId: id, name: was.name, delta: -was.qty });
+  }
+
+  return deltas;
+};
+
+/**
+ * Moves stock for a parts edit. Returns the lines that could not be applied so a
+ * screen can tell the technician the allocation saved but the shelf count did not.
+ */
+export const applyPartsDelta = async (
+  previous: { productId?: string | null; name?: string; quantity?: number }[],
+  next: { productId?: string | null; name?: string; quantity?: number }[]
+): Promise<{ applied: PartsDelta[]; failed: { delta: PartsDelta; error: string }[] }> => {
+  const deltas = diffParts(previous, next);
+  const applied: PartsDelta[] = [];
+  const failed: { delta: PartsDelta; error: string }[] = [];
+
+  // diffParts keys by product, so every delta here touches a different counter
+  // and the writes cannot contend with each other.
+  await mapWithConcurrency(deltas, STOCK_CONCURRENCY, async (delta) => {
+    try {
+      // A part added to the ticket leaves the shelf; a removed part returns to it.
+      await commitStockDelta(delta.productId, -delta.delta);
+      applied.push(delta);
+    } catch (err) {
+      failed.push({ delta, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  return { applied, failed };
+};
+
+/** Read-only helper for screens that want the live number before writing. */
+export const readStock = async (id: string): Promise<number | null> => {
+  const found = await readCurrentStock(id);
+  return found ? clampStock(found.data.stock) : null;
+};

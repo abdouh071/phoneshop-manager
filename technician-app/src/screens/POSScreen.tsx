@@ -27,9 +27,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePosStore } from '../store/posStore';
 import { useAuthStore } from '../store/authStore';
 import { RoleBottomNav } from '../components/RoleBottomNav';
+import { useTranslation } from 'react-i18next';
 import type { PhoneModel, PaymentMethod, SaleTransaction, Customer } from '../types';
 
 export const POSScreen = ({ navigation }: any) => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const {
     products,
@@ -120,7 +122,7 @@ export const POSScreen = ({ navigation }: any) => {
 
   const handleProductPress = (product: PhoneModel) => {
     if (product.stock <= 0) {
-      Alert.alert('Out of Stock', `${product.name} has 0 available units.`);
+      Alert.alert(t('common.outOfStock', 'Out of Stock'), t('pos.outOfStockBody', '{{name}} has 0 available units.', { name: product.name }));
       return;
     }
     Vibration.vibrate(30);
@@ -139,9 +141,9 @@ export const POSScreen = ({ navigation }: any) => {
         if (matched) {
           Vibration.vibrate(60);
           addToCart(matched, 1);
-          Alert.alert('Scanned to Cart', `${matched.name} ${matched.model} added to cart.`);
+          Alert.alert(t('pos.scannedToCart', 'Scanned to Cart'), t('pos.scannedToCardBody', '{{name}} {{model}} added to cart.', { name: matched.name, model: matched.model }));
         } else {
-          Alert.alert('Product Not Found', `No product matching SKU/Barcode: ${scannedCode}`);
+          Alert.alert(t('pos.productNotFound', 'Product Not Found'), t('pos.productNotFoundBody', 'No product matching SKU/Barcode: {{code}}', { code: scannedCode }));
         }
       },
     });
@@ -149,7 +151,7 @@ export const POSScreen = ({ navigation }: any) => {
 
   const handleCreateCustomer = async () => {
     if (!newCustomerName.trim() || !newCustomerPhone.trim()) {
-      Alert.alert('Required Fields', 'Please enter customer name and phone number.');
+      Alert.alert(t('pos.requiredFields', 'Required Fields'), t('pos.requiredFieldsBody', 'Please enter customer name and phone number.'));
       return;
     }
     setIsSavingCustomer(true);
@@ -161,7 +163,7 @@ export const POSScreen = ({ navigation }: any) => {
       setNewCustomerPhone('');
       Vibration.vibrate(40);
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to create customer.');
+      Alert.alert(t('common.error', 'Error'), err.message || t('pos.createCustomerFailed', 'Failed to create customer.'));
     } finally {
       setIsSavingCustomer(false);
     }
@@ -187,7 +189,7 @@ export const POSScreen = ({ navigation }: any) => {
       setShowDiscountSection(false);
       Vibration.vibrate([0, 50, 50, 100]);
     } catch (err: any) {
-      Alert.alert('Checkout Failed', err.message || 'Could not complete sale.');
+      Alert.alert(t('pos.checkoutFailedTitle', 'Checkout Failed'), err.message || t('pos.checkoutFailed', 'Could not complete sale.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -218,7 +220,7 @@ export const POSScreen = ({ navigation }: any) => {
     const text = buildReceiptText(completedTx);
     const phone = completedTx.customerPhone ? completedTx.customerPhone.replace(/\D/g, '') : '';
     const url = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
-    Linking.openURL(url).catch(() => Alert.alert('Error', 'WhatsApp is not installed.'));
+    Linking.openURL(url).catch(() => Alert.alert(t('common.error', 'Error'), t('common.whatsappMissing', 'WhatsApp is not installed.')));
   };
 
   const handleGeneralShare = () => {
@@ -267,7 +269,7 @@ export const POSScreen = ({ navigation }: any) => {
             if (cart.length > 0) {
               setIsCheckoutOpen(true);
             } else {
-              Alert.alert('Cart is Empty', 'Select products below to add them to your cart.');
+              Alert.alert(t('pos.cartEmptyTitle', 'Cart is Empty'), t('pos.cartEmptyBody', 'Select products below to add them to your cart.'));
             }
           }}
         >
@@ -400,7 +402,7 @@ export const POSScreen = ({ navigation }: any) => {
                         style={styles.stepperBtn}
                         onPress={() => {
                           if (inCart.quantity >= item.stock) {
-                            Alert.alert('Max Stock', `Only ${item.stock} unit(s) available.`);
+                            Alert.alert(t('pos.maxStockTitle', 'Max Stock'), t('pos.maxStockBody', 'Only {{n}} unit(s) available.', { n: item.stock }));
                             return;
                           }
                           updateQuantity(item.id, inCart.quantity + 1);

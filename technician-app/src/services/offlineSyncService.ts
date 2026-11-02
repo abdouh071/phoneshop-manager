@@ -1,361 +1,1061 @@
+/**
+ * Offline queue for the technician app.
+ * ======================================
+ * What this guarantees, and what the version before it did not:
+ *
+ *   • Owned per user. Keys are namespaced by the signed-in uid, so a shared tablet
+ *     no longer replays user A's unsynced sale under user B's name. Legacy
+ *     device-global entries are folded into the first account that signs in after
+ *     the upgrade rather than dropped.
+ *   • Replay-safe. Every record carries an `idempotencyKey` minted once at enqueue
+ *     time; a crash between "uploaded" and "queue rewritten" is resolved by
+ *     adopting the document that already exists instead of adding a second sale.
+ *   • Bounded. Failures back off exponentially and park in the dead-letter store
+ *     after MAX_ATTEMPTS, where the UI can show them. Previously a poisoned action
+ *     retried every 15 seconds forever and a broken ticket reference could never
+ *     succeed at all.
+ *   • Non-destructive. A status replay is merged against the live document, so it
+ *     cannot erase `statusHistory`, the owning technician, or a remark another
+ *     device wrote while this phone was offline.
+ *   • Ordered. Tickets upload before the status/remark/parts actions pointing at
+ *     them, and the temp id → real id rewrite happens in the same pass.
+ */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  collection,
-  addDoc,
-  doc,
-  getDoc,
-  updateDoc,
-  getDocs,
-  query,
-  limit,
-} from 'firebase/firestore';
+import { AppState, type AppStateStatus } from 'react-native';
+import { collection, doc, getDoc, getDocs, limit, query, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { RepairTicket, SaleTransaction, RepairStatus, CustomerDebtEntry } from '../types';
+import { addIdempotently } from './idempotentReplay';
+import { allocateTicketNumber } from './ticketCounter';
+import { applyPartsDelta, applyStockLines } from './stockService';
+import {
+  MAX_ATTEMPTS,
+  buildStatusPatch,
+  dedupeById,
+  isDue,
+  isOwnerKey,
+  needsTicketNumber,
+  queueKey,
+  recordFailure,
+  rebaseActions,
+  resolveRef,
+  shouldDeadLetter,
+  toDeadLetter,
+  unownedKey,
+  type DeadLetterEntry,
+  type IdMap,
+  type QueueAction,
+  type QueueKind,
+} from './offlineQueuePolicy';
+import type { CartItem, CustomerDebtEntry, PhoneModel, RepairStatus, RepairTicket, SaleTransaction } from '../types';
 
-const STORAGE_KEYS = {
-  OFFLINE_TICKETS: '@offline_tickets',
-  OFFLINE_SALES: '@offline_sales',
-  OFFLINE_STATUS_UPDATES: '@offline_status_updates',
-  OFFLINE_DEBTS: '@offline_debts',
-  OFFLINE_REMARKS: '@offline_remarks',
-  OFFLINE_PARTS: '@offline_parts',
-  CACHED_TICKETS: '@cached_tickets',
-  CACHED_PRODUCTS: '@cached_products',
-};
-
+/** Kept for callers that still describe a queued status change this way. */
 export interface OfflineStatusAction {
   id: string;
   ticketId: string;
   status: RepairStatus;
   changerName?: string;
-  additionalUpdates?: any;
+  additionalUpdates?: Record<string, unknown> | null;
   timestamp: string;
 }
 
-type SyncListener = (pendingCount: number, isSyncing: boolean) => void;
-const listeners = new Set<SyncListener>();
-let isSyncing = false;
-
-function notifyListeners(pendingCount: number, syncing: boolean) {
-  listeners.forEach(fn => {
-    try {
-      fn(pendingCount, syncing);
-    } catch (e) {
-      console.warn('[OfflineSync] Listener error:', e);
-    }
-  });
+interface StatusPayload {
+  ticketId: string;
+  status: RepairStatus;
+  changerId?: string;
+  changerName?: string;
+  additionalUpdates?: Record<string, unknown> | null;
+  timestamp: string;
 }
 
-async function getStoredList<T>(key: string): Promise<T[]> {
+interface RemarkPayload {
+  ticketId: string;
+  remark: string;
+  updatedAt: string;
+}
+
+interface AllocatedPart {
+  productId?: string | null;
+  name: string;
+  cost: number;
+  quantity: number;
+}
+
+interface PartsPayload {
+  ticketId: string;
+  parts: AllocatedPart[];
+  actorId?: string;
+  actorName?: string;
+}
+
+interface StockPayload {
+  productId: string;
+  name: string;
+  /** Signed units: negative takes stock off the shelf. */
+  delta: number;
+  reason: string;
+}
+
+const KIND_BASE: Record<QueueKind, string> = {
+  ticket: '@offline_tickets',
+  sale: '@offline_sales',
+  status: '@offline_status_updates',
+  debt: '@offline_debts',
+  remark: '@offline_remarks',
+  parts: '@offline_parts',
+  stock: '@offline_stock_deltas',
+};
+
+const KINDS = Object.keys(KIND_BASE) as QueueKind[];
+
+const ID_MAP_BASE = '@offline_id_map';
+const DEAD_LETTER_BASE = '@offline_dead_letters';
+const CACHED_TICKETS_BASE = '@cached_tickets';
+const CACHED_PRODUCTS_BASE = '@cached_products';
+/** Queue items waiting on a ticket that has not uploaded yet are re-tried, not failed. */
+const DEFER_MS = 20_000;
+
+let ownerUid: string | null = null;
+let isSyncing = false;
+let seq = 0;
+
+type SyncListener = (pendingCount: number, isSyncing: boolean, droppedCount: number) => void;
+const listeners = new Set<SyncListener>();
+
+const owner = () => ownerUid || '__unowned__';
+const keyFor = (base: string) => queueKey(base, owner());
+
+const nowMs = () => Date.now();
+const nowIso = () => new Date().toISOString();
+
+const newActionId = (kind: QueueKind): string => {
+  seq = (seq + 1) % 1_000_000;
+  return `${kind}_${nowMs().toString(36)}_${seq.toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+};
+
+const notifyListeners = async () => {
+  const [pending, dropped] = await Promise.all([
+    countPending(),
+    getDeadLetters().then((d) => d.length),
+  ]);
+  for (const fn of listeners) {
+    try {
+      fn(pending, isSyncing, dropped);
+    } catch {
+      // A broken subscriber must not abort the sync pass.
+    }
+  }
+};
+
+const errorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err ?? 'Unknown sync failure');
+
+// ─── Storage primitives ────────────────────────────────────────────────────────
+
+const readRaw = async <T>(key: string): Promise<T[]> => {
   try {
     const raw = await AsyncStorage.getItem(key);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
   } catch {
     return [];
   }
+};
+
+const writeRaw = async (key: string, value: unknown): Promise<boolean> => {
+  try {
+    await AsyncStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (err) {
+    console.warn(`[OfflineSync] Failed to persist ${key}:`, err);
+    return false;
+  }
+};
+
+const isEnvelope = (value: unknown): value is QueueAction => {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.id === 'string' && typeof v.kind === 'string' && 'payload' in v;
+};
+
+/**
+ * Records queued by the previous build are bare tickets/sales, not envelopes. They
+ * are wrapped on read — keeping their offline id as the idempotency key — so an
+ * upgrade mid-shift does not lose or duplicate a sale.
+ */
+const wrapLegacy = (kind: QueueKind, raw: Record<string, unknown>): QueueAction => {
+  const recordId = typeof raw.id === 'string' ? raw.id : '';
+  const id = recordId ? `act_${kind}_${recordId}` : newActionId(kind);
+  const ticketRef =
+    kind === 'status' || kind === 'remark' || kind === 'parts'
+      ? typeof raw.ticketId === 'string'
+        ? raw.ticketId
+        : undefined
+      : recordId && recordId.startsWith('offline_tkt_')
+        ? recordId
+        : undefined;
+
+  return {
+    id,
+    kind,
+    payload: raw,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : nowIso(),
+    attempts: 0,
+    nextAttemptAt: 0,
+    ticketRef,
+  };
+};
+
+const loadQueue = async (kind: QueueKind): Promise<QueueAction[]> => {
+  const base = KIND_BASE[kind];
+  const stored = await readRaw<unknown>(keyFor(base));
+  const wrapped = stored.map((item) => (isEnvelope(item) ? (item as QueueAction) : wrapLegacy(kind, item as Record<string, unknown>)));
+  return dedupeById(wrapped);
+};
+
+const saveQueue = (kind: QueueKind, actions: QueueAction[]): Promise<boolean> =>
+  writeRaw(keyFor(KIND_BASE[kind]), actions);
+
+/**
+ * Several queues in one bridge call. countPending() used to do a separate AsyncStorage round
+ * trip and parse per kind, and it runs on every enqueue — the round trips, not the data, were
+ * what made queuing an offline action feel slow. Same semantics as loadQueue(), including the
+ * legacy-envelope wrapping and a corrupt entry degrading to an empty queue.
+ */
+const loadQueues = async (kinds: QueueKind[]): Promise<QueueAction[][]> => {
+  const keys = kinds.map((kind) => keyFor(KIND_BASE[kind]));
+
+  let entries: readonly (readonly [string, string | null])[];
+  try {
+    entries = await AsyncStorage.multiGet(keys);
+  } catch (err) {
+    console.warn('[OfflineSync] multiGet failed, reading queues individually:', err);
+    return Promise.all(kinds.map((kind) => loadQueue(kind)));
+  }
+
+  return entries.map(([key, raw], index) => {
+    const kind = kinds[index];
+    let stored: unknown[] = [];
+    try {
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) stored = parsed;
+    } catch {
+      console.warn(`[OfflineSync] Corrupt queue at ${key}, treated as empty`);
+      stored = [];
+    }
+    const wrapped = stored.map((item) =>
+      isEnvelope(item) ? (item as QueueAction) : wrapLegacy(kind, item as Record<string, unknown>)
+    );
+    return dedupeById(wrapped);
+  });
+};
+
+const loadAllQueues = (): Promise<QueueAction[][]> => loadQueues(KINDS);
+
+const loadIdMap = async (): Promise<IdMap> => {
+  try {
+    const raw = await AsyncStorage.getItem(keyFor(ID_MAP_BASE));
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? (parsed as IdMap) : {};
+  } catch {
+    return {};
+  }
+};
+
+const saveIdMap = (map: IdMap) => writeRaw(keyFor(ID_MAP_BASE), map);
+
+const getDeadLetters = async (): Promise<DeadLetterEntry[]> =>
+  readRaw<DeadLetterEntry>(keyFor(DEAD_LETTER_BASE));
+
+const saveDeadLetters = (entries: DeadLetterEntry[]) =>
+  writeRaw(keyFor(DEAD_LETTER_BASE), entries);
+
+const countPending = async (): Promise<number> => {
+  const lists = await loadAllQueues();
+  return lists.reduce((sum, list) => sum + list.length, 0);
+};
+
+// ─── Ownership ─────────────────────────────────────────────────────────────────
+
+/**
+ * Moves everything stored under the old device-global keys (and under the bucket
+ * used before an account was known) into the signed-in user's queue. The new key
+ * is written before the old one is removed, so an interrupted migration leaves the
+ * records readable from the legacy key rather than gone.
+ */
+const migrateLegacyQueues = async (uid: string) => {
+  for (const kind of KINDS) {
+    const base = KIND_BASE[kind];
+    const ownerKey = queueKey(base, uid);
+    const merged = dedupeById(await loadQueue(kind));
+
+    for (const legacyKey of [base, unownedKey(base)]) {
+      if (legacyKey === ownerKey) continue;
+      const legacy = await readRaw<unknown>(legacyKey);
+      if (!legacy.length) continue;
+      merged.push(
+        ...legacy.map((item) =>
+          isEnvelope(item) ? (item as QueueAction) : wrapLegacy(kind, item as Record<string, unknown>)
+        )
+      );
+    }
+
+    const unique = dedupeById(merged);
+    const wrote = await writeRaw(ownerKey, unique);
+    if (!wrote) continue;
+    for (const legacyKey of [base, unownedKey(base)]) {
+      if (legacyKey !== ownerKey) await AsyncStorage.removeItem(legacyKey);
+    }
+  }
+
+  // The read-only caches (tickets and the POS product list) are cosmetic, but an
+  // offline technician opening the app right after an upgrade should still see the
+  // catalogue they cached yesterday.
+  for (const cacheBase of [CACHED_TICKETS_BASE, CACHED_PRODUCTS_BASE]) {
+    const ownerKey = queueKey(cacheBase, uid);
+    const existing = await AsyncStorage.getItem(ownerKey);
+    if (existing) continue;
+    const legacyValue = await AsyncStorage.getItem(cacheBase);
+    if (legacyValue) await AsyncStorage.setItem(ownerKey, legacyValue);
+  }
+};
+
+// ─── Enqueue ───────────────────────────────────────────────────────────────────
+
+const enqueue = async (action: QueueAction) => {
+  const list = await loadQueue(action.kind);
+  list.unshift(action);
+  await saveQueue(action.kind, dedupeById(list));
+  await notifyListeners();
+};
+
+const removeActions = async (kind: QueueKind, ids: Set<string>) => {
+  const list = await loadQueue(kind);
+  await saveQueue(kind, list.filter((a) => !ids.has(a.id)));
+};
+
+// ─── Flush ─────────────────────────────────────────────────────────────────────
+
+interface FlushResult {
+  synced: number;
+  failed: number;
+  deferred: number;
+  dropped: string[];
 }
 
-async function setStoredList<T>(key: string, list: T[]): Promise<void> {
-  try {
-    await AsyncStorage.setItem(key, JSON.stringify(list));
-  } catch (e) {
-    console.error(`[OfflineSync] Failed to persist ${key}:`, e);
+const emptyResult = (): FlushResult => ({ synced: 0, failed: 0, deferred: 0, dropped: [] });
+
+const parkOrFail = async (
+  kind: QueueKind,
+  action: QueueAction,
+  err: unknown
+): Promise<{ result: 'failed' | 'dropped'; list: QueueAction[] }> => {
+  const list = await loadQueue(kind);
+  const idx = list.findIndex((a) => a.id === action.id);
+  const failed = recordFailure(action, nowMs(), errorMessage(err));
+  if (idx >= 0) list[idx] = failed;
+  else list.push(failed);
+
+  if (shouldDeadLetter(failed)) {
+    const dead = await getDeadLetters();
+    dead.unshift(toDeadLetter(failed, nowIso()));
+    await saveDeadLetters(dedupeById(dead) as DeadLetterEntry[]);
+    await saveQueue(kind, list.filter((a) => a.id !== failed.id));
+    return { result: 'dropped', list };
   }
-}
+
+  await saveQueue(kind, list);
+  return { result: 'failed', list };
+};
+
+const deferAction = async (kind: QueueKind, action: QueueAction, reason: string) => {
+  const list = await loadQueue(kind);
+  const idx = list.findIndex((a) => a.id === action.id);
+  const deferred: QueueAction = { ...action, nextAttemptAt: nowMs() + DEFER_MS, lastError: reason };
+  if (idx >= 0) list[idx] = deferred;
+  await saveQueue(kind, list);
+};
+
+const record = (action: QueueAction): Record<string, unknown> =>
+  action.payload && typeof action.payload === 'object'
+    ? (action.payload as Record<string, unknown>)
+    : {};
+
+const isTicketStillQueued = (idMap: IdMap, ref: string | undefined, queuedTicketIds: Set<string>): boolean => {
+  if (!ref) return false;
+  const resolved = resolveRef(idMap, ref) as string;
+  return queuedTicketIds.has(resolved) || queuedTicketIds.has(ref);
+};
+
+/** Tickets first: everything else may reference the id this step creates. */
+const flushTickets = async (map: IdMap): Promise<FlushResult> => {
+  const out = emptyResult();
+  const queue = await loadQueue('ticket');
+  const done = new Set<string>();
+
+  for (const action of queue) {
+    if (!isDue(action, nowMs())) continue;
+    const payload = record(action);
+    const tempId = typeof payload.id === 'string' ? payload.id : action.ticketRef || action.id;
+
+    try {
+      let body = { ...payload };
+      // An offline check-in could not reach the shared counter, so it carries a
+      // provisional number; claim a real one now instead of shipping the fallback.
+      if (needsTicketNumber(body as { ticketNumber?: unknown; ticketNumberProvisional?: boolean })) {
+        try {
+          const claimed = await allocateTicketNumber();
+          body = {
+            ...body,
+            ticketNumber: claimed,
+            ticketNumberProvisional: false,
+            provisionalTicketNumber: body.ticketNumber ?? null,
+          };
+        } catch (counterErr) {
+          // Still upload the repair — a lost ticket is worse than a late number.
+          console.warn('[OfflineSync] Could not claim a ticket number yet:', errorMessage(counterErr));
+        }
+      }
+
+      const { id: _localId, ...dataToSave } = body;
+      const { id: realId } = await addIdempotently('repairs', action.id, dataToSave);
+
+      done.add(action.id);
+      out.synced++;
+
+      map[tempId] = realId;
+      await saveIdMap(map);
+      await removeActions('ticket', new Set([action.id]));
+
+      // Any status/remark/parts action waiting on this temp id is re-pointed now.
+      // One multiGet instead of three sequential gets — this ran once per uploaded ticket.
+      const dependentKinds: QueueKind[] = ['status', 'remark', 'parts'];
+      const dependents = await loadQueues(dependentKinds);
+      const rebases = dependentKinds.flatMap((kind, i) => {
+        const list = dependents[i];
+        const rebased = rebaseActions(list, tempId, realId);
+        return rebased.some((a, j) => a !== list[j]) ? [saveQueue(kind, rebased)] : [];
+      });
+      if (rebases.length > 0) await Promise.all(rebases);
+
+      const cached = await readRaw<RepairTicket>(keyFor(CACHED_TICKETS_BASE));
+      if (cached.some((t) => t && t.id === tempId)) {
+        await writeRaw(
+          keyFor(CACHED_TICKETS_BASE),
+          cached.map((t) => (t && t.id === tempId ? { ...t, id: realId, ...(body.ticketNumber ? { ticketNumber: body.ticketNumber } : {}) } : t))
+        );
+      }
+    } catch (err) {
+      const { result } = await parkOrFail('ticket', action, err);
+      if (result === 'dropped') out.dropped.push(action.id);
+      else out.failed++;
+    }
+  }
+
+  return out;
+};
+
+const flushStatuses = async (map: IdMap, queuedTicketIds: Set<string>): Promise<FlushResult> => {
+  const out = emptyResult();
+
+  for (const action of await loadQueue('status')) {
+    if (!isDue(action, nowMs())) {
+      out.deferred++;
+      continue;
+    }
+    const payload = record(action);
+    const rawRef = typeof payload.ticketId === 'string' ? payload.ticketId : action.ticketRef || '';
+    const ticketId = resolveRef(map, rawRef) as string;
+
+    if (!ticketId || ticketId.startsWith('offline_') || isTicketStillQueued(map, rawRef, queuedTicketIds)) {
+      await deferAction('status', action, 'Waiting for the ticket to upload');
+      out.deferred++;
+      continue;
+    }
+
+    try {
+      const ref = doc(db, 'repairs', ticketId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        const { result } = await parkOrFail('status', action, new Error(`Ticket ${ticketId} no longer exists`));
+        if (result === 'dropped') out.dropped.push(action.id);
+        else out.failed++;
+        continue;
+      }
+
+      const current = snap.data() as Record<string, unknown>;
+      const patch = buildStatusPatch(current, {
+        status: (typeof payload.status === 'string' ? payload.status : 'pending') as RepairStatus,
+        timestamp: typeof payload.timestamp === 'string' ? payload.timestamp : nowIso(),
+        actorId: typeof payload.changerId === 'string' ? payload.changerId : undefined,
+        actorName: typeof payload.actorName === 'string' ? payload.actorName : (typeof payload.changerName === 'string' ? payload.changerName : undefined),
+        additionalUpdates: (payload.additionalUpdates as Record<string, unknown> | null) ?? null,
+      });
+
+      await updateDoc(ref, patch);
+      await removeActions('status', new Set([action.id]));
+      out.synced++;
+    } catch (err) {
+      const { result } = await parkOrFail('status', action, err);
+      if (result === 'dropped') out.dropped.push(action.id);
+      else out.failed++;
+    }
+  }
+
+  return out;
+};
+
+const flushParts = async (map: IdMap, queuedTicketIds: Set<string>): Promise<FlushResult> => {
+  const out = emptyResult();
+
+  for (const action of await loadQueue('parts')) {
+    if (!isDue(action, nowMs())) {
+      out.deferred++;
+      continue;
+    }
+    const payload = record(action);
+    const ticketId = resolveRef(map, (payload.ticketId as string) || action.ticketRef) as string;
+
+    if (!ticketId || ticketId.startsWith('offline_') || isTicketStillQueued(map, payload.ticketId as string, queuedTicketIds)) {
+      await deferAction('parts', action, 'Waiting for the ticket to upload');
+      out.deferred++;
+      continue;
+    }
+
+    try {
+      const ref = doc(db, 'repairs', ticketId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        const { result } = await parkOrFail('parts', action, new Error(`Ticket ${ticketId} no longer exists`));
+        if (result === 'dropped') out.dropped.push(action.id);
+        else out.failed++;
+        continue;
+      }
+
+      const current = snap.data() as Record<string, unknown>;
+      const parts = Array.isArray(payload.parts) ? (payload.parts as AllocatedPart[]) : [];
+
+      // The action id stamped on the document is what makes the stock move
+      // exactly once: a retry of an already-applied allocation must not take the
+      // part off the shelf a second time.
+      const alreadyApplied = current.lastPartsActionId === action.id;
+
+      if (!alreadyApplied) {
+        const previous = Array.isArray(current.partsUsed)
+          ? (current.partsUsed as AllocatedPart[])
+          : [];
+        const { failed } = await applyPartsDelta(previous, parts);
+        if (failed.length) {
+          // Park the shelf movement in its own queue; the allocation itself can
+          // still land so the ticket is not blocked behind one unknown SKU.
+          for (const f of failed) {
+            await enqueue({
+              id: newActionId('stock'),
+              kind: 'stock',
+              payload: { productId: f.delta.productId, name: f.delta.name, delta: -f.delta.delta, reason: `Repair ${ticketId} parts` } as StockPayload,
+              createdAt: nowIso(),
+              attempts: 0,
+              nextAttemptAt: 0,
+              ticketRef: ticketId,
+            });
+          }
+        }
+      }
+
+      await updateDoc(ref, {
+        partsUsed: parts.map((p) => ({
+          name: p.name,
+          cost: Number(p.cost) || 0,
+          quantity: Math.max(1, Math.trunc(Number(p.quantity) || 1)),
+          productId: p.productId || 'custom-mobile-part',
+        })),
+        lastPartsActionId: action.id,
+        updatedAt: nowIso(),
+      });
+
+      await removeActions('parts', new Set([action.id]));
+      out.synced++;
+    } catch (err) {
+      const { result } = await parkOrFail('parts', action, err);
+      if (result === 'dropped') out.dropped.push(action.id);
+      else out.failed++;
+    }
+  }
+
+  return out;
+};
+
+const flushRemarks = async (map: IdMap, queuedTicketIds: Set<string>): Promise<FlushResult> => {
+  const out = emptyResult();
+
+  for (const action of await loadQueue('remark')) {
+    if (!isDue(action, nowMs())) {
+      out.deferred++;
+      continue;
+    }
+    const payload = record(action);
+    const ticketId = resolveRef(map, (payload.ticketId as string) || action.ticketRef) as string;
+
+    if (!ticketId || ticketId.startsWith('offline_') || isTicketStillQueued(map, payload.ticketId as string, queuedTicketIds)) {
+      await deferAction('remark', action, 'Waiting for the ticket to upload');
+      out.deferred++;
+      continue;
+    }
+
+    try {
+      const ref = doc(db, 'repairs', ticketId);
+      if (!(await getDoc(ref)).exists()) {
+        const { result } = await parkOrFail('remark', action, new Error(`Ticket ${ticketId} no longer exists`));
+        if (result === 'dropped') out.dropped.push(action.id);
+        else out.failed++;
+        continue;
+      }
+
+      // Last write wins: the technician's note is the newest intent for this field.
+      await updateDoc(ref, { remark: String(payload.remark ?? ''), updatedAt: nowIso() });
+      await removeActions('remark', new Set([action.id]));
+      out.synced++;
+    } catch (err) {
+      const { result } = await parkOrFail('remark', action, err);
+      if (result === 'dropped') out.dropped.push(action.id);
+      else out.failed++;
+    }
+  }
+
+  return out;
+};
+
+const flushStock = async (): Promise<FlushResult> => {
+  const out = emptyResult();
+
+  for (const action of await loadQueue('stock')) {
+    if (!isDue(action, nowMs())) {
+      out.deferred++;
+      continue;
+    }
+    const payload = record(action) as unknown as StockPayload;
+    const delta = Math.trunc(Number(payload.delta) || 0);
+
+    if (!payload.productId || delta === 0) {
+      await removeActions('stock', new Set([action.id]));
+      out.synced++;
+      continue;
+    }
+
+    try {
+      const { failed } = await applyStockLines(
+        [{ productId: payload.productId, name: payload.name || payload.productId, quantity: Math.abs(delta) }],
+        delta < 0 ? -1 : 1
+      );
+      // applyStockLines reports per-line failure instead of throwing; a SKU the
+      // server does not know must stay queued rather than be counted as synced.
+      if (failed.length) {
+        const { result } = await parkOrFail('stock', action, new Error(failed[0].error));
+        if (result === 'dropped') out.dropped.push(action.id);
+        else out.failed++;
+        continue;
+      }
+      await removeActions('stock', new Set([action.id]));
+      out.synced++;
+    } catch (err) {
+      const { result } = await parkOrFail('stock', action, err);
+      if (result === 'dropped') out.dropped.push(action.id);
+      else out.failed++;
+    }
+  }
+
+  return out;
+};
+
+const flushSales = async (): Promise<FlushResult> => {
+  const out = emptyResult();
+
+  for (const action of await loadQueue('sale')) {
+    if (!isDue(action, nowMs())) {
+      out.deferred++;
+      continue;
+    }
+    const payload = record(action) as Record<string, unknown>;
+    const items = Array.isArray(payload.items) ? (payload.items as CartItem[]) : [];
+
+    try {
+      const { id: _localId, ...dataToSave } = payload;
+      const { id, created } = await addIdempotently('transactions', action.id, {
+        ...dataToSave,
+        saleType: dataToSave.saleType || 'retail',
+      });
+
+      // Stock moves only for a sale this pass actually created; adopting an
+      // existing document must not deduct the same units twice.
+      if (created && items.length) {
+        const lines = items
+          .map((item) => ({
+            productId: String(item?.product?.id || ''),
+            name: String(item?.product?.name || ''),
+            quantity: Math.max(1, Math.trunc(Number(item?.quantity) || 1)),
+          }))
+          .filter((l) => l.productId);
+
+        const { failed } = await applyStockLines(lines, -1);
+        for (const f of failed) {
+          await enqueue({
+            id: newActionId('stock'),
+            kind: 'stock',
+            payload: { productId: f.line.productId, name: f.line.name, delta: -f.line.quantity, reason: `Sale ${id}` } as StockPayload,
+            createdAt: nowIso(),
+            attempts: 0,
+            nextAttemptAt: 0,
+          });
+        }
+      }
+
+      await removeActions('sale', new Set([action.id]));
+      out.synced++;
+    } catch (err) {
+      const { result } = await parkOrFail('sale', action, err);
+      if (result === 'dropped') out.dropped.push(action.id);
+      else out.failed++;
+    }
+  }
+
+  return out;
+};
+
+const flushDebts = async (): Promise<FlushResult> => {
+  const out = emptyResult();
+
+  for (const action of await loadQueue('debt')) {
+    if (!isDue(action, nowMs())) {
+      out.deferred++;
+      continue;
+    }
+    const payload = record(action) as Record<string, unknown>;
+
+    try {
+      const { id: _localId, ...dataToSave } = payload;
+      await addIdempotently('customer_debts', action.id, dataToSave);
+      await removeActions('debt', new Set([action.id]));
+      out.synced++;
+    } catch (err) {
+      const { result } = await parkOrFail('debt', action, err);
+      if (result === 'dropped') out.dropped.push(action.id);
+      else out.failed++;
+    }
+  }
+
+  return out;
+};
+
+// ─── Public service ────────────────────────────────────────────────────────────
 
 export const offlineSyncService = {
   /**
-   * Subscribe to pending sync count and syncing state
+   * Tells the queue whose device this currently is. Called from the auth listener.
+   * Returns once any pre-namespacing data has been folded into this account.
    */
+  setQueueOwner: async (uid: string | null): Promise<void> => {
+    if (!uid) {
+      ownerUid = null;
+      await notifyListeners();
+      return;
+    }
+    if (ownerUid === uid) return;
+    ownerUid = uid;
+    try {
+      await migrateLegacyQueues(uid);
+    } catch (err) {
+      console.warn('[OfflineSync] Legacy queue migration failed:', errorMessage(err));
+    }
+    await notifyListeners();
+  },
+
+  getQueueOwner: (): string | null => ownerUid,
+
   subscribe: (listener: SyncListener): (() => void) => {
     listeners.add(listener);
-    offlineSyncService.getPendingCount().then(c => listener(c, isSyncing));
+    void notifyListeners();
     return () => {
       listeners.delete(listener);
     };
   },
 
-  /**
-   * Calculate total pending items across all offline queues
-   */
-  getPendingCount: async (): Promise<number> => {
-    try {
-      const [tickets, sales, statuses, debts, remarks, parts] = await Promise.all([
-        getStoredList<RepairTicket>(STORAGE_KEYS.OFFLINE_TICKETS),
-        getStoredList<SaleTransaction>(STORAGE_KEYS.OFFLINE_SALES),
-        getStoredList<OfflineStatusAction>(STORAGE_KEYS.OFFLINE_STATUS_UPDATES),
-        getStoredList<CustomerDebtEntry>(STORAGE_KEYS.OFFLINE_DEBTS),
-        getStoredList<any>(STORAGE_KEYS.OFFLINE_REMARKS),
-        getStoredList<any>(STORAGE_KEYS.OFFLINE_PARTS),
-      ]);
-      return tickets.length + sales.length + statuses.length + debts.length + remarks.length + parts.length;
-    } catch {
-      return 0;
+  getPendingCount: async (): Promise<number> => countPending(),
+
+  /** Pending writes belonging to accounts other than the one signed in. */
+  getForeignPendingCount: async (): Promise<number> => {
+    const keys = await AsyncStorage.getAllKeys();
+    const foreign: string[] = [];
+    for (const kind of KINDS) {
+      const base = KIND_BASE[kind];
+      for (const key of keys) {
+        if (isOwnerKey(key, base) && key !== keyFor(base)) foreign.push(key);
+      }
     }
+    if (!foreign.length) return 0;
+    const entries = await AsyncStorage.multiGet(foreign);
+    return entries.reduce((sum, [, value]) => {
+      try {
+        const parsed = value ? JSON.parse(value) : [];
+        return sum + (Array.isArray(parsed) ? parsed.length : 0);
+      } catch {
+        return sum;
+      }
+    }, 0);
   },
 
-  /**
-   * Enqueue a new ticket created offline
-   */
+  getDroppedCount: async (): Promise<number> => (await getDeadLetters()).length,
+
+  getDroppedActions: async (): Promise<DeadLetterEntry[]> => getDeadLetters(),
+
+  /** Puts a parked action back at the front of its queue with the retry budget reset. */
+  retryDroppedAction: async (id: string): Promise<boolean> => {
+    const dead = await getDeadLetters();
+    const entry = dead.find((d) => d.id === id);
+    if (!entry) return false;
+    await saveDeadLetters(dead.filter((d) => d.id !== id));
+    await enqueue({
+      id: entry.id,
+      kind: entry.kind,
+      payload: entry.payload,
+      createdAt: nowIso(),
+      attempts: 0,
+      nextAttemptAt: 0,
+      ticketRef: entry.ticketRef,
+    });
+    await notifyListeners();
+    return true;
+  },
+
+  dismissDroppedAction: async (id: string): Promise<void> => {
+    const dead = await getDeadLetters();
+    await saveDeadLetters(dead.filter((d) => d.id !== id));
+    await notifyListeners();
+  },
+
+  clearDroppedActions: async (): Promise<void> => {
+    await saveDeadLetters([]);
+    await notifyListeners();
+  },
+
   saveOfflineTicket: async (ticket: RepairTicket): Promise<void> => {
-    const list = await getStoredList<RepairTicket>(STORAGE_KEYS.OFFLINE_TICKETS);
-    list.unshift(ticket);
-    await setStoredList(STORAGE_KEYS.OFFLINE_TICKETS, list);
-
-    // Also update cached tickets so user immediately sees it on screen
-    const cached = await getStoredList<RepairTicket>(STORAGE_KEYS.CACHED_TICKETS);
-    await setStoredList(STORAGE_KEYS.CACHED_TICKETS, [ticket, ...cached]);
-
-    const count = await offlineSyncService.getPendingCount();
-    notifyListeners(count, isSyncing);
+    await enqueue({
+      id: newActionId('ticket'),
+      kind: 'ticket',
+      payload: ticket,
+      createdAt: nowIso(),
+      attempts: 0,
+      nextAttemptAt: 0,
+      ticketRef: ticket.id,
+    });
+    const cached = await readRaw<RepairTicket>(keyFor(CACHED_TICKETS_BASE));
+    await writeRaw(keyFor(CACHED_TICKETS_BASE), [ticket, ...cached]);
   },
 
-  /**
-   * Enqueue a POS sale completed offline
-   */
   saveOfflineSale: async (sale: SaleTransaction): Promise<void> => {
-    const list = await getStoredList<SaleTransaction>(STORAGE_KEYS.OFFLINE_SALES);
-    list.unshift(sale);
-    await setStoredList(STORAGE_KEYS.OFFLINE_SALES, list);
-
-    const count = await offlineSyncService.getPendingCount();
-    notifyListeners(count, isSyncing);
+    await enqueue({
+      id: newActionId('sale'),
+      kind: 'sale',
+      payload: sale,
+      createdAt: nowIso(),
+      attempts: 0,
+      nextAttemptAt: 0,
+    });
   },
 
-  /**
-   * Enqueue a customer debt record created offline
-   */
   saveOfflineDebt: async (debt: CustomerDebtEntry): Promise<void> => {
-    const list = await getStoredList<CustomerDebtEntry>(STORAGE_KEYS.OFFLINE_DEBTS);
-    list.unshift(debt);
-    await setStoredList(STORAGE_KEYS.OFFLINE_DEBTS, list);
-
-    const count = await offlineSyncService.getPendingCount();
-    notifyListeners(count, isSyncing);
+    await enqueue({
+      id: newActionId('debt'),
+      kind: 'debt',
+      payload: debt,
+      createdAt: nowIso(),
+      attempts: 0,
+      nextAttemptAt: 0,
+    });
   },
 
-  /**
-   * Enqueue a status update made offline
-   */
   saveOfflineStatusUpdate: async (
     ticketId: string,
     status: RepairStatus,
     changerName?: string,
-    additionalUpdates?: any
+    additionalUpdates?: Record<string, unknown> | null,
+    changerId?: string
   ): Promise<void> => {
-    const list = await getStoredList<OfflineStatusAction>(STORAGE_KEYS.OFFLINE_STATUS_UPDATES);
-    list.push({
-      id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    const payload: StatusPayload = {
       ticketId,
       status,
       changerName,
-      additionalUpdates,
-      timestamp: new Date().toISOString(),
+      changerId,
+      additionalUpdates: additionalUpdates ?? null,
+      timestamp: nowIso(),
+    };
+    await enqueue({
+      id: newActionId('status'),
+      kind: 'status',
+      payload,
+      createdAt: payload.timestamp,
+      attempts: 0,
+      nextAttemptAt: 0,
+      ticketRef: ticketId,
     });
-    await setStoredList(STORAGE_KEYS.OFFLINE_STATUS_UPDATES, list);
+  },
 
-    const count = await offlineSyncService.getPendingCount();
-    notifyListeners(count, isSyncing);
+  /** The remark queue existed in storage but nothing ever wrote to it. */
+  saveOfflineRemark: async (ticketId: string, remark: string): Promise<void> => {
+    const payload: RemarkPayload = { ticketId, remark, updatedAt: nowIso() };
+    await enqueue({
+      id: newActionId('remark'),
+      kind: 'remark',
+      payload,
+      createdAt: payload.updatedAt,
+      attempts: 0,
+      nextAttemptAt: 0,
+      ticketRef: ticketId,
+    });
+  },
+
+  /** Parts that were saved while offline: the shelf count moves when they upload. */
+  saveOfflineParts: async (
+    ticketId: string,
+    parts: AllocatedPart[],
+    actor?: { id?: string; name?: string }
+  ): Promise<void> => {
+    const payload: PartsPayload = { ticketId, parts, actorId: actor?.id, actorName: actor?.name };
+    await enqueue({
+      id: newActionId('parts'),
+      kind: 'parts',
+      payload,
+      createdAt: nowIso(),
+      attempts: 0,
+      nextAttemptAt: 0,
+      ticketRef: ticketId,
+    });
   },
 
   /**
-   * Cache tickets from Firestore for immediate offline viewing
+   * A stock movement the server never saw. Unlike a sale there is no document to
+   * stamp with an idempotency key, so the queue entry is deleted immediately after
+   * the transaction commits — the window for a double apply is one await.
    */
+  saveOfflineStockDelta: async (line: StockPayload): Promise<void> => {
+    const delta = Math.trunc(Number(line.delta) || 0);
+    if (!line.productId || delta === 0) return;
+    await enqueue({
+      id: newActionId('stock'),
+      kind: 'stock',
+      payload: { ...line, delta },
+      createdAt: nowIso(),
+      attempts: 0,
+      nextAttemptAt: 0,
+    });
+  },
+
   setCachedTickets: async (tickets: RepairTicket[]): Promise<void> => {
-    await setStoredList(STORAGE_KEYS.CACHED_TICKETS, tickets);
+    await writeRaw(keyFor(CACHED_TICKETS_BASE), tickets);
   },
 
-  /**
-   * Get cached tickets from storage
-   */
-  getCachedTickets: async (): Promise<RepairTicket[]> => {
-    return getStoredList<RepairTicket>(STORAGE_KEYS.CACHED_TICKETS);
+  getCachedTickets: async (): Promise<RepairTicket[]> =>
+    readRaw<RepairTicket>(keyFor(CACHED_TICKETS_BASE)),
+
+  setCachedProducts: async (products: PhoneModel[]): Promise<void> => {
+    await writeRaw(keyFor(CACHED_PRODUCTS_BASE), products);
   },
 
-  /**
-   * Cache inventory products for offline POS
-   */
-  setCachedProducts: async (products: any[]): Promise<void> => {
-    await setStoredList(STORAGE_KEYS.CACHED_PRODUCTS, products);
-  },
+  getCachedProducts: async (): Promise<PhoneModel[]> =>
+    readRaw<PhoneModel>(keyFor(CACHED_PRODUCTS_BASE)),
 
   /**
-   * Get cached inventory products
+   * Master sync runner. The queue is checked locally FIRST: a device with nothing
+   * pending makes no Firestore request at all, which is what keeps the heartbeat
+   * affordable on the Spark plan's read quota.
    */
-  getCachedProducts: async (): Promise<any[]> => {
-    return getStoredList<any>(STORAGE_KEYS.CACHED_PRODUCTS);
-  },
+  syncAll: async (): Promise<{ syncedCount: number; errors: boolean; droppedCount: number }> => {
+    if (isSyncing) return { syncedCount: 0, errors: false, droppedCount: 0 };
 
-  /**
-   * Master sync runner: checks connection and flushes all offline queues to Firestore
-   */
-  syncAll: async (): Promise<{ syncedCount: number; errors: boolean }> => {
-    if (isSyncing) return { syncedCount: 0, errors: false };
+    const initialPending = await countPending();
+    if (initialPending === 0) return { syncedCount: 0, errors: false, droppedCount: 0 };
 
-    // 1. Check internet connectivity with a quick lightweight probe
     try {
-      const probeQuery = query(collection(db, 'repairs'), limit(1));
-      await getDocs(probeQuery);
-    } catch (e: any) {
-      // Still offline or connection timed out
-      return { syncedCount: 0, errors: false };
+      await getDocs(query(collection(db, 'repairs'), limit(1)));
+    } catch {
+      return { syncedCount: 0, errors: false, droppedCount: 0 };
     }
-
-    const initialPending = await offlineSyncService.getPendingCount();
-    if (initialPending === 0) return { syncedCount: 0, errors: false };
 
     isSyncing = true;
-    notifyListeners(initialPending, true);
+    await notifyListeners();
 
     let syncedCount = 0;
-    let hasErrors = false;
+    let failedCount = 0;
+    let droppedCount = 0;
 
     try {
-      console.log(`[OfflineSync] Reconnected! Flushing ${initialPending} pending offline item(s)...`);
+      const map = await loadIdMap();
+      const queuedTicketIds = new Set(
+        (await loadQueue('ticket'))
+          .map((a) => {
+            const payload = record(a) as Record<string, unknown>;
+            return typeof payload.id === 'string' ? payload.id : a.ticketRef;
+          })
+          .filter((id): id is string => !!id)
+      );
 
-      // ─── 1. Flush Offline Tickets ──────────────────────────────────────────
-      const pendingTickets = await getStoredList<RepairTicket>(STORAGE_KEYS.OFFLINE_TICKETS);
-      if (pendingTickets.length > 0) {
-        const remainingTickets: RepairTicket[] = [];
-        for (const ticket of pendingTickets) {
-          try {
-            const { id: oldTempId, ...ticketData } = ticket;
-            const docRef = await addDoc(collection(db, 'repairs'), {
-              ...ticketData,
-              syncedAt: new Date().toISOString(),
-            });
-            syncedCount++;
+      const results: Record<QueueKind, FlushResult> = {
+        ticket: await flushTickets(map),
+        status: emptyResult(),
+        parts: emptyResult(),
+        remark: emptyResult(),
+        stock: emptyResult(),
+        sale: emptyResult(),
+        debt: emptyResult(),
+      };
 
-            // Update cached tickets with the real Firestore ID
-            const cached = await getStoredList<RepairTicket>(STORAGE_KEYS.CACHED_TICKETS);
-            const updatedCached = cached.map(t => (t.id === oldTempId ? { ...t, id: docRef.id } : t));
-            await setStoredList(STORAGE_KEYS.CACHED_TICKETS, updatedCached);
-          } catch (tErr) {
-            console.error('[OfflineSync] Failed to upload ticket:', tErr);
-            remainingTickets.push(ticket);
-            hasErrors = true;
-          }
-        }
-        await setStoredList(STORAGE_KEYS.OFFLINE_TICKETS, remainingTickets);
+      results.status = await flushStatuses(map, queuedTicketIds);
+      results.parts = await flushParts(map, queuedTicketIds);
+      results.remark = await flushRemarks(map, queuedTicketIds);
+      results.stock = await flushStock();
+      results.sale = await flushSales();
+      results.debt = await flushDebts();
+
+      for (const kind of KINDS) {
+        syncedCount += results[kind].synced;
+        failedCount += results[kind].failed;
+        droppedCount += results[kind].dropped.length;
       }
 
-      // ─── 2. Flush Offline POS Sales ────────────────────────────────────────
-      const pendingSales = await getStoredList<SaleTransaction>(STORAGE_KEYS.OFFLINE_SALES);
-      if (pendingSales.length > 0) {
-        const remainingSales: SaleTransaction[] = [];
-        for (const sale of pendingSales) {
-          try {
-            const { id: _, ...saleData } = sale;
-            await addDoc(collection(db, 'transactions'), {
-              ...saleData,
-              saleType: saleData.saleType || 'retail',
-              syncedAt: new Date().toISOString(),
-            });
-            syncedCount++;
-
-            // Deduct stock in Firestore collection 'inventory' (or 'products' fallback)
-            if (sale.items && Array.isArray(sale.items)) {
-              for (const item of sale.items) {
-                try {
-                  const invRef = doc(db, 'inventory', item.product.id);
-                  const invSnap = await getDoc(invRef);
-                  if (invSnap.exists()) {
-                    const cur = invSnap.data();
-                    const currentStock = cur.stock ?? item.product.stock;
-                    const newStock = Math.max(0, currentStock - item.quantity);
-                    const threshold = cur.lowStockThreshold ?? item.product.lowStockThreshold ?? 1;
-                    const stockStatus = newStock === 0 ? 'out_of_stock' : newStock <= threshold ? 'low_stock' : 'in_stock';
-                    await updateDoc(invRef, { stock: newStock, stockStatus });
-                  } else {
-                    const prodRef = doc(db, 'products', item.product.id);
-                    const prodSnap = await getDoc(prodRef);
-                    if (prodSnap.exists()) {
-                      const cur = prodSnap.data();
-                      const currentStock = cur.stock ?? item.product.stock;
-                      const newStock = Math.max(0, currentStock - item.quantity);
-                      const threshold = cur.lowStockThreshold ?? item.product.lowStockThreshold ?? 1;
-                      const stockStatus = newStock === 0 ? 'out_of_stock' : newStock <= threshold ? 'low_stock' : 'in_stock';
-                      await updateDoc(prodRef, { stock: newStock, stockStatus });
-                    }
-                  }
-                } catch (stockErr) {
-                  console.warn('[OfflineSync] Failed to deduct stock for synced item:', stockErr);
-                }
-              }
-            }
-          } catch (sErr) {
-            console.error('[OfflineSync] Failed to upload sale transaction:', sErr);
-            remainingSales.push(sale);
-            hasErrors = true;
-          }
-        }
-        await setStoredList(STORAGE_KEYS.OFFLINE_SALES, remainingSales);
+      if (syncedCount) console.log(`[OfflineSync] Uploaded ${syncedCount} queued item(s).`);
+      if (droppedCount) {
+        console.warn(
+          `[OfflineSync] ${droppedCount} action(s) failed ${MAX_ATTEMPTS} times and are parked for an admin to redo.`
+        );
       }
-
-      // ─── 3. Flush Offline Status Updates ──────────────────────────────────
-      const pendingStatuses = await getStoredList<OfflineStatusAction>(STORAGE_KEYS.OFFLINE_STATUS_UPDATES);
-      if (pendingStatuses.length > 0) {
-        const remainingStatuses: OfflineStatusAction[] = [];
-        for (const act of pendingStatuses) {
-          try {
-            const docRef = doc(db, 'repairs', act.ticketId);
-            const updatePayload: any = {
-              status: act.status,
-              updatedAt: act.timestamp,
-              ...(act.additionalUpdates || {}),
-            };
-            await updateDoc(docRef, updatePayload);
-            syncedCount++;
-          } catch (uErr) {
-            console.error('[OfflineSync] Failed to apply offline status update:', uErr);
-            remainingStatuses.push(act);
-            hasErrors = true;
-          }
-        }
-        await setStoredList(STORAGE_KEYS.OFFLINE_STATUS_UPDATES, remainingStatuses);
-      }
-
-      // ─── 4. Flush Offline Customer Debts ──────────────────────────────────
-      const pendingDebts = await getStoredList<CustomerDebtEntry>(STORAGE_KEYS.OFFLINE_DEBTS);
-      if (pendingDebts.length > 0) {
-        const remainingDebts: CustomerDebtEntry[] = [];
-        for (const debt of pendingDebts) {
-          try {
-            const { id: _, ...dataToSave } = debt;
-            await addDoc(collection(db, 'customer_debts'), dataToSave);
-            syncedCount++;
-          } catch (dErr) {
-            console.error('[OfflineSync] Failed to upload customer debt:', dErr);
-            remainingDebts.push(debt);
-            hasErrors = true;
-          }
-        }
-        await setStoredList(STORAGE_KEYS.OFFLINE_DEBTS, remainingDebts);
-      }
-
-      console.log(`[OfflineSync] Sync complete. Successfully sent ${syncedCount} item(s) to Firestore.`);
-      return { syncedCount, errors: hasErrors };
     } finally {
       isSyncing = false;
-      const remainingCount = await offlineSyncService.getPendingCount();
-      notifyListeners(remainingCount, false);
+      await notifyListeners();
     }
+
+    return { syncedCount, errors: failedCount > 0, droppedCount };
   },
 
   /**
-   * Start background sync heartbeat
+   * Heartbeat. Slower than the previous 15s and paired with an app-foreground
+   * trigger, because the queue is checked locally before any network call.
    */
   init: (): (() => void) => {
-    // Initial check
-    offlineSyncService.syncAll().catch(console.warn);
+    void offlineSyncService.syncAll();
 
-    // Periodic 15-second heartbeat
     const intervalId = setInterval(() => {
-      offlineSyncService.syncAll().catch(console.warn);
-    }, 15000);
+      void offlineSyncService.syncAll();
+    }, 60_000);
+
+    const stateSubscription = AppState.addEventListener(
+      'change',
+      (status: AppStateStatus) => {
+        if (status === 'active') void offlineSyncService.syncAll();
+      }
+    );
 
     return () => {
       clearInterval(intervalId);
+      stateSubscription.remove();
     };
   },
 };

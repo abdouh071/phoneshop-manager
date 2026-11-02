@@ -35,9 +35,11 @@ import { useAuthStore } from '../store/authStore';
 import { usePosStore } from '../store/posStore';
 import { activityLogService } from '../services/activityLogService';
 import { RoleBottomNav } from '../components/RoleBottomNav';
+import { useTranslation } from 'react-i18next';
 import type { PhoneModel, ProductCategory, StockStatus } from '../types';
 
 export const InventoryScreen = ({ navigation }: any) => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const { addToCart } = usePosStore();
@@ -179,7 +181,10 @@ export const InventoryScreen = ({ navigation }: any) => {
           setExactStockInput(matched.stock.toString());
           setIsAdjustModalOpen(true);
         } else {
-          Alert.alert('Scanned', `Barcode "${scannedCode}" filtered in inventory.`);
+          Alert.alert(
+          t('inventory.scannedTitle', 'Scanned'),
+          t('inventory.scannedBody', 'Barcode "{{code}}" filtered in inventory.', { code: scannedCode })
+        );
         }
       },
     });
@@ -238,7 +243,7 @@ export const InventoryScreen = ({ navigation }: any) => {
       setIsAdjustModalOpen(false);
       setTargetProduct(null);
     } catch (err: any) {
-      Alert.alert('Adjustment Failed', err.message || 'Could not update stock.');
+      Alert.alert(t('inventory.adjustFailedTitle', 'Adjustment Failed'), err.message || t('inventory.adjustFailed', 'Could not update stock.'));
     } finally {
       setIsUpdatingStock(false);
     }
@@ -247,17 +252,17 @@ export const InventoryScreen = ({ navigation }: any) => {
   // Quick Add Product to POS Cart
   const handleAddToCart = (product: PhoneModel) => {
     if (product.stock <= 0) {
-      Alert.alert('Out of Stock', 'This product has 0 units available.');
+      Alert.alert(t('common.outOfStock', 'Out of Stock'), t('inventory.zeroUnits', 'This product has 0 units available.'));
       return;
     }
     addToCart(product, 1);
     Vibration.vibrate(30);
     Alert.alert(
-      'Added to Cart',
-      `${product.name} added to cart. Tap POS to complete the sale.`,
+      t('inventory.addedToCart', 'Added to Cart'),
+      t('inventory.addedToCartBody', '{{name}} added to cart. Tap POS to complete the sale.', { name: product.name }),
       [
-        { text: 'Keep Browsing' },
-        { text: 'Go to POS', onPress: () => navigation.navigate('POS') },
+        { text: t('inventory.keepBrowsing', 'Keep Browsing') },
+        { text: t('inventory.goToPos', 'Go to POS'), onPress: () => navigation.navigate('POS') },
       ]
     );
   };
@@ -265,7 +270,7 @@ export const InventoryScreen = ({ navigation }: any) => {
   // Save New Product
   const handleSaveNewProduct = async () => {
     if (!newProdName.trim() || !newProdPrice.trim()) {
-      Alert.alert('Missing Info', 'Please enter at least a product name and selling price.');
+      Alert.alert(t('inventory.missingInfo', 'Missing Info'), t('inventory.missingInfoBody', 'Please enter at least a product name and selling price.'));
       return;
     }
 
@@ -319,9 +324,9 @@ export const InventoryScreen = ({ navigation }: any) => {
       setNewProdSku('');
       setNewProdBarcode('');
 
-      Alert.alert('Product Created', `${newProductData.name} added to inventory.`);
+      Alert.alert(t('inventory.productCreated', 'Product Created'), t('inventory.productCreatedBody', '{{name}} added to inventory.', { name: newProductData.name }));
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Could not save product.');
+      Alert.alert(t('common.error', 'Error'), err.message || t('inventory.saveProductFailed', 'Could not save product.'));
     } finally {
       setIsSavingNewProduct(false);
     }
@@ -362,7 +367,7 @@ export const InventoryScreen = ({ navigation }: any) => {
       setIsEditModalOpen(false);
       setEditProduct(null);
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to update details.');
+      Alert.alert(t('common.error', 'Error'), err.message || t('inventory.updateDetailsFailed', 'Failed to update details.'));
     } finally {
       setIsSavingEdit(false);
     }
