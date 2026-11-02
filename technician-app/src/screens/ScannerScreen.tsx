@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Camera, CameraView } from 'expo-camera';
-import { Text, Appbar, ActivityIndicator, useTheme } from 'react-native-paper';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Text, Appbar, ActivityIndicator } from 'react-native-paper';
+import { useTranslation } from 'react-i18next';
+import { colors, fontSize, radius, spacing } from '../theme/tokens';
 
 export const ScannerScreen = ({ navigation, route }: any) => {
+  const { t } = useTranslation();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
-  const theme = useTheme();
 
   useEffect(() => {
     const getCameraPermissions = async () => {
@@ -18,7 +19,7 @@ export const ScannerScreen = ({ navigation, route }: any) => {
     getCameraPermissions();
   }, []);
 
-  const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
+  const handleBarCodeScanned = ({ data }: { type: string; data: string }) => {
     setScanned(true);
     // Return the scanned data back to the previous screen (WorkbenchScreen)
     if (route.params?.onScan) {
@@ -30,16 +31,16 @@ export const ScannerScreen = ({ navigation, route }: any) => {
   if (hasPermission === null) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color={theme.colors.primary} />
+        <ActivityIndicator size="large" color={colors.brand} />
       </View>
     );
   }
   if (hasPermission === false) {
     return (
       <View style={styles.centerContainer}>
-        <Text style={styles.errorText}>No access to camera</Text>
-        <TouchableOpacity style={styles.button} onPress={() => navigation.goBack()}>
-          <Text style={styles.buttonText}>Go Back</Text>
+        <Text style={styles.errorText}>{t('scanner.noCameraAccess', 'No access to camera')}</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Text style={styles.backButtonText}>{t('common.back', 'Back')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -47,9 +48,12 @@ export const ScannerScreen = ({ navigation, route }: any) => {
 
   return (
     <View style={styles.container}>
-      <Appbar.Header style={{ backgroundColor: '#0f172a' }}>
-        <Appbar.BackAction onPress={() => navigation.goBack()} color="#fff" />
-        <Appbar.Content title="Scan Ticket Barcode" titleStyle={{ color: '#fff' }} />
+      <Appbar.Header style={styles.header}>
+        <Appbar.BackAction onPress={() => navigation.goBack()} color={colors.textInverse} />
+        <Appbar.Content
+          title={t('scanner.title', 'Scan Ticket Barcode')}
+          titleStyle={styles.headerTitle}
+        />
       </Appbar.Header>
 
       <CameraView
@@ -84,28 +88,37 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'column',
     justifyContent: 'center',
-    backgroundColor: '#000',
+    backgroundColor: colors.cameraCanvas,
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8fafc',
+    backgroundColor: colors.background,
+  },
+  header: {
+    backgroundColor: colors.brand,
+  },
+  headerTitle: {
+    color: colors.textInverse,
+    fontWeight: '700',
+    fontSize: fontSize.title,
   },
   errorText: {
-    fontSize: 18,
-    color: '#ef4444',
-    marginBottom: 20,
+    fontSize: fontSize.subtitle,
+    color: colors.danger,
+    marginBottom: spacing.xl,
   },
-  button: {
-    backgroundColor: '#3b82f6',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
+  backButton: {
+    backgroundColor: colors.brand,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    borderRadius: radius.sm,
   },
-  buttonText: {
-    color: '#fff',
-    fontWeight: 'bold',
+  backButtonText: {
+    color: colors.onBrand,
+    fontSize: fontSize.body,
+    fontWeight: '700',
   },
   overlay: {
     position: 'absolute',
@@ -116,7 +129,7 @@ const styles = StyleSheet.create({
   },
   unfocusedContainer: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: colors.cameraScrim,
   },
   middleContainer: {
     flexDirection: 'row',
@@ -131,7 +144,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 40,
     height: 40,
-    borderColor: '#3b82f6',
+    borderColor: colors.onBrand,
   },
   topLeft: { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4 },
   topRight: { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4 },

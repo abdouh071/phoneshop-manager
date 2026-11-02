@@ -1,5 +1,6 @@
 {
   "common": {
+    "clear": "Clear",
     "cancel": "Cancel",
     "success": "Success",
     "error": "Error",
@@ -186,6 +187,8 @@
     "completeHandover": "Complete Handover"
   },
   "newTicket": {
+    "remarksPlaceholder": "e.g. Scratched back, missing SIM tray, water indicator pink",
+    "tapPattern": "Tap dots to draw pattern",
     "title": "New Repair Ticket",
     "subtitle": "Enter device and customer details below.",
     "customerInfo": "Customer Info",
@@ -532,6 +535,10 @@
     "detailsPlaceholder": "e.g. Refund 1,500 DA, remove item 2, change to cash...",
     "requestWarning": "This submission will alert the desktop manager in real-time. Once approved, the adjustments will be automatically processed.",
     "submitRequest": "Submit Approval Request"
+  },
+  "scanner": {
+    "title": "Scan Ticket Barcode",
+    "noCameraAccess": "No access to camera"
   },
   "reports": {
     "viewDaily": "Daily",

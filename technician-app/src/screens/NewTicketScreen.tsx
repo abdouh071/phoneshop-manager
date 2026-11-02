@@ -180,7 +180,7 @@ export const NewTicketScreen = ({ navigation }: any) => {
             label={t('newTicket.remarks', 'Condition / Findings (Optional)')}
             value={remark}
             onChangeText={setRemark}
-            placeholder="e.g. Scratched back, missing SIM tray, water indicator pink"
+            placeholder={t('newTicket.remarksPlaceholder', 'e.g. Scratched back, missing SIM tray, water indicator pink')}
             mode="outlined"
             multiline
             numberOfLines={2}
@@ -248,7 +248,7 @@ export const NewTicketScreen = ({ navigation }: any) => {
           
           {lockType === 'pin' && (
             <TextInput
-              label="Enter PIN / Password"
+              label={t('newTicket.enterPin', 'Enter PIN / Password')}
               value={lockValue}
               onChangeText={setLockValue}
               mode="outlined"
@@ -262,11 +262,13 @@ export const NewTicketScreen = ({ navigation }: any) => {
             <View style={styles.patternBox}>
               <View style={styles.patternHeaderRow}>
                 <Text style={styles.patternSequence}>
-                  {patternDots.length > 0 ? patternDots.join(' ➔ ') : 'Tap dots to draw pattern'}
+                  {patternDots.length > 0
+                    ? patternDots.join(', ')
+                    : t('newTicket.tapPattern', 'Tap dots to draw pattern')}
                 </Text>
                 {patternDots.length > 0 && (
                   <Button mode="text" compact textColor="#ef4444" onPress={handleClearPattern}>
-                    Clear
+                    {t('common.clear', 'Clear')}
                   </Button>
                 )}
               </View>

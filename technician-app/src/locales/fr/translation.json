@@ -1,5 +1,6 @@
 {
   "common": {
+    "clear": "Effacer",
     "cancel": "Annuler",
     "success": "Succès",
     "error": "Erreur",
@@ -186,6 +187,8 @@
     "completeHandover": "Terminer la remise"
   },
   "newTicket": {
+    "remarksPlaceholder": "ex. Dos rayé, tiroir SIM manquant, indicateur d'eau rose",
+    "tapPattern": "Touchez les points pour tracer le schéma",
     "title": "Nouveau Ticket de Réparation",
     "subtitle": "Entrez les détails de l'appareil et du client ci-dessous.",
     "customerInfo": "Informations client",
@@ -532,6 +535,10 @@
     "detailsPlaceholder": "Ex. : rembourser 1 500 DA, retirer l'article 2, passer en espèces...",
     "requestWarning": "Cette demande alerte le gestionnaire de bureau en temps réel. Une fois approuvée, les ajustements sont traités automatiquement.",
     "submitRequest": "Envoyer la demande d'approbation"
+  },
+  "scanner": {
+    "title": "Scanner le code-barres du ticket",
+    "noCameraAccess": "Aucun accès à la caméra"
   },
   "reports": {
     "viewDaily": "Journée",

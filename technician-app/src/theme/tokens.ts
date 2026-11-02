@@ -99,6 +99,10 @@ export const colors = {
   /** One scrim value for every hand-rolled modal and for Paper's dialogs. */
   backdrop: 'rgba(15, 23, 42, 0.4)',
 
+  /** The camera screen is the one place that wants true black, not slate. */
+  cameraCanvas: ramp.black,
+  cameraScrim: 'rgba(0, 0, 0, 0.6)',
+
   // Brand
   brand: ramp.indigo600,
   brandPressed: ramp.indigo700,

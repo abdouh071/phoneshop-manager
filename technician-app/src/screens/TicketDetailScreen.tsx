@@ -407,7 +407,7 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
                     {
                       sequence:
                         parsedPatternDots.length > 0
-                          ? parsedPatternDots.join(' ➔ ')
+                          ? parsedPatternDots.join(', ')
                           : ticket.lockValue || t('ticketDetail.drawPattern', 'Draw pattern'),
                     }
                   )}
