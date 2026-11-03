@@ -122,7 +122,7 @@ describe('planSaleEditStock', () => {
     expect(plan.shortages).toHaveLength(0);
   });
 
-  it('keeps a sale row and a return row of one model as two movements', () => {
+  it('counts a sale row and a return row of one model apart, then writes their sum once', () => {
     const twin = phone('p1');
     const plan = planSaleEditStock(
       [line(twin, 3), line(twin, 1, { isReturn: true, restock: true })],
@@ -131,12 +131,25 @@ describe('planSaleEditStock', () => {
       shelf
     );
 
-    // The sale row hands a unit back and the return row takes one more in. Both go on
-    // the shelf, and neither cancels the other out.
-    expect(plan.deltas).toEqual([
-      { productId: 'p1', name: 'Phone', delta: 1 },
-      { productId: 'p1', name: 'Phone', delta: 1 },
-    ]);
+    // The sale row hands a unit back and the return row takes one more in. Counting
+    // them as one row would lose the second movement, but the shelf gets a single
+    // write of both: two transactions opening on one document would abort each other.
+    expect(plan.deltas).toEqual([{ productId: 'p1', name: 'Phone', delta: 2 }]);
+  });
+
+  it('writes nothing when the two kinds of one model cancel each other out', () => {
+    const twin = phone('p1');
+    const plan = planSaleEditStock(
+      [line(twin, 2), line(twin, 2, { isReturn: true, restock: true })],
+      [line(twin, 1), line(twin, 1, { isReturn: true, restock: true })],
+      {},
+      shelf
+    );
+
+    // The sale row gives a unit back and the return row takes the same unit out. The
+    // shelf ends where it started, so the document is corrected without a write.
+    expect(plan.deltas).toHaveLength(0);
+    expect(plan.shortages).toHaveLength(0);
   });
 
   it('plans nothing when no line moved', () => {

@@ -62,7 +62,10 @@ const labelOf = (item: CartItem): string =>
  * Units are totalled per product AND per kind, because the editor gives one SKU one
  * control and applies it to every row that carries it: an exchange invoice can hold a
  * sale row and a return row of the same model, and those two move the shelf in
- * opposite directions.
+ * opposite directions. They are then merged back into one number per product, because
+ * the two sides of the same document cannot be written twice at once — a stock commit
+ * reads the shelf and writes it, and Firestore aborts the loser of two concurrent
+ * transactions on one product.
  */
 export const planSaleEditStock = (
   originalItems: CartItem[],
@@ -73,6 +76,7 @@ export const planSaleEditStock = (
   const deltas: SaleEditStockDelta[] = [];
   const shortages: SaleEditStockShortage[] = [];
   const totals = new Map<string, StockGroup>();
+  const movements = new Map<string, { name: string; delta: number }>();
 
   const collect = (items: CartItem[], side: 'sold' | 'now') => {
     items.forEach(item => {
@@ -112,13 +116,21 @@ export const planSaleEditStock = (
     const delta = group.isReturn ? moved : -moved;
     if (delta > 0 && returnToStockOptions[group.productId] === false) return;
 
+    const current = movements.get(group.productId);
+    if (current) current.delta += delta;
+    else movements.set(group.productId, { name: group.name, delta });
+  });
+
+  movements.forEach(({ name, delta }, productId) => {
+    if (delta === 0) return;
+
     if (delta < 0) {
       const wanted = -delta;
-      const level = shelf.find(p => p.id === group.productId);
+      const level = shelf.find(p => p.id === productId);
       if (level && (Number(level.stock) || 0) < wanted) {
         shortages.push({
-          productId: group.productId,
-          name: group.name,
+          productId,
+          name,
           wanted,
           available: Math.max(0, Number(level.stock) || 0),
         });
@@ -126,7 +138,7 @@ export const planSaleEditStock = (
       }
     }
 
-    deltas.push({ productId: group.productId, name: group.name, delta });
+    deltas.push({ productId, name, delta });
   });
 
   return { deltas, shortages };
