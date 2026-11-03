@@ -26,6 +26,7 @@ import { collection, doc, getDoc, getDocs, limit, query, updateDoc } from 'fireb
 import { db } from '../lib/firebase';
 import { addIdempotently } from './idempotentReplay';
 import { allocateTicketNumber } from './ticketCounter';
+import { customerService } from './customerService';
 import { applyPartsDelta, applyStockLines } from './stockService';
 import {
   MAX_ATTEMPTS,
@@ -684,6 +685,7 @@ const flushSales = async (): Promise<FlushResult> => {
         ...dataToSave,
         saleType: dataToSave.saleType || 'retail',
       });
+      const settlement = dataToSave.accountSettlement as SaleTransaction['accountSettlement'];
 
       // Stock moves only for a sale this pass actually created; adopting an
       // existing document must not deduct the same units twice.
@@ -707,6 +709,19 @@ const flushSales = async (): Promise<FlushResult> => {
             nextAttemptAt: 0,
           });
         }
+      }
+
+      // And the same rule for the customer's own numbers: the till left them alone for
+      // a sale it could not write, so this pass adds them once — from the settlement the
+      // invoice carries, which is what the counter reads too.
+      const customerId = String(dataToSave.customerId || '');
+      if (created && customerId) {
+        const charged = Math.max(0, Number(settlement?.chargedAmount) || 0);
+        await customerService.recordSaleOnProfile(
+          customerId,
+          Math.max(0, (Number(dataToSave.total) || 0) - charged),
+          charged
+        );
       }
 
       await removeActions('sale', new Set([action.id]));

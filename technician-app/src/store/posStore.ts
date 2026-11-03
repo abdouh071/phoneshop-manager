@@ -267,6 +267,13 @@ export const usePosStore = create<PosState>((set, get) => ({
       }
     }
 
+    // The profile of the man this sale was written on gains what it took in. A sale
+    // this phone could not write is recorded by the sync pass that creates its
+    // document instead, so an invoice is never counted on the customer twice.
+    if (saleUploaded && cust) {
+      await customerService.recordSaleOnProfile(cust.id, total - debtAmount, debtAmount);
+    }
+
     // If debt payment or partial payment, record customer debt entry
     if (debtAmount > 0 && cust) {
       const itemsSummary = cart.map(i => `${i.quantity}x ${i.product.name} ${i.product.model || ''}`.trim()).join(', ');

@@ -4,6 +4,7 @@ import {
   getDocs,
   getDoc,
   addDoc,
+  increment,
   updateDoc,
   query,
   where,
@@ -230,6 +231,36 @@ export const customerService = {
       }
     } catch (e) {
       console.warn('[CustomerService] Failed to record customer spending:', e);
+    }
+  },
+
+  /**
+   * What one sale adds to the profile it was written on: the money that came into the
+   * drawer, what went onto the account, and the visit itself.
+   *
+   * The counter answers the same question by recomputing the customer from the whole
+   * history it already holds in memory. A phone holds no such list, and fetching one at
+   * every sale would bill a read of the man's past for each cable sold — so the server
+   * adds the numbers instead. That is also what keeps two tills selling to the same
+   * customer in the same minute from overwriting each other, which a read-then-write
+   * here would.
+   */
+  recordSaleOnProfile: async (customerId: string, paid: number, charged: number): Promise<void> => {
+    if (!customerId) return;
+    const cents = (n: number) => Math.round(Math.max(0, n) * 100) / 100;
+
+    const updates: Record<string, unknown> = {
+      lastVisitDate: new Date().toISOString(),
+      totalPurchases: increment(1),
+    };
+    if (paid > 0) updates.totalSpent = increment(cents(paid));
+    if (charged > 0) updates.totalDebt = increment(cents(charged));
+
+    try {
+      await updateDoc(doc(db, 'customers', customerId), updates);
+    } catch (e) {
+      // A profile that has gone missing must not stop the till from selling.
+      console.warn('[CustomerService] Sale could not be recorded on the customer:', e);
     }
   }
 };
