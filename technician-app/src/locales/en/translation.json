@@ -352,6 +352,14 @@
     "sellingPrice": "Selling Price",
     "costPrice": "Cost: {{price}} DA",
     "editPrice": "Edit Price",
+    "askPriceChange": "Ask to change price",
+    "priceDelta": "price {{from}} → {{to}} DA",
+    "costDelta": "cost {{from}} → {{to}} DA",
+    "thresholdDelta": "low-stock alert {{from}} → {{to}}",
+    "priceApprovalLabel": "{{name}} {{model}}: {{oldPrice}} DA → {{newPrice}} DA",
+    "approvalLineStock": "In stock: {{n}}",
+    "nothingChanged": "Nothing to change",
+    "nothingChangedBody": "The price, cost and alert threshold are already set to these values.",
     "adjustStock": "Adjust Stock",
     "sellInPos": "Sell in POS",
     "noProducts": "No Products Found",
@@ -399,7 +407,10 @@
     "edit": {
       "title": "Edit Product Pricing",
       "threshold": "Low Stock Alert Threshold",
-      "save": "Save Changes"
+      "reasonForAdmin": "Why? Sent to the admin (optional)",
+      "reasonPlaceholder": "e.g. Supplier raised the cost",
+      "save": "Save Changes",
+      "askAdmin": "Ask an admin to approve"
     }
   },
   "pos": {

@@ -8,7 +8,7 @@
  * a request goes into `approvalRequests`, every admin is pushed, and whoever
  * answers unlocks this screen through the live listener.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Button, Text } from 'react-native-paper';
 import { Modal, StyleSheet, TouchableOpacity, Vibration, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -56,35 +56,42 @@ export const AdminApprovalSheet = ({
   const [detail, setDetail] = useState<string | null>(null);
   const [resolvedBy, setResolvedBy] = useState<string | null>(null);
 
-  const sentFor = useRef<string | null>(null);
+  const started = useRef(false);
   const pending = useRef<string | null>(null);
   const approvedRef = useRef(onApproved);
-  useEffect(() => {
-    approvedRef.current = onApproved;
-  }, [onApproved]);
-  const payloadKey = useMemo(() => JSON.stringify(payload), [payload]);
+  const payloadRef = useRef(payload);
   const [attempt, setAttempt] = useState(0);
 
-  // One request per thing being approved, even if the parent re-renders the sheet
-  // while the technician waits.
   useEffect(() => {
-    if (!visible) return;
-    if (sentFor.current === payloadKey) return;
-    sentFor.current = payloadKey;
+    approvedRef.current = onApproved;
+    payloadRef.current = payload;
+  }, [onApproved, payload]);
+
+  /**
+   * One request per opening. The parent keeps re-rendering while the technician
+   * waits — and on the price screen it clears the edited product the moment the
+   * approved write lands — so a changed payload must never become a second
+   * request behind the admin's back.
+   */
+  useEffect(() => {
+    if (!visible || started.current) return;
+    started.current = true;
     setStatus('submitting');
     setDetail(null);
-    submitRequest(payload)
+    setResolvedBy(null);
+    setRequestId(null);
+    submitRequest(payloadRef.current)
       .then((id) => {
         pending.current = id;
         setRequestId(id);
         setStatus('waiting');
       })
       .catch((err) => {
-        sentFor.current = null;
+        started.current = false;
         setDetail(message(err));
         setStatus('failed');
       });
-  }, [visible, payloadKey, payload, submitRequest, attempt]);
+  }, [visible, submitRequest, attempt]);
 
   useEffect(() => {
     if (!requestId) return undefined;
@@ -114,6 +121,7 @@ export const AdminApprovalSheet = ({
   // would sit on every admin's list forever, so it dies with this screen.
   useEffect(() => {
     if (visible) return;
+    started.current = false;
     const orphan = pending.current;
     if (!orphan) return;
     pending.current = null;
@@ -129,7 +137,7 @@ export const AdminApprovalSheet = ({
   );
 
   const retry = useCallback(() => {
-    sentFor.current = null;
+    started.current = false;
     setRequestId(null);
     setStatus('submitting');
     setAttempt((n) => n + 1);

@@ -40,6 +40,7 @@ import type { PhoneModel, ProductCategory, StockStatus } from '../types';
 import { buildSearch, matchesSearch } from '../utils/search';
 import { findCodeCollisions, resolveProductByCode } from '../utils/productCode';
 import { askWhichProduct } from '../utils/productCodePrompt';
+import { AdminApprovalSheet, type ApprovalPayload } from '../components/AdminApprovalSheet';
 import { colors, fontSize, radius, ramp, spacing, stockStatusColors } from '../theme/tokens';
 
 type InventoryMetrics = {
@@ -221,7 +222,10 @@ export const InventoryScreen = ({ navigation }: any) => {
   const [editPrice, setEditPrice] = useState('');
   const [editCostPrice, setEditCostPrice] = useState('');
   const [editThreshold, setEditThreshold] = useState('');
+  const [editReason, setEditReason] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isAskingPriceApproval, setIsAskingPriceApproval] = useState(false);
+  const [priceGrant, setPriceGrant] = useState<string | null>(null);
 
   useEffect(() => {
     if (!can.inventory_products) {
@@ -494,32 +498,90 @@ export const InventoryScreen = ({ navigation }: any) => {
   };
 
   // Quick Edit Price / Threshold
+  const isAdmin = user?.role === 'admin';
+
   const handleOpenEditModal = (product: PhoneModel) => {
     setEditProduct(product);
     setEditPrice(product.price.toString());
     setEditCostPrice((product.costPrice || 0).toString());
     setEditThreshold((product.lowStockThreshold || 1).toString());
+    setEditReason('');
+    setPriceGrant(null);
     setIsEditModalOpen(true);
   };
 
-  const handleSaveEditProduct = async () => {
+  const proposedPrice = editProduct ? parseFloat(editPrice) || editProduct.price : 0;
+  const proposedCostPrice = editProduct ? parseFloat(editCostPrice) || 0 : 0;
+  const proposedThreshold = editProduct ? parseInt(editThreshold, 10) || 1 : 1;
+
+  // An answer covers the exact numbers it was given for: change one of them after
+  // an approval and the technician has to ask again.
+  const priceGrantKey = editProduct
+    ? `${editProduct.id}|${proposedPrice}|${proposedCostPrice}|${proposedThreshold}`
+    : '';
+  const priceApproved = priceGrant === priceGrantKey;
+
+  const priceChanges = editProduct
+    ? [
+        proposedPrice !== editProduct.price &&
+          t('inventory.priceDelta', 'price {{from}} → {{to}} DA', { from: editProduct.price, to: proposedPrice }),
+        proposedCostPrice !== (editProduct.costPrice || 0) &&
+          t('inventory.costDelta', 'cost {{from}} → {{to}} DA', {
+            from: editProduct.costPrice || 0,
+            to: proposedCostPrice,
+          }),
+        proposedThreshold !== (editProduct.lowStockThreshold || 1) &&
+          t('inventory.thresholdDelta', 'low-stock alert {{from}} → {{to}}', {
+            from: editProduct.lowStockThreshold || 1,
+            to: proposedThreshold,
+          }),
+      ].filter((line): line is string => Boolean(line))
+    : [];
+
+  /**
+   * The shape the counter terminal already renders for `inventory_edit_product`,
+   * with the old price kept alongside the new one so an admin can see the move
+   * rather than only the destination.
+   */
+  const priceApprovalPayload: ApprovalPayload = {
+    actionType: 'inventory_edit_product',
+    actionLabel: t('inventory.priceApprovalLabel', '{{name}} {{model}}: {{oldPrice}} DA → {{newPrice}} DA', {
+      name: editProduct?.name ?? '',
+      model: editProduct?.model ?? '',
+      oldPrice: editProduct?.price ?? 0,
+      newPrice: proposedPrice,
+    }),
+    targetId: editProduct?.id,
+    actionData: {
+      itemType: 'product',
+      productName: editProduct?.name ?? '',
+      model: editProduct?.model ?? '',
+      sku: editProduct?.sku ?? '',
+      category: editProduct?.category ?? '',
+      price: proposedPrice,
+      costPrice: proposedCostPrice,
+      currentStock: editProduct?.stock ?? 0,
+      previousPrice: editProduct?.price ?? 0,
+      lowStockThreshold: proposedThreshold,
+    },
+    reason: editReason.trim() || priceChanges.join(' · ') || undefined,
+  };
+
+  const applyPriceEdit = async () => {
     if (!editProduct) return;
     setIsSavingEdit(true);
     try {
-      const price = parseFloat(editPrice) || editProduct.price;
-      const costPrice = parseFloat(editCostPrice) || 0;
-      const threshold = parseInt(editThreshold, 10) || 1;
       const stockStatus: StockStatus =
         editProduct.stock === 0
           ? 'out_of_stock'
-          : editProduct.stock <= threshold
+          : editProduct.stock <= proposedThreshold
           ? 'low_stock'
           : 'in_stock';
 
       await updateDoc(doc(db, 'inventory', editProduct.id), {
-        price,
-        costPrice,
-        lowStockThreshold: threshold,
+        price: proposedPrice,
+        costPrice: proposedCostPrice,
+        lowStockThreshold: proposedThreshold,
         stockStatus,
         updatedAt: new Date().toISOString(),
       });
@@ -527,11 +589,28 @@ export const InventoryScreen = ({ navigation }: any) => {
       Vibration.vibrate(30);
       setIsEditModalOpen(false);
       setEditProduct(null);
+      setPriceGrant(null);
     } catch (err: any) {
       Alert.alert(t('common.error', 'Error'), err.message || t('inventory.updateDetailsFailed', 'Failed to update details.'));
     } finally {
       setIsSavingEdit(false);
     }
+  };
+
+  const handleSaveEditProduct = () => {
+    if (!editProduct) return;
+    // A price list is where money leaves the shop, so a technician's edit is a
+    // request until an admin answers it.
+    if (isAdmin || priceApproved) {
+      void applyPriceEdit();
+      return;
+    }
+    // An admin is asked to answer a change, not a screenful of unchanged numbers.
+    if (priceChanges.length === 0) {
+      Alert.alert(t('inventory.nothingChanged', 'Nothing to change'), t('inventory.nothingChangedBody', 'The price, cost and alert threshold are already set to these values.'));
+      return;
+    }
+    setIsAskingPriceApproval(true);
   };
 
   if (!can.inventory_products) {
@@ -655,15 +734,22 @@ export const InventoryScreen = ({ navigation }: any) => {
 
                   {/* Quick Action Buttons */}
                   <View style={styles.cardActionsRow}>
-                    {can.inventory_edit && (
-                      <TouchableOpacity
-                        style={styles.actionChip}
-                        onPress={() => handleOpenEditModal(item)}
-                      >
-                        <MaterialCommunityIcons name="pencil-outline" size={16} color={colors.textSecondary} />
-                        <Text style={styles.actionChipText}>{t('inventory.editPrice', 'Edit Price')}</Text>
-                      </TouchableOpacity>
-                    )}
+                    {/* An admin writes the price; anyone else can only ask for it. */}
+                    <TouchableOpacity
+                      style={styles.actionChip}
+                      onPress={() => handleOpenEditModal(item)}
+                    >
+                      <MaterialCommunityIcons
+                        name={isAdmin ? 'pencil-outline' : 'shield-edit-outline'}
+                        size={16}
+                        color={colors.textSecondary}
+                      />
+                      <Text style={styles.actionChipText}>
+                        {isAdmin
+                          ? t('inventory.editPrice', 'Edit Price')
+                          : t('inventory.askPriceChange', 'Ask to change price')}
+                      </Text>
+                    </TouchableOpacity>
 
                     {can.inventory_edit && (
                       <TouchableOpacity
@@ -972,6 +1058,17 @@ export const InventoryScreen = ({ navigation }: any) => {
               style={styles.fieldLg}
             />
 
+            {!isAdmin && (
+              <TextInput
+                label={t('inventory.edit.reasonForAdmin', 'Why? Sent to the admin (optional)')}
+                placeholder={t('inventory.edit.reasonPlaceholder', 'e.g. Supplier raised the cost')}
+                value={editReason}
+                onChangeText={setEditReason}
+                mode="outlined"
+                style={styles.fieldLg}
+              />
+            )}
+
             <Button
               mode="contained"
               buttonColor={colors.brand}
@@ -981,11 +1078,28 @@ export const InventoryScreen = ({ navigation }: any) => {
               onPress={handleSaveEditProduct}
               style={styles.sheetButton}
             >
-              {t('inventory.edit.save', 'Save Changes')}
+              {isAdmin || priceApproved
+                ? t('inventory.edit.save', 'Save Changes')
+                : t('inventory.edit.askAdmin', 'Ask an admin to approve')}
             </Button>
           </View>
         </View>
       </Modal>
+
+      {/* The answer unlocks the write, and this phone is the one that applies it. */}
+      <AdminApprovalSheet
+        visible={isAskingPriceApproval}
+        payload={priceApprovalPayload}
+        lines={[
+          ...priceChanges,
+          t('inventory.approvalLineStock', 'In stock: {{n}}', { n: editProduct?.stock ?? 0 }),
+        ]}
+        onApproved={() => {
+          setPriceGrant(priceGrantKey);
+          void applyPriceEdit();
+        }}
+        onDismiss={() => setIsAskingPriceApproval(false)}
+      />
     </View>
   );
 };

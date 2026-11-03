@@ -352,6 +352,14 @@
     "sellingPrice": "سعر البيع",
     "costPrice": "التكلفة: {{price}} دج",
     "editPrice": "تعديل السعر",
+    "askPriceChange": "اطلب تغيير السعر",
+    "priceDelta": "السعر {{from}} ← {{to}} دج",
+    "costDelta": "التكلفة {{from}} ← {{to}} دج",
+    "thresholdDelta": "تنبيه المخزون المنخفض {{from}} ← {{to}}",
+    "priceApprovalLabel": "{{name}} {{model}}: {{oldPrice}} دج ← {{newPrice}} دج",
+    "approvalLineStock": "المخزون: {{n}}",
+    "nothingChanged": "لا شيء للتغيير",
+    "nothingChangedBody": "السعر والتكلفة وحد التنبيه مضبوطة بالفعل على هذه القيم.",
     "adjustStock": "تعديل المخزون",
     "sellInPos": "بيع في الصندوق",
     "noProducts": "لا توجد منتجات",
@@ -399,7 +407,10 @@
     "edit":     {
       "title": "تعديل أسعار المنتج",
       "threshold": "حد تنبيه المخزون المنخفض",
-      "save": "حفظ التغييرات"
+      "reasonForAdmin": "لماذا؟ يُرسل للمدير (اختياري)",
+      "reasonPlaceholder": "مثال: المورّد رفع التكلفة",
+      "save": "حفظ التغييرات",
+      "askAdmin": "اطلب موافقة مدير"
     }
   },
   "pos": {

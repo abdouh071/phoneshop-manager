@@ -352,6 +352,14 @@
     "sellingPrice": "Prix de vente",
     "costPrice": "Coût : {{price}} DA",
     "editPrice": "Modifier le prix",
+    "askPriceChange": "Demander un changement de prix",
+    "priceDelta": "prix {{from}} → {{to}} DA",
+    "costDelta": "coût {{from}} → {{to}} DA",
+    "thresholdDelta": "alerte stock faible {{from}} → {{to}}",
+    "priceApprovalLabel": "{{name}} {{model}} : {{oldPrice}} DA → {{newPrice}} DA",
+    "approvalLineStock": "En stock : {{n}}",
+    "nothingChanged": "Rien à changer",
+    "nothingChangedBody": "Le prix, le coût et le seuil sont déjà à ces valeurs.",
     "adjustStock": "Ajuster le stock",
     "sellInPos": "Vendre en caisse",
     "noProducts": "Aucun produit trouvé",
@@ -399,7 +407,10 @@
     "edit": {
       "title": "Modifier les prix du produit",
       "threshold": "Seuil d’alerte stock faible",
-      "save": "Enregistrer les modifications"
+      "reasonForAdmin": "Pourquoi ? Transmis à l’admin (facultatif)",
+      "reasonPlaceholder": "ex. le fournisseur a augmenté le coût",
+      "save": "Enregistrer les modifications",
+      "askAdmin": "Demander l’approbation d’un admin"
     }
   },
   "pos": {
