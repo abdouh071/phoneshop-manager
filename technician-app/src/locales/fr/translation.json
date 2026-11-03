@@ -52,6 +52,8 @@
     "email": "Adresse e-mail",
     "password": "Mot de passe",
     "signIn": "Se connecter",
+    "showPassword": "Afficher le mot de passe",
+    "staysSignedIn": "Ce téléphone vous garde connecté, et vous pouvez lui demander une empreinte à la place.",
     "poweredBy": "Propulsé par Auto-Manager"
   },
   "sidebar": {
@@ -485,7 +487,6 @@
     "searchPlaceholder": "Rechercher un produit ou une SKU...",
     "selectCustomer": "Choisir un client",
     "shareWhatsapp": "Partager via WhatsApp",
-    "sku": "SKU : {{sku}}",
     "startNewSale": "Nouvelle vente",
     "subtotal": "Sous-total",
     "title": "Vente rapide",
@@ -593,6 +594,8 @@
     "emptyWorkBody": "Aucune réparation terminée sur cette période."
   },
   "productCode": {
+    "skuLabel": "SKU",
+    "barcodeLabel": "Code-barres",
     "duplicateTitle": "Un même code pour plusieurs produits",
     "duplicateBody": "« {{code}} » est enregistré sur {{total}} produits. Choisissez celui que vous vouliez — un administrateur doit donner un nouveau code à l’un des autres."
   },

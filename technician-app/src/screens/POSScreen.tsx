@@ -26,7 +26,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import { useTranslation } from 'react-i18next';
 import { buildSearch, matchesSearch } from '../utils/search';
-import { resolveProductByCode } from '../utils/productCode';
+import { resolveProductByCode, codesToShow } from '../utils/productCode';
 import { askWhichProduct } from '../utils/productCodePrompt';
 import { discountAmountOf, discountPercentOf, requiresDiscountApproval, DISCOUNT_APPROVAL_PERCENT } from '../utils/discountPolicy';
 import { AdminApprovalSheet, type ApprovalPayload } from '../components/AdminApprovalSheet';
@@ -471,19 +471,22 @@ export const POSScreen = ({ navigation }: any) => {
             const inCart = cart.find(c => c.product.id === item.id);
             const isOutOfStock = item.stock <= 0;
             const stock = isOutOfStock ? stockStatusColors.out_of_stock : stockStatusColors.in_stock;
+            const codes = codesToShow(item);
             return (
-              <View style={[styles.productCard, isOutOfStock && styles.productCardDisabled]}>
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  style={styles.productInfo}
-                  onPress={() => handleProductPress(item)}
-                >
-                  <Text style={styles.productName}>{item.name}</Text>
-                  <Text style={styles.productModel} numberOfLines={1}>
-                    {item.model} · {t('pos.sku', 'SKU: {{sku}}', { sku: item.sku || '—' })}
-                  </Text>
-                  <View style={styles.productMetaRow}>
-                    <Text style={styles.productPrice}>{item.price} DA</Text>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={[styles.productCard, isOutOfStock && styles.productCardDisabled]}
+                onPress={() => handleProductPress(item)}
+              >
+                <View style={styles.productInfo}>
+                  <View style={styles.productTitleRow}>
+                    <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
+                    <Text style={styles.productPrice}>{item.price.toLocaleString()} DA</Text>
+                  </View>
+                  <View style={styles.productStockRow}>
+                    {Boolean(item.model) && (
+                      <Text style={styles.productModel} numberOfLines={1}>{item.model}</Text>
+                    )}
                     <View style={[styles.stockBadge, { backgroundColor: stock.tint }]}>
                       <Text style={[styles.stockBadgeText, { color: stock.ink }]}>
                         {isOutOfStock
@@ -492,7 +495,14 @@ export const POSScreen = ({ navigation }: any) => {
                       </Text>
                     </View>
                   </View>
-                </TouchableOpacity>
+                  {/* The code is on the row because two rows with similar names are
+                      told apart by it — that is the whole scan complaint in one line. */}
+                  {codes.length > 0 && (
+                    <Text style={styles.productCodes} numberOfLines={1}>
+                      {codes.map((code) => `${t(`productCode.${code.kind}Label`, { defaultValue: code.kind === 'sku' ? 'SKU' : 'Barcode' })} ${code.value}`).join(' · ')}
+                    </Text>
+                  )}
+                </View>
                 <View style={styles.productAction}>
                   {inCart ? (
                     <View style={styles.stepperContainer}>
@@ -517,23 +527,16 @@ export const POSScreen = ({ navigation }: any) => {
                       </TouchableOpacity>
                     </View>
                   ) : (
-                    <TouchableOpacity
-                      disabled={isOutOfStock}
-                      style={[styles.addBtn, isOutOfStock && styles.addBtnDisabled]}
-                      onPress={() => handleProductPress(item)}
-                    >
+                    <View style={[styles.addCircle, isOutOfStock && styles.addCircleDisabled]}>
                       <MaterialCommunityIcons
                         name="plus"
-                        size={18}
+                        size={20}
                         color={isOutOfStock ? colors.borderStrong : colors.brand}
                       />
-                      <Text style={[styles.addBtnText, isOutOfStock && styles.addBtnTextDisabled]}>
-                        {t('common.add', 'Add')}
-                      </Text>
-                    </TouchableOpacity>
+                    </View>
                   )}
                 </View>
-              </View>
+              </TouchableOpacity>
             );
           }}
           ListEmptyComponent={
@@ -1189,20 +1192,32 @@ const styles = StyleSheet.create({
   productInfo: {
     flex: 1,
   },
+  productTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
   productName: {
+    flex: 1,
     fontSize: fontSize.bodyStrong,
     fontWeight: '700',
     color: colors.textPrimary,
   },
-  productModel: {
-    fontSize: fontSize.label,
-    color: colors.textMuted,
-    marginTop: spacing.xxs,
-  },
-  productMetaRow: {
+  productStockRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: spacing.sm,
+    marginTop: spacing.xxs,
+  },
+  productModel: {
+    flexShrink: 1,
+    fontSize: fontSize.label,
+    color: colors.textMuted,
+  },
+  productCodes: {
+    fontSize: fontSize.caption,
+    color: colors.textFaint,
     marginTop: spacing.xs,
   },
   productPrice: {
@@ -1242,28 +1257,20 @@ const styles = StyleSheet.create({
     minWidth: 20,
     textAlign: 'center',
   },
-  addBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    borderRadius: radius.sm,
-    backgroundColor: colors.brandSoft,
+  /** The row itself is the Add target; this is the mark that says so. */
+  addCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.circle,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.brandBorder,
+    backgroundColor: colors.brandSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  addBtnDisabled: {
-    backgroundColor: colors.surfaceMuted,
+  addCircleDisabled: {
     borderColor: colors.border,
-  },
-  addBtnText: {
-    color: colors.brand,
-    fontSize: fontSize.label,
-    fontWeight: '700',
-  },
-  addBtnTextDisabled: {
-    color: colors.borderStrong,
+    backgroundColor: colors.surfaceMuted,
   },
   headerCartBtn: {
     padding: spacing.sm,

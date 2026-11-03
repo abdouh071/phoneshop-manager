@@ -38,7 +38,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { useTranslation } from 'react-i18next';
 import type { PhoneModel, ProductCategory, StockStatus } from '../types';
 import { buildSearch, matchesSearch } from '../utils/search';
-import { findCodeCollisions, resolveProductByCode } from '../utils/productCode';
+import { findCodeCollisions, resolveProductByCode, codesToShow } from '../utils/productCode';
 import { askWhichProduct } from '../utils/productCodePrompt';
 import { AdminApprovalSheet, type ApprovalPayload } from '../components/AdminApprovalSheet';
 import { colors, fontSize, radius, ramp, spacing, stockStatusColors } from '../theme/tokens';
@@ -686,6 +686,7 @@ export const InventoryScreen = ({ navigation }: any) => {
               : isLow
                 ? stockStatusColors.low_stock
                 : stockStatusColors.in_stock;
+            const codes = codesToShow(item);
 
             return (
               <Card style={styles.productCard}>
@@ -694,10 +695,11 @@ export const InventoryScreen = ({ navigation }: any) => {
                     <View style={styles.productTitleBlock}>
                       <Text style={styles.productName}>{item.name}</Text>
                       {Boolean(item.model) && <Text style={styles.productModel}>{item.model}</Text>}
-                      <View style={styles.skuRow}>
-                        <Text style={styles.skuText}>SKU: {item.sku || 'N/A'}</Text>
-                        {Boolean(item.barcode) && <Text style={styles.skuText}>· {item.barcode}</Text>}
-                      </View>
+                      {codes.length > 0 && (
+                        <Text style={styles.skuText} numberOfLines={1}>
+                          {codes.map((code) => `${t(`productCode.${code.kind}Label`, { defaultValue: code.kind === 'sku' ? 'SKU' : 'Barcode' })} ${code.value}`).join(' · ')}
+                        </Text>
+                      )}
                     </View>
 
                     {/* Stock Badge */}
@@ -753,11 +755,11 @@ export const InventoryScreen = ({ navigation }: any) => {
 
                     {can.inventory_edit && (
                       <TouchableOpacity
-                        style={[styles.actionChip, styles.stockAdjustBtn]}
+                        style={styles.actionChip}
                         onPress={() => openStockAdjustModal(item)}
                       >
-                        <MaterialCommunityIcons name="swap-vertical" size={16} color={colors.brand} />
-                        <Text style={[styles.actionChipText, styles.actionChipTextBrand]}>
+                        <MaterialCommunityIcons name="swap-vertical" size={16} color={colors.textSecondary} />
+                        <Text style={styles.actionChipText}>
                           {t('inventory.adjustStock', 'Adjust Stock')}
                         </Text>
                       </TouchableOpacity>
@@ -1226,15 +1228,10 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: spacing.xxs,
   },
-  skuRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginTop: spacing.xxs,
-  },
   skuText: {
     fontSize: fontSize.caption,
     color: colors.textFaint,
+    marginTop: spacing.xxs,
   },
   stockBadge: {
     paddingHorizontal: spacing.sm,
@@ -1292,9 +1289,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.textSecondary,
   },
-  actionChipTextBrand: {
-    color: colors.brand,
-  },
   actionChipTextInverse: {
     color: colors.textInverse,
     fontWeight: '700',
@@ -1302,13 +1296,9 @@ const styles = StyleSheet.create({
   actionChipDisabled: {
     opacity: 0.4,
   },
-  stockAdjustBtn: {
-    backgroundColor: colors.brandSoft,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.brandBorder,
-  },
+  /** Only one filled action per card, so this is the one that stands out. */
   posAddBtn: {
-    backgroundColor: colors.success,
+    backgroundColor: colors.brand,
   },
   center: {
     flex: 1,

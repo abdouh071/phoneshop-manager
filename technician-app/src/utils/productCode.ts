@@ -70,6 +70,27 @@ export const resolveProductByCode = (
   };
 };
 
+export type DisplayCode = { kind: 'sku' | 'barcode'; value: string };
+
+/**
+ * The codes a row should show, in the order a technician reads them.
+ *
+ * This exists because two products whose SKUs share a prefix are told apart by
+ * their codes, and the screens used to print only the sku. A row that copied its
+ * sku into the barcode (which is what saving here does when the field is left
+ * blank) is not shown saying the same thing twice.
+ */
+export const codesToShow = (item: { sku?: unknown; barcode?: unknown }): DisplayCode[] => {
+  const sku = String(item.sku ?? '').trim();
+  const barcode = String(item.barcode ?? '').trim();
+  const codes: DisplayCode[] = [];
+  if (sku) codes.push({ kind: 'sku', value: sku });
+  if (barcode && normalizeCode(barcode) !== normalizeCode(sku)) {
+    codes.push({ kind: 'barcode', value: barcode });
+  }
+  return codes;
+};
+
 /**
  * Codes the row would take that another product already answers to. The counter app
  * and hand-typed lists both create these, and the screen cannot save its way out of a

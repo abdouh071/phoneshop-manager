@@ -52,6 +52,8 @@
     "email": "البريد الإلكتروني",
     "password": "كلمة المرور",
     "signIn": "دخول",
+    "showPassword": "إظهار كلمة المرور",
+    "staysSignedIn": "يبقى هذا الهاتف تسجيل دخولك، ويمكنك طلب البصمة بدلاً من ذلك.",
     "poweredBy": "مدعوم من Auto-Manager"
   },
   "sidebar": {
@@ -485,7 +487,6 @@
     "searchPlaceholder": "ابحث عن منتج أو SKU...",
     "selectCustomer": "اختيار زبون",
     "shareWhatsapp": "مشاركة عبر واتساب",
-    "sku": "SKU: {{sku}}",
     "startNewSale": "بدء بيع جديد",
     "subtotal": "المجموع الفرعي",
     "title": "بيع سريع",
@@ -593,6 +594,8 @@
     "emptyWorkBody": "لا توجد إصلاحات منجزة في هذه الفترة."
   },
   "productCode": {
+    "skuLabel": "رمز المنتج",
+    "barcodeLabel": "الباركود",
     "duplicateTitle": "نفس الرمز لعدة منتجات",
     "duplicateBody": "رمز \"{{code}}\" مسجل لدى {{total}} منتجات. اختر المنتج المطلوب — على المدير إعطاء أحدها رمزًا جديدًا."
   },

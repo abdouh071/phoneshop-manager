@@ -130,6 +130,7 @@ export const colors = {
   warningInk: ramp.amber800,
   danger: ramp.red600,
   dangerSoft: ramp.red100,
+  dangerBorder: ramp.red200,
   dangerText: ramp.red900,
   info: ramp.blue500,
   infoSoft: ramp.sky100,

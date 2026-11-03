@@ -52,6 +52,8 @@
     "email": "Email Address",
     "password": "Password",
     "signIn": "Sign In",
+    "showPassword": "Show password",
+    "staysSignedIn": "This phone keeps you signed in, and you can ask it for a fingerprint instead.",
     "poweredBy": "Powered by Auto-Manager"
   },
   "sidebar": {
@@ -485,7 +487,6 @@
     "searchPlaceholder": "Search products or SKU...",
     "selectCustomer": "Select Customer",
     "shareWhatsapp": "Share via WhatsApp",
-    "sku": "SKU: {{sku}}",
     "startNewSale": "Start New Sale",
     "subtotal": "Subtotal",
     "title": "Quick POS Sale",
@@ -593,6 +594,8 @@
     "emptyWorkBody": "No repairs completed in this period."
   },
   "productCode": {
+    "skuLabel": "SKU",
+    "barcodeLabel": "Barcode",
     "duplicateTitle": "Same code on more than one product",
     "duplicateBody": "\"{{code}}\" is saved on {{total}} products. Pick the one you meant — an admin should give one of them a new code."
   },

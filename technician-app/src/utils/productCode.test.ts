@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findCodeCollisions, normalizeCode, resolveProductByCode, matchesForCode } from './productCode.ts';
+import { findCodeCollisions, normalizeCode, resolveProductByCode, matchesForCode, codesToShow } from './productCode.ts';
 import type { PhoneModel } from '../types/index.ts';
 
 const makeProduct = (overrides: Partial<PhoneModel> & { id: string }): PhoneModel => ({
@@ -94,4 +94,26 @@ test('a row keeping its own codes is not a collision with itself', () => {
 test('an empty barcode field is not compared against anything', () => {
   const other = makeProduct({ id: 'doc-empty', name: 'Blank', sku: '' });
   assert.deepEqual(findCodeCollisions([other, HOCO_128], { id: 'doc-new', sku: '', barcode: '' }), []);
+});
+
+test('a row shows both of its codes so neighbours can be told apart', () => {
+  const withBarcode = makeProduct({ ...HOCO_128, barcode: '6291234567890' });
+  assert.deepEqual(codesToShow(withBarcode), [
+    { kind: 'sku', value: 'kit-bt-hoco-128' },
+    { kind: 'barcode', value: '6291234567890' },
+  ]);
+});
+
+test('a barcode that repeats the sku is not shown twice', () => {
+  const row = makeProduct({ id: 'doc-a', name: 'Cable', sku: 'KIT-128', barcode: ' kit-128 ' });
+  assert.deepEqual(codesToShow(row), [{ kind: 'sku', value: 'KIT-128' }]);
+});
+
+test('a row with only a barcode still shows the code that scans', () => {
+  const row = makeProduct({ id: 'doc-b', name: 'Blank', sku: '', barcode: '6290000000001' });
+  assert.deepEqual(codesToShow(row), [{ kind: 'barcode', value: '6290000000001' }]);
+});
+
+test('a row with no codes at all shows nothing rather than an empty label', () => {
+  assert.deepEqual(codesToShow({ sku: '', barcode: undefined }), []);
 });
