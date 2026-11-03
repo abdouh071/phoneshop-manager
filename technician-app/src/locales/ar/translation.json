@@ -316,6 +316,8 @@
   "inventory": {
     "scannedTitle": "تم المسح",
     "scannedBody": "تم تصفية المخزون حسب الباركود \"{{code}}\".",
+    "duplicateCodeTitle": "الرمز مستخدم بالفعل",
+    "duplicateCodeBody": "يوجد منتج آخر بنفس هذا الرمز:",
     "adjustFailedTitle": "فشل التعديل",
     "adjustFailed": "لم يمكن تحديث المخزون.",
     "zeroUnits": "هذا المنتج لا يحتوي على أي وحدة متاحة.",
@@ -403,7 +405,7 @@
   "pos": {
     "outOfStockBody": "لا توجد وحدات متاحة من {{name}}.",
     "scannedToCart": "أُضيف بالمسح إلى السلة",
-    "scannedToCardBody": "تمت إضافة {{name}} {{model}} إلى السلة.",
+    "scannedToCardBody": "تمت إضافة {{name}} {{model}} ({{sku}}) إلى السلة.",
     "productNotFound": "المنتج غير موجود",
     "productNotFoundBody": "لا يوجد منتج مطابق للـ SKU أو الباركود: {{code}}",
     "requiredFields": "حقول إلزامية",
@@ -565,5 +567,9 @@
     "emptyWorkTitle": "كل شيء منجز!",
     "emptyTakenBody": "لم يتم استلام أو تسوية أي هاتف في هذه الفترة.",
     "emptyWorkBody": "لا توجد إصلاحات منجزة في هذه الفترة."
+  },
+  "productCode": {
+    "duplicateTitle": "نفس الرمز لعدة منتجات",
+    "duplicateBody": "رمز \"{{code}}\" مسجل لدى {{total}} منتجات. اختر المنتج المطلوب — على المدير إعطاء أحدها رمزًا جديدًا."
   }
 }

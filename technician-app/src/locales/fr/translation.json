@@ -316,6 +316,8 @@
   "inventory": {
     "scannedTitle": "Scanné",
     "scannedBody": "Code-barres « {{code}} » filtré dans l’inventaire.",
+    "duplicateCodeTitle": "Code déjà utilisé",
+    "duplicateCodeBody": "Un autre produit répond déjà à ce code :",
     "adjustFailedTitle": "Échec de l’ajustement",
     "adjustFailed": "Impossible de mettre à jour le stock.",
     "zeroUnits": "Ce produit n’a aucune unité disponible.",
@@ -403,7 +405,7 @@
   "pos": {
     "outOfStockBody": "{{name}} n’a aucune unité disponible.",
     "scannedToCart": "Scanné dans le panier",
-    "scannedToCardBody": "{{name}} {{model}} ajouté au panier.",
+    "scannedToCardBody": "{{name}} {{model}} ({{sku}}) ajouté au panier.",
     "productNotFound": "Produit introuvable",
     "productNotFoundBody": "Aucun produit correspondant à la SKU / au code-barres : {{code}}",
     "requiredFields": "Champs obligatoires",
@@ -565,5 +567,9 @@
     "emptyWorkTitle": "Tout est à jour !",
     "emptyTakenBody": "Aucun téléphone n'a été retiré et réglé sur cette période.",
     "emptyWorkBody": "Aucune réparation terminée sur cette période."
+  },
+  "productCode": {
+    "duplicateTitle": "Un même code pour plusieurs produits",
+    "duplicateBody": "« {{code}} » est enregistré sur {{total}} produits. Choisissez celui que vous vouliez — un administrateur doit donner un nouveau code à l’un des autres."
   }
 }

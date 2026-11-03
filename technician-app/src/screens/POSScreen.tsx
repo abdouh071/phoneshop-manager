@@ -26,6 +26,8 @@ import { usePermissions } from '../hooks/usePermissions';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import { useTranslation } from 'react-i18next';
 import { buildSearch, matchesSearch } from '../utils/search';
+import { resolveProductByCode } from '../utils/productCode';
+import { askWhichProduct } from '../utils/productCodePrompt';
 import { colors, fontSize, radius, ramp, spacing, stockStatusColors } from '../theme/tokens';
 import type { PhoneModel, PaymentMethod, SaleTransaction } from '../types';
 
@@ -152,22 +154,43 @@ export const POSScreen = ({ navigation }: any) => {
     addToCart(product, 1);
   };
 
+  const addScannedToCart = (product: PhoneModel) => {
+    if (product.stock <= 0) {
+      // A scan used to bypass the guard every tappable row enforced, so an
+      // out-of-stock item could be rung up without anyone touching it.
+      Alert.alert(t('common.outOfStock', 'Out of Stock'), t('pos.outOfStockBody', '{{name}} has 0 available units.', { name: product.name }));
+      return;
+    }
+    Vibration.vibrate(60);
+    addToCart(product, 1);
+    // The code is named back to the technician because two products sharing a
+    // prefix used to look like one successful scan while the wrong row landed.
+    Alert.alert(
+      t('pos.scannedToCart', 'Scanned to Cart'),
+      t('pos.scannedToCardBody', '{{name}} {{model}} ({{sku}}) added to cart.', {
+        name: product.name,
+        model: product.model,
+        sku: product.sku,
+      })
+    );
+  };
+
   const handleOpenScanner = () => {
     navigation.navigate('Scanner', {
       onScan: (scannedCode: string) => {
-        const clean = scannedCode.trim().toLowerCase();
-        const matched = products.find(p =>
-          p.sku?.toLowerCase() === clean ||
-          p.barcode?.toLowerCase() === clean ||
-          p.id.toLowerCase() === clean
-        );
-        if (matched) {
-          Vibration.vibrate(60);
-          addToCart(matched, 1);
-          Alert.alert(t('pos.scannedToCart', 'Scanned to Cart'), t('pos.scannedToCardBody', '{{name}} {{model}} added to cart.', { name: matched.name, model: matched.model }));
-        } else {
-          Alert.alert(t('pos.productNotFound', 'Product Not Found'), t('pos.productNotFoundBody', 'No product matching SKU/Barcode: {{code}}', { code: scannedCode }));
+        const result = resolveProductByCode(products, scannedCode);
+        if (result.kind === 'unique') {
+          addScannedToCart(result.product);
+          return;
         }
+        if (result.kind === 'ambiguous') {
+          askWhichProduct(scannedCode, result.candidates, addScannedToCart);
+          return;
+        }
+        Alert.alert(
+          t('pos.productNotFound', 'Product Not Found'),
+          t('pos.productNotFoundBody', 'No product matching SKU/Barcode: {{code}}', { code: scannedCode })
+        );
       },
     });
   };

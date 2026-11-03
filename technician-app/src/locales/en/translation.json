@@ -316,6 +316,8 @@
   "inventory": {
     "scannedTitle": "Scanned",
     "scannedBody": "Barcode \"{{code}}\" filtered in inventory.",
+    "duplicateCodeTitle": "Code already in use",
+    "duplicateCodeBody": "Another product already answers to this code:",
     "adjustFailedTitle": "Adjustment Failed",
     "adjustFailed": "Could not update stock.",
     "zeroUnits": "This product has 0 units available.",
@@ -403,7 +405,7 @@
   "pos": {
     "outOfStockBody": "{{name}} has 0 available units.",
     "scannedToCart": "Scanned to Cart",
-    "scannedToCardBody": "{{name}} {{model}} added to cart.",
+    "scannedToCardBody": "{{name}} {{model}} ({{sku}}) added to cart.",
     "productNotFound": "Product Not Found",
     "productNotFoundBody": "No product matching SKU/Barcode: {{code}}",
     "requiredFields": "Required Fields",
@@ -565,5 +567,9 @@
     "emptyWorkTitle": "All caught up!",
     "emptyTakenBody": "No phones were picked up and settled in this period.",
     "emptyWorkBody": "No repairs completed in this period."
+  },
+  "productCode": {
+    "duplicateTitle": "Same code on more than one product",
+    "duplicateBody": "\"{{code}}\" is saved on {{total}} products. Pick the one you meant — an admin should give one of them a new code."
   }
 }

@@ -38,6 +38,8 @@ import { usePermissions } from '../hooks/usePermissions';
 import { useTranslation } from 'react-i18next';
 import type { PhoneModel, ProductCategory, StockStatus } from '../types';
 import { buildSearch, matchesSearch } from '../utils/search';
+import { findCodeCollisions, resolveProductByCode } from '../utils/productCode';
+import { askWhichProduct } from '../utils/productCodePrompt';
 import { colors, fontSize, radius, ramp, spacing, stockStatusColors } from '../theme/tokens';
 
 type InventoryMetrics = {
@@ -312,29 +314,28 @@ export const InventoryScreen = ({ navigation }: any) => {
   );
 
   // Barcode scanner integration
+  const adjustFromScan = (product: PhoneModel) => {
+    Vibration.vibrate(50);
+    openStockAdjustModal(product);
+  };
+
   const handleOpenScanner = () => {
     navigation.navigate('Scanner', {
       onScan: (scannedCode: string) => {
-        const clean = scannedCode.trim().toLowerCase();
         setSearch(scannedCode.trim());
-        const matched = products.find(
-          (p) =>
-            p.sku?.toLowerCase() === clean ||
-            p.barcode?.toLowerCase() === clean ||
-            p.id.toLowerCase() === clean
-        );
-        if (matched) {
-          Vibration.vibrate(50);
-          setTargetProduct(matched);
-          setStockDelta(0);
-          setExactStockInput(matched.stock.toString());
-          setIsAdjustModalOpen(true);
-        } else {
-          Alert.alert(
+        const result = resolveProductByCode(products, scannedCode);
+        if (result.kind === 'unique') {
+          adjustFromScan(result.product);
+          return;
+        }
+        if (result.kind === 'ambiguous') {
+          askWhichProduct(scannedCode, result.candidates, adjustFromScan);
+          return;
+        }
+        Alert.alert(
           t('inventory.scannedTitle', 'Scanned'),
           t('inventory.scannedBody', 'Barcode "{{code}}" filtered in inventory.', { code: scannedCode })
         );
-        }
       },
     });
   };
@@ -423,6 +424,19 @@ export const InventoryScreen = ({ navigation }: any) => {
       return;
     }
 
+    // A code on two rows is how one scan ends up adding the wrong product, and this
+    // form used to accept it silently — including the barcode defaulting to the sku.
+    const sku = newProdSku.trim() || `SKU-${Date.now().toString().slice(-6)}`;
+    const barcode = newProdBarcode.trim() || sku;
+    const collisions = findCodeCollisions(products, { sku, barcode });
+    if (collisions.length > 0) {
+      Alert.alert(
+        t('inventory.duplicateCodeTitle', 'Code already in use'),
+        `${t('inventory.duplicateCodeBody', 'Another product already answers to this code:')} ${collisions.join(' · ')}`
+      );
+      return;
+    }
+
     setIsSavingNewProduct(true);
     try {
       const price = parseFloat(newProdPrice) || 0;
@@ -431,8 +445,6 @@ export const InventoryScreen = ({ navigation }: any) => {
       const threshold = parseInt(newProdThreshold, 10) || 1;
       const stockStatus: StockStatus =
         stock === 0 ? 'out_of_stock' : stock <= threshold ? 'low_stock' : 'in_stock';
-
-      const sku = newProdSku.trim() || `SKU-${Date.now().toString().slice(-6)}`;
 
       const newProductData = {
         name: newProdName.trim(),
@@ -444,7 +456,7 @@ export const InventoryScreen = ({ navigation }: any) => {
         lowStockThreshold: threshold,
         stockStatus,
         sku,
-        barcode: newProdBarcode.trim() || sku,
+        barcode,
         createdAt: serverTimestamp(),
       };
 
