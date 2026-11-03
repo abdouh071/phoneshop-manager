@@ -2,7 +2,7 @@
   "expo": {
     "name": "Auto-Manager",
     "slug": "abdouh71",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "orientation": "portrait",
     "runtimeVersion": {
       "policy": "appVersion"
@@ -22,7 +22,7 @@
     },
     "android": {
       "package": "com.phoneshop.technicianapp",
-      "versionCode": 2,
+      "versionCode": 3,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
