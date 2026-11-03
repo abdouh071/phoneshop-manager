@@ -22,6 +22,14 @@ const line = (product: PhoneModel, quantity: number) => ({
   unitPrice: product.price,
 });
 
+const returnLine = (product: PhoneModel, quantity: number, restock = true) => ({
+  product,
+  quantity,
+  unitPrice: product.price,
+  isReturn: true,
+  restock,
+});
+
 const makeTx = (over: Partial<SaleTransaction> = {}): SaleTransaction => {
   const items = over.items ?? [line(makeProduct(), 2)];
   const subtotal = over.subtotal ?? items.reduce((s, i) => s + i.product.price * i.quantity, 0);
@@ -161,10 +169,24 @@ test('one SKU written on two rows is one control, and both rows move together', 
     plan.items.map(i => i.quantity),
     [2, 2]
   );
-  // The counter compares each original row with the first row that carries the same
-  // product id, so a 1-unit row grows by one and a 4-unit row gives two back.
-  assert.deepEqual(plan.restock, [{ productId: 'p1', name: 'Hoco EQ2', quantity: 2 }]);
-  assert.deepEqual(plan.deduct, [{ productId: 'p1', name: 'Hoco EQ2', quantity: 1 }]);
+  // The editor gives one SKU one control and applies it to every row carrying it, so
+  // five units sold become four: one comes back, and nothing is taken off again.
+  assert.deepEqual(plan.restock, [{ productId: 'p1', name: 'Hoco EQ2', quantity: 1 }]);
+  assert.deepEqual(plan.deduct, []);
+});
+
+test('a sale row and a return row of one model are two shelf movements, not one', () => {
+  const twin = makeProduct();
+  const tx = makeTx({ items: [line(twin, 3), returnLine(twin, 1)] });
+  const plan = planSaleEdit(tx, { p1: { quantity: 2, unitPrice: 4500 } });
+
+  // One control sets both rows to two: the sale row hands a unit back, and the return
+  // row takes one more in. Both go on the shelf, and neither cancels the other.
+  assert.deepEqual(plan.restock, [
+    { productId: 'p1', name: 'Hoco EQ2', quantity: 1 },
+    { productId: 'p1', name: 'Hoco EQ2', quantity: 1 },
+  ]);
+  assert.deepEqual(plan.deduct, []);
 });
 
 test('a line stored without a product id survives the rewrite with its money intact', () => {
@@ -307,4 +329,44 @@ test('the approving admin is told which product was put on the invoice', () => {
   const changes = diffSaleEdit(tx, {}, [line(cable(), 2)]);
 
   assert.deepEqual(changes, [{ kind: 'add', name: 'Cable', quantity: 2, unitPrice: 100 }]);
+});
+
+test('a return line that shrank takes its units back off the shelf', () => {
+  const tx = makeTx({ items: [returnLine(makeProduct(), 2)] });
+  const plan = planSaleEdit(tx, { p1: { quantity: 1, unitPrice: 4500 } });
+
+  assert.deepEqual(plan.restock, []);
+  assert.deepEqual(plan.deduct, [{ productId: 'p1', name: 'Hoco EQ2', quantity: 1 }]);
+});
+
+test('a return line that grew puts the extra units back on the shelf', () => {
+  const tx = makeTx({ items: [returnLine(makeProduct(), 1)] });
+  const plan = planSaleEdit(tx, { p1: { quantity: 2, unitPrice: 4500 } });
+
+  assert.deepEqual(plan.deduct, []);
+  assert.deepEqual(plan.restock, [{ productId: 'p1', name: 'Hoco EQ2', quantity: 1 }]);
+});
+
+test('a return the shop wrote off moves no shelf in either direction', () => {
+  const tx = makeTx({ items: [returnLine(makeProduct(), 2, false)] });
+  const plan = planSaleEdit(tx, { p1: { quantity: 1, unitPrice: 4500 } });
+
+  assert.deepEqual(plan.restock, []);
+  assert.deepEqual(plan.deduct, []);
+});
+
+test('the do-not-restock choice stops a growing return from stocking the shelf', () => {
+  const tx = makeTx({ items: [returnLine(makeProduct(), 1)] });
+  const plan = planSaleEdit(tx, { p1: { quantity: 2, unitPrice: 4500 } }, { p1: false });
+
+  assert.deepEqual(plan.restock, []);
+  assert.deepEqual(plan.deduct, []);
+});
+
+test('one edit moves a sale line and a new line in the directions the counter expects', () => {
+  const tx = makeTx({ items: [line(makeProduct(), 3)] });
+  const plan = planSaleEdit(tx, { p1: { quantity: 2, unitPrice: 4500 } }, {}, [line(cable(), 2)]);
+
+  assert.deepEqual(plan.restock, [{ productId: 'p1', name: 'Hoco EQ2', quantity: 1 }]);
+  assert.deepEqual(plan.deduct, [{ productId: 'p9', name: 'Cable', quantity: 2 }]);
 });

@@ -16,11 +16,10 @@
  * the new basket, a flat amount does not), the total is floored at zero, and the
  * status only changes when units actually came off.
  *
- * One thing goes further than the counter, deliberately: a product that was never on
- * the invoice can be added to it. The shop asks for it at the counter — the customer
- * who comes back for a second cable — and the phone is the till that is standing
- * there. A new row is planned like a row that grew: its units come off the shelf, and
- * the save refuses what the shelf cannot give.
+ * A product that was never on the invoice can be added to it, on both terminals. The
+ * shop asks for it at the counter — the customer who comes back for a second cable —
+ * and a new row is planned like a row that grew: its units come off the shelf, and the
+ * save refuses what the shelf cannot give.
  */
 import type { CartItem, SaleTransaction } from '../types/index.ts';
 
@@ -54,6 +53,22 @@ export interface SaleEditPlan {
   restock: SaleStockLine[];
   deduct: SaleStockLine[];
   hasChanges: boolean;
+}
+
+/**
+ * The units one SKU owes the shelf, totalled per product AND per kind: an exchange
+ * invoice can hold a sale row and a return row of the same model, and those two move
+ * the shelf in opposite directions.
+ */
+interface StockGroup {
+  productId: string;
+  name: string;
+  isReturn: boolean;
+  /** How many rows carry this SKU, and how many of them were written off instead of restocked. */
+  rows: number;
+  writtenOff: number;
+  sold: number;
+  now: number;
 }
 
 const wholeUnits = (value: number, fallback: number): number => {
@@ -123,9 +138,9 @@ export const planSaleEdit = (
       return {
         ...item,
         quantity,
-        // The desktop rewrites `product.price` and leaves `unitPrice` at the old
-        // number. The phone's own list and its WhatsApp receipt read `unitPrice`,
-        // so both move here — otherwise a corrected invoice prints the old price.
+        // Both price fields move: the phone's item list and its WhatsApp receipt read
+        // `unitPrice`, the basket prices off `product.price`, and a corrected invoice
+        // that updates only one of them prints the old number somewhere.
         unitPrice,
         product: { ...product, price: unitPrice },
       };
@@ -133,11 +148,11 @@ export const planSaleEdit = (
     .filter(item => wholeUnits(item.quantity, 0) > 0);
 
   /**
-   * The new rows. The counter's editor has no add control, so the phone sets the
-   * shape here: both price fields are written — the item list and the WhatsApp
-   * receipt read `unitPrice`, the basket prices off `product.price` — and a SKU that
-   * is already on the invoice is refused, because the desktop's rule that one product
-   * id is one control means the row on the document owns that product.
+   * The new rows. Both terminals offer the add control, and the phone sets the shape
+   * here: both price fields are written — the item list and the WhatsApp receipt read
+   * `unitPrice`, the basket prices off `product.price` — and a SKU that is already on
+   * the invoice is refused, because the desktop's rule that one product id is one
+   * control means the row on the document owns that product.
    */
   const onInvoice = new Set(tx.items.map(item => item?.product?.id).filter(Boolean));
   const addedItems: CartItem[] = [];
@@ -157,33 +172,59 @@ export const planSaleEdit = (
   const restock: SaleStockLine[] = [];
   const deduct: SaleStockLine[] = [];
 
-  tx.items.forEach(item => {
-    const product = item?.product;
-    if (!product?.id) return;
-    const stockName = product.name || product.model || product.id;
-    const match = items.find(i => i.product?.id === product.id);
-    const newQty = match ? wholeUnits(match.quantity, 0) : 0;
-    const returnedQty = wholeUnits(item.quantity, 0) - newQty;
-
-    if (returnedQty > 0) {
-      if (restockChoices[product.id] !== false) {
-        restock.push({ productId: product.id, name: stockName, quantity: returnedQty });
+  /**
+   * One signed delta per product AND per kind — the desktop's `planSaleEditStock`.
+   * Walking only the originals was the old bug on both terminals: a row the invoice
+   * never carried moved nothing, and a return line that shrank was restocked instead
+   * of taken back off the shelf. Totalling by group matters because the editor gives
+   * one SKU one control and applies it to every row carrying it, so an exchange
+   * invoice with a sale row and a return row of the same model moves the shelf twice,
+   * in opposite directions.
+   */
+  const groups = new Map<string, StockGroup>();
+  const collect = (list: CartItem[], side: 'sold' | 'now') => {
+    list.forEach(item => {
+      const id = item?.product?.id;
+      if (!id) return;
+      const isReturn = Boolean(item.isReturn);
+      const key = `${id}::${isReturn ? 'return' : 'sale'}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          productId: id,
+          name: item.product?.name || item.product?.model || id,
+          isReturn,
+          rows: 0,
+          writtenOff: 0,
+          sold: 0,
+          now: 0,
+        };
+        groups.set(key, group);
       }
-    } else if (returnedQty < 0) {
-      deduct.push({ productId: product.id, name: stockName, quantity: -returnedQty });
-    }
-  });
-
-  // A new row has no original to be compared with, so the whole quantity leaves the
-  // counter. The save asks the shelf for these units exactly as it does for a row
-  // that grew, and an empty shelf stops the invoice.
-  addedItems.forEach(item => {
-    const product = item.product;
-    deduct.push({
-      productId: product.id,
-      name: product.name || product.model || product.id,
-      quantity: wholeUnits(item.quantity, 0),
+      group[side] += wholeUnits(item.quantity, 0);
+      group.rows += 1;
+      if (item.restock === false) group.writtenOff += 1;
     });
+  };
+  collect(tx.items, 'sold');
+  collect(items, 'now');
+
+  groups.forEach(group => {
+    const moved = group.now - group.sold;
+    if (moved === 0) return;
+
+    // Goods the customer handed back that were never put on the shelf cannot move it
+    // in either direction.
+    if (group.isReturn && group.writtenOff === group.rows) return;
+
+    const delta = group.isReturn ? moved : -moved;
+
+    if (delta > 0) {
+      if (restockChoices[group.productId] === false) return;
+      restock.push({ productId: group.productId, name: group.name, quantity: delta });
+    } else {
+      deduct.push({ productId: group.productId, name: group.name, quantity: -delta });
+    }
   });
 
   const subtotal = items.reduce(
