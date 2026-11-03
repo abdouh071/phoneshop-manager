@@ -112,6 +112,33 @@ describe('planSaleEditStock', () => {
     expect(plan.deltas).toEqual([{ productId: 'gone', name: 'Old Stock', delta: -3 }]);
   });
 
+  it('totals two rows of one SKU, because one control sets them both', () => {
+    const twin = phone('p1');
+    const plan = planSaleEditStock([line(twin, 1), line(twin, 4)], [line(twin, 2), line(twin, 2)], {}, shelf);
+
+    // Five units were sold and four now stand on the document: one comes back, and
+    // nothing is taken off again for the row that appeared to grow.
+    expect(plan.deltas).toEqual([{ productId: 'p1', name: 'Phone', delta: 1 }]);
+    expect(plan.shortages).toHaveLength(0);
+  });
+
+  it('keeps a sale row and a return row of one model as two movements', () => {
+    const twin = phone('p1');
+    const plan = planSaleEditStock(
+      [line(twin, 3), line(twin, 1, { isReturn: true, restock: true })],
+      [line(twin, 2), line(twin, 2, { isReturn: true, restock: true })],
+      {},
+      shelf
+    );
+
+    // The sale row hands a unit back and the return row takes one more in. Both go on
+    // the shelf, and neither cancels the other out.
+    expect(plan.deltas).toEqual([
+      { productId: 'p1', name: 'Phone', delta: 1 },
+      { productId: 'p1', name: 'Phone', delta: 1 },
+    ]);
+  });
+
   it('plans nothing when no line moved', () => {
     const plan = planSaleEditStock([sold], [line(phone('p1'), 2)], {}, shelf);
 

@@ -33,6 +33,22 @@ export interface SaleEditStockPlan {
   shortages: SaleEditStockShortage[];
 }
 
+interface StockGroup {
+  productId: string;
+  name: string;
+  isReturn: boolean;
+  /** How many rows carry this SKU, and how many of them were written off instead of restocked. */
+  rows: number;
+  writtenOff: number;
+  sold: number;
+  now: number;
+}
+
+const wholeUnits = (value: number): number => {
+  const n = Math.trunc(Number(value));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+};
+
 const idOf = (item: CartItem | undefined): string | undefined => item?.product?.id;
 
 const labelOf = (item: CartItem): string =>
@@ -42,6 +58,11 @@ const labelOf = (item: CartItem): string =>
  * `shelf` is whatever this till believes it holds. A product it does not list at all
  * is not refused — only a shelf that demonstrably cannot cover the line is, so an
  * imported invoice whose part was later deleted stays correctable.
+ *
+ * Units are totalled per product AND per kind, because the editor gives one SKU one
+ * control and applies it to every row that carries it: an exchange invoice can hold a
+ * sale row and a return row of the same model, and those two move the shelf in
+ * opposite directions.
  */
 export const planSaleEditStock = (
   originalItems: CartItem[],
@@ -51,38 +72,53 @@ export const planSaleEditStock = (
 ): SaleEditStockPlan => {
   const deltas: SaleEditStockDelta[] = [];
   const shortages: SaleEditStockShortage[] = [];
-  const seen = new Set<string>();
+  const totals = new Map<string, StockGroup>();
 
-  [...originalItems, ...newItems].forEach(item => {
-    const productId = idOf(item);
-    if (productId) seen.add(productId);
-  });
+  const collect = (items: CartItem[], side: 'sold' | 'now') => {
+    items.forEach(item => {
+      const productId = idOf(item);
+      if (!productId) return;
+      const isReturn = Boolean(item.isReturn);
+      const key = `${productId}::${isReturn ? 'return' : 'sale'}`;
+      let group = totals.get(key);
+      if (!group) {
+        group = {
+          productId,
+          name: labelOf(item),
+          isReturn,
+          rows: 0,
+          writtenOff: 0,
+          sold: 0,
+          now: 0,
+        };
+        totals.set(key, group);
+      }
+      group[side] += wholeUnits(item.quantity);
+      group.rows += 1;
+      if (item.restock === false) group.writtenOff += 1;
+    });
+  };
+  collect(originalItems, 'sold');
+  collect(newItems, 'now');
 
-  seen.forEach(productId => {
-    const original = originalItems.find(i => i.product.id === productId);
-    const next = newItems.find(i => i.product.id === productId);
-    // The line that survives decides the direction; a removal is judged by what was sold.
-    const line = next ?? original;
-    if (!line) return;
-
-    const moved = (next?.quantity ?? 0) - (original?.quantity ?? 0);
+  totals.forEach(group => {
+    const moved = group.now - group.sold;
     if (moved === 0) return;
 
-    const isReturn = Boolean(line.isReturn);
     // Goods the customer handed back that were never put on the shelf cannot move it
     // in either direction.
-    if (isReturn && line.restock === false) return;
+    if (group.isReturn && group.writtenOff === group.rows) return;
 
-    const delta = isReturn ? moved : -moved;
-    if (delta > 0 && returnToStockOptions[productId] === false) return;
+    const delta = group.isReturn ? moved : -moved;
+    if (delta > 0 && returnToStockOptions[group.productId] === false) return;
 
     if (delta < 0) {
       const wanted = -delta;
-      const level = shelf.find(p => p.id === productId);
+      const level = shelf.find(p => p.id === group.productId);
       if (level && (Number(level.stock) || 0) < wanted) {
         shortages.push({
-          productId,
-          name: labelOf(line),
+          productId: group.productId,
+          name: group.name,
           wanted,
           available: Math.max(0, Number(level.stock) || 0),
         });
@@ -90,7 +126,7 @@ export const planSaleEditStock = (
       }
     }
 
-    deltas.push({ productId, name: labelOf(line), delta });
+    deltas.push({ productId: group.productId, name: group.name, delta });
   });
 
   return { deltas, shortages };
