@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useInventoryStore } from '../store/inventoryStore';
 import { useCartStore } from '../store/cartStore';
 import { useToast } from '../components/ui/Toast';
+import { describeCodeCandidates, resolveProductByCode } from '../utils/productCode';
 
 const MAX_KEY_INTERVAL_MS = 60; // Barcode scanners type with < 40ms interval between characters
 const MIN_BARCODE_LENGTH = 3;
@@ -10,6 +11,11 @@ const MIN_BARCODE_LENGTH = 3;
  * Global Barcode Scanner Auto-Detection Hook
  * Listens for hardware USB / Bluetooth barcode scanners firing rapid keystrokes,
  * and automatically adds matching products to the active POS cart.
+ *
+ * The POS screen runs its own scanner for the same keystrokes, because it can refuse
+ * a repair part and switch the cashier to the products tab. Both listeners acting on
+ * one scan put two units in the cart, so exactly one of them owns any given scan —
+ * see the split inside the handler.
  */
 export function useGlobalBarcodeScanner() {
   const toast = useToast();
@@ -22,8 +28,20 @@ export function useGlobalBarcodeScanner() {
       if (e.ctrlKey || e.altKey || e.metaKey) return;
 
       const target = e.target as HTMLElement;
-      // Do not intercept if user is typing in textarea or contenteditable
-      if (target.tagName === 'TEXTAREA' || target.isContentEditable) {
+      const isTypingInField =
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'INPUT' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable;
+
+      // The POS page reads the same keystrokes, but deliberately ignores anything typed
+      // into a field — and the search box is where a cashier parks their hands, so the
+      // scan that lands there is this hook's to answer. Off that page a field means
+      // someone is typing, not scanning, so a form value must never reach the cart.
+      const ownsScan = window.location.pathname.startsWith('/pos') ? isTypingInField : !isTypingInField;
+      if (!ownsScan) {
+        // Without this the next Enter would read the whole typed sentence as a code.
+        bufferRef.current = '';
         return;
       }
 
@@ -38,13 +56,18 @@ export function useGlobalBarcodeScanner() {
 
         if (barcode.length >= MIN_BARCODE_LENGTH) {
           const { products } = useInventoryStore.getState();
-          const cleanCode = barcode.toLowerCase();
+          const resolution = resolveProductByCode(products, barcode);
 
-          const matchedProduct = products.find(p =>
-            p.sku?.toLowerCase() === cleanCode ||
-            p.barcode?.toLowerCase() === cleanCode ||
-            p.id.toLowerCase() === cleanCode
-          );
+          if (resolution.kind === 'ambiguous') {
+            e.preventDefault();
+            toast.error(
+              'Same Code on Two Products',
+              `"${barcode}" is saved on ${describeCodeCandidates(resolution.candidates)}. Pick the item from the list so the wrong row is not sold.`
+            );
+            return;
+          }
+
+          const matchedProduct = resolution.kind === 'unique' ? resolution.product : undefined;
 
           if (matchedProduct) {
             e.preventDefault();

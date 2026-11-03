@@ -46,8 +46,11 @@ export const StockAudit: React.FC<StockAuditProps> = ({ products, onClose }) => 
 
   const productBySku = React.useMemo(() => {
     const map = new Map<string, PhoneModel>();
+    // A row stored without a sku cannot be indexed, and reading one used to throw
+    // here — which took the whole audit screen down before the first scan.
     products
-      .filter(p => p.category !== 'repair_part' && !p.sku?.toUpperCase().startsWith('PRT-'))
+      .filter((p): p is PhoneModel & { sku: string } =>
+        Boolean(p.sku) && p.category !== 'repair_part' && !p.sku.toUpperCase().startsWith('PRT-'))
       .forEach(p => map.set(p.sku.toUpperCase(), p));
     return map;
   }, [products]);

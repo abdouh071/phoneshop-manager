@@ -12,6 +12,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useSettingsStore } from '../../store/settingsStore';
 import { getCurrencySymbol } from '../../utils/formatCurrency';
 import { computeStockStatus } from '../../utils/stockStatus';
+import { findCodeCollisions } from '../../utils/productCode';
 import { errorMessage } from '../../utils/errorUtils';
 import type { PhoneModel } from '../../types';
 import { ProfitMarginCalculator } from '../../components/ui/ProfitMarginCalculator';
@@ -65,6 +66,25 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, onClose }
       lowStockThreshold: threshold,
       stockStatus: computeStockStatus(stock, threshold),
     };
+
+    // The "SKU / Barcode" field is editable here, and a code saved on two rows makes
+    // every later scan answer to whichever came first — the wrong item sold in silence.
+    const nextSku = (updates.sku || '').trim();
+    if (nextSku && nextSku.toUpperCase() !== (product.sku || '').toUpperCase()) {
+      const { products, parts } = useInventoryStore.getState();
+      const collisions = findCodeCollisions([...products, ...parts], {
+        id: product.id,
+        sku: nextSku,
+        barcode: updates.barcode,
+      });
+      if (collisions.length > 0) {
+        toast.error(
+          'Code Already on Another Product',
+          `${collisions[0]}. Give this part its own code, or one scan will sell two different items.`
+        );
+        return;
+      }
+    }
 
     const outcome = await updateProduct(product.id, updates);
     if (outcome === 'committed') {

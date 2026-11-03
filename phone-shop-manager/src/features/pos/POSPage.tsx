@@ -24,6 +24,7 @@ import { useToast } from '../../components/ui/Toast';
 import type { PaymentMethod, SaleTransaction, SuspendedCart, PhoneModel, CartItem, Customer } from '../../types';
 import { groupProductsByBaseModel } from '../../utils/productGrouping';
 import type { ProductGroup } from '../../utils/productGrouping';
+import { describeCodeCandidates, resolveProductByCode } from '../../utils/productCode';
 import styles from './POS.module.css';
 import { formatCurrency, getCurrencySymbol } from '../../utils/formatCurrency';
 import { usePrivacyStore } from '../../store/privacyStore';
@@ -187,11 +188,23 @@ export const POSPage = () => {
     return result;
   }, [addToCart, toast]);
 
-  const handleBarcodeInput = useCallback((sku: string) => {
+  const handleBarcodeInput = useCallback((code: string) => {
     setScannerScanned(true);
     setTimeout(() => setScannerScanned(false), 1200);
 
-    const product = allProducts.find(p => p.sku.toLowerCase() === sku.toLowerCase());
+    const resolution = resolveProductByCode(allProducts, code);
+
+    if (resolution.kind === 'ambiguous') {
+      // Two rows answer to this code. Guessing here is what sold the neighbour
+      // product, so nothing goes in the cart until an admin splits the codes.
+      toast.error(
+        'Same Code on Two Products',
+        `"${code.trim()}" is saved on ${describeCodeCandidates(resolution.candidates)}. Pick the item from the list instead of scanning it.`
+      );
+      return;
+    }
+
+    const product = resolution.kind === 'unique' ? resolution.product : undefined;
     if (product) {
       // Safety net — server already excludes repair parts from POS products
       if (product.category === 'repair_part') {
@@ -208,7 +221,7 @@ export const POSPage = () => {
         toast.warning('Stock Limit Reached', `Only ${result.availableStock} unit${result.availableStock === 1 ? '' : 's'} of ${product.name} ${product.model} available.`);
       }
     } else {
-      toast.error('Product Not Found', `No product found with SKU: ${sku}`);
+      toast.error('Product Not Found', `No product found with SKU: ${code.trim()}`);
     }
   }, [allProducts, addToCart, toast]);
 
@@ -387,11 +400,14 @@ export const POSPage = () => {
 
       if (!isInputFocused) {
         if (e.key === 'Enter') {
-          if (barcodeBuffer.current.length > 3) {
-            handleBarcodeInput(barcodeBuffer.current);
-          }
+          // Empty the buffer before handing the code over: a handler that throws
+          // used to leave it full, and every scan after it carried the old code.
+          const scanned = barcodeBuffer.current;
           barcodeBuffer.current = '';
           if (barcodeTimer.current) clearTimeout(barcodeTimer.current);
+          if (scanned.length > 3) {
+            handleBarcodeInput(scanned);
+          }
           return;
         }
 

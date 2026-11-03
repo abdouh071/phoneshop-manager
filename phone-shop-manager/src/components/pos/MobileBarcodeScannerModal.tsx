@@ -9,6 +9,7 @@ import { useHaptic } from '../../hooks/useHaptic';
 import type { PhoneModel } from '../../types';
 import styles from './MobileBarcodeScannerModal.module.css';
 import { errorMessage } from '../../utils/errorUtils';
+import { describeCodeCandidates, resolveProductByCode } from '../../utils/productCode';
 
 interface MobileBarcodeScannerModalProps {
   isOpen: boolean;
@@ -35,14 +36,11 @@ export const MobileBarcodeScannerModal: React.FC<MobileBarcodeScannerModalProps>
   const haptic = useHaptic();
 
   const handleProductDetected = useCallback((barcode: string) => {
-    const cleanCode = barcode.trim().toLowerCase();
+    const cleanCode = barcode.trim();
     if (!cleanCode) return;
 
-    const matched = products.find(p =>
-      p.sku?.toLowerCase() === cleanCode ||
-      p.barcode?.toLowerCase() === cleanCode ||
-      p.id.toLowerCase() === cleanCode
-    );
+    const resolution = resolveProductByCode(products, cleanCode);
+    const matched = resolution.kind === 'unique' ? resolution.product : undefined;
 
     if (matched) {
       haptic.success();
@@ -59,7 +57,16 @@ export const MobileBarcodeScannerModal: React.FC<MobileBarcodeScannerModalProps>
     } else {
       haptic.warning();
       setLastScanned({ code: barcode });
-      toast.warning('Unknown Barcode', `No product found for SKU/Barcode: ${barcode}`);
+      if (resolution.kind === 'ambiguous') {
+        // Two rows answer to this code. Guessing here is what sold the neighbour
+        // product, so the camera stays on the counter until an admin splits them.
+        toast.error(
+          'Same Code on Two Products',
+          `"${cleanCode}" is saved on ${describeCodeCandidates(resolution.candidates)}. Pick the item from the list so the wrong row is not sold.`
+        );
+      } else {
+        toast.warning('Unknown Barcode', `No product found for SKU/Barcode: ${barcode}`);
+      }
     }
 
     // Reset overlay after 1.8s

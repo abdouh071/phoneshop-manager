@@ -21,6 +21,23 @@ export interface StockWriteResult {
   applied: number;
 }
 
+/**
+ * Every code a scan already answers to, across products and parts.
+ *
+ * A new product is given a distinct sku from this set, so the set has to hold the
+ * legacy `barcode` field too: a scan reads either one, and a sku that lands on
+ * another row's barcode is the same code saved twice — which is how one scan came to
+ * sell the neighbour product.
+ */
+const codesAlreadyInUse = (rows: readonly PhoneModel[]): Set<string> => {
+  const taken = new Set<string>();
+  for (const row of rows) {
+    if (row.sku) taken.add(row.sku.toUpperCase().trim());
+    if (row.barcode) taken.add(row.barcode.toUpperCase().trim());
+  }
+  return taken;
+};
+
 interface InventoryState {
   products: PhoneModel[]; // Retail products (Server excludes repair_part from the beginning)
   parts: PhoneModel[];    // Repair parts (Server sends only repair_part from the beginning)
@@ -236,9 +253,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
   addProduct: async (product) => {
     try {
       // Safety net: resolve SKU against all existing products before persisting
-      const systemSkus = new Set(get().products.map(p => (p.sku || '').toUpperCase().trim()));
-      // Also include repair parts to prevent any cross-collection collisions
-      get().parts.forEach(p => systemSkus.add((p.sku || '').toUpperCase().trim()));
+      const systemSkus = codesAlreadyInUse([...get().products, ...get().parts]);
       const rawSku = (product.sku || '').trim() || generateSKU(product.name, product.model, product.storage || '', product.color || '');
       const safeSku = resolveUniqueSKU(rawSku, systemSkus);
       const safeProduct = { ...product, sku: safeSku };
@@ -264,8 +279,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
   addProductsBulk: async (products) => {
     try {
       // Safety net: resolve every product's SKU against existing store + prior items in this batch
-      const systemSkus = new Set(get().products.map(p => (p.sku || '').toUpperCase().trim()));
-      get().parts.forEach(p => systemSkus.add((p.sku || '').toUpperCase().trim()));
+      const systemSkus = codesAlreadyInUse([...get().products, ...get().parts]);
       const safeProducts = products.map(product => {
         const rawSku = (product.sku || '').trim() || generateSKU(product.name, product.model, product.storage || '', product.color || '');
         const safeSku = resolveUniqueSKU(rawSku, systemSkus); // mutates systemSkus so next product sees this one
