@@ -214,3 +214,97 @@ test('a SKU on two rows is reported to the approving admin once', () => {
 
   assert.deepEqual(changes, [{ kind: 'quantity', name: 'Hoco EQ2', from: 3, to: 2 }]);
 });
+
+const cable = (over: Partial<PhoneModel> = {}) =>
+  makeProduct({ id: 'p9', name: 'Cable', model: 'USB-C', price: 100, ...over });
+
+test('a product the invoice never carried is added and the whole quantity leaves the shelf', () => {
+  const tx = makeTx({ items: [line(makeProduct(), 1)] });
+  const plan = planSaleEdit(tx, { p1: { quantity: 1, unitPrice: 4500 } }, {}, [line(cable(), 2)]);
+
+  assert.equal(plan.subtotal, 4700);
+  assert.equal(plan.additionalDue, 200);
+  assert.equal(plan.refundDue, 0);
+  assert.deepEqual(plan.deduct, [{ productId: 'p9', name: 'Cable', quantity: 2 }]);
+  assert.deepEqual(plan.restock, []);
+  assert.equal(plan.status, 'completed');
+  // Nothing on the document moved, yet there is a sale to write.
+  assert.equal(plan.hasChanges, true);
+});
+
+test('a new line carries both prices, or the till and the receipt tell two stories', () => {
+  const tx = makeTx({ items: [line(makeProduct(), 1)] });
+  const plan = planSaleEdit(tx, {}, {}, [{ product: cable(), quantity: 1, unitPrice: 80 }]);
+
+  assert.equal(plan.items[1].unitPrice, 80);
+  assert.equal(plan.items[1].product.price, 80);
+  assert.equal(plan.subtotal, 4580);
+});
+
+test('a new line named at zero units is not on the invoice and does not unlock the save', () => {
+  const tx = makeTx({ items: [line(makeProduct(), 1)] });
+  const plan = planSaleEdit(tx, {}, {}, [{ product: cable(), quantity: 0 }]);
+
+  assert.equal(plan.items.length, 1);
+  assert.deepEqual(plan.deduct, []);
+  assert.equal(plan.hasChanges, false);
+});
+
+test('a product already on the invoice is edited on its own row, not stacked as a second one', () => {
+  const tx = makeTx({ items: [line(makeProduct(), 2)] });
+  const plan = planSaleEdit(tx, { p1: { quantity: 2, unitPrice: 4500 } }, {}, [line(makeProduct(), 3)]);
+
+  assert.equal(plan.items.length, 1);
+  assert.equal(plan.subtotal, 9000);
+  assert.deepEqual(plan.deduct, []);
+  assert.equal(plan.hasChanges, false);
+});
+
+test('a row that gives units back and a new row that takes them both reach the shelf', () => {
+  const tx = makeTx({ items: [line(makeProduct(), 3)] });
+  const plan = planSaleEdit(tx, { p1: { quantity: 2, unitPrice: 4500 } }, {}, [line(cable(), 2)]);
+
+  assert.deepEqual(plan.restock, [{ productId: 'p1', name: 'Hoco EQ2', quantity: 1 }]);
+  assert.deepEqual(plan.deduct, [{ productId: 'p9', name: 'Cable', quantity: 2 }]);
+  assert.equal(plan.total, 9200);
+  assert.equal(plan.refundDue, 4300);
+  assert.equal(plan.status, 'partially_refunded');
+});
+
+test('a credit sale that grows by a new line puts its share on the account', () => {
+  const tx = makeTx({
+    items: [line(makeProduct(), 2)],
+    total: 9000,
+    payments: [
+      { method: 'cash', amount: 4500 },
+      { method: 'debt', amount: 4500 },
+    ],
+  });
+  const plan = planSaleEdit(tx, {}, {}, [line(cable(), 3)]);
+
+  const debtLine = plan.payments.find(p => p.method === 'debt');
+  assert.equal(debtLine?.amount, 4650);
+  assert.equal(plan.payments.reduce((sum, p) => sum + p.amount, 0), 9300);
+  assert.equal(plan.additionalDue, 300);
+});
+
+test('the discount granted on the sale follows the basket into the new line', () => {
+  const tx = makeTx({
+    items: [line(makeProduct(), 2)],
+    discount: { type: 'percent', value: 10 },
+    total: 8100,
+  });
+  const plan = planSaleEdit(tx, {}, {}, [line(cable(), 5)]);
+
+  assert.equal(plan.subtotal, 9500);
+  assert.equal(plan.discountAmount, 950);
+  assert.equal(plan.total, 8550);
+  assert.equal(plan.additionalDue, 450);
+});
+
+test('the approving admin is told which product was put on the invoice', () => {
+  const tx = makeTx({ items: [line(makeProduct(), 1)] });
+  const changes = diffSaleEdit(tx, {}, [line(cable(), 2)]);
+
+  assert.deepEqual(changes, [{ kind: 'add', name: 'Cable', quantity: 2, unitPrice: 100 }]);
+});

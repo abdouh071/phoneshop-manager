@@ -15,6 +15,12 @@
  * discount that was granted on the sale stays granted (a percentage scales with
  * the new basket, a flat amount does not), the total is floored at zero, and the
  * status only changes when units actually came off.
+ *
+ * One thing goes further than the counter, deliberately: a product that was never on
+ * the invoice can be added to it. The shop asks for it at the counter — the customer
+ * who comes back for a second cable — and the phone is the till that is standing
+ * there. A new row is planned like a row that grew: its units come off the shelf, and
+ * the save refuses what the shelf cannot give.
  */
 import type { CartItem, SaleTransaction } from '../types/index.ts';
 
@@ -90,7 +96,13 @@ export const rescalePayments = (
 export const planSaleEdit = (
   tx: SaleTransaction,
   edits: SaleLineEdits,
-  restockChoices: SaleRestockChoices = {}
+  restockChoices: SaleRestockChoices = {},
+  /**
+   * Products the cashier puts on an invoice that was already sold — the second
+   * cable the customer asks for at the counter. They carry the quantity and price
+   * the editor was given, and every unit of them comes off the shelf.
+   */
+  added: CartItem[] = []
 ): SaleEditPlan => {
   // The desktop modal builds the new lines first — every row takes the edited
   // quantity and price of its product id, and a row that reaches zero leaves the
@@ -120,6 +132,28 @@ export const planSaleEdit = (
     })
     .filter(item => wholeUnits(item.quantity, 0) > 0);
 
+  /**
+   * The new rows. The counter's editor has no add control, so the phone sets the
+   * shape here: both price fields are written — the item list and the WhatsApp
+   * receipt read `unitPrice`, the basket prices off `product.price` — and a SKU that
+   * is already on the invoice is refused, because the desktop's rule that one product
+   * id is one control means the row on the document owns that product.
+   */
+  const onInvoice = new Set(tx.items.map(item => item?.product?.id).filter(Boolean));
+  const addedItems: CartItem[] = [];
+  for (const item of added) {
+    const product = item?.product;
+    const id = product?.id;
+    if (!id || onInvoice.has(id)) continue;
+    const quantity = wholeUnits(item.quantity, 0);
+    if (quantity <= 0) continue;
+    const listed = money(product.price, 0);
+    const unitPrice = money(item.unitPrice ?? listed, listed);
+    addedItems.push({ ...item, quantity, unitPrice, product: { ...product, price: unitPrice } });
+  }
+
+  const items = [...newItems, ...addedItems];
+
   const restock: SaleStockLine[] = [];
   const deduct: SaleStockLine[] = [];
 
@@ -127,7 +161,7 @@ export const planSaleEdit = (
     const product = item?.product;
     if (!product?.id) return;
     const stockName = product.name || product.model || product.id;
-    const match = newItems.find(i => i.product?.id === product.id);
+    const match = items.find(i => i.product?.id === product.id);
     const newQty = match ? wholeUnits(match.quantity, 0) : 0;
     const returnedQty = wholeUnits(item.quantity, 0) - newQty;
 
@@ -140,7 +174,19 @@ export const planSaleEdit = (
     }
   });
 
-  const subtotal = newItems.reduce(
+  // A new row has no original to be compared with, so the whole quantity leaves the
+  // counter. The save asks the shelf for these units exactly as it does for a row
+  // that grew, and an empty shelf stops the invoice.
+  addedItems.forEach(item => {
+    const product = item.product;
+    deduct.push({
+      productId: product.id,
+      name: product.name || product.model || product.id,
+      quantity: wholeUnits(item.quantity, 0),
+    });
+  });
+
+  const subtotal = items.reduce(
     // The basket prices off the product snapshot, as the counter does. A row too old
     // to carry one keeps its own line price instead of contributing zero.
     (sum, item) => sum + money(item.product?.price ?? item.unitPrice, 0) * wholeUnits(item.quantity, 0),
@@ -154,33 +200,35 @@ export const planSaleEdit = (
   const total = Math.max(0, subtotal - discountAmount);
 
   let status: NonNullable<SaleTransaction['status']> = tx.status || 'completed';
-  if (newItems.length === 0 || total === 0) {
+  if (items.length === 0 || total === 0) {
     status = 'refunded';
   } else if (
     tx.items.some(orig => {
-      const match = newItems.find(ni => ni.product?.id === orig.product?.id);
+      const match = items.find(ni => ni.product?.id === orig.product?.id);
       return !match || wholeUnits(match.quantity, 0) < wholeUnits(orig.quantity, 0);
     })
   ) {
     status = 'partially_refunded';
   }
 
-  const hasChanges = tx.items.some(item => {
-    const edit = item.product?.id ? edits[item.product.id] : undefined;
-    if (!edit) return false;
-    const originalQty = wholeUnits(item.quantity, 0);
-    const originalPrice = money(item.product?.price, 0);
-    return (
-      wholeUnits(edit.quantity, originalQty) !== originalQty ||
-      money(edit.unitPrice, originalPrice) !== originalPrice
-    );
-  });
+  const hasChanges =
+    addedItems.length > 0 ||
+    tx.items.some(item => {
+      const edit = item.product?.id ? edits[item.product.id] : undefined;
+      if (!edit) return false;
+      const originalQty = wholeUnits(item.quantity, 0);
+      const originalPrice = money(item.product?.price, 0);
+      return (
+        wholeUnits(edit.quantity, originalQty) !== originalQty ||
+        money(edit.unitPrice, originalPrice) !== originalPrice
+      );
+    });
 
   // The desktop's own wording for the two directions of the same difference.
   const diff = (tx.total || 0) - total;
 
   return {
-    items: newItems,
+    items,
     subtotal,
     discountAmount,
     total,
@@ -196,14 +244,20 @@ export const planSaleEdit = (
 
 /**
  * The changes reduced to what a remote admin reads on their own screen before they
- * answer: which line shrank, which price moved. The screen owns the wording, so this
- * stays numbers and product names rather than sentences.
+ * answer: which line shrank, which price moved, which product was put on the
+ * invoice. The screen owns the wording, so this stays numbers and product names
+ * rather than sentences.
  */
 export type SaleEditChange =
   | { kind: 'quantity'; name: string; from: number; to: number }
-  | { kind: 'price'; name: string; from: number; to: number };
+  | { kind: 'price'; name: string; from: number; to: number }
+  | { kind: 'add'; name: string; quantity: number; unitPrice: number };
 
-export const diffSaleEdit = (tx: SaleTransaction, edits: SaleLineEdits): SaleEditChange[] => {
+export const diffSaleEdit = (
+  tx: SaleTransaction,
+  edits: SaleLineEdits,
+  added: CartItem[] = []
+): SaleEditChange[] => {
   const changes: SaleEditChange[] = [];
   const seen = new Set<string>();
 
@@ -223,5 +277,19 @@ export const diffSaleEdit = (tx: SaleTransaction, edits: SaleLineEdits): SaleEdi
     if (toQty !== fromQty) changes.push({ kind: 'quantity', name, from: fromQty, to: toQty });
     if (toUnit !== fromUnit) changes.push({ kind: 'price', name, from: fromUnit, to: toUnit });
   });
+
+  added.forEach(item => {
+    const product = item?.product;
+    const quantity = wholeUnits(item.quantity, 0);
+    if (!product?.id || quantity <= 0) return;
+    const listed = money(product.price, 0);
+    changes.push({
+      kind: 'add',
+      name: product.name || product.model || product.id,
+      quantity,
+      unitPrice: money(item.unitPrice ?? listed, listed),
+    });
+  });
+
   return changes;
 };
