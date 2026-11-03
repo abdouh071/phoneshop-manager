@@ -31,10 +31,10 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
-import { usePosStore } from '../store/posStore';
 import { useApprovalStore } from '../store/approvalStore';
 import { activityLogService } from '../services/activityLogService';
 import { applyStockLines } from '../services/stockService';
+import { EditSaleSheet } from '../components/EditSaleSheet';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import { usePermissions } from '../hooks/usePermissions';
 import { useTranslation } from 'react-i18next';
@@ -61,27 +61,23 @@ const FILTER_TABS = [
   { id: 'pending', labelKey: 'salesHistory.tabPending', fallback: 'Approvals', icon: 'clock-outline' },
 ] as const;
 
-const REQUEST_TYPES = [
-  { id: 'void', labelKey: 'salesHistory.reqVoid', fallback: 'Void & Refund Sale', icon: 'undo-variant' },
-  { id: 'modify', labelKey: 'salesHistory.reqModify', fallback: 'Modify Items / Price', icon: 'playlist-edit' },
-] as const;
-
 export const SalesHistoryScreen = ({ navigation }: any) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const can = usePermissions();
-  const { addToCart, clearCart } = usePosStore();
 
   const [transactions, setTransactions] = useState<SaleTransaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'today' | 'past' | 'pending'>('today');
 
+  // Editing a settled invoice, in place.
+  const [editTx, setEditTx] = useState<SaleTransaction | null>(null);
+
   // Admin Approval Request Modal State
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
   const [targetTxForApproval, setTargetTxForApproval] = useState<SaleTransaction | null>(null);
-  const [requestType, setRequestType] = useState<'void' | 'modify'>('void');
   const [requestReason, setRequestReason] = useState('');
   const [requestDetails, setRequestDetails] = useState('');
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
@@ -244,31 +240,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
     );
   };
 
-  // TODAY: Re-open Cart / Edit Sale
-  const handleEditCartToday = (tx: SaleTransaction) => {
-    Alert.alert(
-      t('salesHistory.editCartTitle', "Edit Today's Cart"),
-      t('salesHistory.editCartBody', 'Would you like to load the items from Invoice #{{invoice}} back into your active cart to make changes?', {
-        invoice: tx.invoiceNumber || tx.id.slice(-6),
-      }),
-      [
-        { text: t('common.cancel', 'Cancel'), style: 'cancel' },
-        {
-          text: t('salesHistory.loadIntoCart', 'Load into Cart'),
-          onPress: () => {
-            clearCart();
-            tx.items.forEach((item) => {
-              addToCart(item.product, item.quantity);
-            });
-            Vibration.vibrate(30);
-            navigation.navigate('POS');
-          },
-        },
-      ]
-    );
-  };
-
-  // PAST: Submit Admin Approval Request
+  // A void an agent cannot perform themselves, asked of an admin over the rail.
   const handleSubmitApprovalRequest = async () => {
     if (!targetTxForApproval) return;
     if (!requestReason.trim()) {
@@ -279,14 +251,10 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
     setIsSubmittingRequest(true);
     try {
       const invNum = targetTxForApproval.invoiceNumber || targetTxForApproval.id.slice(-6);
-      const actionLabel =
-        requestType === 'void'
-          ? `Request Void / Refund Sale #${invNum}`
-          : `Request Edit Items / Price for #${invNum}`;
 
       const reqId = await useApprovalStore.getState().submitRequest({
-        actionType: requestType === 'void' ? 'void_sale' : 'modify_sale',
-        actionLabel,
+        actionType: 'void_sale',
+        actionLabel: `Request Void / Refund Sale #${invNum}`,
         actionData: {
           saleId: targetTxForApproval.id,
           invoiceNumber: invNum,
@@ -298,7 +266,6 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
             qty: i.quantity,
             price: i.product.price,
           })),
-          requestType,
           details: requestDetails.trim() || undefined,
         },
         targetId: targetTxForApproval.id,
@@ -532,8 +499,12 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
                         <Text style={[styles.statusPillText, { color: status.ink }]}>
                           {isPendingApproval
                             ? t('salesHistory.statusPending', 'Approval Pending')
-                            : isVoided
+                            : item.status === 'voided'
                             ? t('salesHistory.statusVoided', 'VOIDED')
+                            : item.status === 'refunded'
+                            ? t('salesHistory.statusRefunded', 'REFUNDED')
+                            : item.status === 'partially_refunded'
+                            ? t('salesHistory.statusEdited', 'CORRECTED')
                             : t('salesHistory.statusCompleted', 'COMPLETED')}
                         </Text>
                       </View>
@@ -611,54 +582,61 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
 
                   {/* Action Bar */}
                   <View style={styles.cardActionsRow}>
-                    {/* TODAY'S SALES: Direct Edit / Void Actions */}
-                    {isToday && !isVoided && (
-                      <>
-                        <TouchableOpacity
-                          style={[styles.actionBtn, styles.editBtn]}
-                          onPress={() => handleEditCartToday(item)}
-                        >
-                          <MaterialCommunityIcons name="cart-arrow-down" size={16} color={colors.brand} />
-                          <Text style={[styles.actionBtnText, { color: colors.brand }]}>
-                            {t('salesHistory.editCart', 'Edit Cart')}
-                          </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          style={[styles.actionBtn, styles.voidBtn]}
-                          onPress={() => handleDirectVoidToday(item)}
-                        >
-                          <MaterialCommunityIcons name="close-circle-outline" size={16} color={colors.danger} />
-                          <Text style={[styles.actionBtnText, { color: colors.danger }]}>
-                            {t('salesHistory.voidRefund', 'Void / Refund')}
-                          </Text>
-                        </TouchableOpacity>
-                      </>
-                    )}
-
-                    {/* PAST DAYS' SALES: Request Admin Change Action */}
-                    {!isToday && !isVoided && (
+                    {/* Correcting a settled invoice is the same act whatever its date:
+                        the document is rewritten and the stock follows it. */}
+                    {!isVoided && (
                       <TouchableOpacity
                         style={[
                           styles.actionBtn,
-                          styles.requestBtn,
+                          styles.editBtn,
                           isPendingApproval && styles.actionBtnDisabled,
                         ]}
                         disabled={isPendingApproval}
+                        onPress={() => setEditTx(item)}
+                      >
+                        <MaterialCommunityIcons
+                          name={isPendingApproval ? 'clock-check-outline' : 'file-document-edit-outline'}
+                          size={16}
+                          color={isPendingApproval ? colors.warningText : colors.brand}
+                        />
+                        <Text
+                          style={[
+                            styles.actionBtnText,
+                            { color: isPendingApproval ? colors.warningText : colors.brand },
+                          ]}
+                        >
+                          {isPendingApproval
+                            ? t('salesHistory.requestPending', 'Request Pending')
+                            : t('salesHistory.editInvoice', 'Edit Invoice')}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {/* TODAY: the agent may void their own day without asking */}
+                    {isToday && !isVoided && (
+                      <TouchableOpacity
+                        style={[styles.actionBtn, styles.voidBtn]}
+                        onPress={() => handleDirectVoidToday(item)}
+                      >
+                        <MaterialCommunityIcons name="close-circle-outline" size={16} color={colors.danger} />
+                        <Text style={[styles.actionBtnText, { color: colors.danger }]}>
+                          {t('salesHistory.voidRefund', 'Void / Refund')}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {/* PAST DAYS: a void is an admin's call */}
+                    {!isToday && !isVoided && !isPendingApproval && (
+                      <TouchableOpacity
+                        style={[styles.actionBtn, styles.requestBtn]}
                         onPress={() => {
                           setTargetTxForApproval(item);
                           setIsRequestModalOpen(true);
                         }}
                       >
-                        <MaterialCommunityIcons
-                          name={isPendingApproval ? 'clock-check-outline' : 'shield-account'}
-                          size={16}
-                          color={colors.warningText}
-                        />
+                        <MaterialCommunityIcons name="shield-account" size={16} color={colors.warningText} />
                         <Text style={[styles.actionBtnText, { color: colors.warningText }]}>
-                          {isPendingApproval
-                            ? t('salesHistory.requestPending', 'Request Pending')
-                            : t('salesHistory.requestAdminChange', 'Request Admin Change')}
+                          {t('salesHistory.requestAdminVoid', 'Request Admin Void')}
                         </Text>
                       </TouchableOpacity>
                     )}
@@ -706,7 +684,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
           >
             <View style={styles.modalHeader}>
               <View style={styles.flexOne}>
-                <Text style={styles.modalTitle}>{t('salesHistory.requestTitle', 'Request Admin Approval')}</Text>
+                <Text style={styles.modalTitle}>{t('salesHistory.requestVoidTitle', 'Request Admin Void')}</Text>
                 <Text style={styles.modalSub}>
                   {t(
                     'salesHistory.requestSub',
@@ -724,29 +702,6 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
             </View>
 
             <ScrollView style={styles.requestScroll} keyboardShouldPersistTaps="handled">
-              <Text style={styles.requestSectionTitle}>{t('salesHistory.requestAction', 'Request Action')}</Text>
-              <View style={styles.requestTypeRow}>
-                {REQUEST_TYPES.map((req) => {
-                  const active = requestType === req.id;
-                  return (
-                    <TouchableOpacity
-                      key={req.id}
-                      style={[styles.requestTypeChip, active && styles.requestTypeChipActive]}
-                      onPress={() => setRequestType(req.id)}
-                    >
-                      <MaterialCommunityIcons
-                        name={req.icon}
-                        size={18}
-                        color={active ? colors.onBrand : colors.textSecondary}
-                      />
-                      <Text style={[styles.requestTypeChipText, active && styles.requestTypeChipTextActive]}>
-                        {t(req.labelKey, req.fallback)}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
               <TextInput
                 label={t('salesHistory.reasonLabel', 'Reason for Admin (Required) *')}
                 placeholder={t(
@@ -797,6 +752,13 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
           </View>
         </View>
       </Modal>
+
+      <EditSaleSheet
+        key={editTx?.id ?? 'closed'}
+        visible={Boolean(editTx)}
+        transaction={editTx}
+        onClose={() => setEditTx(null)}
+      />
     </View>
   );
 };
@@ -1190,41 +1152,6 @@ const styles = StyleSheet.create({
   },
   requestScroll: {
     maxHeight: 380,
-  },
-  requestSectionTitle: {
-    fontSize: fontSize.body,
-    fontWeight: '700',
-    color: ramp.slate700,
-    marginBottom: spacing.sm,
-  },
-  requestTypeRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.md - 2,
-  },
-  requestTypeChip: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs + 2,
-    paddingVertical: 10,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radius.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-  },
-  requestTypeChipActive: {
-    backgroundColor: colors.warningSolid,
-    borderColor: colors.warningSolid,
-  },
-  requestTypeChipText: {
-    fontSize: fontSize.label,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  requestTypeChipTextActive: {
-    color: colors.onBrand,
   },
   requestInput: {
     backgroundColor: colors.surface,
