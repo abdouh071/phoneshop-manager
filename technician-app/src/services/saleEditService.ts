@@ -100,7 +100,7 @@ const itemsDetail = (plan: SaleEditPlan): string =>
     .map(i => `${i.quantity}x ${i.product?.name || i.product?.model || 'Item'} @ ${i.product?.price ?? 0} DA`)
     .join(', ');
 
-interface FoundDebt {
+export interface FoundDebt {
   id: string;
   customerId: string;
   customerName?: string;
@@ -119,7 +119,7 @@ interface FoundDebt {
  * row was queued. Reading them off a phone costs a query, so the first clause is a
  * direct document read and the rest only run for a sale that was not paid in full.
  */
-const findLinkedDebt = async (tx: SaleTransaction): Promise<FoundDebt | null> => {
+export const findLinkedDebt = async (tx: SaleTransaction): Promise<FoundDebt | null> => {
   const toDebt = (id: string, data: Record<string, unknown>): FoundDebt => ({
     id,
     customerId: String(data.customerId || ''),
@@ -168,6 +168,57 @@ const findLinkedDebt = async (tx: SaleTransaction): Promise<FoundDebt | null> =>
 };
 
 /**
+ * Put a profile's own numbers back after one of its invoices changed.
+ *
+ * What a customer has spent is the money that actually changed hands, so an invoice
+ * that moved value between the drawer and the account leaves the figure alone and only
+ * a real gain or loss moves it. Passing `openBalance` as null leaves what the account
+ * owes untouched — an edit that never reached a debt entry cannot recompute it.
+ */
+export const writeCustomerTotals = async (
+  customerId: string,
+  paidDelta: number,
+  openBalance: number | null
+): Promise<void> => {
+  const ref = doc(db, 'customers', customerId);
+  const snap = await getDoc(ref).catch(() => null);
+  if (!snap?.exists()) return;
+  const cust = snap.data() as { totalSpent?: number };
+
+  const updates: Record<string, unknown> = { lastVisitDate: new Date().toISOString() };
+  if (paidDelta !== 0) {
+    updates.totalSpent = Math.max(0, (Number(cust.totalSpent) || 0) + paidDelta);
+  }
+  if (openBalance !== null) updates.totalDebt = Math.max(0, openBalance);
+
+  await updateDoc(ref, updates)
+    .catch(err => console.warn('[SaleEdit] Customer totals could not be written:', err));
+};
+
+/**
+ * Every entry on an account that is not settled, with `thisId` counted at the balance
+ * it has just been given rather than the one the server still holds.
+ *
+ * The desktop reads this off the debt list already in memory; a phone has to ask —
+ * one bounded query, and only for a sale that went to account.
+ */
+export const sumOpenDebt = async (
+  customerId: string,
+  thisId: string,
+  thisBalance: number
+): Promise<number> => {
+  const others = await getDocs(
+    query(collection(db, 'customer_debts'), where('customerId', '==', customerId), limit(100))
+  ).catch(() => null);
+  if (!others) return Math.max(0, thisBalance);
+  return others.docs.reduce((sum, row) => {
+    if (row.id === thisId) return sum + Math.max(0, thisBalance);
+    const data = row.data() as { status?: string; remainingBalance?: number };
+    return data.status && data.status !== 'paid' ? sum + (Number(data.remainingBalance) || 0) : sum;
+  }, 0);
+};
+
+/**
  * `debtService.updateDebtAmount` plus the totals its store wrapper then puts back
  * on the customer: the new total against what was already paid decides the
  * remaining balance and the state, and what the account owes is the sum of the
@@ -207,32 +258,18 @@ const syncLinkedDebt = async (
 
   await updateDoc(doc(db, 'customer_debts', debt.id), updates);
 
-  const ref = doc(db, 'customers', debt.customerId);
-  const custSnap = await getDoc(ref).catch(() => null);
-  if (custSnap?.exists()) {
-    const cust = custSnap.data() as { totalSpent?: number };
-    // What the account owes is every entry on it that is not settled. The desktop
-    // reads that off the list already in memory; the phone asks for it — one
-    // bounded query, and only for a sale that went to account.
-    const openBalance = status === 'paid' ? 0 : remainingBalance;
-    const others = await getDocs(
-      query(collection(db, 'customer_debts'), where('customerId', '==', debt.customerId), limit(100))
-    ).catch(() => null);
-    const totalDebt = others
-      ? others.docs.reduce((sum, row) => {
-          if (row.id === debt.id) return sum; // counted above, at its new balance
-          const data = row.data() as { status?: string; remainingBalance?: number };
-          return data.status && data.status !== 'paid' ? sum + (Number(data.remainingBalance) || 0) : sum;
-        }, openBalance)
-      : openBalance;
+  const totalDebt = await sumOpenDebt(
+    debt.customerId,
+    debt.id,
+    status === 'paid' ? 0 : remainingBalance
+  );
 
-    await updateDoc(ref, {
-      totalDebt: Math.max(0, totalDebt),
-      // What the profile has spent is every sale on it; this invoice just changed
-      // by the difference, which is what an authoritative recompute would find.
-      totalSpent: Math.max(0, (Number(cust.totalSpent) || 0) + (plan.total - (tx.total || 0))),
-    });
-  }
+  // What the profile has spent is the money that changed hands. This invoice held
+  // `paidBefore` of it and now holds `paidAfter`; the rest of its value sat on the
+  // account before this edit and sits there after, so it is not spending.
+  const paidBefore = Math.max(0, (tx.total || 0) - debt.remainingBalance);
+  const paidAfter = Math.max(0, plan.total - remainingBalance);
+  await writeCustomerTotals(debt.customerId, paidAfter - paidBefore, totalDebt);
 
   const actor = useAuthStore.getState().user;
   await addDoc(collection(db, 'customer_activity_logs'), {
@@ -319,8 +356,18 @@ export const applySaleEdit = async (
   );
   try {
     const debt = await findLinkedDebt(tx);
-    if (debt) debtSynced = await syncLinkedDebt(tx, plan, debt);
-    else accountUnreconciled = chargedOnAccount;
+    if (debt) {
+      debtSynced = await syncLinkedDebt(tx, plan, debt);
+    } else {
+      accountUnreconciled = chargedOnAccount;
+      // No entry involved means the whole invoice was handed over, so its profile
+      // moved by the whole difference — and still has to hear about it. A sale whose
+      // account entry could not be found is left alone: its own numbers would be
+      // computed from a balance this phone never read.
+      if (tx.customerId && chargedOnAccount <= 0) {
+        await writeCustomerTotals(tx.customerId, plan.total - (tx.total || 0), null);
+      }
+    }
   } catch (err) {
     console.warn('[SaleEdit] Linked debt could not be corrected:', err);
     accountUnreconciled = chargedOnAccount;
