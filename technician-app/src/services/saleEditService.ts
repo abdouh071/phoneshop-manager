@@ -48,6 +48,12 @@ export interface SaleEditOutcome {
   status: SaleTransaction['status'];
   stockFailures: SaleEditFailure[];
   debtSynced: boolean;
+  /**
+   * What the customer still owes on this invoice when the phone could not find the
+   * entry to correct — non-zero only when the corrected invoice itself carries a
+   * balance. The reports and the account then disagree until someone closes it.
+   */
+  accountUnreconciled: number;
 }
 
 /**
@@ -105,11 +111,13 @@ interface FoundDebt {
 /**
  * The debt entry raised when this sale went to someone's account.
  *
- * The desktop matches on three things — the id recorded on the transaction, the
- * transaction id stored on the debt, and its notes carrying the transaction id —
- * because which of the three exists depends on which app wrote the sale and when.
- * Reading three clauses off a phone costs a query, so the first clause is a direct
- * document read and the other two only run for a sale that was not paid in full.
+ * Four things can identify it — the id recorded on the transaction, the transaction
+ * id stored on the debt, the debt's notes carrying the transaction id, and the two
+ * invoice numbers — because which of them exists depends on which app wrote the sale
+ * and when. A counter-written credit sale answers the first three; a phone written
+ * offline answers only the last, since no transaction id existed yet when its debt
+ * row was queued. Reading them off a phone costs a query, so the first clause is a
+ * direct document read and the rest only run for a sale that was not paid in full.
  */
 const findLinkedDebt = async (tx: SaleTransaction): Promise<FoundDebt | null> => {
   const toDebt = (id: string, data: Record<string, unknown>): FoundDebt => ({
@@ -131,8 +139,17 @@ const findLinkedDebt = async (tx: SaleTransaction): Promise<FoundDebt | null> =>
   if (!tx.customerId) return null;
   if (tx.accountSettlement?.type === 'paid_full') return null;
 
-  const byAnyOfTheThree = (id: string, data: Record<string, unknown>) =>
-    id === debtEntryId || data.transactionId === tx.id || String(data.notes || '').includes(tx.id);
+  const invoice = String(tx.invoiceNumber || '').trim();
+  const matchesThisInvoice = (id: string, data: Record<string, unknown>) => {
+    if (id === debtEntryId || data.transactionId === tx.id) return true;
+    if (String(data.notes || '').includes(tx.id)) return true;
+    // A phone writes the invoice number on both sides; an invoice raised offline has no
+    // transaction id for either party to remember, so this clause is what lets a
+    // credit sale that was queued in a back room still be corrected a week later.
+    // Both sides must actually carry one — two absent numbers are not a match.
+    const debtInvoice = String(data.invoiceNumber || '').trim();
+    return !!invoice && !!debtInvoice && debtInvoice === invoice;
+  };
 
   const found = await getDocs(
     query(
@@ -145,7 +162,7 @@ const findLinkedDebt = async (tx: SaleTransaction): Promise<FoundDebt | null> =>
 
   for (const row of found.docs) {
     const data = row.data() as Record<string, unknown>;
-    if (byAnyOfTheThree(row.id, data)) return toDebt(row.id, data);
+    if (matchesThisInvoice(row.id, data)) return toDebt(row.id, data);
   }
   return null;
 };
@@ -163,7 +180,17 @@ const syncLinkedDebt = async (
 ): Promise<boolean> => {
   const now = new Date().toISOString();
   const amountPaid = debt.amountPaid;
-  const remainingBalance = Math.max(0, plan.total - amountPaid);
+  // What the account owes is what the corrected invoice says it owes. The rescaled
+  // payment lines are the document the till, the drawer and the reports all read, so
+  // taking the balance from the account's old paid amount instead would leave the two
+  // differing by whatever the proportional split rounded away. An invoice that carries
+  // no debt line at all keeps the old rule — silence there is not evidence that a
+  // standing balance was paid.
+  const accountLines = plan.payments.filter(p => p.method === 'debt');
+  const charged = accountLines.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const remainingBalance = accountLines.length > 0
+    ? Math.max(0, Math.round(charged * 100) / 100)
+    : Math.max(0, plan.total - amountPaid);
   const status = remainingBalance <= 0 ? 'paid' : amountPaid > 0 ? 'partially_paid' : 'unpaid';
   const summary = itemsSummary(plan);
 
@@ -279,11 +306,24 @@ export const applySaleEdit = async (
   }
 
   let debtSynced = false;
+  let accountUnreconciled = 0;
+  // What the corrected invoice itself puts on the account.
+  //
+  // A balance standing there with no entry reached is a second document telling a
+  // different story about the same customer. The link is written on the debt row only
+  // from this revision, so an invoice raised before it lands here every time — naming
+  // it is honest, guessing which row to zero is not. The same applies when the search
+  // itself failed: nothing was corrected, so nothing may be reported as corrected.
+  const chargedOnAccount = plan.payments.reduce(
+    (sum, p) => (p.method === 'debt' ? sum + (Number(p.amount) || 0) : sum), 0
+  );
   try {
     const debt = await findLinkedDebt(tx);
     if (debt) debtSynced = await syncLinkedDebt(tx, plan, debt);
+    else accountUnreconciled = chargedOnAccount;
   } catch (err) {
     console.warn('[SaleEdit] Linked debt could not be corrected:', err);
+    accountUnreconciled = chargedOnAccount;
   }
 
   activityLogService
@@ -316,5 +356,5 @@ export const applySaleEdit = async (
     }).catch(err => console.warn('[SaleEdit] Customer timeline entry could not be written:', err));
   }
 
-  return { total: plan.total, status: plan.status, stockFailures, debtSynced };
+  return { total: plan.total, status: plan.status, stockFailures, debtSynced, accountUnreconciled };
 };

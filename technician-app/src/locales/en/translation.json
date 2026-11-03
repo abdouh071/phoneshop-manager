@@ -535,6 +535,7 @@
     "editSavedQueued": "Transaction {{id}} has been modified. {{count}} stock change could not be written and is queued for the next sync.",
     "editSavedRefund": " Refund due: {{amount}} DA",
     "editSavedExtra": " Extra collected: {{amount}} DA",
+    "editSavedUnreconciled": " Its {{amount}} DA balance is still open on the customer account — clear it from the Customers tab.",
     "editFailedTitle": "Edit Failed",
     "editBlockedTitle": "Those units are not in the shop",
     "editBlockedShort": "{{name}}: {{available}} in stock, this edit sells {{wanted}}.",

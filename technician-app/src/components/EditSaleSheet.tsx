@@ -202,7 +202,15 @@ export const EditSaleSheet = ({
               count: outcome.stockFailures.length,
             })
           : t('salesHistory.editSavedBody', 'Transaction {{id}} has been modified.', { id: transaction.id })) +
-          difference
+          difference +
+          // The invoice says the customer owes this; his account still says something
+          // else, and only a person can close the gap. Saying nothing would let the
+          // till believe the correction was finished.
+          (outcome.accountUnreconciled > 0
+            ? t('salesHistory.editSavedUnreconciled', ' Its {{amount}} DA balance is still open on the customer account — clear it from the Customers tab.', {
+                amount: amount(outcome.accountUnreconciled),
+              })
+            : '')
       );
       onSaved?.(outcome);
       onClose();

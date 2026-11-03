@@ -83,6 +83,19 @@ export interface CustomerDebtEntry {
   type: 'sale' | 'repair' | 'manual';
   notes?: string;
   payments?: CustomerDebtPayment[];
+  /**
+   * The sale this entry was raised by. The counter writes it, and every lookup that
+   * corrects or voids an invoice reads it — without it a phone-written credit sale
+   * cannot be found again from the transaction side.
+   */
+  transactionId?: string;
+  /**
+   * Stable across a queue replay, unlike `transactionId`: the invoice number is minted
+   * at the counter before the phone has a server id, so it is the one key that survives
+   * a sale that was written while the shop had no network.
+   */
+  invoiceNumber?: string;
+  itemsSummary?: string;
   createdAt: string;
   updatedAt: string;
 }

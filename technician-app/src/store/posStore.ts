@@ -4,6 +4,8 @@ import {
   query,
   getDocs,
   addDoc,
+  doc,
+  updateDoc,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuthStore } from './authStore';
@@ -13,6 +15,7 @@ import { customerService } from '../services/customerService';
 import { notificationService } from '../services/notificationService';
 import { applyStockLines, type StockLine } from '../services/stockService';
 import { discountAmountOf } from '../utils/discountPolicy';
+import { salePayments } from '../utils/salePayments';
 import type { PhoneModel, CartItem, SaleTransaction, Customer, PaymentMethod, CustomerDebtEntry, StockStatus } from '../types';
 
 interface CheckoutParams {
@@ -191,7 +194,10 @@ export const usePosStore = create<PosState>((set, get) => ({
       subtotal,
       discount: params.discountValue ? { type: params.discountType || 'flat', value: params.discountValue } : undefined,
       total,
-      payments: [{ method: params.paymentMethod, amount: params.paymentMethod === 'debt' ? 0 : (params.amountPaid || total) }],
+      // One line per tender, and they add up to the invoice: the counter reads the
+      // `debt` lines to know what the shop is owed today, so an account sale written
+      // as a single zero would report a day of free goods.
+      payments: salePayments(params.paymentMethod, total, debtAmount),
       customerName: cust?.name || 'Walk-in Customer',
       customerPhone: cust?.phone || undefined,
       customerId: cust?.id || undefined,
@@ -263,12 +269,14 @@ export const usePosStore = create<PosState>((set, get) => ({
 
     // If debt payment or partial payment, record customer debt entry
     if (debtAmount > 0 && cust) {
+      const itemsSummary = cart.map(i => `${i.quantity}x ${i.product.name} ${i.product.model || ''}`.trim()).join(', ');
       const debtEntry: CustomerDebtEntry = {
         id: '',
         customerId: cust.id,
         customerName: cust.name,
         customerPhone: cust.phone,
         productOrService: `POS Sale (${cart.map(i => `${i.product.name} x${i.quantity}`).join(', ')})`,
+        itemsSummary,
         totalAmount: total,
         amountPaid: params.paymentMethod === 'debt' ? 0 : (params.amountPaid || 0),
         remainingBalance: debtAmount,
@@ -276,6 +284,13 @@ export const usePosStore = create<PosState>((set, get) => ({
         status: debtAmount === total ? 'unpaid' : 'partially_paid',
         type: 'sale',
         notes: `Receipt #${invoiceNumber}`,
+        // Both keys, because each one outlives a different failure. The transaction id
+        // is the strongest link and the counter matches on it; the invoice number is
+        // minted at the till before the phone has a server id, so it is the only one
+        // that survives a sale that was written while the shop had no network. Without
+        // either, nothing in either app could find this debt again from the invoice.
+        invoiceNumber,
+        transactionId: saleUploaded ? realTx.id : undefined,
         createdAt: now,
         updatedAt: now,
       };
@@ -285,6 +300,16 @@ export const usePosStore = create<PosState>((set, get) => ({
         const debtDocRef = await addDoc(collection(db, 'customer_debts'), debtToSave);
         if (realTx.accountSettlement) {
           realTx.accountSettlement.debtEntryId = debtDocRef.id;
+          // The link has to exist on the invoice too, or the next device to read it —
+          // this phone replaying an edit, the counter refunding the sale — has to guess.
+          // A queued sale has no document to point at yet; its sync pass writes the
+          // settlement from this same object when it creates the transaction.
+          if (saleUploaded) {
+            await updateDoc(
+              doc(db, 'transactions', realTx.id),
+              { 'accountSettlement.debtEntryId': debtDocRef.id }
+            ).catch(err => console.warn('[PosStore] Debt link could not be written back:', err));
+          }
         }
       } catch (dErr) {
         console.warn('[PosStore] Offline customer debt queueing:', dErr);
