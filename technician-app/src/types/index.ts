@@ -185,7 +185,7 @@ export interface SaleTransaction {
   };
   processedById?: string;
   processedByName?: string;
-  status?: 'completed' | 'refunded' | 'voided' | 'pending_approval';
+  status?: 'completed' | 'refunded' | 'partially_refunded' | 'voided' | 'cancelled' | 'pending_approval';
   approvalRequestId?: string;
   notes?: string;
 }
