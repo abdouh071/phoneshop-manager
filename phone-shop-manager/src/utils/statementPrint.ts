@@ -236,12 +236,15 @@ export function buildOperationReceiptData({
         : 'CASH';
 
       tx.items.forEach(it => {
+        // A stored line carries `unitPrice` only once the receipt was corrected, so the
+        // price the customer actually paid is the written one or the price on the goods.
+        const unit = it.unitPrice ?? it.product?.price ?? 0;
         items.push({
           name: it.product?.name || i18n.t('statementModal.item', 'Item'),
           detail: it.product?.model || '',
           quantity: it.quantity,
-          price: it.unitPrice ?? 0,
-          total: it.totalPrice ?? 0,
+          price: unit,
+          total: it.totalPrice ?? unit * it.quantity,
         });
       });
 

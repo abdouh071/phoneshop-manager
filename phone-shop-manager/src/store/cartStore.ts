@@ -9,6 +9,7 @@ import { useAuthStore } from './authStore';
 import { useCustomerStore } from './customerStore';
 import { cartService } from '../services/cartService';
 import { formatCurrency } from '../utils/formatCurrency';
+import { planSaleEditStock } from '../utils/saleEditStock';
 
 const getInventoryProducts = () =>
   useInventoryStore.getState().products;
@@ -115,6 +116,11 @@ interface CartState {
    * owing for goods he returned.
    */
   refundTransaction: (txId: string) => Promise<string[]>;
+  /**
+   * Rewrite a settled invoice in place. Lines absent from `tx.items` are treated as
+   * products the counter is adding, so they deduct their whole quantity.
+   * @throws when a line asks for more units than the shelf holds; nothing is written.
+   */
   editTransaction: (
     txId: string,
     newItems: CartItem[],
@@ -948,24 +954,27 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     if (!tx) return;
 
-    // Handle stock returns for reduced or removed items
-    const stockPromises: Promise<unknown>[] = [];
-    tx.items.forEach(origItem => {
-      const pId = origItem.product.id;
-      const newItem = newItems.find(i => i.product.id === pId);
-      const newQty = newItem ? newItem.quantity : 0;
-      const returnedQty = origItem.quantity - newQty;
+    // Stock follows the diff, and a line the invoice never carried is a diff of its
+    // whole quantity. The signs and the shelf check are `planSaleEditStock`'s.
+    const { deltas, shortages } = planSaleEditStock(
+      tx.items,
+      newItems,
+      returnToStockOptions,
+      [...useInventoryStore.getState().products, ...useInventoryStore.getState().parts]
+    );
 
-      if (returnedQty > 0) {
-        const shouldReturnToStock = returnToStockOptions[pId] !== false; // default true
-        if (shouldReturnToStock) {
-          stockPromises.push(inventoryService.adjustStockAsync(pId, returnedQty));
-        }
-      } else if (returnedQty < 0) {
-        // Sold more units than originally
-        stockPromises.push(inventoryService.adjustStockAsync(pId, returnedQty)); // negative delta
-      }
-    });
+    // Nothing has written yet, so a refused line cannot leave the rest of the edit
+    // half-applied to the stock.
+    if (shortages.length > 0) {
+      const detail = shortages
+        .map(s => `"${s.name}" (shelf ${s.available}, needs ${s.wanted})`)
+        .join(', ');
+      throw new Error(`Not enough stock to put on the invoice: ${detail}`);
+    }
+
+    const stockPromises = deltas.map(({ productId, delta }) =>
+      inventoryService.adjustStockAsync(productId, delta)
+    );
 
     if (stockPromises.length > 0) {
       await Promise.all(stockPromises).catch(console.error);
@@ -1014,8 +1023,24 @@ export const useCartStore = create<CartState>((set, get) => ({
       });
     }
 
+    // The statement and the account-statement print read `unitPrice`/`totalPrice` off
+    // the stored line, so a corrected price that only reaches `product.price` prints
+    // the old number — or nothing at all.
+    const pricedItems = newItems.map(item => {
+      const listed = Math.max(0, Number(item.product.price) || 0);
+      const granted = item.customReturnPrice;
+      const unitPrice = item.isReturn && typeof granted === 'number' && Number.isFinite(granted)
+        ? Math.max(0, granted)
+        : listed;
+      return {
+        ...item,
+        unitPrice,
+        totalPrice: Math.round(unitPrice * item.quantity * 100) / 100,
+      };
+    });
+
     const updates: Partial<SaleTransaction> = {
-      items: newItems,
+      items: pricedItems,
       subtotal,
       total,
       status,

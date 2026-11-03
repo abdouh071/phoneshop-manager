@@ -889,14 +889,19 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                           </tr>
                                         </thead>
                                         <tbody>
-                                          {item.rawTransaction.items.map((it, iIdx) => (
-                                            <tr key={iIdx}>
-                                              <td><strong>{it.product.name}</strong> {it.product.model || ''}</td>
-                                              <td style={{ textAlign: 'center' }}>{it.quantity}</td>
-                                              <td style={{ textAlign: 'right' }}>{formatPrivateCurrency(it.unitPrice ?? 0)}</td>
-                                              <td style={{ textAlign: 'right' }}>{formatPrivateCurrency(it.totalPrice ?? 0)}</td>
-                                            </tr>
-                                          ))}
+                                          {item.rawTransaction.items.map((it, iIdx) => {
+                                            // `unitPrice` exists only on a corrected line; otherwise the price paid
+                                            // is the one carried on the goods themselves.
+                                            const unit = it.unitPrice ?? it.product?.price ?? 0;
+                                            return (
+                                              <tr key={iIdx}>
+                                                <td><strong>{it.product.name}</strong> {it.product.model || ''}</td>
+                                                <td style={{ textAlign: 'center' }}>{it.quantity}</td>
+                                                <td style={{ textAlign: 'right' }}>{formatPrivateCurrency(unit)}</td>
+                                                <td style={{ textAlign: 'right' }}>{formatPrivateCurrency(it.totalPrice ?? unit * it.quantity)}</td>
+                                              </tr>
+                                            );
+                                          })}
                                         </tbody>
                                       </table>
                                     </div>
