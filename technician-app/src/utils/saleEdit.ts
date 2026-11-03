@@ -19,7 +19,9 @@
  * A product that was never on the invoice can be added to it, on both terminals. The
  * shop asks for it at the counter — the customer who comes back for a second cable —
  * and a new row is planned like a row that grew: its units come off the shelf, and the
- * save refuses what the shelf cannot give.
+ * save refuses what the shelf cannot give. Units are counted per product and per kind,
+ * then merged back into one movement per product, because a stock write reads the shelf
+ * and writes it and two of them on one document cannot run at the same time.
  */
 import type { CartItem, SaleTransaction } from '../types/index.ts';
 
@@ -171,6 +173,7 @@ export const planSaleEdit = (
 
   const restock: SaleStockLine[] = [];
   const deduct: SaleStockLine[] = [];
+  const movements = new Map<string, { name: string; delta: number }>();
 
   /**
    * One signed delta per product AND per kind — the desktop's `planSaleEditStock`.
@@ -179,7 +182,9 @@ export const planSaleEdit = (
    * of taken back off the shelf. Totalling by group matters because the editor gives
    * one SKU one control and applies it to every row carrying it, so an exchange
    * invoice with a sale row and a return row of the same model moves the shelf twice,
-   * in opposite directions.
+   * in opposite directions. The two directions of one product are then merged into a
+   * single restock or deduct line: the till writes the net, because two writes to the
+   * same document — and two concurrent transactions on it — would abort each other.
    */
   const groups = new Map<string, StockGroup>();
   const collect = (list: CartItem[], side: 'sold' | 'now') => {
@@ -221,10 +226,23 @@ export const planSaleEdit = (
 
     if (delta > 0) {
       if (restockChoices[group.productId] === false) return;
-      restock.push({ productId: group.productId, name: group.name, quantity: delta });
-    } else {
-      deduct.push({ productId: group.productId, name: group.name, quantity: -delta });
     }
+
+    const current = movements.get(group.productId);
+    if (current) current.delta += delta;
+    else movements.set(group.productId, { name: group.name, delta });
+  });
+
+  /**
+   * One line per product, with both kinds inside it. Two rows of the same SKU can pull
+   * the shelf in opposite directions — a sale row hands a unit back while a return row
+   * takes one out — and the till writes their sum, never two moves on one document.
+   */
+  movements.forEach((movement, productId) => {
+    if (movement.delta === 0) return;
+    const line = { productId, name: movement.name, quantity: Math.abs(movement.delta) };
+    if (movement.delta > 0) restock.push(line);
+    else deduct.push(line);
   });
 
   const subtotal = items.reduce(

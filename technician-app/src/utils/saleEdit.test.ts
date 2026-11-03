@@ -175,17 +175,26 @@ test('one SKU written on two rows is one control, and both rows move together', 
   assert.deepEqual(plan.deduct, []);
 });
 
-test('a sale row and a return row of one model are two shelf movements, not one', () => {
+test('a sale row and a return row of one model are counted apart and moved once', () => {
   const twin = makeProduct();
   const tx = makeTx({ items: [line(twin, 3), returnLine(twin, 1)] });
   const plan = planSaleEdit(tx, { p1: { quantity: 2, unitPrice: 4500 } });
 
-  // One control sets both rows to two: the sale row hands a unit back, and the return
-  // row takes one more in. Both go on the shelf, and neither cancels the other.
-  assert.deepEqual(plan.restock, [
-    { productId: 'p1', name: 'Hoco EQ2', quantity: 1 },
-    { productId: 'p1', name: 'Hoco EQ2', quantity: 1 },
-  ]);
+  // One control sets both rows to two: the sale row hands a unit back and the return
+  // row takes one more in. Counting them as one row would lose the second movement —
+  // but the shelf is told once, because two writes to one product cannot run at once.
+  assert.deepEqual(plan.restock, [{ productId: 'p1', name: 'Hoco EQ2', quantity: 2 }]);
+  assert.deepEqual(plan.deduct, []);
+});
+
+test('the two kinds of one model that cancel each other move no shelf at all', () => {
+  const twin = makeProduct();
+  const tx = makeTx({ items: [line(twin, 2), returnLine(twin, 2)] });
+  const plan = planSaleEdit(tx, { p1: { quantity: 1, unitPrice: 4500 } });
+
+  // The sale row gives a unit back while the return row takes the same unit out. The
+  // shelf ends where it started, so the correction writes no stock movement.
+  assert.deepEqual(plan.restock, []);
   assert.deepEqual(plan.deduct, []);
 });
 
