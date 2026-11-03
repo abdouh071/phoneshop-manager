@@ -23,13 +23,16 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../store/authStore';
-import { applySaleEdit, type SaleEditOutcome } from '../services/saleEditService';
+import { applySaleEdit, findOversoldLines, type SaleEditOutcome } from '../services/saleEditService';
 import { diffSaleEdit, planSaleEdit, type SaleLineEdits, type SaleRestockChoices } from '../utils/saleEdit';
 import { AdminApprovalSheet, type ApprovalPayload } from './AdminApprovalSheet';
 import { colors, fontSize, radius, spacing } from '../theme/tokens';
 import type { CartItem, SaleTransaction } from '../types';
 
 type LineDraft = { quantity: number; price: string };
+
+/** A runaway tap should not be able to write a hundred-unit invoice. */
+const MAX_UNITS = 999;
 
 const wholeUnits = (value: number): number => {
   const n = Math.trunc(Number(value));
@@ -52,13 +55,26 @@ const soldUnitPrice = (item: CartItem): number => {
 interface EditSaleSheetProps {
   visible: boolean;
   transaction: SaleTransaction | null;
+  /**
+   * What the shelf held for each product when the sheet opened, `null` per product
+   * when it has no inventory row and `undefined` altogether while the read is still
+   * in flight or failed. It decides how far a line may grow; the save re-checks it,
+   * so a count that moved in the meantime cannot be sold twice.
+   */
+  stockLevels?: Map<string, number | null> | null;
   onClose: () => void;
   onSaved?: (outcome: SaleEditOutcome) => void;
 }
 
 const amount = (n: number): string => n.toLocaleString();
 
-export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSaleSheetProps) => {
+export const EditSaleSheet = ({
+  visible,
+  transaction,
+  stockLevels,
+  onClose,
+  onSaved,
+}: EditSaleSheetProps) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const user = useAuthStore(s => s.user);
@@ -131,7 +147,10 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
     if (!id) return;
     setDraft(prev => ({
       ...prev,
-      [id]: { ...prev[id], quantity: Math.max(0, Math.min(maxQty, Math.trunc(Number(quantity) || 0))) },
+      [id]: {
+        ...prev[id],
+        quantity: Math.max(0, Math.min(Math.max(0, maxQty), Math.trunc(Number(quantity) || 0))),
+      },
     }));
   };
 
@@ -144,6 +163,29 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
     if (!transaction || !plan || !plan.hasChanges || isSaving) return;
     setIsSaving(true);
     try {
+      // The shelf may have emptied since the sheet opened — another till sold the
+      // last unit, or this phone is looking at a cached count. Asking it for units
+      // it does not hold would write a sale the shop cannot cover, so the live
+      // count is read once more and an oversold line stops the save.
+      const oversold = await findOversoldLines(plan);
+      if (oversold.length > 0) {
+        Alert.alert(
+          t('salesHistory.editBlockedTitle', 'Those units are not in the shop'),
+          oversold
+            .map(row =>
+              row.available === null
+                ? t('salesHistory.editBlockedMissing', '{{name}} has no inventory row left.', { name: row.name })
+                : t('salesHistory.editBlockedShort', '{{name}}: {{available}} in stock, this edit sells {{wanted}}.', {
+                    name: row.name,
+                    available: row.available,
+                    wanted: row.wanted,
+                  })
+            )
+            .join('\n')
+        );
+        return;
+      }
+
       const outcome = await applySaleEdit(transaction, plan);
       Vibration.vibrate([0, 50, 50, 80]);
       const difference =
@@ -255,6 +297,17 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
               const returnedQty = originalQty - quantity;
               const willRestock = !pid || restock[pid] !== false;
               const name = item.product?.name || item.product?.model || t('salesHistory.unknownItem', 'Item');
+              // Sold units are already committed; anything new has to come off the
+              // counter. No count yet (read in flight or failed) means no ceiling,
+              // and the save re-checks the shelf before it writes. `null` is a real
+              // answer — the product has no inventory row, so nothing can come off.
+              const onShelf: number | null | undefined =
+                pid && stockLevels?.has(pid) ? (stockLevels.get(pid) ?? null) : undefined;
+              const maxQty =
+                onShelf === undefined
+                  ? MAX_UNITS
+                  : Math.min(MAX_UNITS, originalQty + Math.max(0, onShelf ?? 0));
+              const atCeiling = quantity >= maxQty;
 
               return (
                 <View key={pid || `row-${index}`} style={styles.line}>
@@ -264,10 +317,20 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
                         {name}
                       </Text>
                       <Text style={styles.lineSub} numberOfLines={1}>
-                        {t('salesHistory.editLineSold', 'Sold {{qty}} at {{price}} DA', {
-                          qty: originalQty,
-                          price: amount(originalUnit),
-                        })}
+                        {onShelf === undefined
+                          ? t('salesHistory.editLineSold', 'Sold {{qty}} at {{price}} DA', {
+                              qty: originalQty,
+                              price: amount(originalUnit),
+                            })
+                          : onShelf === null
+                            ? t('salesHistory.editLineNoRow', 'Sold {{qty}} · {{name}} has no stock row', {
+                                qty: originalQty,
+                                name,
+                              })
+                            : t('salesHistory.editLineShelf', 'Sold {{qty}} · {{count}} on the shelf', {
+                                qty: originalQty,
+                                count: onShelf,
+                              })}
                       </Text>
                     </View>
                     <Text style={styles.lineTotal}>{amount(unitPrice * quantity)} DA</Text>
@@ -296,7 +359,7 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
                       <View style={styles.stepper}>
                         <TouchableOpacity
                           style={[styles.stepBtn, quantity <= 0 && styles.stepBtnOff]}
-                          onPress={() => setQuantity(pid, quantity - 1, originalQty)}
+                          onPress={() => setQuantity(pid, quantity - 1, maxQty)}
                           disabled={quantity <= 0}
                           accessibilityLabel={t('salesHistory.decrease', 'Decrease quantity')}
                         >
@@ -306,15 +369,28 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
                           {quantity} / {originalQty}
                         </Text>
                         <TouchableOpacity
-                          style={[styles.stepBtn, quantity >= originalQty && styles.stepBtnOff]}
-                          onPress={() => setQuantity(pid, quantity + 1, originalQty)}
-                          disabled={quantity >= originalQty}
+                          style={[styles.stepBtn, atCeiling && styles.stepBtnOff]}
+                          onPress={() => setQuantity(pid, quantity + 1, maxQty)}
+                          disabled={atCeiling}
                           accessibilityLabel={t('salesHistory.increase', 'Increase quantity')}
                         >
-                          <MaterialCommunityIcons name="plus" size={18} color={quantity >= originalQty ? colors.textFaint : colors.brand} />
+                          <MaterialCommunityIcons name="plus" size={18} color={atCeiling ? colors.textFaint : colors.brand} />
                         </TouchableOpacity>
                       </View>
                     </View>
+                  ) : null}
+
+                  {pid && atCeiling && onShelf !== undefined && returnedQty >= 0 ? (
+                    <Text style={styles.ceilingNote}>
+                      {onShelf === null
+                        ? t('salesHistory.editCeilingNoRow', 'There is no stock row for this item, so only what was already sold stays on the invoice.')
+                        : onShelf <= 0
+                          ? t('salesHistory.editCeilingEmpty', 'The shelf is empty — this line cannot grow.')
+                          : t('salesHistory.editCeilingShelf', 'The shelf holds {{count}}, so this line stops at {{max}}.', {
+                              count: onShelf,
+                              max: maxQty,
+                            })}
+                    </Text>
                   ) : null}
 
                   {pid && returnedQty > 0 ? (
@@ -333,6 +409,14 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
                           : t('salesHistory.restockNo', 'Do not restock')}
                       </Text>
                     </TouchableOpacity>
+                  ) : null}
+
+                  {pid && returnedQty < 0 ? (
+                    <Text style={styles.addedNote}>
+                      {t('salesHistory.unitsAdded', '+{{count}} unit(s) come off the shelf when you save', {
+                        count: -returnedQty,
+                      })}
+                    </Text>
                   ) : null}
                 </View>
               );
@@ -516,6 +600,8 @@ const styles = StyleSheet.create({
   restockText: { flex: 1, fontSize: fontSize.label },
   restockYes: { color: colors.success, fontWeight: '700' },
   restockNo: { color: colors.dangerText, fontWeight: '600' },
+  addedNote: { fontSize: fontSize.caption, color: colors.dangerText, fontWeight: '600' },
+  ceilingNote: { fontSize: fontSize.caption, color: colors.textMuted, fontStyle: 'italic' },
   lockedNote: { fontSize: fontSize.caption, color: colors.textMuted },
   summary: { backgroundColor: colors.surfaceMuted, borderRadius: radius.lg, padding: spacing.md, gap: spacing.xs },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

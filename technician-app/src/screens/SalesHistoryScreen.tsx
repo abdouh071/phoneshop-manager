@@ -33,7 +33,7 @@ import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
 import { useApprovalStore } from '../store/approvalStore';
 import { activityLogService } from '../services/activityLogService';
-import { applyStockLines } from '../services/stockService';
+import { applyStockLines, readStockLevels } from '../services/stockService';
 import { EditSaleSheet } from '../components/EditSaleSheet';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import { usePermissions } from '../hooks/usePermissions';
@@ -74,6 +74,10 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
 
   // Editing a settled invoice, in place.
   const [editTx, setEditTx] = useState<SaleTransaction | null>(null);
+  // What the counter held when the editor was opened: a line may only grow as far
+  // as the shop actually has. `null` while the read is in flight or after it
+  // failed, which leaves the ceiling off — the save still asks the shelf again.
+  const [editStock, setEditStock] = useState<Map<string, number | null> | null>(null);
 
   // Admin Approval Request Modal State
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
@@ -180,6 +184,21 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
     });
     return { todayValidTotal: validTotal, todayValidCount: validCount, todayVoidedCount: voidedCount };
   }, [transactions]);
+
+  // Opening the invoice editor. The shelf is read once here, per SKU on the
+  // document, so the editor can cap a line at what the shop actually holds —
+  // typically 1-3 documents' worth of reads, only when a human asks to edit.
+  const openEditor = (tx: SaleTransaction) => {
+    setEditTx(tx);
+    setEditStock(null);
+    const ids = tx.items
+      .map(row => row.product?.id)
+      .filter((id): id is string => Boolean(id));
+    if (ids.length === 0) return;
+    readStockLevels(ids)
+      .then(levels => setEditStock(levels))
+      .catch(() => setEditStock(null));
+  };
 
   // TODAY: Direct Void / Refund handler
   const handleDirectVoidToday = (tx: SaleTransaction) => {
@@ -592,7 +611,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
                           isPendingApproval && styles.actionBtnDisabled,
                         ]}
                         disabled={isPendingApproval}
-                        onPress={() => setEditTx(item)}
+                        onPress={() => openEditor(item)}
                       >
                         <MaterialCommunityIcons
                           name={isPendingApproval ? 'clock-check-outline' : 'file-document-edit-outline'}
@@ -757,6 +776,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
         key={editTx?.id ?? 'closed'}
         visible={Boolean(editTx)}
         transaction={editTx}
+        stockLevels={editStock}
         onClose={() => setEditTx(null)}
       />
     </View>

@@ -27,12 +27,20 @@ import type { SaleTransaction } from '../types';
 import { activityLogService } from './activityLogService';
 import { notificationService } from './notificationService';
 import { offlineSyncService } from './offlineSyncService';
-import { applyStockLines, type StockLine } from './stockService';
+import { applyStockLines, readStockLevels, type StockLine } from './stockService';
 
 export interface SaleEditFailure {
   name: string;
   quantity: number;
   error: string;
+}
+
+export interface OversoldLine {
+  productId: string;
+  name: string;
+  wanted: number;
+  /** null when the product no longer has an inventory row at all. */
+  available: number | null;
 }
 
 export interface SaleEditOutcome {
@@ -41,6 +49,38 @@ export interface SaleEditOutcome {
   stockFailures: SaleEditFailure[];
   debtSynced: boolean;
 }
+
+/**
+ * The units an edit wants to take out, against what the shelf actually holds.
+ *
+ * Raising a quantity on a settled invoice is the one correction that can sell
+ * something twice, and the atomic writer clamps at zero rather than refusing — so
+ * without this check the invoice would claim three units while the shelf went to
+ * none. Every line for the same product is folded together first, because an old
+ * document can carry one SKU on two rows.
+ */
+export const findOversoldLines = async (plan: SaleEditPlan): Promise<OversoldLine[]> => {
+  if (plan.deduct.length === 0) return [];
+
+  const wantedByProduct = new Map<string, { name: string; quantity: number }>();
+  for (const line of plan.deduct) {
+    const previous = wantedByProduct.get(line.productId);
+    wantedByProduct.set(line.productId, {
+      name: previous?.name || line.name,
+      quantity: (previous?.quantity || 0) + line.quantity,
+    });
+  }
+
+  const levels = await readStockLevels([...wantedByProduct.keys()]);
+  const blocked: OversoldLine[] = [];
+  for (const [productId, want] of wantedByProduct) {
+    const available = levels.get(productId) ?? null;
+    if (available === null || available < want.quantity) {
+      blocked.push({ productId, name: want.name, wanted: want.quantity, available });
+    }
+  }
+  return blocked;
+};
 
 /** The counter's line description: `2x Hoco EQ2 BT-EQ2`. */
 const itemsSummary = (plan: SaleEditPlan): string =>
