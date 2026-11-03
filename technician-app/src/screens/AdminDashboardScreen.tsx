@@ -60,7 +60,7 @@ const getTimeAgo = (dateStrOrTimestamp: any): string => {
 
 export const AdminDashboardScreen = ({ navigation }: any) => {
   const { user } = useAuthStore();
-  const { tickets, subscribeToTickets } = useRepairStore();
+  const { tickets } = useRepairStore();
   const { pendingCount, subscribeToPending } = useApprovalStore();
   const theme = useTheme();
 
@@ -105,7 +105,8 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
       return;
     }
     loadDashboardData();
-    const unsubTickets = subscribeToTickets();
+    // Tickets come from the session-wide listeners App opens; this screen only
+    // adds the two bounded streams it needs for its own feed and badge.
     const unsubApprovals = subscribeToPending();
 
     // 3. Real-time activity feed listener
@@ -121,11 +122,10 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
     });
 
     return () => {
-      unsubTickets();
       unsubApprovals();
       unsubLogs();
     };
-  }, [user?.role, loadDashboardData, subscribeToTickets, subscribeToPending]);
+  }, [user?.role, loadDashboardData, subscribeToPending]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

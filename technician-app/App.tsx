@@ -11,6 +11,7 @@ import { colors } from './src/theme/tokens';
 
 import { useAuthStore } from './src/store/authStore';
 import { useSettingsStore } from './src/store/settingsStore';
+import { useRepairStore } from './src/store/repairStore';
 import { offlineSyncService } from './src/services/offlineSyncService';
 import { OfflineBanner } from './src/components/OfflineBanner';
 
@@ -33,6 +34,7 @@ const Stack = createNativeStackNavigator();
 export default function App() {
   const { user, isAuthenticated, isInitializing } = useAuthStore();
   const { subscribeToSettings } = useSettingsStore();
+  const { subscribeToTickets } = useRepairStore();
 
   // Initialize offline sync runner (periodic check & push to Firestore)
   useEffect(() => {
@@ -51,6 +53,16 @@ export default function App() {
       if (unsubscribeSettings) unsubscribeSettings();
     };
   }, [isAuthenticated]);
+
+  // Repairs are held open for the whole session, not per screen. A technician
+  // reading stock or ringing up a sale still gets another device's new ticket
+  // pushed to them, and the list is warm the moment they open the workbench.
+  // The store refcounts, so a screen that asks for tickets later shares this pair
+  // of listeners instead of opening a second one, and logout drops it.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    return subscribeToTickets();
+  }, [isAuthenticated, subscribeToTickets]);
 
   // Register push notifications when user logs in
   useEffect(() => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { View, StyleSheet, FlatList, TouchableOpacity, Alert, ScrollView, RefreshControl, Linking, Vibration } from 'react-native';
 import { Appbar, Card, Text, FAB, useTheme, ActivityIndicator, Searchbar } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -204,7 +204,7 @@ const WorkbenchHeader = ({
 
 export const WorkbenchScreen = ({ navigation }: any) => {
   const insets = useSafeAreaInsets();
-  const { tickets, isLoading, error, subscribeToTickets, updateTicketStatus } = useRepairStore();
+  const { tickets, isLoading, error, refreshTickets, updateTicketStatus } = useRepairStore();
   const { user } = useAuthStore();
   // Capabilities, not roles: an admin who revoked `repair_add` from one
   // technician must not leave that technician looking at the same FAB as before.
@@ -216,20 +216,14 @@ export const WorkbenchScreen = ({ navigation }: any) => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    const unsubscribe = subscribeToTickets();
-    return () => unsubscribe();
-  }, []);
-
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    // Re-subscribe triggers a fresh fetch
-    const unsub = subscribeToTickets();
-    setTimeout(() => {
-      setRefreshing(false);
-      unsub();
-    }, 1200);
-  }, [subscribeToTickets]);
+    // The live listeners belong to App and stay in sync on their own; a pull
+    // re-reads both queries from the server and settles when the merged snapshot
+    // lands, instead of waiting out a fixed timer.
+    await refreshTickets();
+    setRefreshing(false);
+  }, [refreshTickets]);
 
   // Ticket counts for filter chips — one pass over the list, one `today` per run.
   const statusCounts = useMemo(() => {

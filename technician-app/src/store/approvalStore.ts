@@ -13,6 +13,7 @@ import {
 import { Vibration } from 'react-native';
 import { db } from '../lib/firebase';
 import { useAuthStore } from './authStore';
+import { createRefCountedSubscription, type RefCountedSubscription } from '../utils/liveSubscription';
 import { notificationService } from '../services/notificationService';
 import { activityLogService } from '../services/activityLogService';
 import type { ApprovalRequest } from '../types';
@@ -45,6 +46,66 @@ interface ApprovalState {
 
 // Track IDs globally to avoid duplicate vibration/chimes on mobile
 let _knownPendingIds: Set<string> | null = null;
+
+// The Approvals screen and the admin dashboard can be mounted at the same time.
+// Without refcounting, each held its own listener on the same 120-document query,
+// so every request arriving was billed and processed twice.
+let _pendingStream: RefCountedSubscription | null = null;
+
+type PendingSetter = (partial: Partial<ApprovalState>) => void;
+
+const attachPendingListeners = (set: PendingSetter): (() => void) => {
+  set({ isLoading: true });
+  // Query approval requests (limit to 120 items)
+  const q = query(collection(db, 'approvalRequests'), limit(120));
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const all: ApprovalRequest[] = [];
+      snapshot.forEach((d) => {
+        all.push({ id: d.id, ...d.data() } as ApprovalRequest);
+      });
+
+      // Sort descending by requestedAt
+      all.sort((a, b) => {
+        const tA = a.requestedAt ? new Date(a.requestedAt).getTime() : 0;
+        const tB = b.requestedAt ? new Date(b.requestedAt).getTime() : 0;
+        return tB - tA;
+      });
+
+      const pending = all.filter((r) => r.status === 'pending');
+      const resolved = all.filter((r) => r.status === 'approved' || r.status === 'rejected').slice(0, 30);
+
+      // Check if there is a new pending request that just arrived
+      if (_knownPendingIds !== null) {
+        const currentIds = new Set(pending.map((r) => r.id));
+        const hasNew = pending.some((r) => !_knownPendingIds!.has(r.id));
+        if (hasNew) {
+          const currentUser = useAuthStore.getState().user;
+          if (currentUser?.role === 'admin') {
+            Vibration.vibrate([0, 200, 100, 200]);
+          }
+        }
+        _knownPendingIds = currentIds;
+      } else {
+        _knownPendingIds = new Set(pending.map((r) => r.id));
+      }
+
+      set({
+        pendingRequests: pending,
+        recentResolved: resolved,
+        pendingCount: pending.length,
+        isLoading: false,
+        error: null,
+      });
+    },
+    (err) => {
+      console.warn('[ApprovalStore] Subscription error:', err);
+      set({ error: err.message, isLoading: false });
+    }
+  );
+};
 
 export const useApprovalStore = create<ApprovalState>((set, get) => ({
   pendingRequests: [],
@@ -223,58 +284,12 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
   },
 
   subscribeToPending: () => {
-    set({ isLoading: true });
-    // Query approval requests (limit to 120 items)
-    const q = query(collection(db, 'approvalRequests'), limit(120));
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const all: ApprovalRequest[] = [];
-        snapshot.forEach((d) => {
-          all.push({ id: d.id, ...d.data() } as ApprovalRequest);
-        });
-
-        // Sort descending by requestedAt
-        all.sort((a, b) => {
-          const tA = a.requestedAt ? new Date(a.requestedAt).getTime() : 0;
-          const tB = b.requestedAt ? new Date(b.requestedAt).getTime() : 0;
-          return tB - tA;
-        });
-
-        const pending = all.filter((r) => r.status === 'pending');
-        const resolved = all.filter((r) => r.status === 'approved' || r.status === 'rejected').slice(0, 30);
-
-        // Check if there is a new pending request that just arrived
-        if (_knownPendingIds !== null) {
-          const currentIds = new Set(pending.map((r) => r.id));
-          const hasNew = pending.some((r) => !_knownPendingIds!.has(r.id));
-          if (hasNew) {
-            const currentUser = useAuthStore.getState().user;
-            if (currentUser?.role === 'admin') {
-              Vibration.vibrate([0, 200, 100, 200]);
-            }
-          }
-          _knownPendingIds = currentIds;
-        } else {
-          _knownPendingIds = new Set(pending.map((r) => r.id));
-        }
-
-        set({
-          pendingRequests: pending,
-          recentResolved: resolved,
-          pendingCount: pending.length,
-          isLoading: false,
-          error: null,
-        });
-      },
-      (err) => {
-        console.warn('[ApprovalStore] Subscription error:', err);
-        set({ error: err.message, isLoading: false });
-      }
-    );
-
-    return unsubscribe;
+    if (!_pendingStream) {
+      _pendingStream = createRefCountedSubscription(() =>
+        attachPendingListeners((partial) => set(partial))
+      );
+    }
+    return _pendingStream.acquire();
   },
 
   subscribeToSingleRequest: (requestId: string, onUpdate: (req: ApprovalRequest) => void) => {

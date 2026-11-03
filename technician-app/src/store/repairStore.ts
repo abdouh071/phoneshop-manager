@@ -19,6 +19,7 @@ import { offlineSyncService } from '../services/offlineSyncService';
 import { notificationService } from '../services/notificationService';
 import { applyPartsDelta } from '../services/stockService';
 import { allocateTicketNumber } from '../services/ticketCounter';
+import { createRefCountedSubscription, type RefCountedSubscription } from '../utils/liveSubscription';
 import type { RepairTicket, RepairStatus, RepairStatusHistoryEntry } from '../types';
 
 // Active statuses that must always be visible regardless of creation date
@@ -43,6 +44,7 @@ interface RepairState {
   isLoading: boolean;
   error: string | null;
   subscribeToTickets: () => () => void;
+  refreshTickets: () => Promise<void>;
   updateTicketStatus: (id: string, status: RepairStatus, changerName?: string, additionalUpdates?: any) => Promise<void>;
   settleAndClaimTicket: (params: SettleClaimParams) => Promise<void>;
   updateTicketRemark: (id: string, remark: string) => Promise<void>;
@@ -51,110 +53,155 @@ interface RepairState {
   updateTicketParts: (id: string, parts: { productId?: string; name: string; cost: number; quantity?: number }[]) => Promise<void>;
 }
 
+type TicketsSetter = (partial: Partial<RepairState>) => void;
+type TicketsGetter = () => RepairState;
+
+// One pair of Firestore listeners serves the whole app, however many screens ask
+// for tickets: a second live listener would double the billed reads on every change.
+// `ticketStream` is the single holder of that pair; a pull-to-refresh settles on
+// the next merged snapshot rather than a fixed timer, so the spinner cannot stop
+// before the server's answer has landed.
+let _ticketStream: RefCountedSubscription | null = null;
+let _refreshResolvers: Array<() => void> = [];
+
+const settleRefreshers = () => {
+  const pending = _refreshResolvers;
+  _refreshResolvers = [];
+  pending.forEach((resolve) => resolve());
+};
+
+const attachTicketListeners = (set: TicketsSetter, get: TicketsGetter): (() => void) => {
+  // Show cached tickets instantly while fresh data loads from Firestore
+  offlineSyncService.getCachedTickets().then((cached) => {
+    if (cached && cached.length > 0 && get().tickets.length === 0) {
+      set({ tickets: cached, isLoading: false });
+    }
+  });
+
+  set({ isLoading: get().tickets.length === 0 });
+
+  // --- Bounded Query 1: All ACTIVE (open) tickets ---
+  // No date limit: a 1-year-old "in_progress" ticket must still appear on the workbench.
+  const activeQ = query(
+    collection(db, 'repairs'),
+    where('status', 'in', ACTIVE_STATUSES),
+    orderBy('createdAt', 'desc')
+  );
+
+  // --- Bounded Query 2: Recent CLOSED tickets (last CLOSED_RETENTION_DAYS days) ---
+  // Closed tickets older than the window are irrelevant to daily technician workflow
+  // and are still fully accessible from the desktop admin app (which has no limit).
+  const closedCutoff = new Date();
+  closedCutoff.setDate(closedCutoff.getDate() - CLOSED_RETENTION_DAYS);
+  const closedQ = query(
+    collection(db, 'repairs'),
+    where('status', 'in', CLOSED_STATUSES),
+    where('updatedAt', '>=', closedCutoff.toISOString()),
+    orderBy('updatedAt', 'desc'),
+    limit(100)
+  );
+
+  // Shared mutable snapshot buffers — one per listener, merged on every update
+  let activeBuffer: RepairTicket[] = [];
+  let closedBuffer: RepairTicket[] = [];
+
+  const mergeAndCommit = async () => {
+    // Deduplicate across both buffers by document ID
+    const seen = new Set<string>();
+    const combined: RepairTicket[] = [];
+    for (const t of [...activeBuffer, ...closedBuffer]) {
+      if (!seen.has(t.id)) {
+        seen.add(t.id);
+        combined.push(t);
+      }
+    }
+
+    // Sort newest-first
+    combined.sort((a, b) => {
+      const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return tB - tA;
+    });
+
+    // Inject any offline-created tickets that haven't synced to the server yet
+    const cached = await offlineSyncService.getCachedTickets();
+    const offlineOnly = (cached || []).filter(t => t.id?.startsWith('offline_'));
+    const serverIds = new Set(combined.map(t => t.id));
+    const merged = [
+      ...offlineOnly.filter(t => !serverIds.has(t.id)),
+      ...combined,
+    ];
+
+    set({ tickets: merged, isLoading: false, error: null });
+    offlineSyncService.setCachedTickets(merged);
+    settleRefreshers();
+  };
+
+  // Active tickets listener
+  const unsubActive = onSnapshot(
+    activeQ,
+    (snapshot) => {
+      activeBuffer = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket));
+      mergeAndCommit();
+    },
+    (error) => {
+      console.warn('[RepairStore] Active tickets snapshot failed (offline):', error);
+      offlineSyncService.getCachedTickets().then((cached) => {
+        set({ tickets: cached || [], error: null, isLoading: false });
+        settleRefreshers();
+      });
+    }
+  );
+
+  // Recent closed tickets listener (non-critical — active listener handles the must-have data)
+  const unsubClosed = onSnapshot(
+    closedQ,
+    (snapshot) => {
+      closedBuffer = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket));
+      mergeAndCommit();
+    },
+    (error) => {
+      // Non-fatal: the technician still gets all active tickets from the first listener
+      console.warn('[RepairStore] Recent closed tickets snapshot error (non-critical):', error);
+    }
+  );
+
+  // Return a combined cleanup function
+  return () => {
+    unsubActive();
+    unsubClosed();
+  };
+};
+
 export const useRepairStore = create<RepairState>((set, get) => ({
   tickets: [],
   isLoading: true,
   error: null,
 
+  /**
+   * Reference-counted so the app can hold one live subscription for a whole
+   * session while screens come and go. The first holder opens the listeners, the
+   * last one closing them — which is also the logout path.
+   */
   subscribeToTickets: () => {
-    // Show cached tickets instantly while fresh data loads from Firestore
-    offlineSyncService.getCachedTickets().then((cached) => {
-      if (cached && cached.length > 0 && get().tickets.length === 0) {
-        set({ tickets: cached, isLoading: false });
-      }
-    });
+    if (!_ticketStream) {
+      _ticketStream = createRefCountedSubscription(() =>
+        attachTicketListeners((partial) => set(partial), () => get())
+      );
+    }
+    return _ticketStream.acquire();
+  },
 
-    set({ isLoading: get().tickets.length === 0 });
-
-    // --- Bounded Query 1: All ACTIVE (open) tickets ---
-    // No date limit: a 1-year-old "in_progress" ticket must still appear on the workbench.
-    const activeQ = query(
-      collection(db, 'repairs'),
-      where('status', 'in', ACTIVE_STATUSES),
-      orderBy('createdAt', 'desc')
-    );
-
-    // --- Bounded Query 2: Recent CLOSED tickets (last CLOSED_RETENTION_DAYS days) ---
-    // Closed tickets older than the window are irrelevant to daily technician workflow
-    // and are still fully accessible from the desktop admin app (which has no limit).
-    const closedCutoff = new Date();
-    closedCutoff.setDate(closedCutoff.getDate() - CLOSED_RETENTION_DAYS);
-    const closedQ = query(
-      collection(db, 'repairs'),
-      where('status', 'in', CLOSED_STATUSES),
-      where('updatedAt', '>=', closedCutoff.toISOString()),
-      orderBy('updatedAt', 'desc'),
-      limit(100)
-    );
-
-    // Shared mutable snapshot buffers — one per listener, merged on every update
-    let activeBuffer: RepairTicket[] = [];
-    let closedBuffer: RepairTicket[] = [];
-
-    const mergeAndCommit = async () => {
-      // Deduplicate across both buffers by document ID
-      const seen = new Set<string>();
-      const combined: RepairTicket[] = [];
-      for (const t of [...activeBuffer, ...closedBuffer]) {
-        if (!seen.has(t.id)) {
-          seen.add(t.id);
-          combined.push(t);
-        }
-      }
-
-      // Sort newest-first
-      combined.sort((a, b) => {
-        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return tB - tA;
-      });
-
-      // Inject any offline-created tickets that haven't synced to the server yet
-      const cached = await offlineSyncService.getCachedTickets();
-      const offlineOnly = (cached || []).filter(t => t.id?.startsWith('offline_'));
-      const serverIds = new Set(combined.map(t => t.id));
-      const merged = [
-        ...offlineOnly.filter(t => !serverIds.has(t.id)),
-        ...combined,
-      ];
-
-      set({ tickets: merged, isLoading: false, error: null });
-      offlineSyncService.setCachedTickets(merged);
-    };
-
-    // Active tickets listener
-    const unsubActive = onSnapshot(
-      activeQ,
-      (snapshot) => {
-        activeBuffer = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket));
-        mergeAndCommit();
-      },
-      (error) => {
-        console.warn('[RepairStore] Active tickets snapshot failed (offline):', error);
-        offlineSyncService.getCachedTickets().then((cached) => {
-          set({ tickets: cached || [], error: null, isLoading: false });
-        });
-      }
-    );
-
-    // Recent closed tickets listener (non-critical — active listener handles the must-have data)
-    const unsubClosed = onSnapshot(
-      closedQ,
-      (snapshot) => {
-        closedBuffer = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as RepairTicket));
-        mergeAndCommit();
-      },
-      (error) => {
-        // Non-fatal: the technician still gets all active tickets from the first listener
-        console.warn('[RepairStore] Recent closed tickets snapshot error (non-critical):', error);
-      }
-    );
-
-    // Return a combined cleanup function
-    return () => {
-      unsubActive();
-      unsubClosed();
-    };
+  /**
+   * Re-opens the listeners so Firestore sends a full copy of both queries.
+   * Resolves on the next merged snapshot; if nothing is subscribed (the app is on
+   * the login screen) it settles immediately rather than spinning forever.
+   */
+  refreshTickets: () => {
+    if (!_ticketStream?.isLive()) return Promise.resolve();
+    const settled = new Promise<void>((resolve) => { _refreshResolvers.push(resolve); });
+    _ticketStream.restart();
+    return settled;
   },
 
   updateTicketStatus: async (id: string, status: RepairStatus, changerName?: string, additionalUpdates?: any) => {
