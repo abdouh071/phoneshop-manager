@@ -91,6 +91,7 @@ vi.mock('./repairStore', () => ({
 type CustomerStore = {
   getState: () => {
     customers: Array<Record<string, unknown>>;
+    isLoading: boolean;
     fetchCustomers: (options?: { force?: boolean }) => Promise<void>;
     recalculateCustomer: (id: string) => Promise<void>;
     recalculateAllCustomerFinancials: () => Promise<void>;
