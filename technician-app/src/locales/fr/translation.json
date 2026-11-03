@@ -432,14 +432,23 @@
     "customerNameLabel": "Nom du client *",
     "customerPhoneLabel": "Numéro de téléphone *",
     "debtBadge": "Dette : {{amount}} DA",
-    "discountApplied": "-{{amount}} DA ({{mode}})",
+    "discountApplied": "-{{amount}} DA ({{percent}}%)",
+    "discountApprovalLabel": "Remise de {{amount}} DA ({{percent}}%) sur une vente de {{total}} DA",
+    "discountApprovedRow": "Un administrateur a approuvé cette remise.",
+    "discountNeedsApproval": "Plus de {{percent}}% de remise demande un administrateur : {{current}}% ici.",
+    "discountPercentHint": "{{percent}}% de cette vente = {{amount}} DA de remise",
+    "discountFlatHint": "{{amount}} DA de remise = {{percent}}% de cette vente",
+    "askAdminForDiscount": "Demander l'approbation d'un admin",
+    "approvalLineAmount": "{{amount}} DA de remise = {{percent}}% de cette vente",
+    "approvalLineTotal": "Le client paie {{paid}} DA au lieu de {{full}} DA",
+    "approvalLineBasket": "{{items}} articles · {{customer}}",
+    "walkInCustomer": "Client de passage",
     "discountFlat": "Remise DA",
     "discountPercent": "Remise %",
     "discountReason": "Motif de remise / note promo (facultatif)",
     "discountReasonPlaceholder": "Ex. : avantage fidélité, lot...",
     "discountRow": "Remise ({{mode}})",
     "flatMode": "Forfait (DA)",
-    "flatShort": "Forfait",
     "inStockCount": "{{n}} en stock",
     "invoiceLine": "Facture n°{{id}} · {{total}} DA",
     "itemInCart": "{{n}} article dans le panier",
@@ -571,5 +580,16 @@
   "productCode": {
     "duplicateTitle": "Un même code pour plusieurs produits",
     "duplicateBody": "« {{code}} » est enregistré sur {{total}} produits. Choisissez celui que vous vouliez — un administrateur doit donner un nouveau code à l’un des autres."
+  },
+  "sensitive": {
+    "waitingTitle": "En attente d'un administrateur",
+    "waitingBody": "Envoyé à tous les administrateurs. Cet écran se débloque dès que l'un répond.",
+    "sending": "Envoi de la demande…",
+    "approvedBy": "Approuvée par {{name}}",
+    "rejectedBy": "Refusée par {{name}}",
+    "failed": "Impossible d'envoyer la demande.",
+    "tryAgain": "Réessayer",
+    "continue": "Continuer",
+    "cancelRequest": "Annuler la demande"
   }
 }

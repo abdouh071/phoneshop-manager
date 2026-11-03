@@ -28,6 +28,8 @@ import { useTranslation } from 'react-i18next';
 import { buildSearch, matchesSearch } from '../utils/search';
 import { resolveProductByCode } from '../utils/productCode';
 import { askWhichProduct } from '../utils/productCodePrompt';
+import { discountAmountOf, discountPercentOf, requiresDiscountApproval, DISCOUNT_APPROVAL_PERCENT } from '../utils/discountPolicy';
+import { AdminApprovalSheet, type ApprovalPayload } from '../components/AdminApprovalSheet';
 import { colors, fontSize, radius, ramp, spacing, stockStatusColors } from '../theme/tokens';
 import type { PhoneModel, PaymentMethod, SaleTransaction } from '../types';
 
@@ -83,6 +85,8 @@ export const POSScreen = ({ navigation }: any) => {
   const [discountValue, setDiscountValue] = useState<string>('');
   const [discountReason, setDiscountReason] = useState<string>('');
   const [showDiscountSection, setShowDiscountSection] = useState(false);
+  const [isAskingApproval, setIsAskingApproval] = useState(false);
+  const [discountGrant, setDiscountGrant] = useState<string | null>(null);
 
   useEffect(() => {
     if (!can.pos) {
@@ -95,17 +99,49 @@ export const POSScreen = ({ navigation }: any) => {
 
   const { subtotal, totalItems } = getCartTotal();
 
-  // Calculated discount values
+  // One discount, one arithmetic. The same helper feeds this screen, the checkout
+  // and the approval rule, so the number shown to the customer is the number that
+  // gets recorded — they used to diverge by a dinar on every rounded percentage.
   const parsedDiscount = parseFloat(discountValue) || 0;
-  const calculatedDiscount = useMemo(() => {
-    if (parsedDiscount <= 0) return 0;
-    if (discountType === 'percent') {
-      return Math.min(subtotal, Math.round((subtotal * parsedDiscount) / 100));
-    }
-    return Math.min(subtotal, Math.round(parsedDiscount));
-  }, [subtotal, parsedDiscount, discountType]);
+  const discount = { mode: discountType, value: parsedDiscount };
+  const calculatedDiscount = discountAmountOf(subtotal, discount);
+  const discountPercent = discountPercentOf(subtotal, discount);
+  const needsDiscountApproval = requiresDiscountApproval(user?.role, subtotal, discount);
+  // An answer is tied to the exact basket it was given for: add an item afterwards
+  // and the approval no longer means what the admin agreed to.
+  const discountGrantKey = `${subtotal}|${discountType}|${parsedDiscount}`;
+  const discountApproved = discountGrant === discountGrantKey;
 
   const finalTotalDue = Math.max(0, subtotal - calculatedDiscount);
+
+  /**
+   * What an admin at the counter would see if this discount were unlocked with a
+   * PIN there. The percentage is sent alongside the flat amount on purpose — a
+   * "1 500 DA" number says nothing about how deep the cut is until it is a share.
+   */
+  const discountApprovalPayload: ApprovalPayload = {
+    actionType: 'pos_discount_override',
+    actionLabel: t(
+      'pos.discountApprovalLabel',
+      'Discount {{amount}} DA ({{percent}}%) off a {{total}} DA sale',
+      {
+        amount: calculatedDiscount.toLocaleString(),
+        percent: discountPercent.toFixed(1),
+        total: subtotal.toLocaleString(),
+      }
+    ),
+    actionData: {
+      itemType: 'pos_discount',
+      discountAmount: calculatedDiscount,
+      discountPercent: Number(discountPercent.toFixed(1)),
+      discountMode: discountType,
+      discountRequested: parsedDiscount,
+      cartTotal: subtotal,
+      customerName: selectedCustomer?.name || t('pos.walkInCustomer', 'Walk-in Customer'),
+      itemCount: totalItems,
+    },
+    reason: discountReason.trim() || undefined,
+  };
 
   /**
    * One normalized haystack per row, rebuilt only when the list changes. Typing
@@ -217,6 +253,12 @@ export const POSScreen = ({ navigation }: any) => {
 
   const handleConfirmCheckout = async () => {
     if (cart.length === 0) return;
+    // The rule is enforced here rather than only hidden in the UI: an approval is
+    // good for one basket, so a sale that grew past it has to ask again.
+    if (needsDiscountApproval && !discountApproved) {
+      setIsAskingApproval(true);
+      return;
+    }
     setIsSubmitting(true);
     try {
       const tx = await checkout({
@@ -233,6 +275,8 @@ export const POSScreen = ({ navigation }: any) => {
       setDiscountValue('');
       setDiscountReason('');
       setShowDiscountSection(false);
+      // The next sale starts with no answers carried over from this one.
+      setDiscountGrant(null);
       Vibration.vibrate([0, 50, 50, 100]);
     } catch (err: any) {
       Alert.alert(t('pos.checkoutFailedTitle', 'Checkout Failed'), err.message || t('pos.checkoutFailed', 'Could not complete sale.'));
@@ -590,10 +634,10 @@ export const POSScreen = ({ navigation }: any) => {
                     <Text style={styles.appliedDiscountBadgeText}>
                       {t(
                         'pos.discountApplied',
-                        '-{{amount}} DA ({{mode}})',
+                        '-{{amount}} DA ({{percent}}%)',
                         {
                           amount: calculatedDiscount.toLocaleString(),
-                          mode: discountType === 'percent' ? `${parsedDiscount}%` : t('pos.flatShort', 'Flat'),
+                          percent: discountPercent.toFixed(1),
                         }
                       )}
                     </Text>
@@ -667,6 +711,7 @@ export const POSScreen = ({ navigation }: any) => {
                       onPress={() => {
                         setDiscountValue('');
                         setDiscountReason('');
+                        setDiscountGrant(null);
                       }}
                       style={styles.clearDiscountBtn}
                     >
@@ -674,6 +719,21 @@ export const POSScreen = ({ navigation }: any) => {
                     </TouchableOpacity>
                   )}
                 </View>
+
+                {/* The two ways of saying the same cut, always both on screen. */}
+                {calculatedDiscount > 0 && (
+                  <Text style={styles.discountHint}>
+                    {discountType === 'percent'
+                      ? t('pos.discountPercentHint', '{{percent}}% of this sale = {{amount}} DA off', {
+                          percent: parsedDiscount,
+                          amount: calculatedDiscount.toLocaleString(),
+                        })
+                      : t('pos.discountFlatHint', '{{amount}} DA off = {{percent}}% of this sale', {
+                          amount: calculatedDiscount.toLocaleString(),
+                          percent: discountPercent.toFixed(1),
+                        })}
+                  </Text>
+                )}
 
                 {/* Optional Discount Note */}
                 <TextInput
@@ -726,7 +786,7 @@ export const POSScreen = ({ navigation }: any) => {
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabelDiscount}>
                     {t('pos.discountRow', 'Discount ({{mode}})', {
-                      mode: discountType === 'percent' ? `${parsedDiscount}%` : t('pos.flatShort', 'Flat'),
+                      mode: `${discountPercent.toFixed(1)}%`,
                     })}
                   </Text>
                   <Text style={styles.summaryValueDiscount}>-{calculatedDiscount.toLocaleString()} DA</Text>
@@ -738,21 +798,66 @@ export const POSScreen = ({ navigation }: any) => {
               </View>
             </View>
 
+            {needsDiscountApproval && !discountApproved && (
+              <View style={styles.approvalGate}>
+                <MaterialCommunityIcons name="shield-lock-outline" size={18} color={colors.warningInk} />
+                <Text style={styles.approvalGateText}>
+                  {t('pos.discountNeedsApproval', 'Over {{percent}}% off needs an admin: {{current}}% here.', {
+                    percent: DISCOUNT_APPROVAL_PERCENT,
+                    current: discountPercent.toFixed(1),
+                  })}
+                </Text>
+              </View>
+            )}
+
+            {needsDiscountApproval && discountApproved && (
+              <View style={styles.approvalGateApproved}>
+                <MaterialCommunityIcons name="shield-check-outline" size={18} color={colors.success} />
+                <Text style={styles.approvalGateApprovedText}>
+                  {t('pos.discountApprovedRow', 'An admin approved this discount.')}
+                </Text>
+              </View>
+            )}
+
               <Button
                 mode="contained"
-                buttonColor={colors.success}
+                buttonColor={needsDiscountApproval && !discountApproved ? colors.brand : colors.success}
                 textColor={colors.onBrand}
                 loading={isSubmitting}
                 disabled={isSubmitting}
                 onPress={handleConfirmCheckout}
                 style={styles.completeSaleBtn}
               >
-                {t('pos.completeSale', 'Complete Sale ({{amount}} DA)', { amount: finalTotalDue.toLocaleString() })}
+                {needsDiscountApproval && !discountApproved
+                  ? t('pos.askAdminForDiscount', 'Ask an admin to approve')
+                  : t('pos.completeSale', 'Complete Sale ({{amount}} DA)', { amount: finalTotalDue.toLocaleString() })}
               </Button>
             </ScrollView>
           </View>
         </View>
       </Modal>
+
+      {/* Discount above the free limit goes to an admin, on the till or by phone. */}
+      <AdminApprovalSheet
+        visible={isAskingApproval}
+        payload={discountApprovalPayload}
+        lines={[
+          t('pos.approvalLineAmount', '{{amount}} DA off = {{percent}}% of this sale', {
+            amount: calculatedDiscount.toLocaleString(),
+            percent: discountPercent.toFixed(1),
+          }),
+          t('pos.approvalLineTotal', 'Customer pays {{paid}} DA instead of {{full}} DA', {
+            paid: finalTotalDue.toLocaleString(),
+            full: subtotal.toLocaleString(),
+          }),
+          t('pos.approvalLineBasket', '{{items}} items · {{customer}}', {
+            items: totalItems,
+            customer: selectedCustomer?.name || t('pos.walkInCustomer', 'Walk-in Customer'),
+          }),
+        ]}
+        onApproved={() => setDiscountGrant(discountGrantKey)}
+        onDismiss={() => setIsAskingApproval(false)}
+      />
 
       {/* Receipt & Share Modal */}
       <Modal visible={Boolean(completedTx)} animationType="fade" transparent>
@@ -1592,6 +1697,43 @@ const styles = StyleSheet.create({
   },
   presetChipTextActive: {
     color: colors.textInverse,
+  },
+  discountHint: {
+    fontSize: fontSize.caption,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  approvalGate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.warningSoft,
+    borderStyle: 'solid',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.warningBorder,
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  approvalGateText: {
+    flex: 1,
+    fontSize: fontSize.caption,
+    fontWeight: '600',
+    color: colors.warningInk,
+  },
+  approvalGateApproved: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  approvalGateApprovedText: {
+    flex: 1,
+    fontSize: fontSize.caption,
+    fontWeight: '600',
+    color: colors.success,
   },
   discountInputRow: {
     flexDirection: 'row',

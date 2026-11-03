@@ -432,14 +432,23 @@
     "customerNameLabel": "اسم الزبون *",
     "customerPhoneLabel": "رقم الهاتف *",
     "debtBadge": "الدين: {{amount}} دج",
-    "discountApplied": "-{{amount}} دج ({{mode}})",
+    "discountApplied": "-{{amount}} دج ({{percent}}%)",
+    "discountApprovalLabel": "تخفيض {{amount}} دج ({{percent}}%) من بيع بـ {{total}} دج",
+    "discountApprovedRow": "وافق مدير على هذا التخفيض.",
+    "discountNeedsApproval": "التخفيض هنا {{current}}% — فوق {{percent}}% يحتاج موافقة مدير.",
+    "discountPercentHint": "{{percent}}% من هذا البيع = {{amount}} دج تخفيض",
+    "discountFlatHint": "{{amount}} دج تخفيض = {{percent}}% من هذا البيع",
+    "askAdminForDiscount": "اطلب موافقة مدير",
+    "approvalLineAmount": "{{amount}} دج تخفيض = {{percent}}% من هذا البيع",
+    "approvalLineTotal": "يدفع الزبون {{paid}} دج بدل {{full}} دج",
+    "approvalLineBasket": "{{items}} أصناف · {{customer}}",
+    "walkInCustomer": "زبون عابر",
     "discountFlat": "خصم دج",
     "discountPercent": "خصم ٪",
     "discountReason": "سبب الخصم / ملاحظة العرض (اختياري)",
     "discountReasonPlaceholder": "مثال: مكافأة ولاء، عرض مجموعة...",
     "discountRow": "الخصم ({{mode}})",
     "flatMode": "مبلغ ثابت (دج)",
-    "flatShort": "ثابت",
     "inStockCount": "{{n}} في المخزون",
     "invoiceLine": "فاتورة رقم {{id}} · {{total}} دج",
     "itemInCart": "{{n}} قطعة في السلة",
@@ -571,5 +580,16 @@
   "productCode": {
     "duplicateTitle": "نفس الرمز لعدة منتجات",
     "duplicateBody": "رمز \"{{code}}\" مسجل لدى {{total}} منتجات. اختر المنتج المطلوب — على المدير إعطاء أحدها رمزًا جديدًا."
+  },
+  "sensitive": {
+    "waitingTitle": "بانتظار موافقة مدير",
+    "waitingBody": "أُرسل الطلب إلى جميع المديرين. تُفتح هذه الشاشة تلقائيًا بمجرد الرد.",
+    "sending": "جارٍ إرسال الطلب…",
+    "approvedBy": "تمت الموافقة بواسطة {{name}}",
+    "rejectedBy": "رُفض الطلب بواسطة {{name}}",
+    "failed": "تعذّر إرسال الطلب.",
+    "tryAgain": "إعادة المحاولة",
+    "continue": "متابعة",
+    "cancelRequest": "إلغاء الطلب"
   }
 }

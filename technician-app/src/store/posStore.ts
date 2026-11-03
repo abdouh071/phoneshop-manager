@@ -12,6 +12,7 @@ import { offlineSyncService } from '../services/offlineSyncService';
 import { customerService } from '../services/customerService';
 import { notificationService } from '../services/notificationService';
 import { applyStockLines, type StockLine } from '../services/stockService';
+import { discountAmountOf } from '../utils/discountPolicy';
 import type { PhoneModel, CartItem, SaleTransaction, Customer, PaymentMethod, CustomerDebtEntry, StockStatus } from '../types';
 
 interface CheckoutParams {
@@ -151,12 +152,13 @@ export const usePosStore = create<PosState>((set, get) => ({
     }
 
     const { subtotal } = get().getCartTotal();
-    let discountAmount = 0;
-    if (params.discountValue && params.discountValue > 0) {
-      discountAmount = params.discountType === 'percent'
-        ? (subtotal * Math.min(100, Math.max(0, params.discountValue))) / 100
-        : Math.min(subtotal, Math.max(0, params.discountValue));
-    }
+    // One arithmetic for the discount, shared with the till screen. It used to
+    // recompute the percent unrounded here, so the stored total and the total the
+    // customer were shown could differ by a dinar.
+    const discountAmount = discountAmountOf(subtotal, {
+      mode: params.discountType ?? 'flat',
+      value: params.discountValue ?? 0,
+    });
     const total = Math.max(0, subtotal - discountAmount);
 
     const currentUser = useAuthStore.getState().user;

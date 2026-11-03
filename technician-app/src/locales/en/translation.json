@@ -432,14 +432,23 @@
     "customerNameLabel": "Customer Name *",
     "customerPhoneLabel": "Phone Number *",
     "debtBadge": "Debt: {{amount}} DA",
-    "discountApplied": "-{{amount}} DA ({{mode}})",
+    "discountApplied": "-{{amount}} DA ({{percent}}%)",
+    "discountApprovalLabel": "Discount {{amount}} DA ({{percent}}%) off a {{total}} DA sale",
+    "discountApprovedRow": "An admin approved this discount.",
+    "discountNeedsApproval": "Over {{percent}}% off needs an admin: {{current}}% here.",
+    "discountPercentHint": "{{percent}}% of this sale = {{amount}} DA off",
+    "discountFlatHint": "{{amount}} DA off = {{percent}}% of this sale",
+    "askAdminForDiscount": "Ask an admin to approve",
+    "approvalLineAmount": "{{amount}} DA off = {{percent}}% of this sale",
+    "approvalLineTotal": "Customer pays {{paid}} DA instead of {{full}} DA",
+    "approvalLineBasket": "{{items}} items · {{customer}}",
+    "walkInCustomer": "Walk-in Customer",
     "discountFlat": "Discount DA",
     "discountPercent": "Discount %",
     "discountReason": "Discount Reason / Promo Note (Optional)",
     "discountReasonPlaceholder": "e.g. Loyalty perk, bundle deal...",
     "discountRow": "Discount ({{mode}})",
     "flatMode": "Flat (DA)",
-    "flatShort": "Flat",
     "inStockCount": "{{n}} in stock",
     "invoiceLine": "Invoice #{{id}} · {{total}} DA",
     "itemInCart": "{{n}} item in cart",
@@ -571,5 +580,16 @@
   "productCode": {
     "duplicateTitle": "Same code on more than one product",
     "duplicateBody": "\"{{code}}\" is saved on {{total}} products. Pick the one you meant — an admin should give one of them a new code."
+  },
+  "sensitive": {
+    "waitingTitle": "Waiting for an admin",
+    "waitingBody": "Sent to every admin. This screen unlocks itself the moment one answers.",
+    "sending": "Sending the request…",
+    "approvedBy": "Approved by {{name}}",
+    "rejectedBy": "Rejected by {{name}}",
+    "failed": "Could not send the request.",
+    "tryAgain": "Try again",
+    "continue": "Continue",
+    "cancelRequest": "Cancel request"
   }
 }
