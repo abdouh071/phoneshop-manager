@@ -1,5 +1,7 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, initializeAuth, type Auth, type Persistence } from 'firebase/auth';
+import * as firebaseAuth from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   initializeFirestore,
   memoryLocalCache,
@@ -68,4 +70,40 @@ export const db = initializeFirestore(app, {
   localCache: hasIndexedDb ? persistentLocalCache({}) : memoryLocalCache(),
 });
 
-export const auth = getAuth(app);
+/**
+ * Metro links the React Native bundle of `firebase/auth`, which exports this
+ * helper; the entry point TypeScript reads is the browser bundle, which does not.
+ * Taken off the namespace and given a local shape rather than `any`, so the
+ * compiler still checks the one call site that uses it.
+ */
+const getReactNativePersistence = (
+  firebaseAuth as unknown as {
+    getReactNativePersistence: (storage: typeof AsyncStorage) => Persistence;
+  }
+).getReactNativePersistence;
+
+/**
+ * `getAuth()` on React Native keeps the session in memory: the web SDK asks the
+ * platform for a place to store it, finds no browser, and the sign-in dies with
+ * the JS runtime — which is why every reopen asked the technician for a password.
+ * AsyncStorage is that place, so the session survives a kill and a reboot.
+ *
+ * Restoring is not trusting: `onAuthStateChanged` still reads `users/{uid}` and
+ * signs the device out of a revoked or wrong-role profile before the app opens.
+ */
+const createAuth = (): Auth => {
+  if (Platform.OS === 'web' || typeof getReactNativePersistence !== 'function') {
+    return getAuth(app);
+  }
+  try {
+    return initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch {
+    // Already initialized — what a Metro Fast Refresh does. Reuse that instance
+    // rather than crash the dev loop over a persistence call it cannot repeat.
+    return getAuth(app);
+  }
+};
+
+export const auth = createAuth();
