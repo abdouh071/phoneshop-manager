@@ -3,6 +3,7 @@ import { Menu } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { MobileBottomNav } from './MobileBottomNav';
 import { useSettingsStore } from '../../store/settingsStore';
+import { useRepairStore } from '../../store/repairStore';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../ui/Toast';
 import { OfflineBanner } from './OfflineBanner';
@@ -29,6 +30,12 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const { user, isHistoryUnlocked, lockHistory } = useAuthStore();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const toast = useToast();
+
+  // The counter's ticket list follows the phones: a repair added or moved on
+  // another device lands here without anyone reloading. Selector form, because
+  // re-rendering the shell for every snapshot would repaint the whole app.
+  const subscribeLiveRepairs = useRepairStore((s) => s.subscribeLiveRepairs);
+  useEffect(() => subscribeLiveRepairs(), [subscribeLiveRepairs]);
 
   // Fetch global settings on app load & set up real-time listener
   useEffect(() => {

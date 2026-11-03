@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { RepairTicket, RepairStatusHistoryEntry, HeldRepairDraft } from '../types';
-import { repairService } from '../services/repairService';
+import { repairService, type RepairPatch } from '../services/repairService';
 import { activityLogService } from '../services/activityLogService';
 import { customerLogService } from '../services/customerLogService';
 import { useCustomerStore } from './customerStore';
@@ -8,6 +8,7 @@ import { useAuthStore } from './authStore';
 import { useInventoryStore } from './inventoryStore';
 import { formatCurrency } from '../utils/formatCurrency';
 import { deduplicateTickets, isSameTicketContent, findDuplicateTickets, type DuplicateTicketPair } from '../utils/ticketDeduplication';
+import { mergeRepairPatch } from '../utils/repairPatchMerge';
 import { isTicketActiveReturnPending } from '../utils/phoneLifecycle';
 
 // --- Persistent Draft Storage (survives reload & logout) ---
@@ -51,6 +52,8 @@ interface RepairState {
   statusFilter: RepairTicket['status'] | 'all' | 'overdue';
   // Actions
   fetchTickets: () => Promise<void>;
+  subscribeLiveRepairs: () => () => void;
+  applyLiveRepairPatch: (patch: RepairPatch) => void;
   setSearchQuery: (query: string) => void;
   setStatusFilter: (status: RepairTicket['status'] | 'all' | 'overdue') => void;
   updateStatus: (id: string, status: RepairTicket['status']) => Promise<void>;
@@ -77,6 +80,9 @@ interface RepairState {
 // The auto-heal below corrects tickets once; the server then returns them already completed, so
 // re-issuing the write on every mount only bills Firestore for a no-op.
 let staleHealRunThisSession = false;
+
+// The single live repairs stream this terminal holds. See subscribeLiveRepairs.
+let _liveUnsub: (() => void) | null = null;
 
 export const useRepairStore = create<RepairState>((set, get) => ({
   tickets: [],
@@ -127,6 +133,34 @@ export const useRepairStore = create<RepairState>((set, get) => ({
 
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setStatusFilter: (statusFilter) => set({ statusFilter }),
+
+  /**
+   * Merge another device's change into the list already on screen. See
+   * utils/repairPatchMerge for the rules; they are unit-tested there.
+   */
+  applyLiveRepairPatch: (patch) => {
+    set((state) => ({ tickets: mergeRepairPatch(state.tickets, patch) }));
+  },
+
+  /**
+   * One live stream for the whole terminal, opened by AppShell. A page that calls
+   * this while the stream is already up gets the same handle back, so a re-mount
+   * cannot pile listeners on top of each other.
+   */
+  subscribeLiveRepairs: () => {
+    if (!_liveUnsub) {
+      _liveUnsub = repairService.subscribeToActive((patch) => {
+        get().applyLiveRepairPatch(patch);
+      });
+    }
+    const mine = _liveUnsub;
+    return () => {
+      if (_liveUnsub === mine) {
+        mine();
+        _liveUnsub = null;
+      }
+    };
+  },
 
   updateStatus: async (id, status) => {
     const actor = useAuthStore.getState().user;

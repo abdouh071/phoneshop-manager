@@ -23,6 +23,18 @@ const COLLECTION = 'repairs';
 const LOCAL_STORAGE_KEY = 'offline_repairs';
 const DELETED_TICKETS_KEY = 'deleted_repair_ticket_ids';
 
+// Shared by the scoped read below and the live stream: what counts as "still work",
+// what counts as recently closed, and how long "recently" lasts.
+const ACTIVE_STATUSES = ['pending', 'in_progress', 'ready', 'returned'];
+const CLOSED_STATUSES = ['completed', 'cancelled'];
+const CLOSED_RETENTION_DAYS = 60;
+
+/** What a live stream says changed: rows to merge in, and ids that are gone for good. */
+export interface RepairPatch {
+  upsert: RepairTicket[];
+  removedIds: string[];
+}
+
 const docToTicket = (id: string, data: Record<string, unknown>): RepairTicket => ({
   ...(data as Omit<RepairTicket, 'id'>),
   id,
@@ -228,10 +240,6 @@ export const repairService = {
       return deduplicateTickets(getLocalRepairs());
     }
 
-    const ACTIVE_STATUSES = ['pending', 'in_progress', 'ready', 'returned'];
-    const CLOSED_STATUSES = ['completed', 'cancelled'];
-    const CLOSED_RETENTION_DAYS = 60;
-
     try {
       const closedCutoff = new Date();
       closedCutoff.setDate(closedCutoff.getDate() - CLOSED_RETENTION_DAYS);
@@ -290,6 +298,67 @@ export const repairService = {
       console.warn('Firestore getActive repairs failed, falling back to local cache:', err);
       return deduplicateTickets(getLocalRepairs());
     }
+  },
+
+  /**
+   * Live stream of the tickets still under work, so a repair added or moved on a
+   * technician's phone lands on this terminal without a reload.
+   *
+   * Scoped to ACTIVE_STATUSES on purpose. A listener over every ticket ever written
+   * would re-bill the whole collection on the shop's slowest day, and the counter
+   * only needs to hear about work in progress; history stays behind getAll() and
+   * the on-demand report reads. When a ticket settles it drops out of the stream, so
+   * one extra read fetches its new shape and the existing row updates in place
+   * instead of freezing at its last open status.
+   */
+  subscribeToActive: (
+    onPatch: (patch: RepairPatch) => void,
+    onError?: (err: unknown) => void
+  ): (() => void) => {
+    const q = query(
+      collection(db, COLLECTION),
+      where('status', 'in', ACTIVE_STATUSES),
+      orderBy('createdAt', 'desc')
+    );
+
+    return onSnapshot(
+      q,
+      (snap) => {
+        const deletedIds = getDeletedTicketIds();
+        const changed = snap.docChanges();
+
+        const upsert = changed
+          .filter((c) => c.type !== 'removed')
+          .map((c) => docToTicket(c.doc.id, c.doc.data() as Record<string, unknown>))
+          .filter((t) => !deletedIds.has(t.id));
+
+        const left = changed
+          .filter((c) => c.type === 'removed')
+          .map((c) => c.doc.id)
+          .filter((id) => !deletedIds.has(id));
+
+        if (left.length === 0) {
+          if (upsert.length > 0) onPatch({ upsert, removedIds: [] });
+          return;
+        }
+
+        Promise.all(left.map((id) => getDoc(doc(db, COLLECTION, id))))
+          .then((settled) => {
+            const fresh = settled
+              .filter((s) => s.exists())
+              .map((s) => docToTicket(s.id, s.data() as Record<string, unknown>));
+            const gone = settled.filter((s) => !s.exists()).map((s) => s.id);
+            onPatch({ upsert: [...upsert, ...fresh], removedIds: gone });
+          })
+          .catch((err) => onError?.(err));
+      },
+      (err) => {
+        // The one-shot list stays usable; the terminal simply behaves the way it
+        // did before this stream existed.
+        console.warn('[RepairService] Live repairs stream unavailable:', err);
+        onError?.(err);
+      }
+    );
   },
 
   getById: async (id: string): Promise<RepairTicket | undefined> => {
