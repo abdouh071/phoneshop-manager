@@ -32,8 +32,8 @@ import {
 import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
 import { useApprovalStore } from '../store/approvalStore';
-import { activityLogService } from '../services/activityLogService';
-import { applyStockLines, readStockLevels } from '../services/stockService';
+import { readStockLevels } from '../services/stockService';
+import { voidSale } from '../services/saleVoidService';
 import { EditSaleSheet } from '../components/EditSaleSheet';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import { usePermissions } from '../hooks/usePermissions';
@@ -215,41 +215,34 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              // 1. Restore inventory stock. Mirrors the quantities the POS took out and
-              // goes through the same atomic primitive, so a count another till moved
-              // between the read and the write cannot be overwritten by this loop.
-              const restoreLines = tx.items.map((item) => ({
-                productId: String(item?.product?.id || ''),
-                name: String(item?.product?.name || ''),
-                quantity: Math.max(1, Math.trunc(Number(item?.quantity) || 1)),
-              }));
+              const outcome = await voidSale(tx, `Voided at the till by ${user?.name || 'Staff'}`);
+              Vibration.vibrate(50);
 
-              const { failed: stockFailures } = await applyStockLines(restoreLines, 1);
-              for (const failure of stockFailures) {
-                console.warn(`Failed to restore stock for ${failure.line.name}:`, failure.error);
+              // A second press on an invoice the shop already closed must not put the
+              // same goods on the shelf twice, so it does nothing — and says so.
+              if (!outcome.voided) {
+                Alert.alert(
+                  t('salesHistory.saleVoided', 'Sale Voided'),
+                  t('salesHistory.voidAlreadyClosed', 'This invoice was already voided. Nothing was taken back and nothing was refunded again.')
+                );
+                return;
               }
 
-              // 2. Mark transaction as voided
-              await updateDoc(doc(db, 'transactions', tx.id), {
-                status: 'voided',
-                voidedAt: new Date().toISOString(),
-                voidedBy: user ? { uid: user.id, name: user.name } : null,
-              });
-
-              // 3. Log activity
-              await activityLogService.log(
-                'sales',
-                `Voided Today's Sale: #${tx.invoiceNumber || tx.id.slice(-6)} (${tx.total} DA)`,
-                {
-                  entityId: tx.id,
-                  entityType: 'sale',
-                  userName: user?.name || 'Sales Agent',
-                  userId: user?.id,
-                }
+              Alert.alert(
+                t('salesHistory.saleVoided', 'Sale Voided'),
+                (outcome.stockFailures.length > 0
+                  ? t('salesHistory.voidSavedQueued', 'Transaction marked as voided. {{count}} stock change could not be written and is queued for the next sync.', {
+                      count: outcome.stockFailures.length,
+                    })
+                  : t('salesHistory.saleVoidedBody', 'Stock restored and transaction marked as voided.')) +
+                  // The sale is closed but his account still carries the balance. Only a
+                  // person can close that, and silence here would report a finished job.
+                  (outcome.accountUnreconciled > 0
+                    ? t('salesHistory.voidSavedUnreconciled', ' Its {{amount}} DA balance is still open on the customer account — clear it from the Customers tab.', {
+                        amount: outcome.accountUnreconciled.toLocaleString(),
+                      })
+                    : '')
               );
-
-              Vibration.vibrate(50);
-              Alert.alert(t('salesHistory.saleVoided', 'Sale Voided'), t('salesHistory.saleVoidedBody', 'Stock restored and transaction marked as voided.'));
             } catch (err: any) {
               Alert.alert(t('salesHistory.voidFailedTitle', 'Void Failed'), err.message || t('salesHistory.voidFailed', 'Could not void sale.'));
             }

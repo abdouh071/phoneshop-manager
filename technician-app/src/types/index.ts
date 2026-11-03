@@ -173,6 +173,14 @@ export interface CartItem {
   product: PhoneModel;
   quantity: number;
   unitPrice?: number;
+  /**
+   * A line the customer handed over instead of bought, so its money comes off the
+   * invoice. The counter writes these on an exchange; a phone only has to read them
+   * back, but a void that missed the sign would restock goods that were never sold.
+   */
+  isReturn?: boolean;
+  /** False when a returned line was kept off the shelf (faulty, sent for repair). */
+  restock?: boolean;
 }
 
 export interface SaleTransaction {

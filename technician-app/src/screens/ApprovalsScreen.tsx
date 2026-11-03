@@ -76,15 +76,34 @@ export const ApprovalsScreen = ({ navigation }: any) => {
           onPress: async () => {
             setActionInProgress(req.id);
             try {
-              await approveRequest(req.id, 'remote');
+              const outcome = await approveRequest(req.id, 'remote');
               Vibration.vibrate([0, 50, 100]);
-              Alert.alert(
-                t('common.success', 'Success'),
-                t('approvals.approvedSuccess', 'Approved "{{action}}" for {{name}}.', {
-                  action: req.actionLabel,
-                  name: req.requestedBy.name,
-                })
-              );
+              let body = t('approvals.approvedSuccess', 'Approved "{{action}}" for {{name}}.', {
+                action: req.actionLabel,
+                name: req.requestedBy.name,
+              });
+              // The void ran, but left something only a person can finish. The approver
+              // is the one who has just seen the request, so the gap is named here rather
+              // than left in a console line.
+              const residual: string[] = [];
+              if (outcome) {
+                if (!outcome.voided) {
+                  residual.push(t('salesHistory.voidAlreadyClosed', 'This invoice was already voided. Nothing was taken back and nothing was refunded again.'));
+                } else {
+                  if (outcome.stockFailures.length > 0) {
+                    residual.push(t('salesHistory.voidSavedQueued', 'Transaction marked as voided. {{count}} stock change could not be written and is queued for the next sync.', {
+                      count: outcome.stockFailures.length,
+                    }));
+                  }
+                  if (outcome.accountUnreconciled > 0) {
+                    residual.push(t('salesHistory.voidSavedUnreconciled', 'Its {{amount}} DA balance is still open on the customer account — clear it from the Customers tab.', {
+                      amount: outcome.accountUnreconciled.toLocaleString(),
+                    }));
+                  }
+                }
+              }
+              if (residual.length > 0) body += `\n\n${residual.join('\n')}`;
+              Alert.alert(t('common.success', 'Success'), body);
             } catch (err: any) {
               Alert.alert(t('common.error', 'Error'), err.message || t('approvals.approveFailed', 'Failed to approve request.'));
             } finally {

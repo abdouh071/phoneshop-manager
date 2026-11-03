@@ -16,7 +16,8 @@ import { useAuthStore } from './authStore';
 import { createRefCountedSubscription, type RefCountedSubscription } from '../utils/liveSubscription';
 import { notificationService } from '../services/notificationService';
 import { activityLogService } from '../services/activityLogService';
-import type { ApprovalRequest } from '../types';
+import { voidSale, type SaleVoidOutcome } from '../services/saleVoidService';
+import type { ApprovalRequest, SaleTransaction } from '../types';
 
 interface ApprovalState {
   pendingRequests: ApprovalRequest[];
@@ -35,7 +36,13 @@ interface ApprovalState {
 
   cancelRequest: (requestId: string) => Promise<void>;
 
-  approveRequest: (requestId: string, method?: 'remote' | 'pin') => Promise<void>;
+  /**
+   * Approving an action. Answers with what the void left undone — stock the server
+   * refused to take back, a balance this phone could not reach — and with null for any
+   * action that has no side-effect to report. The approver is the one person standing
+   * close enough to finish those, so they come back rather than into a console.
+   */
+  approveRequest: (requestId: string, method?: 'remote' | 'pin') => Promise<SaleVoidOutcome | null>;
 
   rejectRequest: (requestId: string, reason?: string) => Promise<void>;
 
@@ -168,7 +175,7 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
     });
   },
 
-  approveRequest: async (requestId: string, method: 'remote' | 'pin' = 'remote') => {
+  approveRequest: async (requestId: string, method: 'remote' | 'pin' = 'remote'): Promise<SaleVoidOutcome | null> => {
     const { user } = useAuthStore.getState();
     if (!user) throw new Error('Not authenticated.');
     if (user.role !== 'admin') {
@@ -193,14 +200,21 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
     });
 
     // Execute side-effects for specific actions (such as void sale)
+    let voidOutcome: SaleVoidOutcome | null = null;
     if (reqData.actionType === 'void_sale' && reqData.targetId) {
       try {
-        await updateDoc(doc(db, 'transactions', reqData.targetId), {
-          status: 'voided',
-          voidedAt: resolvedAt,
-          voidedBy: user.name,
-          voidReason: reqData.reason || 'Approved by admin',
-        });
+        // The same void the till runs: the goods go back, the credit record closes and
+        // the profile's numbers follow. Answering only with a status used to leave an
+        // approved invoice standing on the shelf it had already emptied.
+        const txSnap = await getDoc(doc(db, 'transactions', reqData.targetId));
+        if (txSnap.exists()) {
+          voidOutcome = await voidSale(
+            { ...(txSnap.data() as SaleTransaction), id: txSnap.id },
+            `Void approved by ${user.name}${reqData.reason ? ` — ${reqData.reason}` : ''}`
+          );
+        } else {
+          console.warn('[ApprovalStore] Approved void names a transaction that is not there:', reqData.targetId);
+        }
       } catch (txErr) {
         console.warn('[ApprovalStore] Error marking transaction voided:', txErr);
       }
@@ -224,6 +238,8 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
       userName: user.name,
       userId: user.id,
     }).catch(console.error);
+
+    return voidOutcome;
   },
 
   rejectRequest: async (requestId: string, reason?: string) => {
