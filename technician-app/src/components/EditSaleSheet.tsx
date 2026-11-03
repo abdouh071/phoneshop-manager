@@ -6,6 +6,11 @@
  * goes near the cart. The lines you see are the lines on the document, and saving
  * rewrites that one document plus the stock its changes imply.
  *
+ * The rules are the counter terminal's `EditTransactionModal`: a quantity stepper
+ * that never climbs above what was sold, a unit price field, one "return stock?"
+ * choice per SKU, and a summary that names the difference in the same two
+ * directions the desktop does.
+ *
  * Who may save is the till's own rule: an admin at the counter types a PIN and acts;
  * a phone cannot hold a PIN (see `AdminApprovalSheet`), so a technician's save is
  * sent to the admins as a request carrying exactly the diff they are approving, and
@@ -18,29 +23,30 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../store/authStore';
-import { applySaleEdit, findOversoldLines, type SaleEditOutcome } from '../services/saleEditService';
+import { applySaleEdit, type SaleEditOutcome } from '../services/saleEditService';
 import { diffSaleEdit, planSaleEdit, type SaleLineEdits, type SaleRestockChoices } from '../utils/saleEdit';
 import { AdminApprovalSheet, type ApprovalPayload } from './AdminApprovalSheet';
 import { colors, fontSize, radius, spacing } from '../theme/tokens';
-import type { SaleTransaction } from '../types';
+import type { CartItem, SaleTransaction } from '../types';
 
 type LineDraft = { quantity: number; price: string };
 
+const wholeUnits = (value: number): number => {
+  const n = Math.trunc(Number(value));
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+};
+
 /**
- * Seed from the document as it stands when the sheet opens. The caller keys this
- * component on the invoice, so a new sale means a new mount — and the live
- * history listener handing over a fresh object every few seconds cannot wipe
- * what the cashier is typing.
+ * The price the line is worth right now. The desktop prices from the product
+ * snapshot and that is what it rewrites, so the snapshot leads; `unitPrice` is the
+ * fallback for a row too old to carry one. Reading `unitPrice` first would re-price
+ * an invoice the counter has already corrected back to the pre-correction number.
  */
-const seedDrafts = (items: SaleTransaction['items']): Record<string, LineDraft> => {
-  const out: Record<string, LineDraft> = {};
-  items.forEach((item, index) => {
-    out[String(index)] = {
-      quantity: Math.max(0, Math.trunc(Number(item.quantity) || 0)),
-      price: String(item.unitPrice ?? item.product?.price ?? 0),
-    };
-  });
-  return out;
+const soldUnitPrice = (item: CartItem): number => {
+  const snapshot = Number(item.product?.price);
+  if (Number.isFinite(snapshot) && snapshot >= 0) return snapshot;
+  const stored = Number(item.unitPrice);
+  return Number.isFinite(stored) && stored >= 0 ? stored : 0;
 };
 
 interface EditSaleSheetProps {
@@ -57,31 +63,47 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
   const insets = useSafeAreaInsets();
   const user = useAuthStore(s => s.user);
 
-  const [draft, setDraft] = useState<Record<string, LineDraft>>(() => seedDrafts(transaction?.items ?? []));
-  const [restock, setRestock] = useState<SaleRestockChoices>(() =>
-    (transaction?.items ?? []).reduce<SaleRestockChoices>((acc, _item, index) => {
-      acc[String(index)] = true;
-      return acc;
-    }, {})
-  );
+  /**
+   * Keyed by product id, as the desktop keys `editedQuantities` / `editedPrices` /
+   * `returnToStock` — so one SKU on two rows of the same invoice is one control.
+   *
+   * Seeded once, on mount, from the document as it stood when the sheet opened. The
+   * caller keys this component on the invoice, so a new sale means a new mount, and
+   * the live history listener handing over a fresh object every few seconds cannot
+   * wipe what the cashier is typing.
+   */
+  const [draft, setDraft] = useState<Record<string, LineDraft>>(() => {
+    const out: Record<string, LineDraft> = {};
+    (transaction?.items ?? []).forEach(item => {
+      const id = item.product?.id;
+      if (!id) return;
+      out[id] = { quantity: wholeUnits(item.quantity), price: String(soldUnitPrice(item)) };
+    });
+    return out;
+  });
+  const [restock, setRestock] = useState<SaleRestockChoices>(() => {
+    const out: SaleRestockChoices = {};
+    (transaction?.items ?? []).forEach(item => {
+      if (item.product?.id) out[item.product.id] = true;
+    });
+    return out;
+  });
   const [isSaving, setIsSaving] = useState(false);
   const [isAsking, setIsAsking] = useState(false);
 
   const edits: SaleLineEdits = useMemo(() => {
     const out: SaleLineEdits = {};
-    transaction?.items.forEach((item, index) => {
-      const key = String(index);
-      const entered = draft[key];
+    transaction?.items.forEach(item => {
+      const id = item.product?.id;
+      if (!id) return;
+      const entered = draft[id];
       if (!entered) return;
       const parsed = Number(String(entered.price).replace(',', '.'));
-      out[key] = {
+      out[id] = {
         quantity: entered.quantity,
         // A half-typed number keeps the price the line already had. Reading it as
         // 0 DA would let someone refund a phone by typing into the wrong field.
-        unitPrice:
-          Number.isFinite(parsed) && parsed >= 0
-            ? parsed
-            : (item.unitPrice ?? item.product?.price ?? 0),
+        unitPrice: Number.isFinite(parsed) && parsed >= 0 ? parsed : soldUnitPrice(item),
       };
     });
     return out;
@@ -105,49 +127,40 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
           ? t('salesHistory.statusVoided', 'VOIDED')
           : t('salesHistory.statusCompleted', 'COMPLETED');
 
-  const setQuantity = (key: string, quantity: number) =>
-    setDraft(prev => ({ ...prev, [key]: { ...prev[key], quantity: Math.max(0, quantity) } }));
+  const setQuantity = (id: string, quantity: number, maxQty: number) => {
+    if (!id) return;
+    setDraft(prev => ({
+      ...prev,
+      [id]: { ...prev[id], quantity: Math.max(0, Math.min(maxQty, Math.trunc(Number(quantity) || 0))) },
+    }));
+  };
 
-  const setPrice = (key: string, price: string) =>
-    setDraft(prev => ({ ...prev, [key]: { ...prev[key], price } }));
+  const setPrice = (id: string, price: string) => {
+    if (!id) return;
+    setDraft(prev => ({ ...prev, [id]: { ...prev[id], price } }));
+  };
 
   const commit = async () => {
     if (!transaction || !plan || !plan.hasChanges || isSaving) return;
     setIsSaving(true);
     try {
-      const oversold = await findOversoldLines(plan);
-      if (oversold.length > 0) {
-        Alert.alert(
-          t('salesHistory.editBlockedTitle', 'Those units are not in the shop'),
-          oversold
-            .map(row =>
-              row.available === null
-                ? t('salesHistory.editBlockedMissing', '{{name}} has no inventory row left.', { name: row.name })
-                : t('salesHistory.editBlockedShort', '{{name}}: {{available}} in stock, this edit sells {{wanted}}.', {
-                    name: row.name,
-                    available: row.available,
-                    wanted: row.wanted,
-                  })
-            )
-            .join('\n')
-        );
-        return;
-      }
-
       const outcome = await applySaleEdit(transaction, plan);
       Vibration.vibrate([0, 50, 50, 80]);
+      const difference =
+        plan.refundDue > 0
+          ? t('salesHistory.editSavedRefund', ' Refund due: {{amount}} DA', { amount: amount(plan.refundDue) })
+          : plan.additionalDue > 0
+            ? t('salesHistory.editSavedExtra', ' Extra collected: {{amount}} DA', { amount: amount(plan.additionalDue) })
+            : '';
       Alert.alert(
-        t('salesHistory.editSavedTitle', 'Invoice Updated'),
-        outcome.stockFailures.length > 0
-          ? t('salesHistory.editSavedQueued', 'Invoice #{{invoice}} now reads {{total}} DA. {{count}} stock change could not be written and is queued for the next sync.', {
-              invoice: invoiceLabel,
-              total: amount(outcome.total),
+        t('salesHistory.editSavedTitle', 'Receipt Updated'),
+        (outcome.stockFailures.length > 0
+          ? t('salesHistory.editSavedQueued', 'Transaction {{id}} has been modified. {{count}} stock change could not be written and is queued for the next sync.', {
+              id: transaction.id,
               count: outcome.stockFailures.length,
             })
-          : t('salesHistory.editSavedBody', 'Invoice #{{invoice}} now reads {{total}} DA, and the stock has been corrected.', {
-              invoice: invoiceLabel,
-              total: amount(outcome.total),
-            })
+          : t('salesHistory.editSavedBody', 'Transaction {{id}} has been modified.', { id: transaction.id })) +
+          difference
       );
       onSaved?.(outcome);
       onClose();
@@ -202,9 +215,9 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
 
   const saveLabel =
     plan.refundDue > 0
-      ? t('salesHistory.editRefundBtn', 'Refund the difference ({{amount}} DA)', { amount: amount(plan.refundDue) })
+      ? t('salesHistory.editRefundBtn', 'Refund Difference ({{amount}} DA)', { amount: amount(plan.refundDue) })
       : plan.additionalDue > 0
-        ? t('salesHistory.editCollectBtn', 'Collect the difference ({{amount}} DA)', { amount: amount(plan.additionalDue) })
+        ? t('salesHistory.editCollectBtn', 'Collect Difference ({{amount}} DA)', { amount: amount(plan.additionalDue) })
         : t('salesHistory.editSaveBtn', 'Save Changes');
 
   return (
@@ -215,11 +228,11 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
           <View style={styles.header}>
             <MaterialCommunityIcons name="file-document-edit-outline" size={24} color={colors.brand} />
             <View style={styles.headerText}>
-              <Text style={styles.title}>{t('salesHistory.editTitle', 'Edit Invoice')}</Text>
+              <Text style={styles.title}>{t('salesHistory.editTitle', 'Edit Receipt & Prices')}</Text>
               <Text style={styles.subtitle}>
-                {t('salesHistory.editSubtitle', '#{{invoice}} · {{total}} DA', {
+                {t('salesHistory.editSubtitle', 'Order #{{invoice}} • {{date}}', {
                   invoice: invoiceLabel,
-                  total: amount(transaction.total),
+                  date: new Date(transaction.date).toLocaleDateString(),
                 })}
               </Text>
             </View>
@@ -230,60 +243,48 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
 
           <ScrollView style={styles.body} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.bodyContent}>
             <Text style={styles.hint}>
-              {t('salesHistory.editHint', 'Change a price, reduce a quantity, or add units back onto the sale. The invoice itself is rewritten and the stock follows.')}
+              {t('salesHistory.editHint', 'Adjust item unit prices, quantities, or remove returned items. Inventory and transaction totals will recalculate automatically.')}
             </Text>
 
             {transaction.items.map((item, index) => {
-              const key = String(index);
-              const entered = draft[key];
-              const originalQty = Math.max(0, Math.trunc(Number(item.quantity) || 0));
-              const originalUnit = Number(item.unitPrice ?? item.product?.price ?? 0);
-              const quantity = entered?.quantity ?? originalQty;
-              const unitPrice = edits[key]?.unitPrice ?? originalUnit;
+              const pid = item.product?.id || '';
+              const originalQty = wholeUnits(item.quantity);
+              const originalUnit = soldUnitPrice(item);
+              const quantity = draft[pid]?.quantity ?? originalQty;
+              const unitPrice = edits[pid]?.unitPrice ?? originalUnit;
               const returnedQty = originalQty - quantity;
-              const editable = Boolean(item.product?.id);
-              const willRestock = restock[key] !== false;
+              const willRestock = !pid || restock[pid] !== false;
+              const name = item.product?.name || item.product?.model || t('salesHistory.unknownItem', 'Item');
 
               return (
-                <View key={`${item.product?.id || 'row'}-${key}`} style={styles.line}>
+                <View key={pid || `row-${index}`} style={styles.line}>
                   <View style={styles.lineHead}>
-                    <Text style={styles.lineName} numberOfLines={1}>
-                      {item.product?.name || item.product?.model || t('salesHistory.unknownItem', 'Item')}
-                    </Text>
+                    <View style={styles.lineHeadText}>
+                      <Text style={styles.lineName} numberOfLines={1}>
+                        {name}
+                      </Text>
+                      <Text style={styles.lineSub} numberOfLines={1}>
+                        {t('salesHistory.editLineSold', 'Sold {{qty}} at {{price}} DA', {
+                          qty: originalQty,
+                          price: amount(originalUnit),
+                        })}
+                      </Text>
+                    </View>
                     <Text style={styles.lineTotal}>{amount(unitPrice * quantity)} DA</Text>
                   </View>
 
-                  {!editable && (
+                  {!pid && (
                     <Text style={styles.lockedNote}>
                       {t('salesHistory.editLockedLine', 'This row has no inventory link, so it stays as it was sold.')}
                     </Text>
                   )}
 
-                  {editable && (
+                  {pid ? (
                     <View style={styles.controls}>
-                      <View style={styles.stepper}>
-                        <TouchableOpacity
-                          style={[styles.stepBtn, quantity <= 0 && styles.stepBtnOff]}
-                          onPress={() => setQuantity(key, quantity - 1)}
-                          disabled={quantity <= 0}
-                          accessibilityLabel={t('salesHistory.decrease', 'Decrease quantity')}
-                        >
-                          <MaterialCommunityIcons name="minus" size={18} color={quantity <= 0 ? colors.textFaint : colors.brand} />
-                        </TouchableOpacity>
-                        <Text style={styles.stepValue}>{quantity}</Text>
-                        <TouchableOpacity
-                          style={styles.stepBtn}
-                          onPress={() => setQuantity(key, quantity + 1)}
-                          accessibilityLabel={t('salesHistory.increase', 'Increase quantity')}
-                        >
-                          <MaterialCommunityIcons name="plus" size={18} color={colors.brand} />
-                        </TouchableOpacity>
-                      </View>
-
                       <TextInput
                         label={t('salesHistory.unitPriceLabel', 'Unit price (DA)')}
-                        value={entered?.price ?? String(originalUnit)}
-                        onChangeText={next => setPrice(key, next)}
+                        value={draft[pid]?.price ?? String(originalUnit)}
+                        onChangeText={next => setPrice(pid, next)}
                         mode="outlined"
                         dense
                         keyboardType="decimal-pad"
@@ -291,66 +292,76 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
                         style={styles.priceInput}
                         accessibilityLabel={t('salesHistory.unitPriceLabel', 'Unit price (DA)')}
                       />
-                    </View>
-                  )}
 
-                  {editable && returnedQty > 0 && (
+                      <View style={styles.stepper}>
+                        <TouchableOpacity
+                          style={[styles.stepBtn, quantity <= 0 && styles.stepBtnOff]}
+                          onPress={() => setQuantity(pid, quantity - 1, originalQty)}
+                          disabled={quantity <= 0}
+                          accessibilityLabel={t('salesHistory.decrease', 'Decrease quantity')}
+                        >
+                          <MaterialCommunityIcons name="minus" size={18} color={quantity <= 0 ? colors.textFaint : colors.brand} />
+                        </TouchableOpacity>
+                        <Text style={styles.stepValue}>
+                          {quantity} / {originalQty}
+                        </Text>
+                        <TouchableOpacity
+                          style={[styles.stepBtn, quantity >= originalQty && styles.stepBtnOff]}
+                          onPress={() => setQuantity(pid, quantity + 1, originalQty)}
+                          disabled={quantity >= originalQty}
+                          accessibilityLabel={t('salesHistory.increase', 'Increase quantity')}
+                        >
+                          <MaterialCommunityIcons name="plus" size={18} color={quantity >= originalQty ? colors.textFaint : colors.brand} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {pid && returnedQty > 0 ? (
                     <TouchableOpacity
                       style={styles.restockRow}
-                      onPress={() => setRestock(prev => ({ ...prev, [key]: !willRestock }))}
+                      onPress={() => setRestock(prev => ({ ...prev, [pid]: !willRestock }))}
                     >
                       <MaterialCommunityIcons
                         name={willRestock ? 'check-circle' : 'circle-outline'}
                         size={20}
                         color={willRestock ? colors.success : colors.textMuted}
                       />
-                      <Text style={styles.restockText}>
+                      <Text style={[styles.restockText, willRestock ? styles.restockYes : styles.restockNo]}>
                         {willRestock
-                          ? t('salesHistory.restockYes', '{{count}} unit(s) go back on the shelf', { count: returnedQty })
-                          : t('salesHistory.restockNo', '{{count}} unit(s) stay sold — not returning them', { count: returnedQty })}
+                          ? t('salesHistory.restockYes', '+{{count}} Stock', { count: returnedQty })
+                          : t('salesHistory.restockNo', 'Do not restock')}
                       </Text>
                     </TouchableOpacity>
-                  )}
-
-                  {editable && returnedQty < 0 && (
-                    <Text style={styles.addedNote}>
-                      {t('salesHistory.unitsAdded', '{{count}} more unit(s) taken from stock', { count: -returnedQty })}
-                    </Text>
-                  )}
-
-                  {editable && quantity === 0 && (
-                    <Text style={styles.removedNote}>
-                      {t('salesHistory.lineRemoved', 'The line comes off the invoice when you save.')}
-                    </Text>
-                  )}
+                  ) : null}
                 </View>
               );
             })}
 
             <View style={styles.summary}>
               <SummaryRow
-                label={t('salesHistory.editOriginalTotal', 'Original total')}
+                label={t('salesHistory.editOriginalTotal', 'Original Total')}
                 value={`${amount(transaction.total)} DA`}
               />
               <SummaryRow
-                label={t('salesHistory.editNewSubtotal', 'New subtotal')}
+                label={t('salesHistory.editNewSubtotal', 'New Subtotal')}
                 value={`${amount(plan.subtotal)} DA`}
               />
               {plan.discountAmount > 0 && (
                 <SummaryRow
-                  label={t('salesHistory.editDiscount', 'Discount')}
+                  label={t('salesHistory.editDiscount', 'Discount Applied')}
                   value={`-${amount(plan.discountAmount)} DA`}
                   tone="danger"
                 />
               )}
               <SummaryRow
-                label={t('salesHistory.editNewTotal', 'New total')}
+                label={t('salesHistory.editNewTotal', 'New Total')}
                 value={`${amount(plan.total)} DA`}
                 strong
               />
               {plan.refundDue > 0 && (
                 <SummaryRow
-                  label={t('salesHistory.editRefundDue', 'Refund due to the customer')}
+                  label={t('salesHistory.editRefundDue', 'Refund Due to Client')}
                   value={`${amount(plan.refundDue)} DA`}
                   tone="danger"
                   strong
@@ -358,7 +369,7 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
               )}
               {plan.additionalDue > 0 && (
                 <SummaryRow
-                  label={t('salesHistory.editAdditionalDue', 'Still to collect')}
+                  label={t('salesHistory.editAdditionalDue', 'Additional Payment Due')}
                   value={`+${amount(plan.additionalDue)} DA`}
                   tone="success"
                   strong
@@ -377,7 +388,7 @@ export const EditSaleSheet = ({ visible, transaction, onClose, onSaved }: EditSa
               <View style={styles.warning}>
                 <MaterialCommunityIcons name="alert-outline" size={16} color={colors.warningInk} />
                 <Text style={styles.warningText}>
-                  {t('salesHistory.editWarning', 'Saving corrects the totals, the payment lines and the stock counts together.')}
+                  {t('salesHistory.editWarning', 'Saving will adjust the transaction prices, totals, and modify inventory stock as selected above.')}
                 </Text>
               </View>
             )}
@@ -482,8 +493,10 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     backgroundColor: colors.surface,
   },
-  lineHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  lineName: { flex: 1, fontSize: fontSize.bodyStrong, fontWeight: '700', color: colors.textPrimary },
+  lineHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.sm },
+  lineHeadText: { flex: 1, gap: 1 },
+  lineName: { fontSize: fontSize.bodyStrong, fontWeight: '700', color: colors.textPrimary },
+  lineSub: { fontSize: fontSize.caption, color: colors.textMuted },
   lineTotal: { fontSize: fontSize.bodyStrong, fontWeight: '700', color: colors.textPrimary },
   controls: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   stepper: {
@@ -497,12 +510,12 @@ const styles = StyleSheet.create({
   },
   stepBtn: { padding: spacing.xs },
   stepBtnOff: { opacity: 0.4 },
-  stepValue: { minWidth: 26, textAlign: 'center', fontSize: fontSize.bodyStrong, fontWeight: '700', color: colors.textPrimary },
+  stepValue: { minWidth: 42, textAlign: 'center', fontSize: fontSize.bodyStrong, fontWeight: '700', color: colors.textPrimary },
   priceInput: { flex: 1, minHeight: 44 },
   restockRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  restockText: { flex: 1, fontSize: fontSize.label, color: colors.textSecondary },
-  addedNote: { fontSize: fontSize.caption, color: colors.dangerText },
-  removedNote: { fontSize: fontSize.caption, color: colors.warningText },
+  restockText: { flex: 1, fontSize: fontSize.label },
+  restockYes: { color: colors.success, fontWeight: '700' },
+  restockNo: { color: colors.dangerText, fontWeight: '600' },
   lockedNote: { fontSize: fontSize.caption, color: colors.textMuted },
   summary: { backgroundColor: colors.surfaceMuted, borderRadius: radius.lg, padding: spacing.md, gap: spacing.xs },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

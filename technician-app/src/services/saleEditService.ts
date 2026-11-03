@@ -1,23 +1,25 @@
 /**
- * Writing an edited invoice back, in the order that keeps the shop honest.
- * ========================================================================
- * Three things have to agree after a correction: the transaction document, the
- * shelf counts, and — when the sale went to someone's account — the debt. They are
- * three separate writes on a Spark plan with no Cloud Functions, so the order is
- * the design:
+ * Writing an edited invoice back, the way the counter terminal does it.
+ * ====================================================================
+ * The desktop's `cartStore.editTransaction` moves four things: the stock, the
+ * transaction document, the customer's debt entry and the customer's own totals,
+ * plus the two audit trails the shop reads (the activity feed and the customer's
+ * timeline). This is the same sequence on a phone.
  *
- *   1. the document, because it is what the reports, the receipts and the desktop
- *      read, and a failed write here means nothing else should have moved;
- *   2. the shelf, line by line, through the same atomic primitive the till uses, so
- *      a count another device moved while this sheet was open cannot be overwritten;
- *   3. the debt, last, because it is derived from the total in (1).
+ * Two orders differ from the desktop, deliberately. The document is written
+ * FIRST, because it is what the reports, the receipts and the counter read, and a
+ * failed write there should move nothing else; the desktop restocks before it
+ * saves, so a dead network there leaves goods on the shelf that were never
+ * returned. And the shelf deltas go through the till's own atomic writer instead
+ * of a read-then-write, so a count another device moved mid-edit cannot be
+ * overwritten by this phone.
  *
- * A stock delta the server never took is not lost — it goes into the same queue the
- * POS uses, and the replay pass applies it. Everything after step 1 is best-effort
- * and reported back, because a corrected invoice that failed to notify the manager
- * is still a corrected invoice.
+ * A stock delta the server never took is not lost — it goes into the same queue
+ * the POS uses, and the replay pass applies it. Everything after the document is
+ * best-effort and reported back, because a corrected invoice that failed to
+ * notify the manager is still a corrected invoice.
  */
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, limit, query, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
 import type { SaleEditPlan } from '../utils/saleEdit';
@@ -25,20 +27,12 @@ import type { SaleTransaction } from '../types';
 import { activityLogService } from './activityLogService';
 import { notificationService } from './notificationService';
 import { offlineSyncService } from './offlineSyncService';
-import { applyStockLines, readStockLevels, type StockLine } from './stockService';
+import { applyStockLines, type StockLine } from './stockService';
 
 export interface SaleEditFailure {
   name: string;
   quantity: number;
   error: string;
-}
-
-export interface OversoldLine {
-  productId: string;
-  name: string;
-  wanted: number;
-  /** null when the product no longer has an inventory row at all. */
-  available: number | null;
 }
 
 export interface SaleEditOutcome {
@@ -48,88 +42,145 @@ export interface SaleEditOutcome {
   debtSynced: boolean;
 }
 
-/**
- * The units an edit wants to take out, against what the shelf actually holds.
- *
- * Raising a quantity on a settled invoice is the one correction that can sell
- * something twice, and the atomic writer clamps at zero rather than refusing — so
- * without this check the invoice would claim three units while the shelf went to
- * none. Every line for the same product is folded together first, because an old
- * document can carry one SKU on two rows.
- */
-export const findOversoldLines = async (plan: SaleEditPlan): Promise<OversoldLine[]> => {
-  if (plan.deduct.length === 0) return [];
+/** The counter's line description: `2x Hoco EQ2 BT-EQ2`. */
+const itemsSummary = (plan: SaleEditPlan): string =>
+  plan.items
+    .map(i => `${i.quantity}x ${i.product?.name || ''} ${i.product?.model || ''}`.replace(/\s+/g, ' ').trim())
+    .join(', ');
 
-  const wantedByProduct = new Map<string, { name: string; quantity: number }>();
-  for (const line of plan.deduct) {
-    const previous = wantedByProduct.get(line.productId);
-    wantedByProduct.set(line.productId, {
-      name: previous?.name || line.name,
-      quantity: (previous?.quantity || 0) + line.quantity,
+/** The counter's price column for the audit trails: `2x Hoco EQ2 @ 4500 DA`. */
+const itemsDetail = (plan: SaleEditPlan): string =>
+  plan.items
+    .map(i => `${i.quantity}x ${i.product?.name || i.product?.model || 'Item'} @ ${i.product?.price ?? 0} DA`)
+    .join(', ');
+
+interface FoundDebt {
+  id: string;
+  customerId: string;
+  customerName?: string;
+  amountPaid: number;
+  remainingBalance: number;
+}
+
+/**
+ * The debt entry raised when this sale went to someone's account.
+ *
+ * The desktop matches on three things — the id recorded on the transaction, the
+ * transaction id stored on the debt, and its notes carrying the transaction id —
+ * because which of the three exists depends on which app wrote the sale and when.
+ * Reading three clauses off a phone costs a query, so the first clause is a direct
+ * document read and the other two only run for a sale that was not paid in full.
+ */
+const findLinkedDebt = async (tx: SaleTransaction): Promise<FoundDebt | null> => {
+  const toDebt = (id: string, data: Record<string, unknown>): FoundDebt => ({
+    id,
+    customerId: String(data.customerId || ''),
+    customerName: data.customerName ? String(data.customerName) : tx.customerName,
+    amountPaid: Number(data.amountPaid) || 0,
+    remainingBalance: Number(data.remainingBalance) || 0,
+  });
+
+  const debtEntryId = tx.accountSettlement?.debtEntryId;
+  // An offline sale carries a local id; there is no Firestore document to correct
+  // yet, and the sync pass creates it from the edited transaction.
+  if (debtEntryId && !debtEntryId.startsWith('offline_')) {
+    const snap = await getDoc(doc(db, 'customer_debts', debtEntryId)).catch(() => null);
+    if (snap?.exists()) return toDebt(snap.id, snap.data() as Record<string, unknown>);
+  }
+
+  if (!tx.customerId) return null;
+  if (tx.accountSettlement?.type === 'paid_full') return null;
+
+  const byAnyOfTheThree = (id: string, data: Record<string, unknown>) =>
+    id === debtEntryId || data.transactionId === tx.id || String(data.notes || '').includes(tx.id);
+
+  const found = await getDocs(
+    query(
+      collection(db, 'customer_debts'),
+      where('customerId', '==', tx.customerId),
+      limit(100)
+    )
+  ).catch(() => null);
+  if (!found) return null;
+
+  for (const row of found.docs) {
+    const data = row.data() as Record<string, unknown>;
+    if (byAnyOfTheThree(row.id, data)) return toDebt(row.id, data);
+  }
+  return null;
+};
+
+/**
+ * `debtService.updateDebtAmount` plus the totals its store wrapper then puts back
+ * on the customer: the new total against what was already paid decides the
+ * remaining balance and the state, and what the account owes is the sum of the
+ * entries that are not settled.
+ */
+const syncLinkedDebt = async (
+  tx: SaleTransaction,
+  plan: SaleEditPlan,
+  debt: FoundDebt
+): Promise<boolean> => {
+  const now = new Date().toISOString();
+  const amountPaid = debt.amountPaid;
+  const remainingBalance = Math.max(0, plan.total - amountPaid);
+  const status = remainingBalance <= 0 ? 'paid' : amountPaid > 0 ? 'partially_paid' : 'unpaid';
+  const summary = itemsSummary(plan);
+
+  const updates: Record<string, unknown> = {
+    totalAmount: plan.total,
+    remainingBalance,
+    status,
+    updatedAt: now,
+  };
+  if (summary) {
+    updates.itemsSummary = summary;
+    updates.productOrService = summary;
+  }
+
+  await updateDoc(doc(db, 'customer_debts', debt.id), updates);
+
+  const ref = doc(db, 'customers', debt.customerId);
+  const custSnap = await getDoc(ref).catch(() => null);
+  if (custSnap?.exists()) {
+    const cust = custSnap.data() as { totalSpent?: number };
+    // What the account owes is every entry on it that is not settled. The desktop
+    // reads that off the list already in memory; the phone asks for it — one
+    // bounded query, and only for a sale that went to account.
+    const openBalance = status === 'paid' ? 0 : remainingBalance;
+    const others = await getDocs(
+      query(collection(db, 'customer_debts'), where('customerId', '==', debt.customerId), limit(100))
+    ).catch(() => null);
+    const totalDebt = others
+      ? others.docs.reduce((sum, row) => {
+          if (row.id === debt.id) return sum; // counted above, at its new balance
+          const data = row.data() as { status?: string; remainingBalance?: number };
+          return data.status && data.status !== 'paid' ? sum + (Number(data.remainingBalance) || 0) : sum;
+        }, openBalance)
+      : openBalance;
+
+    await updateDoc(ref, {
+      totalDebt: Math.max(0, totalDebt),
+      // What the profile has spent is every sale on it; this invoice just changed
+      // by the difference, which is what an authoritative recompute would find.
+      totalSpent: Math.max(0, (Number(cust.totalSpent) || 0) + (plan.total - (tx.total || 0))),
     });
   }
 
-  const levels = await readStockLevels([...wantedByProduct.keys()]);
-  const blocked: OversoldLine[] = [];
-  for (const [productId, want] of wantedByProduct) {
-    const available = levels.get(productId) ?? null;
-    if (available === null || available < want.quantity) {
-      blocked.push({ productId, name: want.name, wanted: want.quantity, available });
-    }
-  }
-  return blocked;
-};
-
-const itemsSummary = (plan: SaleEditPlan): string =>
-  plan.items.map(i => `${i.quantity}x ${i.product?.name || i.product?.model || ''}`.trim()).join(', ');
-
-/**
- * The debt entry that was written when the sale settled, if this phone can still
- * name it. An offline sale carries a local id, and there is no Firestore document
- * to correct yet — the sync pass creates it from the edited transaction.
- */
-const syncLinkedDebt = async (tx: SaleTransaction, plan: SaleEditPlan): Promise<boolean> => {
-  const debtId = tx.accountSettlement?.debtEntryId;
-  if (!debtId || debtId.startsWith('offline_')) return false;
-
-  const debtRef = doc(db, 'customer_debts', debtId);
-  const snap = await getDoc(debtRef);
-  if (!snap.exists()) return false;
-
-  const debt = snap.data() as { customerId: string; amountPaid: number; remainingBalance: number };
-  const amountPaid = Number(debt.amountPaid) || 0;
-  const remaining = Math.max(0, Math.round((plan.total - amountPaid) * 100) / 100);
-  const status = remaining <= 0 ? 'paid' : amountPaid > 0 ? 'partially_paid' : 'unpaid';
-  const now = new Date().toISOString();
-  const summary = itemsSummary(plan);
-
-  await updateDoc(debtRef, {
-    totalAmount: plan.total,
-    remainingBalance: remaining,
-    status,
-    // Every line taken off the invoice leaves nothing to name; blanking the
-    // description would erase what the debt was for on the customer's file.
-    ...(summary ? { productOrService: `POS Sale (${summary})` } : {}),
-    updatedAt: now,
-  });
-
-  // What the customer owes is the sum of what they still owe. Moving it by the
-  // difference between the old balance and the new one is the same arithmetic the
-  // counter does when it recomputes a profile from scratch, in one read instead of
-  // a query over every debt on the account.
-  const drift = remaining - (Number(debt.remainingBalance) || 0);
-  const spentDrift = plan.total - (tx.total || 0);
-  if (debt.customerId && (drift !== 0 || spentDrift !== 0)) {
-    const custRef = doc(db, 'customers', debt.customerId);
-    const custSnap = await getDoc(custRef);
-    if (custSnap.exists()) {
-      const cust = custSnap.data() as { totalDebt?: number; totalSpent?: number };
-      await updateDoc(custRef, {
-        totalDebt: Math.max(0, (Number(cust.totalDebt) || 0) + drift),
-        totalSpent: Math.max(0, (Number(cust.totalSpent) || 0) + spentDrift),
-      });
-    }
-  }
+  const actor = useAuthStore.getState().user;
+  await addDoc(collection(db, 'customer_activity_logs'), {
+    customerId: debt.customerId,
+    customerName: debt.customerName || tx.customerName || 'Customer',
+    actionType: 'debt_edited',
+    actionTitle: 'Invoice / Debt Balance Adjusted',
+    actionDescription: `Invoice total adjusted from ${tx.total || 0} DA to ${plan.total} DA by ${actor?.name || 'Staff'}. New remaining balance: ${remainingBalance} DA.`,
+    actorId: actor?.id,
+    actorName: actor?.name || 'Staff',
+    actorRole: actor?.role || 'sales_agent',
+    metadata: { transactionId: tx.id, oldTotal: tx.total || 0, newTotal: plan.total, remainingBalance },
+    date: now,
+    createdAt: now,
+  }).catch(err => console.warn('[SaleEdit] Customer debt log could not be written:', err));
 
   return true;
 };
@@ -188,29 +239,42 @@ export const applySaleEdit = async (
   }
 
   let debtSynced = false;
-  if (tx.accountSettlement?.debtEntryId) {
-    try {
-      debtSynced = await syncLinkedDebt(tx, plan);
-    } catch (err) {
-      console.warn('[SaleEdit] Linked debt could not be corrected:', err);
-    }
+  try {
+    const debt = await findLinkedDebt(tx);
+    if (debt) debtSynced = await syncLinkedDebt(tx, plan, debt);
+  } catch (err) {
+    console.warn('[SaleEdit] Linked debt could not be corrected:', err);
   }
 
   activityLogService
     .log(
       'sales',
-      `Edited Sale #${tx.invoiceNumber || tx.id.slice(-6)}: ${tx.total} DA -> ${plan.total} DA`,
+      `Transaction #${tx.invoiceNumber || tx.id} edited: ${tx.total} DA → ${plan.total} DA`,
       {
         entityId: tx.id,
         entityType: 'sale',
-        detail: `${itemsSummary(plan)} · status ${plan.status}${
-          stockFailures.length ? ` · ${stockFailures.length} stock delta queued` : ''
-        }`,
+        detail: `Updated items: ${itemsDetail(plan)}`,
         userName: user?.name || 'Staff',
         userId: user?.id,
       }
     )
     .catch(err => console.warn('[SaleEdit] Activity log failed:', err));
+
+  if (tx.customerId) {
+    await addDoc(collection(db, 'customer_activity_logs'), {
+      customerId: tx.customerId,
+      customerName: tx.customerName || 'Customer',
+      actionType: 'sale_completed',
+      actionTitle: `Invoice #${tx.invoiceNumber || tx.id.slice(0, 8)} Modified`,
+      actionDescription: `Invoice adjusted from ${tx.total} DA to ${plan.total} DA by ${user?.name || 'Staff'}. Items: ${itemsDetail(plan)}.`,
+      actorId: user?.id,
+      actorName: user?.name || 'Staff',
+      actorRole: user?.role || 'sales_agent',
+      metadata: { transactionId: tx.id, oldTotal: tx.total, newTotal: plan.total, itemsDetail: itemsDetail(plan) },
+      date: now,
+      createdAt: now,
+    }).catch(err => console.warn('[SaleEdit] Customer timeline entry could not be written:', err));
+  }
 
   return { total: plan.total, status: plan.status, stockFailures, debtSynced };
 };

@@ -124,27 +124,6 @@ export interface StockLine {
   quantity: number;
 }
 
-/**
- * What the shelf holds right now, per product, without touching it.
- *
- * `commitStockDelta` is the only writer — it reads inside its own transaction and
- * cannot be fooled by a stale phone. This exists for the one case that needs to be
- * refused before it is recorded: editing an old invoice to sell units that were
- * never in the shop, where the atomic write would clamp at zero and leave the
- * ledger claiming a sale the shelf cannot cover.
- */
-export const readStockLevels = async (ids: string[]): Promise<Map<string, number | null>> => {
-  const unique = [...new Set(ids.filter(Boolean))];
-  const levels = new Map<string, number | null>();
-
-  await mapWithConcurrency(unique, STOCK_CONCURRENCY, async (id) => {
-    const found = await readCurrentStock(id).catch(() => null);
-    levels.set(id, found ? clampStock(found.data.stock) : null);
-  });
-
-  return levels;
-};
-
 export interface AppliedStockLine {
   line: StockLine;
   result: StockResult;

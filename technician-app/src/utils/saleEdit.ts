@@ -1,29 +1,29 @@
 /**
  * What an edit of a settled invoice does — computed before anything is written.
  * =============================================================================
- * The counter terminal has had this since forever (`cartStore.editTransaction`);
- * the phone faked it by dropping the old lines into a live cart, which left the
- * invoice untouched and sold the goods a second time. So this planner takes the
- * original document and the cashier's changes and produces the whole write set at
- * once: the new lines, the money, the status, the payment split and — the part that
- * decides whether the shelf count stays true — the per-line stock movement.
+ * This is the counter terminal's `cartStore.editTransaction` and its
+ * `EditTransactionModal`, moved out of the browser so a phone can use the same
+ * rules. The phone used to fake it by dropping the old lines into a live cart,
+ * which left the invoice untouched and sold the goods a second time.
  *
- * Lines are keyed by position, not product id. A document written years ago can
- * hold the same SKU twice, and a removal keyed by id would then edit both rows.
+ * Lines are keyed by PRODUCT ID, exactly as the desktop modal keys its
+ * `editedQuantities` / `editedPrices` / `returnToStock`. The consequence is the
+ * desktop's: one SKU written on two rows of the same invoice is one control, and
+ * changing it moves both rows together.
  *
- * Money rules are the desktop's: the stored discount stays as it was granted, so a
- * percentage scales with the new basket and a flat amount does not, and payments are
- * rescaled proportionally so they always sum to the recorded total.
+ * Money rules are the desktop's too — the basket prices off `product.price`, the
+ * discount that was granted on the sale stays granted (a percentage scales with
+ * the new basket, a flat amount does not), the total is floored at zero, and the
+ * status only changes when units actually came off.
  */
 import type { CartItem, SaleTransaction } from '../types/index.ts';
-import { discountAmountOf } from './discountPolicy.ts';
 
 export interface SaleLineEdit {
   quantity: number;
   unitPrice: number;
 }
 
-/** Edits and restock choices are keyed by the line's index in `tx.items`. */
+/** Edits and restock choices are keyed by `product.id`, as on the desktop. */
 export type SaleLineEdits = Record<string, SaleLineEdit>;
 export type SaleRestockChoices = Record<string, boolean>;
 
@@ -68,12 +68,14 @@ const money = (value: number, fallback: number): number => {
  */
 export const rescalePayments = (
   payments: SaleTransaction['payments'],
-  total: number
+  total: number,
+  /** The desktop divides by the recorded total when the payment lines add up to nothing. */
+  fallbackSum = 1
 ): SaleTransaction['payments'] => {
   if (!payments || payments.length <= 1) {
     return [{ method: payments?.[0]?.method || 'cash', amount: total }];
   }
-  const oldSum = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) || 1;
+  const oldSum = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) || fallbackSum || 1;
   let running = 0;
   return payments.map((payment, index) => {
     if (index === payments.length - 1) {
@@ -90,80 +92,102 @@ export const planSaleEdit = (
   edits: SaleLineEdits,
   restockChoices: SaleRestockChoices = {}
 ): SaleEditPlan => {
-  const items: CartItem[] = [];
+  // The desktop modal builds the new lines first — every row takes the edited
+  // quantity and price of its product id, and a row that reaches zero leaves the
+  // basket — and only then does the store compare them with the originals.
+  const newItems = tx.items
+    .map((item): CartItem => {
+      const product = item?.product;
+      // A row stored without a product id has no product to edit and no shelf to
+      // move, so it carries through untouched rather than dropping out of the
+      // invoice and quietly taking its money with it.
+      if (!product?.id) return item;
+      const edit = edits[product.id];
+      if (!edit) {
+        return { ...item, quantity: wholeUnits(item.quantity, 0) };
+      }
+      const quantity = wholeUnits(edit.quantity, wholeUnits(item.quantity, 0));
+      const unitPrice = money(edit.unitPrice, money(product.price, 0));
+      return {
+        ...item,
+        quantity,
+        // The desktop rewrites `product.price` and leaves `unitPrice` at the old
+        // number. The phone's own list and its WhatsApp receipt read `unitPrice`,
+        // so both move here — otherwise a corrected invoice prints the old price.
+        unitPrice,
+        product: { ...product, price: unitPrice },
+      };
+    })
+    .filter(item => wholeUnits(item.quantity, 0) > 0);
+
   const restock: SaleStockLine[] = [];
   const deduct: SaleStockLine[] = [];
-  let hasChanges = false;
-  let anyLineReduced = false;
 
-  tx.items.forEach((item, index) => {
-    const key = String(index);
+  tx.items.forEach(item => {
     const product = item?.product;
-    // A row stored without a product id has no shelf to move. Carry it through
-    // untouched rather than dropping it out of `items`, which would quietly take
-    // its money off the invoice the customer already paid.
-    if (!product?.id) {
-      items.push(item);
-      return;
-    }
+    if (!product?.id) return;
+    const stockName = product.name || product.model || product.id;
+    const match = newItems.find(i => i.product?.id === product.id);
+    const newQty = match ? wholeUnits(match.quantity, 0) : 0;
+    const returnedQty = wholeUnits(item.quantity, 0) - newQty;
 
-    const originalQty = wholeUnits(item.quantity, 0);
-    const originalUnit = money(item.unitPrice ?? product.price, 0);
-
-    const edit = edits[key];
-    const quantity = edit ? wholeUnits(edit.quantity, originalQty) : originalQty;
-    const unitPrice = edit ? money(edit.unitPrice, originalUnit) : originalUnit;
-
-    if (quantity !== originalQty || unitPrice !== originalUnit) hasChanges = true;
-    if (quantity < originalQty) anyLineReduced = true;
-
-    const returnedQty = originalQty - quantity;
-    if (returnedQty > 0 && restockChoices[key] !== false) {
-      restock.push({ productId: product.id, name: product.name || product.model || product.id, quantity: returnedQty });
+    if (returnedQty > 0) {
+      if (restockChoices[product.id] !== false) {
+        restock.push({ productId: product.id, name: stockName, quantity: returnedQty });
+      }
     } else if (returnedQty < 0) {
-      deduct.push({ productId: product.id, name: product.name || product.model || product.id, quantity: -returnedQty });
+      deduct.push({ productId: product.id, name: stockName, quantity: -returnedQty });
     }
-
-    if (quantity <= 0) return;
-
-    items.push({
-      ...item,
-      quantity,
-      // The desktop leaves `unitPrice` at the old number while rewriting
-      // `product.price`; receipts read either one, so both move together here.
-      unitPrice,
-      product: { ...product, price: unitPrice },
-    });
   });
 
-  const subtotal = items.reduce(
-    (sum, item) => sum + money(item.unitPrice ?? item.product?.price, 0) * wholeUnits(item.quantity, 0),
+  const subtotal = newItems.reduce(
+    // The basket prices off the product snapshot, as the counter does. A row too old
+    // to carry one keeps its own line price instead of contributing zero.
+    (sum, item) => sum + money(item.product?.price ?? item.unitPrice, 0) * wholeUnits(item.quantity, 0),
     0
   );
-  const discountAmount = discountAmountOf(subtotal, {
-    mode: tx.discount?.type ?? 'flat',
-    value: tx.discount?.value ?? 0,
-  });
+  let discountAmount = 0;
+  if (tx.discount) {
+    discountAmount =
+      tx.discount.type === 'percent' ? subtotal * (tx.discount.value / 100) : tx.discount.value;
+  }
   const total = Math.max(0, subtotal - discountAmount);
 
-  let status: NonNullable<SaleTransaction['status']>;
-  if (items.length === 0 || total === 0) {
+  let status: NonNullable<SaleTransaction['status']> = tx.status || 'completed';
+  if (newItems.length === 0 || total === 0) {
     status = 'refunded';
-  } else if (anyLineReduced) {
+  } else if (
+    tx.items.some(orig => {
+      const match = newItems.find(ni => ni.product?.id === orig.product?.id);
+      return !match || wholeUnits(match.quantity, 0) < wholeUnits(orig.quantity, 0);
+    })
+  ) {
     status = 'partially_refunded';
-  } else {
-    status = tx.status ?? 'completed';
   }
 
+  const hasChanges = tx.items.some(item => {
+    const edit = item.product?.id ? edits[item.product.id] : undefined;
+    if (!edit) return false;
+    const originalQty = wholeUnits(item.quantity, 0);
+    const originalPrice = money(item.product?.price, 0);
+    return (
+      wholeUnits(edit.quantity, originalQty) !== originalQty ||
+      money(edit.unitPrice, originalPrice) !== originalPrice
+    );
+  });
+
+  // The desktop's own wording for the two directions of the same difference.
+  const diff = (tx.total || 0) - total;
+
   return {
-    items,
+    items: newItems,
     subtotal,
     discountAmount,
     total,
-    refundDue: Math.max(0, (tx.total || 0) - total),
-    additionalDue: Math.max(0, total - (tx.total || 0)),
+    refundDue: diff > 0 ? diff : 0,
+    additionalDue: diff < 0 ? Math.abs(diff) : 0,
     status,
-    payments: rescalePayments(tx.payments, total),
+    payments: rescalePayments(tx.payments, total, tx.total),
     restock,
     deduct,
     hasChanges,
@@ -181,13 +205,20 @@ export type SaleEditChange =
 
 export const diffSaleEdit = (tx: SaleTransaction, edits: SaleLineEdits): SaleEditChange[] => {
   const changes: SaleEditChange[] = [];
-  tx.items.forEach((item, index) => {
-    const edit = edits[String(index)];
-    if (!edit) return;
-    const name = item?.product?.name || item?.product?.model || item?.product?.id || '';
+  const seen = new Set<string>();
+
+  tx.items.forEach(item => {
+    const id = item.product?.id;
+    const edit = id ? edits[id] : undefined;
+    // One entry per product id: two rows of the same SKU share one control on the
+    // desktop, so reporting them twice would show an admin one change as two.
+    if (!edit || !id || seen.has(id)) return;
+    seen.add(id);
+
+    const name = item.product?.name || item.product?.model || id;
     const fromQty = wholeUnits(item.quantity, 0);
     const toQty = wholeUnits(edit.quantity, fromQty);
-    const fromUnit = money(item.unitPrice ?? item.product?.price, 0);
+    const fromUnit = money(item.product?.price, 0);
     const toUnit = money(edit.unitPrice, fromUnit);
     if (toQty !== fromQty) changes.push({ kind: 'quantity', name, from: fromQty, to: toQty });
     if (toUnit !== fromUnit) changes.push({ kind: 'price', name, from: fromUnit, to: toUnit });
