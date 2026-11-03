@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Delete, Check, Hash } from 'lucide-react';
 import type { CartItem } from '../../types';
 import styles from './TouchQuantityModal.module.css';
@@ -18,9 +18,17 @@ export const TouchQuantityModal: React.FC<Props> = ({
   onClose,
   onApply,
 }) => {
-  if (!isOpen || !item) return null;
+  const [inputVal, setInputVal] = useState<string>('');
 
-  const [inputVal, setInputVal] = useState<string>(String(item.quantity));
+  // The hook used to sit under an early return, so closing this modal handed React a
+  // render with one fewer hook than the one that opened it — an invariant violation
+  // on the money screen. Opening a second line now seeds its own quantity instead of
+  // the digits typed into the first.
+  useEffect(() => {
+    if (isOpen && item) setInputVal(String(item.quantity));
+  }, [isOpen, item]);
+
+  if (!isOpen || !item) return null;
 
   const handleDigit = (digit: string) => {
     setInputVal((prev) => {
