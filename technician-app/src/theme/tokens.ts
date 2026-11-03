@@ -241,6 +241,7 @@ export const saleStatusColors: Record<string, StatusAppearance> = {
   completed: { ink: ramp.green600, tint: ramp.green100 },
   voided: { ink: ramp.red600, tint: ramp.red100 },
   refunded: { ink: ramp.red500, tint: ramp.red100 },
+  partially_refunded: { ink: ramp.amber600, tint: ramp.amber100 },
   pending_approval: { ink: ramp.amber500, tint: ramp.amber100 },
 };
 
