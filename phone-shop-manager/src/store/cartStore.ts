@@ -10,6 +10,7 @@ import { useCustomerStore } from './customerStore';
 import { cartService } from '../services/cartService';
 import { formatCurrency } from '../utils/formatCurrency';
 import { planSaleEditStock } from '../utils/saleEditStock';
+import { foldStockDeltas } from '../utils/stockDeltas';
 
 const getInventoryProducts = () =>
   useInventoryStore.getState().products;
@@ -593,15 +594,16 @@ export const useCartStore = create<CartState>((set, get) => ({
       // 6. Authoritative Stock Adjustments in Zustand & Firestore (executed ONCE per transaction):
       // Regular purchases -> deduct stock (-qty)
       // Returned items -> restock into inventory (+qty)
+      // One movement per product, because an exchange puts a sale row and a return row
+      // of the same model on one document and two writes on one product abort each other.
       try {
-        itemsSnapshot.forEach(item => {
-          if (item.isReturn) {
-            if (item.restock !== false) {
-              useInventoryStore.getState().adjustStockBy(item.product.id, item.quantity);
-            }
-          } else {
-            useInventoryStore.getState().adjustStockBy(item.product.id, -item.quantity);
-          }
+        foldStockDeltas(
+          itemsSnapshot.map(item => ({
+            productId: item.product?.id,
+            delta: item.isReturn ? (item.restock !== false ? item.quantity : 0) : -item.quantity,
+          }))
+        ).forEach(({ productId, delta }) => {
+          useInventoryStore.getState().adjustStockBy(productId, delta);
         });
       } catch (err) {
         console.error('Failed to adjust stock on checkout:', err);
@@ -746,8 +748,10 @@ export const useCartStore = create<CartState>((set, get) => ({
 
       // 4. Immediate Authoritative Stock Deduction in Zustand & Firestore (executed ONCE per snapshot)
       try {
-        itemsSnapshot.forEach(item => {
-          useInventoryStore.getState().adjustStockBy(item.product.id, -item.quantity);
+        foldStockDeltas(
+          itemsSnapshot.map(item => ({ productId: item.product?.id, delta: -item.quantity }))
+        ).forEach(({ productId, delta }) => {
+          useInventoryStore.getState().adjustStockBy(productId, delta);
         });
       } catch (err) {
         console.error('Failed to deduct stock:', err);
@@ -823,14 +827,13 @@ export const useCartStore = create<CartState>((set, get) => ({
     // Regular purchases -> return to stock (+qty)
     // Returned items from customer previously -> deduct from stock (-qty)
     try {
-      tx.items.forEach(item => {
-        if (item.isReturn) {
-          if (item.restock !== false) {
-            useInventoryStore.getState().adjustStockBy(item.product.id, -item.quantity);
-          }
-        } else {
-          useInventoryStore.getState().adjustStockBy(item.product.id, item.quantity);
-        }
+      foldStockDeltas(
+        tx.items.map(item => ({
+          productId: item.product?.id,
+          delta: item.isReturn ? (item.restock !== false ? -item.quantity : 0) : item.quantity,
+        }))
+      ).forEach(({ productId, delta }) => {
+        useInventoryStore.getState().adjustStockBy(productId, delta);
       });
     } catch (err) {
       console.error('Failed to restore stock on refund:', err);
