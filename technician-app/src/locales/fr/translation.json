@@ -230,7 +230,11 @@
     "languageChangedTitle": "Redémarrage requis",
     "languageChangedBody": "L’application doit redémarrer avant que le nouveau sens de lecture ne s’applique.",
     "restartNow": "Redémarrer maintenant",
-    "restartManually": "Fermez complètement l’application, puis rouvrez-la."
+    "restartManually": "Fermez complètement l’application, puis rouvrez-la.",
+    "security": "Sécurité",
+    "biometricTitle": "Déverrouiller par biométrie",
+    "biometricBody": "Ce téléphone reste connecté et demande votre empreinte ou votre visage après environ 5 minutes loin de l’application.",
+    "biometricUnavailable": "Aucune empreinte ni reconnaissance faciale n’est configurée sur ce téléphone, donc rien à demander."
   },
   "ticket": {
     "repairTicket": "Ticket de Réparation",
@@ -602,5 +606,15 @@
     "tryAgain": "Réessayer",
     "continue": "Continuer",
     "cancelRequest": "Annuler la demande"
+  },
+  "lock": {
+    "title": "PhoneShop est verrouillé",
+    "body": "Déverrouillez avec votre empreinte ou votre visage pour laisser la caisse ouverte.",
+    "unlock": "Déverrouiller",
+    "prompt": "Déverrouiller PhoneShop",
+    "notMatched": "Cela ne correspond pas. Réessayez.",
+    "usePassword": "Se connecter avec un mot de passe",
+    "enablePrompt": "Confirmez votre empreinte ou votre visage pour activer ceci",
+    "enableFailed": "Le téléphone n’a pas accepté la biométrie."
   }
 }

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, KeyboardAvoidingView, Platform, Alert, ScrollView, TouchableOpacity, Image } from 'react-native';
-import { TextInput, Button, Title, Text, useTheme, Card, Divider } from 'react-native-paper';
+import { TextInput, Button, Title, Text, useTheme, Card, Divider, Switch } from 'react-native-paper';
 import { useSettingsStore } from '../store/settingsStore';
 import { useAuthStore } from '../store/authStore';
+import { useLockStore } from '../store/lockStore';
 import { useTranslation } from 'react-i18next';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import i18next from 'i18next';
@@ -10,6 +11,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { restartForDirection, setLanguage } from '../i18n';
 import { RoleBottomNav } from '../components/RoleBottomNav';
+import { colors } from '../theme/tokens';
 import appConfig from '../../app.json';
 
 // Read from app.json so the About screen can never drift from what is actually built.
@@ -24,6 +26,19 @@ export const SettingsScreen = ({ navigation }: any) => {
   
   const [localPercentage, setLocalPercentage] = useState(profitPercentage);
   const [saving, setSaving] = useState(false);
+
+  const lockRequired = useLockStore((state) => state.required);
+  const lockCanEnable = useLockStore((state) => state.canEnable);
+  const lockError = useLockStore((state) => state.error);
+  const setLockRequired = useLockStore((state) => state.setRequired);
+  const refreshLockAvailability = useLockStore((state) => state.refreshAvailability);
+  const [lockBusy, setLockBusy] = useState(false);
+
+  // A fingerprint can be deleted in Settings any time, so the phone is asked again
+  // on every visit rather than trusting what the launch-time check concluded.
+  useEffect(() => {
+    void refreshLockAvailability();
+  }, [refreshLockAvailability]);
 
   // The store may resolve the personal number from the profile after this screen
   // mounted; re-seed the field so the input is never left showing a stale default.
@@ -56,6 +71,14 @@ export const SettingsScreen = ({ navigation }: any) => {
     setSaving(true);
     await followShopDefault();
     setSaving(false);
+  };
+
+  // Turning it on makes the phone prove it answers first, so the switch can never
+  // be the thing that locks a technician out of their own till.
+  const handleToggleLock = async (on: boolean) => {
+    setLockBusy(true);
+    await setLockRequired(on);
+    setLockBusy(false);
   };
 
   const changeLanguage = async (lang: string) => {
@@ -169,6 +192,29 @@ export const SettingsScreen = ({ navigation }: any) => {
                 {t('settings.followShop', 'Use the shop default instead')}
               </Button>
             )}
+          </Card.Content>
+        </Card>
+
+        {/* Security Section — this phone, not the account */}
+        <Text style={styles.sectionTitle}>{t('settings.security', 'Security')}</Text>
+        <Card style={styles.card}>
+          <Card.Content>
+            <View style={styles.lockRow}>
+              <MaterialCommunityIcons name="fingerprint" size={24} color={colors.textSecondary} />
+              <Text style={styles.lockLabel}>{t('settings.biometricTitle', 'Unlock with biometrics')}</Text>
+              <Switch
+                value={lockRequired}
+                onValueChange={handleToggleLock}
+                disabled={lockBusy || (!lockRequired && !lockCanEnable)}
+                color={colors.brand}
+              />
+            </View>
+            <Text style={styles.lockHint}>
+              {lockCanEnable || lockRequired
+                ? t('settings.biometricBody', 'This phone stays signed in, and asks for your fingerprint or face after about 5 minutes away.')
+                : t('settings.biometricUnavailable', 'No fingerprint or face unlock is set up on this phone, so there is nothing to ask for.')}
+            </Text>
+            {Boolean(lockError) && <Text style={styles.lockError}>{lockError}</Text>}
           </Card.Content>
         </Card>
 
@@ -326,6 +372,30 @@ const styles = StyleSheet.create({
     color: '#64748b',
     marginBottom: 12,
     marginTop: -8,
+  },
+  // Security
+  lockRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  lockLabel: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.textPrimary,
+    marginHorizontal: 8,
+  },
+  lockHint: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 8,
+    lineHeight: 18,
+  },
+  lockError: {
+    fontSize: 12,
+    color: colors.danger,
+    marginTop: 8,
+    fontWeight: '600',
   },
   // About
   aboutContent: {

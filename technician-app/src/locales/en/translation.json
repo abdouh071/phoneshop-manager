@@ -230,7 +230,11 @@
     "languageChangedTitle": "Restart required",
     "languageChangedBody": "The app must restart before the new reading direction applies.",
     "restartNow": "Restart now",
-    "restartManually": "Close the app completely and open it again."
+    "restartManually": "Close the app completely and open it again.",
+    "security": "Security",
+    "biometricTitle": "Unlock with biometrics",
+    "biometricBody": "This phone stays signed in, and asks for your fingerprint or face after about 5 minutes away.",
+    "biometricUnavailable": "No fingerprint or face unlock is set up on this phone, so there is nothing to ask for."
   },
   "ticket": {
     "repairTicket": "Repair Ticket",
@@ -602,5 +606,15 @@
     "tryAgain": "Try again",
     "continue": "Continue",
     "cancelRequest": "Cancel request"
+  },
+  "lock": {
+    "title": "PhoneShop is locked",
+    "body": "Unlock with your fingerprint or face to keep the till open.",
+    "unlock": "Unlock",
+    "prompt": "Unlock PhoneShop",
+    "notMatched": "That did not match. Try again.",
+    "usePassword": "Sign in with a password instead",
+    "enablePrompt": "Confirm your fingerprint or face to turn this on",
+    "enableFailed": "Your phone did not accept the biometric."
   }
 }

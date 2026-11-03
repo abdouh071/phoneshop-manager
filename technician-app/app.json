@@ -37,6 +37,12 @@
     "plugins": [
       "expo-localization",
       [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow PhoneShop to unlock the till with your face."
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "Allow PhoneShop to scan barcodes and device QR codes."
