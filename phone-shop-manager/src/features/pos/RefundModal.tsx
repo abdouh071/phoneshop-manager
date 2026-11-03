@@ -22,10 +22,19 @@ export const RefundModal: React.FC<RefundModalProps> = ({ isOpen, onClose, trans
   const handleRefund = async () => {
     if (isProcessing) return;
     setIsProcessing(true);
-    await refundTransaction(transaction.id);
-    toast.success('Refund Processed', `Transaction ${transaction.id} has been refunded.`);
-    setIsProcessing(false);
-    onClose();
+    try {
+      const warnings = await refundTransaction(transaction.id);
+      if (warnings.length > 0) {
+        // The sale is refunded; something on the customer's account is not. Saying
+        // "processed" here would be the lie that left balances standing.
+        toast.warning('Refunded, with one thing still open', warnings.join(' '));
+      } else {
+        toast.success('Refund Processed', `Transaction ${transaction.id} has been refunded.`);
+      }
+      onClose();
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   

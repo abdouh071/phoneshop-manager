@@ -390,6 +390,42 @@ export const debtService = {
     }
   },
 
+  /**
+   * Close a debt by settling it rather than by deleting it.
+   *
+   * A refund used to remove the row outright, which is the one write `firestore.rules`
+   * reserves for an admin — so a sales agent refunding a credit sale failed on a
+   * permission the interface never mentioned, and the customer went on owing for goods
+   * he had already handed back. Zeroing the balance is an update, which every signed-in
+   * till may do, and the row stays behind as the evidence that the sale existed at all.
+   * The reason is not written here: the customer's own audit trail carries it.
+   */
+  settleDebt: async (debtId: string): Promise<void> => {
+    const now = new Date().toISOString();
+    const settled = {
+      totalAmount: 0,
+      amountPaid: 0,
+      remainingBalance: 0,
+      status: 'paid' as const,
+      updatedAt: now,
+    };
+
+    saveLocalDebts(getLocalDebts().map(d => (d.id === debtId ? { ...d, ...settled } : d)));
+
+    if (debtId.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      return;
+    }
+
+    const ref = doc(db, COLLECTION, debtId);
+    const updatePromise = updateDoc(ref, settled);
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore settleDebt timeout')), 1500)
+    );
+    // Thrown on purpose: a refund that left the balance standing is not a completed
+    // refund, and the till has to say so instead of logging it quietly.
+    await Promise.race([updatePromise, timeoutPromise]);
+  },
+
   deleteDebt: async (debtId: string): Promise<void> => {
     const local = getLocalDebts().filter(d => d.id !== debtId);
     saveLocalDebts(local);

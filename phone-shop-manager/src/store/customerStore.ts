@@ -59,6 +59,8 @@ interface CustomerState {
     newItemsSummary?: string
   ) => Promise<CustomerDebtEntry>;
   deleteDebt: (debtId: string) => Promise<void>;
+  /** Close a debt at zero because the sale behind it was refunded; needs no admin rights. */
+  settleDebt: (debtId: string, reason: string) => Promise<void>;
   getCustomerDebtTotal: (customerId: string) => number;
   getCustomerDebts: (customerId: string) => CustomerDebtEntry[];
   /** Find an existing customer by phone or create a new one with seamless non-destructive auto-enrichment. */
@@ -734,6 +736,52 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
     } catch (err) {
       console.error('Failed to update debt amount', err);
       throw err;
+    }
+  },
+
+  settleDebt: async (debtId, reason) => {
+    // Throws when the balance could not be cleared, so a refund that leaves the
+    // customer still owing is reported instead of being logged and forgotten.
+    await debtService.settleDebt(debtId);
+
+    const target = get().debts.find(d => d.id === debtId);
+    set(state => {
+      const updatedDebts = state.debts.map(d =>
+        d.id === debtId
+          ? { ...d, totalAmount: 0, amountPaid: 0, remainingBalance: 0, status: 'paid' as const }
+          : d
+      );
+      const newTotalDebt = target
+        ? updatedDebts
+            .filter(d => d.customerId === target.customerId && d.status !== 'paid')
+            .reduce((sum, d) => sum + d.remainingBalance, 0)
+        : 0;
+
+      return {
+        debts: updatedDebts,
+        customers: target
+          ? state.customers.map(c =>
+              c.id === target.customerId ? { ...c, totalDebt: newTotalDebt } : c
+            )
+          : state.customers,
+      };
+    });
+
+    if (target) {
+      const actor = useAuthStore.getState().user;
+      get().addCustomerAuditLog({
+        customerId: target.customerId,
+        customerName: target.customerName,
+        actionType: 'debt_edited',
+        actionTitle: 'Credit Record Closed',
+        actionDescription: `${reason} The balance of ${formatCurrency(target.totalAmount)} was cleared by ${actor?.name || 'Staff'}.`,
+        actorId: actor?.id,
+        actorName: actor?.name || 'Staff',
+        actorRole: actor?.role,
+        metadata: { debtId, productOrService: target.productOrService, clearedAmount: target.totalAmount },
+      }).catch(console.error);
+
+      get().recalculateCustomer(target.customerId).catch(console.error);
     }
   },
 

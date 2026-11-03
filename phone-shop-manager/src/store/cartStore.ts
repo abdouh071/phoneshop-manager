@@ -109,7 +109,12 @@ interface CartState {
   fetchTransactions: () => Promise<void>;
   checkout: (options?: CheckoutOptions) => Promise<SaleTransaction | null>;
   checkoutB2B: (options: B2BCheckoutOptions) => Promise<{ transaction: SaleTransaction; debtEntry?: CustomerDebtEntry; invoiceNumber: string } | null>;
-  refundTransaction: (txId: string) => Promise<void>;
+  /**
+   * @returns anything the refund could not finish — currently only a credit record it
+   * failed to close, which the till has to say out loud rather than leave the customer
+   * owing for goods he returned.
+   */
+  refundTransaction: (txId: string) => Promise<string[]>;
   editTransaction: (
     txId: string,
     newItems: CartItem[],
@@ -798,6 +803,7 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
 
   refundTransaction: async (txId) => {
+    const warnings: string[] = [];
     let tx = get().transactions.find(t => t.id === txId);
     let isPartsB2B = false;
     if (!tx) {
@@ -805,7 +811,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       tx = usePartsCartStore.getState().invoices.find(t => t.id === txId);
       if (tx) isPartsB2B = true;
     }
-    if (!tx || tx.status === 'refunded') return;
+    if (!tx || tx.status === 'refunded') return warnings;
     
     // 1. Authoritative stock reversal (Problem 4 fix):
     // Regular purchases -> return to stock (+qty)
@@ -827,9 +833,12 @@ export const useCartStore = create<CartState>((set, get) => ({
     const customerStore = useCustomerStore.getState();
 
     // 2. Void or remove linked customer debt if this transaction was put on debt (Problem 4 fix)
+    // The invoice number is a clause of its own because the phone records it on both sides
+    // and has no transaction id to offer a credit sale it wrote while off the network.
     const linkedDebt = customerStore.debts.find(d =>
       d.id === tx.accountSettlement?.debtEntryId ||
       d.transactionId === txId ||
+      (tx.invoiceNumber && d.invoiceNumber === tx.invoiceNumber) ||
       (d.notes && d.notes.includes(txId))
     );
     if (linkedDebt) {
@@ -841,7 +850,19 @@ export const useCartStore = create<CartState>((set, get) => ({
           `Refund of partial payment made on voided debt (Receipt #${tx.invoiceNumber || txId.slice(0, 8)})`
         ).catch(console.error);
       }
-      await customerStore.deleteDebt(linkedDebt.id).catch(console.error);
+      await customerStore.settleDebt(
+        linkedDebt.id,
+        `Receipt #${tx.invoiceNumber || txId.slice(0, 8)} was refunded.`
+      ).catch(debtErr => {
+        // A refund that leaves the balance standing is not finished, and the till has
+        // to hear that: it used to be a console line, so the customer kept owing for
+        // goods he had already handed back.
+        console.error('Refund closed the sale but not the credit record:', debtErr);
+        warnings.push(
+          `${tx.customerName || 'The customer'} still owes ${formatCurrency(linkedDebt.remainingBalance)}. ` +
+          `Clear that credit record from the Customers tab.`
+        );
+      });
     }
 
     // 3. Restore store credit if customer spent store credit on this sale
@@ -911,6 +932,8 @@ export const useCartStore = create<CartState>((set, get) => ({
         metadata: { transactionId: txId, refundedTotal: tx.total, itemsDesc },
       }).catch(console.error);
     }
+
+    return warnings;
   },
 
   editTransaction: async (txId, newItems, returnToStockOptions) => {
@@ -1004,6 +1027,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     const linkedDebt = customerStore.debts.find(d =>
       d.id === tx.accountSettlement?.debtEntryId ||
       d.transactionId === txId ||
+      (tx.invoiceNumber && d.invoiceNumber === tx.invoiceNumber) ||
       (d.notes && d.notes.includes(txId))
     );
     if (linkedDebt) {
