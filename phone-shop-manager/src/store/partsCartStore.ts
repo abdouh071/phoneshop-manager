@@ -14,6 +14,7 @@ import { useAuthStore } from './authStore';
 import { useCustomerStore } from './customerStore';
 
 import { transactionService } from '../services/transactionService';
+import { claimInvoiceNumber } from '../services/invoiceCounter';
 import { activityLogService } from '../services/activityLogService';
 import { customerLogService } from '../services/customerLogService';
 import { partsCartService } from '../services/partsCartService';
@@ -480,8 +481,8 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       const total = get().getTotal();
       const discount = get().getDiscountAmount();
       const actor = useAuthStore.getState().user;
-      const now = new Date().toISOString();
-      const invoiceNumber = `INV-PARTS-${Date.now().toString().slice(-6)}`;
+      const now = new Date();
+      const { invoiceNumber, provisional: numberGuessed } = await claimInvoiceNumber('parts', now);
 
       // Resolve matched or selected customer
       const customerStore = useCustomerStore.getState();
@@ -495,7 +496,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       }
 
       const txData: Omit<SaleTransaction, 'id'> = {
-        date: now,
+        date: now.toISOString(),
         items: itemsSnapshot,
         subtotal,
         discount: discount > 0 ? { type: 'flat', value: discount } : undefined,
@@ -507,6 +508,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         shopName: matchedCust?.shopName,
         saleType: 'parts_b2b',
         invoiceNumber,
+        invoiceNumberProvisional: numberGuessed || undefined,
         status: 'completed',
         processedById: actor?.id,
         processedByName: actor?.name,
@@ -577,8 +579,8 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       const total = get().getTotal();
       const discount = get().getDiscountAmount();
       const actor = useAuthStore.getState().user;
-      const now = new Date().toISOString();
-      const invoiceNumber = `INV-PARTS-${Date.now().toString().slice(-6)}`;
+      const now = new Date();
+      const { invoiceNumber, provisional: numberGuessed } = await claimInvoiceNumber('parts', now);
 
       const { customer, settlementType, paidAmount, paymentMethod, chargedAmount, dueDate, notes, allowCreditLimitOverride } = options;
 
@@ -599,7 +601,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
             productOrService: itemsSummary || `Parts Invoice #${invoiceNumber}`,
             totalAmount: total,
             amountPaid: paidAmount,
-            date: now,
+            date: now.toISOString(),
             dueDate: dueDate || undefined,
             notes: notes ? `${notes} (Invoice #${invoiceNumber})` : `Parts Invoice #${invoiceNumber}`,
             invoiceNumber,
@@ -623,7 +625,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
 
       // 2. Build and save SaleTransaction
       const txData: Omit<SaleTransaction, 'id'> = {
-        date: now,
+        date: now.toISOString(),
         items: itemsSnapshot,
         subtotal,
         discount: discount > 0 ? { type: 'flat', value: discount } : undefined,
@@ -635,6 +637,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         shopName: customer.shopName || customer.name,
         saleType: 'parts_b2b',
         invoiceNumber,
+        invoiceNumberProvisional: numberGuessed || undefined,
         accountSettlement: {
           type: settlementType,
           paidAmount,

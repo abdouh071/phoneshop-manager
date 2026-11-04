@@ -3,6 +3,7 @@ import type { CartItem, Customer, PaymentMethod, PhoneModel, SaleTransaction, Su
 import { useInventoryStore } from './inventoryStore';
 import { inventoryService } from '../services/inventoryService';
 import { transactionService } from '../services/transactionService';
+import { claimInvoiceNumber } from '../services/invoiceCounter';
 import { activityLogService } from '../services/activityLogService';
 import { customerLogService } from '../services/customerLogService';
 import { useAuthStore } from './authStore';
@@ -515,8 +516,13 @@ export const useCartStore = create<CartState>((set, get) => ({
         }
       }
 
+      // The reference this sale is filed and searched under, and — since the till and
+      // the phone share one sequence per day — the number a debt can be matched on.
+      const moment = new Date();
+      const { invoiceNumber, provisional: numberGuessed } = await claimInvoiceNumber('retail', moment);
+
       const txData: Omit<SaleTransaction, 'id'> = {
-        date: new Date().toISOString(),
+        date: moment.toISOString(),
         items: [...itemsSnapshot],
         subtotal,
         // The document holds the dinars the promise came to, not the promise: the
@@ -529,6 +535,8 @@ export const useCartStore = create<CartState>((set, get) => ({
         customerPhone: customerPhone || matchedOrCreatedCustomer?.phone || undefined,
         customerId: matchedOrCreatedCustomer?.id,
         saleType: 'retail',
+        invoiceNumber,
+        invoiceNumberProvisional: numberGuessed || undefined,
         status: 'completed',
         processedById: actor?.id,
         processedByName: actor?.name,
@@ -593,6 +601,10 @@ export const useCartStore = create<CartState>((set, get) => ({
             date: txData.date,
             notes: `POS Sale Receipt #${saved.id}`,
             transactionId: saved.id,
+            // The receipt's own reference, so a retail balance is findable by the
+            // number printed on the paper the customer holds — not only by the
+            // document id, which nobody in the shop reads.
+            invoiceNumber: txData.invoiceNumber,
             allowCreditLimitOverride: options?.allowCreditLimitOverride,
           });
 
@@ -704,8 +716,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       const subtotal = get().getSubtotal();
       const total = get().getTotal();
       const actor = useAuthStore.getState().user;
-      const now = new Date().toISOString();
-      const invoiceNumber = `INV-PARTS-${Date.now().toString().slice(-6)}`;
+      const moment = new Date();
+      const now = moment.toISOString();
+      const { invoiceNumber, provisional: numberGuessed } = await claimInvoiceNumber('parts', moment);
 
       const { customer, settlementType, paidAmount, paymentMethod, chargedAmount, dueDate, notes } = options;
 
@@ -752,6 +765,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         shopName: customer.shopName || customer.name,
         saleType: 'parts_b2b',
         invoiceNumber,
+        invoiceNumberProvisional: numberGuessed || undefined,
         accountSettlement: {
           type: settlementType,
           paidAmount,

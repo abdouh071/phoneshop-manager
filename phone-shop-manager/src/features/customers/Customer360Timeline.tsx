@@ -42,7 +42,13 @@ const SaleCard: React.FC<{ event: SaleEvent; onViewReceipt?: (tx: SaleTransactio
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const tx = event.data;
-  const isB2B = tx.saleType === 'parts_b2b' || Boolean(tx.invoiceNumber);
+  // Parts bought on a shop's account — not merely a sale that carries a number,
+  // which every till's cash sale does now that invoice numbers come from one
+  // sequence. A document old enough to have no `saleType` still says so in its
+  // parts reference.
+  const isB2B =
+    tx.saleType === 'parts_b2b' ||
+    (!tx.saleType && /^INV-PARTS-/.test(tx.invoiceNumber || ''));
   const refCode = tx.invoiceNumber ? `#${tx.invoiceNumber}` : `TX-#${tx.id.slice(-6)}`;
 
   const discountsGiven = discountsGivenOf(tx);

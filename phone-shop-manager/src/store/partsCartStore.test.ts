@@ -22,6 +22,15 @@ const captured = vi.hoisted(() => ({
   /** The order of the awaited writes a checkout performs. */
   order: [] as string[],
   failStock: false,
+  /** What the till is handed when it asks for a reference. Real Firestore is not involved. */
+  counter: { invoiceNumber: 'INV-PARTS-261104-0003', provisional: false } as {
+    invoiceNumber: string;
+    provisional: boolean;
+  },
+}));
+
+vi.mock('../services/invoiceCounter', () => ({
+  claimInvoiceNumber: async () => ({ ...captured.counter }),
 }));
 
 vi.mock('../services/transactionService', () => ({
@@ -137,6 +146,7 @@ beforeEach(() => {
   captured.stockMoves.length = 0;
   captured.order.length = 0;
   captured.failStock = false;
+  captured.counter = { invoiceNumber: 'INV-PARTS-261104-0003', provisional: false };
   emptyCart();
   (shelf as { price: number }).price = 300;
   (screen as { price: number }).price = 9000;
@@ -261,6 +271,18 @@ describe('the sale as it is written down', () => {
     const tx = captured.transactions[0] as { subtotal: number; total: number };
     expect(tx.subtotal).toBe(500);
     expect(tx.total).toBe(400);
+  });
+
+  it('files the invoice under the number the counter handed out', async () => {
+    cable(1);
+    await usePartsCartStore.getState().checkout();
+
+    const tx = captured.transactions[0] as {
+      invoiceNumber?: string;
+      invoiceNumberProvisional?: boolean;
+    };
+    expect(tx.invoiceNumber).toBe('INV-PARTS-261104-0003');
+    expect(tx.invoiceNumberProvisional).toBeUndefined();
   });
 });
 

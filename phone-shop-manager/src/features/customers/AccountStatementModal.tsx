@@ -230,7 +230,11 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
 
     // Process all Transactions
     custTxs.forEach(tx => {
-      const isB2B = tx.saleType === 'parts_b2b' || Boolean(tx.invoiceNumber);
+      // Parts on a shop's account, not any sale carrying a number: the counter's
+      // cash receipts hold one too, since invoice numbers come from one sequence.
+      const isB2B =
+        tx.saleType === 'parts_b2b' ||
+        (!tx.saleType && /^INV-PARTS-/.test(tx.invoiceNumber || ''));
       const refNumber = tx.invoiceNumber || `TX-${tx.id.slice(0, 8)}`;
       const itemsDesc = tx.items.map(i => `${i.quantity}× ${i.product.name} ${i.product.model}`).join(', ');
 

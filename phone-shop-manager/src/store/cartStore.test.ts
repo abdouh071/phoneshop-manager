@@ -22,6 +22,17 @@ const captured = vi.hoisted(() => ({
   debts: [] as Array<{ id: string; customerId: string; amountPaid: number; totalAmount: number; invoiceNumber: string }>,
   /** Every Avoir move the corrected invoice asked for, in the order it asked. */
   credit: [] as Array<{ kind: 'add' | 'use'; customerId: string; amount: number; note: string }>,
+  /** Every account entry the till asked for, so a sale and its debt can be compared. */
+  newDebts: [] as Record<string, unknown>[],
+  /** What the till is handed when it asks for a reference. Real Firestore is not involved. */
+  counter: { invoiceNumber: 'INV-261104-0007', provisional: false } as {
+    invoiceNumber: string;
+    provisional: boolean;
+  },
+}));
+
+vi.mock('../services/invoiceCounter', () => ({
+  claimInvoiceNumber: async () => ({ ...captured.counter }),
 }));
 
 vi.mock('../services/transactionService', () => ({
@@ -77,7 +88,15 @@ vi.mock('./customerStore', () => ({
       customers: [],
       debts: captured.debts,
       recalculateCustomer: async () => undefined,
-      addDebt: async () => ({ id: 'debt_1' }),
+      findOrCreateCustomer: async (who: { name: string; phone: string }) => ({
+        id: 'cust_1',
+        name: who.name,
+        phone: who.phone,
+      }),
+      addDebt: async (entry: Record<string, unknown>) => {
+        captured.newDebts.push(entry);
+        return { id: 'debt_1' };
+      },
       updateDebtAmount: async () => undefined,
       getCustomerDebtTotal: () => 0,
       addStoreCredit: async (customerId: string, amount: number, note = '') => {
@@ -151,6 +170,8 @@ beforeEach(() => {
   captured.stock.length = 0;
   captured.debts.length = 0;
   captured.credit.length = 0;
+  captured.newDebts.length = 0;
+  captured.counter = { invoiceNumber: 'INV-261104-0007', provisional: false };
   emptyCart();
   (phone as { price: number }).price = 10005;
 });
@@ -230,6 +251,38 @@ describe('the sale as it is written down', () => {
 
     expect(useCartStore.getState().items).toEqual([]);
     expect(useCartStore.getState().discount).toBeNull();
+  });
+
+  it('files the sale under the number the counter handed out, and the account entry under the same one', async () => {
+    add(cable);
+    useCartStore.setState({
+      customerName: 'Yacine',
+      payments: [{ method: 'debt', amount: 300 }],
+    });
+    await useCartStore.getState().checkout();
+
+    const tx = captured.transactions[0] as {
+      invoiceNumber?: string;
+      invoiceNumberProvisional?: boolean;
+    };
+    expect(tx.invoiceNumber).toBe('INV-261104-0007');
+    expect(tx.invoiceNumberProvisional).toBeUndefined();
+
+    // The statement and the timeline find an invoice's account entry by this number.
+    // A debt written without it reads as a payment nobody made, on a receipt the
+    // customer is holding.
+    expect(captured.newDebts[0]).toMatchObject({ invoiceNumber: 'INV-261104-0007' });
+  });
+
+  it('says so on the document when the reference was guessed instead of claimed', async () => {
+    captured.counter = { invoiceNumber: 'INV-482013', provisional: true };
+    add(cable);
+    await useCartStore.getState().checkout();
+
+    const tx = captured.transactions[0] as { invoiceNumber?: string; invoiceNumberProvisional?: boolean };
+    // A clock number repeats every sixteen and a half minutes, so the shop has to be
+    // able to find the sales carrying one instead of trusting them to be unique.
+    expect(tx.invoiceNumberProvisional).toBe(true);
   });
 });
 

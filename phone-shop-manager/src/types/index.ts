@@ -75,6 +75,12 @@ export interface SaleTransaction {
   saleType?: 'retail' | 'parts_b2b';
   invoiceNumber?: string;
   /**
+   * True when the number was minted from the till's own clock because the shared
+   * counter could not be reached. A clock number repeats inside a busy day, so this
+   * says which references a match on `invoiceNumber` may not trust.
+   */
+  invoiceNumberProvisional?: boolean;
+  /**
    * Minted before the first attempt to write this sale and stamped on the document,
    * so the offline sync can find what the counter already wrote. The replay's own
    * temporary id is no use here: a sale the server committed while the 2.5-second
