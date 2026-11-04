@@ -5,6 +5,7 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { discountsGivenOf } from '../../utils/discountPolicy';
+import { getClaimedRepairFullPrice, getClaimedRepairRevenue, getClaimedRepairDebt } from '../../utils/repairFinancials';
 import type { SaleTransaction, RepairTicket } from '../../types';
 import type { ReportData } from '../../services/reportsService';
 import type { LedgerTab } from './reportTypes';
@@ -173,8 +174,10 @@ export const LedgerTable: React.FC<LedgerTableProps> = ({
                 </tr>
               ) : (
                 filteredRepairsLedger.map(r => {
-                  const partsCost = (r.partsUsed || []).reduce((s, p) => s + (p.cost || 0) * (p.quantity || 1), 0);
-                  const fee = r.actualCost || r.estimatedCost || 0;
+                  const partsCost = (r.partsUsed || []).reduce((s, p) => s + (p.cost || 0) * (p.quantity ?? 1), 0);
+                  // The till's own helpers: a free repair keeps its 0 instead of falling
+                  // through to the estimate, and "paid" counts deposits, not just paidAmount.
+                  const fee = getClaimedRepairFullPrice(r);
                   return (
                     <tr key={r.id} className={styles.tr}>
                       <td className={styles.td} style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
@@ -203,7 +206,7 @@ export const LedgerTable: React.FC<LedgerTableProps> = ({
                         <strong>{formatCurrency(fee)}</strong>
                         {r.status === 'completed' && r.paymentStatus === 'partial' && (
                           <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>
-                            Paid: {formatCurrency(r.paidAmount || 0)}
+                            Paid: {formatCurrency(getClaimedRepairRevenue(r))}
                           </div>
                         )}
                       </td>
@@ -224,7 +227,7 @@ export const LedgerTable: React.FC<LedgerTableProps> = ({
                         </span>
                         {r.status === 'completed' && (r.paymentStatus === 'partial' || r.paymentStatus === 'debt') && (
                           <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: 700, marginTop: '2px' }}>
-                            Debt: {formatCurrency(Math.max(0, fee - (r.paidAmount || 0)))}
+                            Debt: {formatCurrency(getClaimedRepairDebt(r))}
                           </div>
                         )}
                       </td>

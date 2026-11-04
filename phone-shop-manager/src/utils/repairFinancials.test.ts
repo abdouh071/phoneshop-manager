@@ -91,6 +91,13 @@ describe('getClaimedRepairFullPrice', () => {
     expect(getClaimedRepairFullPrice(t)).toBe(4500);
   });
 
+  it('keeps a zero actualCost instead of falling through to the estimate', () => {
+    // A free warranty repair records actualCost: 0. The ledger used to show the
+    // estimate as the charged fee for it.
+    const t = makeTicket({ actualCost: 0, estimatedCost: 8000 });
+    expect(getClaimedRepairFullPrice(t)).toBe(0);
+  });
+
   it('returns 0 for null ticket', () => {
     expect(getClaimedRepairFullPrice(null)).toBe(0);
   });
