@@ -28,6 +28,7 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { errorMessage } from '../../utils/errorUtils';
 import {
   DISCOUNT_APPROVAL_PERCENT,
+  discountAmountOf,
   lineDiscountOf,
   requiresLineDiscountApproval,
   unitPriceAfterDiscount,
@@ -203,12 +204,12 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
 
   const newSubtotal = newItems.reduce((sum, i) => sum + i.product.price * i.quantity, 0);
 
-  let newDiscountAmt = 0;
-  if (transaction.discount) {
-    newDiscountAmt = transaction.discount.type === 'percent'
-      ? newSubtotal * (transaction.discount.value / 100)
-      : transaction.discount.value;
-  }
+  // What the store will write, not what the arithmetic says: the discount is
+  // resolved in whole dinars against the corrected basket, so the preview the
+  // editor shows and the invoice that comes out of the printer agree.
+  const newDiscountAmt = transaction.discount
+    ? discountAmountOf(newSubtotal, { mode: transaction.discount.type, value: transaction.discount.value })
+    : 0;
   const newTotal = Math.max(0, newSubtotal - newDiscountAmt);
   const diff = transaction.total - newTotal;
   const refundAmount = diff > 0 ? diff : 0;

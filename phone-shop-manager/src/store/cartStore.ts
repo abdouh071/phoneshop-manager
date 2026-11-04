@@ -9,6 +9,7 @@ import { useAuthStore } from './authStore';
 import { useCustomerStore } from './customerStore';
 import { cartService } from '../services/cartService';
 import { formatCurrency } from '../utils/formatCurrency';
+import { discountAmountOf } from '../utils/discountPolicy';
 import { planSaleEditStock } from '../utils/saleEditStock';
 import { foldStockDeltas } from '../utils/stockDeltas';
 
@@ -437,7 +438,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       return null;
     }
 
-    const { items, payments, customerName, customerPhone, discount } = get();
+    const { items, payments, customerName, customerPhone } = get();
     if (items.length === 0) return null;
 
     set({ isCheckingOut: true });
@@ -448,6 +449,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       const purchasesSubtotal = get().getPurchasesSubtotal();
       const returnsSubtotal = get().getReturnsSubtotal();
       const subtotal = get().getSubtotal();
+      const discountAmount = get().getDiscountAmount();
       const total = get().getTotal();
       const hasReturn = itemsSnapshot.some(i => i.isReturn === true);
       const actor = useAuthStore.getState().user;
@@ -494,7 +496,10 @@ export const useCartStore = create<CartState>((set, get) => ({
         date: new Date().toISOString(),
         items: [...itemsSnapshot],
         subtotal,
-        discount: discount || undefined,
+        // The document holds the dinars the promise came to, not the promise: the
+        // receipt re-expands a percentage without rounding while the total is
+        // rounded, and then its own lines stop adding up to its own total.
+        discount: discountAmount > 0 ? { type: 'flat', value: discountAmount } : undefined,
         total,
         payments,
         customerName: customerName || matchedOrCreatedCustomer?.name || undefined,
@@ -985,12 +990,12 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
 
     const subtotal = newItems.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-    let discountAmt = 0;
-    if (tx.discount) {
-      discountAmt = tx.discount.type === 'percent'
-        ? subtotal * (tx.discount.value / 100)
-        : tx.discount.value;
-    }
+    // The same rule as the two carts: dinars to the nearest whole one, never more
+    // than the basket. A corrected invoice is reprinted, and a percentage
+    // re-expanded by the printer without rounding leaves it not footing itself.
+    const discountAmt = tx.discount
+      ? discountAmountOf(subtotal, { mode: tx.discount.type, value: tx.discount.value })
+      : 0;
     const total = Math.max(0, subtotal - discountAmt);
 
     let status: NonNullable<SaleTransaction['status']> = tx.status || 'completed';
@@ -1049,6 +1054,14 @@ export const useCartStore = create<CartState>((set, get) => ({
       status,
       payments: adjustedPayments,
     };
+
+    // A sale written before the till stored its discount in dinars still carries a
+    // percentage, and re-expanding one at print time is exactly how a reprint came
+    // out a dinar off its own lines. The corrected invoice gets written once, in
+    // the dinars the customer was actually given.
+    if (tx.discount?.type === 'percent' && discountAmt > 0) {
+      updates.discount = { type: 'flat', value: discountAmt };
+    }
 
     // If this transaction was linked to a debt entry, update the debt balance accordingly (Problem 8 fix)
     const customerStore = useCustomerStore.getState();
@@ -1124,12 +1137,10 @@ export const useCartStore = create<CartState>((set, get) => ({
   getDiscountAmount: () => {
     const { discount } = get();
     if (!discount) return 0;
-    const purchases = get().getPurchasesSubtotal();
-    if (purchases <= 0) return 0;
-    if (discount.type === 'percent') {
-      return (purchases * discount.value) / 100;
-    }
-    return Math.min(discount.value, purchases);
+    // Measured against the purchases, not the net basket: a returned phone coming
+    // back onto the shelf must not shrink the discount a trade customer was owed on
+    // what he took. One rule with the parts counter and the technician phone.
+    return discountAmountOf(get().getPurchasesSubtotal(), { mode: discount.type, value: discount.value });
   },
 
   getTotal: () => {

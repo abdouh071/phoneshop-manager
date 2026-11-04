@@ -438,11 +438,17 @@ export const PosCartFooter: React.FC<PosCartFooterProps> = ({
               )}
 
               <div className={styles.discountRowCompact}>
-                <span className={styles.discountLabel}>Discount (DA):</span>
+                <span className={styles.discountLabel}>
+                  {pendingDiscountValue === null && discount?.type === 'percent' ? 'Discount (%):' : 'Discount (DA):'}
+                </span>
                 <input
                   type="number"
                   placeholder="0"
-                  title={`${DISCOUNT_APPROVAL_PERCENT}% of the basket or less; deeper needs an admin`}
+                  title={
+                    pendingDiscountValue === null && discount?.type === 'percent'
+                      ? `A promise of ${discount.value}% of the basket — it grows and shrinks with what is on the counter. Typing here replaces it with a number of dinars.`
+                      : `${DISCOUNT_APPROVAL_PERCENT}% of the basket or less; deeper needs an admin`
+                  }
                   value={pendingDiscountValue !== null ? pendingDiscountValue.toString() : (discount?.value ? discount.value.toString() : '')}
                   onChange={e => {
                     const raw = e.target.value;
