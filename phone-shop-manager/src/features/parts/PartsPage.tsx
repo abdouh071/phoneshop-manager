@@ -14,7 +14,14 @@ import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
 import { useTranslation } from 'react-i18next';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
-import { discountPercentOf, requiresDiscountApproval } from '../../utils/discountPolicy';
+import {
+  DISCOUNT_APPROVAL_PERCENT,
+  discountPercentOf,
+  lineDiscountOf,
+  requiresDiscountApproval,
+  requiresLineDiscountApproval,
+  unitPriceAfterDiscount,
+} from '../../utils/discountPolicy';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { groupProductsByBaseModel } from '../../utils/productGrouping';
 import type { ProductGroup } from '../../utils/productGrouping';
@@ -40,7 +47,7 @@ import { PartsInvoicesTab } from './PartsInvoicesTab';
 import { RestockAssistantModal } from './RestockAssistantModal';
 import { CustomerProfilePanel } from '../customers/CustomerProfilePanel';
 import { useCustomerStore } from '../../store/customerStore';
-import type { Customer, CustomerDebtEntry, SaleTransaction } from '../../types';
+import type { Customer, CustomerDebtEntry, SaleTransaction, CartItem } from '../../types';
 import { Store, Bell } from 'lucide-react';
 
 import styles from './Parts.module.css';
@@ -112,7 +119,7 @@ export const PartsPage = () => {
   const { t } = useTranslation();
   const { fetchParts, parts } = useInventoryStore();
   const partsOnly = parts;
-  const { items, addToCart, removeFromCart, updateQuantity, clearCart, setPayments, setCustomerName, setDiscount, checkout, customerName, discount, getSubtotal, getTotal, getItemCount, suspendedCarts, suspendCart, resumeCart, discardSuspendedCart, fetchCarts } = usePartsCartStore();
+  const { items, addToCart, removeFromCart, updateQuantity, clearCart, setPayments, setCustomerName, setDiscount, setLineDiscount, checkout, customerName, discount, getSubtotal, getTotal, getItemCount, getLinesConcessionTotal, suspendedCarts, suspendCart, resumeCart, discardSuspendedCart, fetchCarts } = usePartsCartStore();
   const permissions = usePermissions();
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'admin';
@@ -120,6 +127,65 @@ export const PartsPage = () => {
 
   const [pendingDiscountValue, setPendingDiscountValue] = useState<number | null>(null);
   const [showDiscountUnlock, setShowDiscountUnlock] = useState(false);
+
+  /** The number exactly as typed, per line. Re-deriving it from the line's price
+   *  lands on 99.99 where the cashier typed 100, which would rewrite the field
+   *  under their fingers. */
+  const [lineDiscountText, setLineDiscountText] = useState<Record<string, string>>({});
+  const [pendingLine, setPendingLine] = useState<{ productId: string; name: string; amount: number; percent: number } | null>(null);
+  const [showLineUnlock, setShowLineUnlock] = useState(false);
+
+  /**
+   * One part's discount, judged by the same rule as the basket and as a corrected
+   * invoice: the share of what that line is worth. A cashier who types a lower
+   * "each" price instead is not measured here — the line total is, and the shelf
+   * price stays the shelf price, so the concession is written into the line.
+   */
+  const handleLineDiscount = (item: CartItem, raw: string) => {
+    const productId = item.product.id;
+    const forgetText = () =>
+      setLineDiscountText(prev => {
+        const next = { ...prev };
+        delete next[productId];
+        return next;
+      });
+
+    if (raw === '') {
+      forgetText();
+      setLineDiscount(productId, 0);
+      return;
+    }
+
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) return;
+
+    const charged = unitPriceAfterDiscount(item.product.price, value, item.quantity);
+    const { percent } = lineDiscountOf(item.product.price, charged, item.quantity);
+    if (requiresLineDiscountApproval(isAdmin ? 'admin' : 'sales_agent', percent)) {
+      setPendingLine({
+        productId,
+        name: `${item.product.name} ${item.product.model || ''}`.trim(),
+        amount: value,
+        percent,
+      });
+      setShowLineUnlock(true);
+      return;
+    }
+
+    setLineDiscountText(prev => ({ ...prev, [productId]: raw }));
+    setLineDiscount(productId, value);
+  };
+
+  /** The quantity and a line's concession are measured against each other, so a
+   *  row that changes size goes back to its shelf price. */
+  const changeLineQuantity = (item: CartItem, quantity: number) => {
+    setLineDiscountText(prev => {
+      const next = { ...prev };
+      delete next[item.product.id];
+      return next;
+    });
+    updateQuantity(item.product.id, quantity);
+  };
 
   const canViewCosts = user?.role === 'admin' || (permissions.inventory_edit && permissions.reports);
   const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
@@ -366,6 +432,7 @@ export const PartsPage = () => {
     setIsProcessing(true);
     try {
       const tx = await checkout();
+      setLineDiscountText({});
       setCompletedTx(tx);
       setAmountPaid('');
     } catch (err: unknown) {
@@ -415,6 +482,27 @@ export const PartsPage = () => {
             ? ` (${discountPercentOf(getSubtotal(), { mode: 'flat', value: pendingDiscountValue }).toFixed(1)}% of the basket)`
             : ''
         }`}
+      />
+
+      <AdminUnlockModal
+        isOpen={showLineUnlock}
+        onClose={() => {
+          setShowLineUnlock(false);
+          setPendingLine(null);
+        }}
+        onSuccess={() => {
+          setShowLineUnlock(false);
+          if (pendingLine) {
+            const { productId, amount } = pendingLine;
+            setLineDiscount(productId, amount);
+            setLineDiscountText(prev => ({ ...prev, [productId]: String(amount) }));
+            setPendingLine(null);
+            toast.success('Line Discount Authorized', 'Admin authorization verified.');
+          }
+        }}
+        // The share is the decision, not the dinars: 900 DA off a cable is a different
+        // act from 900 DA off a screen.
+        actionName={`authorize ${pendingLine ? `${pendingLine.percent.toFixed(1)}%` : ''} off "${pendingLine?.name ?? ''}" (${pendingLine ? formatCurrency(pendingLine.amount) : ''}) on a parts sale`}
       />
 
       <ReceiptModal
@@ -962,7 +1050,7 @@ export const PartsPage = () => {
                 )}
               </div>
               {(items.length > 0 || customerName) && (
-                <button className={posStyles.clearBtn} onClick={clearCart}>
+                <button className={posStyles.clearBtn} onClick={() => { clearCart(); setLineDiscountText({}); }}>
                   Clear
                 </button>
               )}
@@ -1079,6 +1167,7 @@ export const PartsPage = () => {
                           size="sm"
                           onClick={() => {
                             const res = resumeCart(sc.id);
+                            setLineDiscountText({});
                             if (res.warnings && res.warnings.length > 0) {
                               res.warnings.forEach(w => toast.warning('Stock Level Alert', w));
                             }
@@ -1130,36 +1219,67 @@ export const PartsPage = () => {
                   )}
                 </div>
               ) : (
-                items.map(item => (
+                items.map(item => {
+                  const charged = item.unitPrice ?? item.product.price;
+                  const concession = lineDiscountOf(item.product.price, charged, item.quantity);
+                  const gated = requiresLineDiscountApproval(isAdmin ? 'admin' : 'sales_agent', concession.percent);
+                  return (
                   <div key={item.product.id} className={posStyles.cartItem}>
                     <div className={posStyles.cartItemDetails}>
                       <p className={posStyles.cartItemName}>{item.product.name} {item.product.model}</p>
-                      <p className={posStyles.cartItemPrice}>{formatCurrency(item.product.price)} each</p>
+                      <p className={posStyles.cartItemPrice}>
+                        {formatCurrency(charged)} each
+                        {concession.granted > 0 && (
+                          <span title={gated ? `Above the ${DISCOUNT_APPROVAL_PERCENT}% a staff account may give on its own` : undefined}
+                            style={{ marginLeft: 6, fontWeight: 700, color: gated ? '#b45309' : '#dc2626' }}>
+                            −{concession.percent.toFixed(1)}%
+                          </span>
+                        )}
+                      </p>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={lineDiscountText[item.product.id] ?? (concession.granted > 0 ? String(Math.round(concession.granted * 100) / 100) : '')}
+                        onChange={e => handleLineDiscount(item, e.target.value)}
+                        placeholder={`Discount (max ${DISCOUNT_APPROVAL_PERCENT}%)`}
+                        aria-label={`Discount on ${item.product.name} ${item.product.model || ''}`.trim()}
+                        title={`Dinars off this line. Over ${DISCOUNT_APPROVAL_PERCENT}% of what it is worth needs an admin.`}
+                        style={{
+                          marginTop: 4,
+                          width: 110,
+                          padding: '3px 6px',
+                          fontSize: 12,
+                          borderRadius: 6,
+                          border: `1px solid ${gated ? '#f59e0b' : '#d1d5db'}`,
+                        }}
+                      />
                     </div>
                     <div className={posStyles.cartItemControls}>
-                      <button 
-                        className={posStyles.qtyBtn} 
-                        onClick={() => updateQuantity(item.product.id, item.quantity - 1)}
+                      <button
+                        className={posStyles.qtyBtn}
+                        onClick={() => changeLineQuantity(item, item.quantity - 1)}
                       >
                         <Minus size={12} />
                       </button>
                       <span className={posStyles.qtyDisplay}>{item.quantity}</span>
-                      <button 
-                        className={posStyles.qtyBtn} 
-                        onClick={() => updateQuantity(item.product.id, item.quantity + 1)}
+                      <button
+                        className={posStyles.qtyBtn}
+                        onClick={() => changeLineQuantity(item, item.quantity + 1)}
                         disabled={item.quantity >= item.product.stock}
                       >
                         <Plus size={12} />
                       </button>
-                      <button 
-                        className={posStyles.deleteBtn} 
+                      <button
+                        className={posStyles.deleteBtn}
                         onClick={() => removeFromCart(item.product.id)}
                       >
                         <Trash2 size={14} />
                       </button>
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
 
@@ -1203,6 +1323,16 @@ export const PartsPage = () => {
                   <span>Subtotal</span>
                   <span>{formatCurrency(getSubtotal())}</span>
                 </div>
+
+                {getLinesConcessionTotal() > 0 && (
+                  <div
+                    className={posStyles.summaryRow}
+                    title="These dinars are already off the line prices and the subtotal above — they are not taken off twice."
+                  >
+                    <span>Given away on lines</span>
+                    <span style={{ color: '#dc2626' }}>{formatCurrency(getLinesConcessionTotal())}</span>
+                  </div>
+                )}
 
                 <div className={posStyles.discountRow}>
                   <span>Discount</span>
@@ -1276,7 +1406,7 @@ export const PartsPage = () => {
                 <div className={posStyles.cartButtons}>
                   <Button
                     variant="secondary"
-                    onClick={() => suspendCart()}
+                    onClick={() => { suspendCart(); setLineDiscountText({}); }}
                     style={{ flex: '1' }}
                   >
                     Hold Cart

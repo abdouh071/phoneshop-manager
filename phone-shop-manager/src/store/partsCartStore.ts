@@ -18,11 +18,31 @@ import { activityLogService } from '../services/activityLogService';
 import { customerLogService } from '../services/customerLogService';
 import { partsCartService } from '../services/partsCartService';
 import { formatCurrency } from '../utils/formatCurrency';
+import { lineDiscountOf, unitPriceAfterDiscount } from '../utils/discountPolicy';
 
 const getInventoryProducts = () => {
   const { parts } = useInventoryStore.getState();
   return parts;
 };
+
+/**
+ * The line as the document stores it. Every renderer — the till's ESC-POS server,
+ * its browser receipt, the parts invoice, the reports — prices a line from the
+ * product carried inside that line, so a concession is folded into that price
+ * rather than left beside it, or the printed lines stop summing to the printed
+ * total. The copy is the point: a cart line's `product` is the live inventory
+ * object, and writing through it would reprice the shelf itself.
+ */
+const foldLineConcessions = (items: CartItem[]): CartItem[] =>
+  items.map(item => {
+    const charged = item.unitPrice ?? item.product.price;
+    return {
+      ...item,
+      product: { ...item.product, price: charged },
+      unitPrice: charged,
+      totalPrice: Math.round(charged * item.quantity * 100) / 100,
+    };
+  });
 
 const STORAGE_KEY_PARTS_ACTIVE = 'parts_active_cart';
 const STORAGE_KEY_PARTS_SUSPENDED = 'parts_suspended_carts';
@@ -118,6 +138,12 @@ export interface PartsCartState {
   setCustomerPhone: (phone: string) => void;
   setSelectedCustomer: (customer: Customer | null) => void;
   setDiscount: (discount: number | { type: 'percent' | 'flat'; value: number } | null) => void;
+  /**
+   * Take `amount` dinars off one line of the cart. The concession lands on that
+   * line's own unit price, so a cashier who types a lower price instead is judged
+   * by the same rule — there is no side door around the threshold.
+   */
+  setLineDiscount: (productId: string, amount: number) => void;
 
   // Suspend Cart Actions
   suspendCart: () => void;
@@ -135,6 +161,17 @@ export interface PartsCartState {
   getDiscountAmount: () => number;
   getTotal: () => number;
   getItemCount: () => number;
+  /** What each line gives away against the shelf price it was added at. */
+  getLineConcessions: () => PartsLineConcession[];
+  getLinesConcessionTotal: () => number;
+}
+
+/** One discounted line: the dinars it carries off, and how deep that is as a share. */
+export interface PartsLineConcession {
+  productId: string;
+  name: string;
+  granted: number;
+  percent: number;
 }
 
 const initialActive = loadLocalActiveCart();
@@ -195,7 +232,9 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
     if (existing) {
       updatedItems = state.items.map(item =>
         item.product.id === product.id
-          ? { ...item, quantity: item.quantity + 1 }
+          // One more unit on a line that carries a concession changes what that
+          // concession is worth per unit, so the line goes back to its shelf price.
+          ? { ...item, quantity: item.quantity + 1, unitPrice: undefined }
           : item
       );
     } else {
@@ -233,7 +272,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
     }
 
     const updated = state.items.map(i =>
-      i.product.id === productId ? { ...i, quantity } : i
+      i.product.id === productId ? { ...i, quantity, unitPrice: undefined } : i
     );
     set({ items: updated });
     saveLocalActiveCart(updated, state.customerName, state.customerPhone, state.discount);
@@ -289,6 +328,17 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
     const state = get();
     set({ discount: numDiscount });
     saveLocalActiveCart(state.items, state.customerName, state.customerPhone, numDiscount);
+  },
+
+  setLineDiscount: (productId, amount) => {
+    const state = get();
+    const updated = state.items.map(item => {
+      if (item.product.id !== productId) return item;
+      const charged = unitPriceAfterDiscount(item.product.price, amount, item.quantity);
+      return charged < item.product.price ? { ...item, unitPrice: charged } : { ...item, unitPrice: undefined };
+    });
+    set({ items: updated });
+    saveLocalActiveCart(updated, state.customerName, state.customerPhone, state.discount);
   },
 
   suspendCart: () => {
@@ -396,7 +446,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
     if (items.length === 0) return null;
 
     set({ isCheckingOut: true });
-    const itemsSnapshot = [...items];
+    const itemsSnapshot = foldLineConcessions(items);
 
     try {
       const subtotal = get().getSubtotal();
@@ -488,7 +538,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
     if (items.length === 0) return null;
 
     set({ isCheckingOut: true });
-    const itemsSnapshot = [...items];
+    const itemsSnapshot = foldLineConcessions(items);
 
     try {
       const subtotal = get().getSubtotal();
@@ -641,8 +691,25 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
 
   // Derived calculations
   getSubtotal: () => {
-    return get().items.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+    // A line's own unit price wins once a concession is on it; otherwise the shelf
+    // price it was added at.
+    return get().items.reduce((sum, item) => sum + ((item.unitPrice ?? item.product.price) * item.quantity), 0);
   },
+
+  getLineConcessions: () =>
+    get()
+      .items.map(item => {
+        const charged = item.unitPrice ?? item.product.price;
+        return {
+          productId: item.product.id,
+          name: `${item.product.name} ${item.product.model || ''}`.trim(),
+          ...lineDiscountOf(item.product.price, charged, item.quantity),
+        };
+      })
+      .filter(line => line.granted > 0),
+
+  getLinesConcessionTotal: () =>
+    get().getLineConcessions().reduce((sum, line) => sum + line.granted, 0),
 
   getDiscountAmount: () => {
     const sub = get().getSubtotal();
