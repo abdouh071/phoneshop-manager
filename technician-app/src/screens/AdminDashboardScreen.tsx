@@ -23,8 +23,9 @@ import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
 import { useRepairStore } from '../store/repairStore';
 import { useApprovalStore } from '../store/approvalStore';
+import { usePosStore } from '../store/posStore';
 import { RoleBottomNav } from '../components/RoleBottomNav';
-import type { ActivityLog, SaleTransaction, PhoneModel, RepairTicket } from '../types';
+import type { ActivityLog, SaleTransaction, RepairTicket } from '../types';
 import {
   isClaimedAndPaidRepair,
   getClaimedRepairRevenue,
@@ -67,11 +68,14 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [transactions, setTransactions] = useState<SaleTransaction[]>([]);
-  const [products, setProducts] = useState<PhoneModel[]>([]);
   const [activityFeed, setActivityFeed] = useState<ActivityLog[]>([]);
+  // The till's list, read here rather than queried again: a shelf the counter can sell
+  // from is a shelf this dashboard can count.
+  const products = usePosStore(s => s.products);
+  const fetchProducts = usePosStore(s => s.fetchProducts);
 
   // Load transactions and inventory products
-  const loadDashboardData = useCallback(async () => {
+  const loadDashboardData = useCallback(async (reloadShelf = false) => {
     try {
       // 1. Fetch transactions (last 100)
       const qTx = query(collection(db, 'transactions'), orderBy('date', 'desc'), limit(100));
@@ -82,22 +86,17 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
       });
       setTransactions(txList);
 
-      // 2. Fetch products for stock KPIs (query 'inventory' first, fallback to 'products')
-      let snapProd = await getDocs(query(collection(db, 'inventory')));
-      if (snapProd.empty) {
-        snapProd = await getDocs(query(collection(db, 'products')));
-      }
-      const prodList: PhoneModel[] = [];
-      snapProd.forEach(docSnap => {
-        prodList.push({ id: docSnap.id, ...docSnap.data() } as PhoneModel);
-      });
-      setProducts(prodList);
+      // 2. The shelf counts come from the till's own product list: the store already
+      // reads 'inventory' with the 'products' fallback and keeps a cached copy for
+      // offline, so this screen asks it once instead of running its own query. A
+      // pull-to-refresh is a person asking for the shelf now, so it re-reads.
+      if (reloadShelf || usePosStore.getState().products.length === 0) await fetchProducts();
     } catch (err) {
       console.warn('[AdminDashboard] Data fetch error:', err);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fetchProducts]);
 
   useEffect(() => {
     if (user?.role !== 'admin') {
@@ -129,7 +128,7 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadDashboardData();
+    await loadDashboardData(true);
     setRefreshing(false);
   }, [loadDashboardData]);
 
