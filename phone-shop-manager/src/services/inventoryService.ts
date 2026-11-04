@@ -18,6 +18,7 @@ import { computeStockStatus } from '../utils/stockStatus';
 import { withTimeout } from '../utils/withTimeout';
 import { offlineQueue } from './offlineQueue';
 import { offlineQueueMirror } from './offlineQueueMirror';
+import { newIdempotencyKey } from './idempotentReplay';
 
 const COLLECTION = 'inventory';
 const LOCAL_STORAGE_KEY = 'offline_inventory';
@@ -377,29 +378,36 @@ export const inventoryService = {
     const threshold = product.lowStockThreshold ?? 1;
     const stockStatus = computeStockStatus(product.stock, threshold);
     const local = getLocalInventory();
+    // Minted before the first attempt, so a document the server wrote during a race the
+    // counter gave up on carries the same key the replay will look the product up by.
+    const keyed: Omit<PhoneModel, 'id'> = {
+      ...product,
+      stockStatus,
+      idempotencyKey: newIdempotencyKey('product'),
+    };
 
     // If offline, save locally with an offline_prod_ prefix and queue for sync
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       const offlineId = `offline_prod_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const created: PhoneModel = { ...product, id: offlineId, stockStatus };
+      const created: PhoneModel = { ...keyed, id: offlineId };
       saveLocalInventory([created, ...local.filter(p => p.id !== offlineId)]);
       savePendingProducts([...getPendingProducts().filter(p => p.id !== offlineId), created]);
       return created;
     }
 
     try {
-      const addDocPromise = addDoc(collection(db, COLLECTION), { ...product, stockStatus });
+      const addDocPromise = addDoc(collection(db, COLLECTION), keyed);
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Firestore addDoc timeout')), 2500)
       );
       const docRef = await Promise.race([addDocPromise, timeoutPromise]);
-      const created: PhoneModel = { ...product, id: docRef.id, stockStatus };
+      const created: PhoneModel = { ...keyed, id: docRef.id };
       saveLocalInventory([created, ...local.filter(p => p.id !== created.id)]);
       return created;
     } catch (err) {
       console.warn('Failed to add product to Firestore, saving locally as offline pending:', err);
       const offlineId = `offline_prod_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const created: PhoneModel = { ...product, id: offlineId, stockStatus };
+      const created: PhoneModel = { ...keyed, id: offlineId };
       saveLocalInventory([created, ...local.filter(p => p.id !== offlineId)]);
       savePendingProducts([...getPendingProducts().filter(p => p.id !== offlineId), created]);
       return created;
@@ -484,13 +492,19 @@ export const inventoryService = {
     const local = getLocalInventory();
     const pending = getPendingProducts();
 
+    const stamp = (product: Omit<PhoneModel, 'id'>): Omit<PhoneModel, 'id'> => ({
+      ...product,
+      stockStatus: computeStockStatus(product.stock, product.lowStockThreshold ?? 1),
+      idempotencyKey: newIdempotencyKey('product'),
+    });
+
+    const tempId = (suffix: string) => `offline_prod_${Date.now()}_${suffix}_${Math.random().toString(36).slice(2, 6)}`;
+
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      const createdList: PhoneModel[] = products.map((product, idx) => {
-        const threshold = product.lowStockThreshold ?? 1;
-        const stockStatus = computeStockStatus(product.stock, threshold);
-        const offlineId = `offline_prod_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`;
-        return { ...product, id: offlineId, stockStatus };
-      });
+      const createdList: PhoneModel[] = products.map((product, idx) => ({
+        ...stamp(product),
+        id: tempId(String(idx)),
+      }));
       saveLocalInventory([...createdList, ...local]);
       savePendingProducts([...pending, ...createdList]);
       return createdList;
@@ -499,35 +513,40 @@ export const inventoryService = {
     const BATCH_SIZE = 500;
     const results: PhoneModel[] = [];
 
-    try {
-      for (let i = 0; i < products.length; i += BATCH_SIZE) {
-        const batch = writeBatch(db);
-        const chunk = products.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < products.length; i += BATCH_SIZE) {
+      // Every row carries its key before the batch is sent, and keeps it on the copy this
+      // device files when a commit is not heard. A failed chunk used to re-queue the whole
+      // import sheet: the rows whose batch had already landed were written a second time,
+      // splitting one SKU over two documents — and the stock the counter deducts from is
+      // whichever copy the shelf happens to read first.
+      const chunk = products.slice(i, i + BATCH_SIZE).map(stamp);
+      const batch = writeBatch(db);
+      const refs = chunk.map(() => doc(collection(db, COLLECTION)));
+      chunk.forEach((row, idx) => batch.set(refs[idx], row));
 
-        chunk.forEach(product => {
-          const threshold = product.lowStockThreshold ?? 1;
-          const stockStatus = computeStockStatus(product.stock, threshold);
-          const docRef = doc(collection(db, COLLECTION));
-          batch.set(docRef, { ...product, stockStatus });
-          results.push({ ...product, id: docRef.id, stockStatus });
-        });
-
+      try {
         await batch.commit();
+        chunk.forEach((row, idx) => results.push({ ...row, id: refs[idx].id }));
+        continue;
+      } catch (err) {
+        console.warn('Failed to commit a bulk-import batch, filing only its own rows:', err);
       }
 
-      saveLocalInventory([...results, ...local]);
-      return results;
-    } catch (err) {
-      console.warn('Failed to bulk add products to Firestore, saving locally:', err);
-      const createdList: PhoneModel[] = products.map((product, idx) => {
-        const threshold = product.lowStockThreshold ?? 1;
-        const stockStatus = computeStockStatus(product.stock, threshold);
-        const offlineId = `offline_prod_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`;
-        return { ...product, id: offlineId, stockStatus };
-      });
-      saveLocalInventory([...createdList, ...local]);
-      savePendingProducts([...pending, ...createdList]);
-      return createdList;
+      // This chunk may be on the server already; the chunks after it certainly are not, since
+      // the loop never reached them. Both are filed as pending under the key each row was sent with.
+      const filedLocally: PhoneModel[] = [
+        ...chunk.map((row, idx) => ({ ...row, id: tempId(String(i + idx)) })),
+        ...products
+          .slice(i + BATCH_SIZE)
+          .map((product, offset) => ({ ...stamp(product), id: tempId(String(i + BATCH_SIZE + offset)) })),
+      ];
+
+      saveLocalInventory([...results, ...filedLocally, ...local]);
+      savePendingProducts([...pending, ...filedLocally]);
+      return [...results, ...filedLocally];
     }
+
+    saveLocalInventory([...results, ...local]);
+    return results;
   },
 };

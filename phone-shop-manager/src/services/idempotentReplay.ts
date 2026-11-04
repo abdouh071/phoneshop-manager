@@ -2,9 +2,10 @@
  * Idempotent replay of records created while offline.
  * ====================================================
  * Every document written during replay is stamped with `idempotencyKey` — the key the
- * record was created with, which for a sale or a debt is minted before its first write
- * and falls back to the temporary id (offline_tx_…, offline_debt_…) when a record
- * predates that rule.
+ * record was created with, which for a sale, a debt, a customer log, a product or a
+ * repair ticket is minted before its first write and falls back to the temporary id
+ * (offline_tx_…, offline_debt_…, offline_log_…, offline_prod_…, offline_tkt_…) when a
+ * record predates that rule.
  *
  * Without it the replay is a bare addDoc followed by a localStorage rewrite, so a crash
  * (or a killed app) in that window leaves the record still carrying its offline_ id and
@@ -40,7 +41,7 @@ export const findExistingDocId = async (
  * server saved this sale and the counter never heard" apart from "this sale never
  * happened": a document written without a key on it matches nothing.
  */
-export const newIdempotencyKey = (kind: 'tx' | 'debt'): string =>
+export const newIdempotencyKey = (kind: 'tx' | 'debt' | 'log' | 'product' | 'ticket'): string =>
   `${kind}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
 /**

@@ -23,7 +23,7 @@ import {
   getDoc,
   updateDoc,
 } from 'firebase/firestore';
-import { addIdempotently, findExistingDocId, replayKeyOf } from './idempotentReplay';
+import { addIdempotently, replayKeyOf } from './idempotentReplay';
 import { offlineDeadLetterStore } from './offlineDeadLetterStore';
 import { offlineQueueMirror } from './offlineQueueMirror';
 import { db } from '../lib/firebase';
@@ -199,7 +199,7 @@ export const unifiedOfflineSyncService = {
         const oldTempId = product.id;
         const { id: _, ...productData } = product;
 
-        const realDocId = await addIdempotently('inventory', oldTempId, { ...productData });
+        const realDocId = await addIdempotently('inventory', replayKeyOf(product, oldTempId), { ...productData });
 
         remapped.set(oldTempId, realDocId);
         synced++;
@@ -348,12 +348,11 @@ export const unifiedOfflineSyncService = {
         const oldTempId = ticket.id;
         const { id: _, ...ticketData } = ticket;
 
-        // Match an already-uploaded ticket by its replay key, then by ticket number
-        // (tickets queued before replay keys existed), otherwise create it once.
-        const realDocId =
-          (await findExistingDocId('repairs', 'idempotencyKey', oldTempId)) ??
-          (await findExistingDocId('repairs', 'ticketNumber', ticket.ticketNumber)) ??
-          await addIdempotently('repairs', oldTempId, { ...ticketData });
+        // Find the ticket by its own replay key, or create it once. Matching by `ticketNumber`
+        // is not available here: two devices mint the same number for two different jobs, and
+        // adopting the other shop's document drops this ticket out of the queue as "synced"
+        // without ever uploading the repair the counter actually wrote.
+        const realDocId = await addIdempotently('repairs', replayKeyOf(ticket, oldTempId), { ...ticketData });
 
         remapped.set(oldTempId, realDocId);
         synced++;
@@ -511,7 +510,7 @@ export const unifiedOfflineSyncService = {
         const oldTempId = log.id;
         const { id: _, ...logData } = log;
 
-        const realDocId = await addIdempotently('customer_activity_logs', oldTempId, { ...logData });
+        const realDocId = await addIdempotently('customer_activity_logs', replayKeyOf(log, oldTempId), { ...logData });
 
         remapped.set(oldTempId, realDocId);
         synced++;

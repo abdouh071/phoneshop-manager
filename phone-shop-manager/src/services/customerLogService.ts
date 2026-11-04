@@ -9,6 +9,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { newIdempotencyKey } from './idempotentReplay';
 import type { CustomerActivityLog } from '../types';
 
 const COLLECTION = 'customer_activity_logs';
@@ -107,6 +108,9 @@ export const customerLogService = {
       date,
       createdAt: date,
       metadata: entry.metadata || {},
+      // Minted before the first attempt and carried by every copy of this event, so a replay
+      // recognises the log the counter only *thinks* it failed to write.
+      idempotencyKey: newIdempotencyKey('log'),
     };
 
     // If offline, store locally with offline_ prefix so unifiedOfflineSyncService catches and syncs it

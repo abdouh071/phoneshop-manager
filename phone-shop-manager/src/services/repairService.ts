@@ -17,6 +17,7 @@ import {
 import { db } from '../lib/firebase';
 import type { RepairTicket, RepairStatusHistoryEntry } from '../types';
 import { deduplicateTickets, isSameTicketContent } from '../utils/ticketDeduplication';
+import { newIdempotencyKey } from './idempotentReplay';
 import { offlineQueue } from './offlineQueue';
 
 const COLLECTION = 'repairs';
@@ -492,6 +493,7 @@ export const repairService = {
           trackingPin,
           createdAt: now,
           updatedAt: now,
+          idempotencyKey: newIdempotencyKey('ticket'),
         };
         saveLocalRepairs([created, ...local.filter(t => t.id !== created.id && t.ticketNumber !== created.ticketNumber)]);
         return created;
@@ -516,6 +518,10 @@ export const repairService = {
         trackingPin,
         createdAt: now,
         updatedAt: now,
+        // Minted before the first attempt and kept on the local copy filed when this write is
+        // not heard, so the replay finds the ticket the server may already have — by this key
+        // alone, never by its number, which two devices can mint for two different jobs.
+        idempotencyKey: newIdempotencyKey('ticket'),
       };
 
       try {

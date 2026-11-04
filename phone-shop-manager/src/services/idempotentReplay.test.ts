@@ -4,20 +4,34 @@
  * The fake below is collection-aware and evaluates where() clauses, which is what makes
  * "add once, then adopt on re-run" testable: a duplicate sale is a second document in
  * `transactions`, and nothing less than a per-collection store can show it.
+ *
+ * `loseTheWrite` and `failBulkCommitAfter` exist because the failure this file is about is
+ * not "the write failed" — it is "the write succeeded and this device was told otherwise",
+ * which is what a 2.5-second race against a slow line actually leaves behind.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { addIdempotently, newIdempotencyKey, replayKeyOf } from './idempotentReplay';
 import { unifiedOfflineSyncService } from './unifiedOfflineSyncService';
+import { customerLogService } from './customerLogService';
+import { inventoryService } from './inventoryService';
+import { repairService } from './repairService';
 
 type FakeDoc = Record<string, unknown>;
 interface FakeWhere { field: string; op: string; value: unknown }
 interface FakeCollectionRef { collection: string }
+interface FakeDocRef { collection: string; id: string }
 interface FakeQuery { collection: string; filters: FakeWhere[]; take?: number }
 
 const fake = vi.hoisted(() => {
   const collections = new Map<string, Map<string, FakeDoc>>();
-  const counters = { adds: 0, lookups: 0 };
-  const flags = { failLookups: false };
+  const counters = { adds: 0, lookups: 0, bulkCommits: 0 };
+  const flags = {
+    failLookups: false,
+    /** The document is written, then the caller is told the write failed. */
+    loseTheWrite: false,
+    /** Commit #k lands and then reports failure for every k above this count; null never fails. */
+    failBulkCommitAfter: null as number | null,
+  };
   let seq = 0;
 
   const collOf = (name: string): Map<string, FakeDoc> => {
@@ -48,10 +62,43 @@ const fake = vi.hoisted(() => {
       collections.clear();
       counters.adds = 0;
       counters.lookups = 0;
+      counters.bulkCommits = 0;
       flags.failLookups = false;
+      flags.loseTheWrite = false;
+      flags.failBulkCommitAfter = null;
       seq = 0;
     },
     collection: (_db: unknown, name: string): FakeCollectionRef => ({ collection: name }),
+    // `doc(db, 'counters', 'repairs')` and `doc(collection(db, 'inventory'))` both appear.
+    doc: (target: unknown, pathOrDb?: unknown, id?: string): FakeDocRef => {
+      if (typeof target === 'string') return { collection: target, id: String(pathOrDb) };
+      const ref = target as FakeCollectionRef;
+      return { collection: ref.collection, id: id ?? `srv_auto_${++seq}` };
+    },
+    // The ticket counter is unreachable here, so intake falls back to local numbering —
+    // the path a shop takes whenever the line is slow.
+    getDoc: async (): Promise<never> => {
+      throw new Error('Fake: the counter is unreachable');
+    },
+    runTransaction: async (): Promise<never> => {
+      throw new Error('Fake: the counter is unreachable');
+    },
+    writeBatch: () => {
+      const writes: FakeDocRef[] = [];
+      const payloads: FakeDoc[] = [];
+      return {
+        set: (ref: FakeDocRef, data: FakeDoc) => {
+          writes.push(ref);
+          payloads.push(data);
+        },
+        commit: async () => {
+          const attempt = ++counters.bulkCommits;
+          writes.forEach((ref, idx) => collOf(ref.collection).set(ref.id, { ...payloads[idx] }));
+          const mustFail = flags.failBulkCommitAfter !== null && attempt > flags.failBulkCommitAfter;
+          if (mustFail) throw new Error('Fake: batch commit was not acknowledged');
+        },
+      };
+    },
     where: (field: string, op: string, value: unknown): FakeWhere => ({ field, op, value }),
     limit: (n: number): { take: number } => ({ take: n }),
     query: (base: FakeCollectionRef, ...clauses: Array<FakeWhere | { take: number }>): FakeQuery => {
@@ -77,6 +124,7 @@ const fake = vi.hoisted(() => {
       counters.adds++;
       const id = `srv_${++seq}`;
       collOf(ref.collection).set(id, { ...data });
+      if (flags.loseTheWrite) throw new Error('Fake: Firestore addDoc timeout');
       return { id };
     },
   };
@@ -87,6 +135,10 @@ vi.mock('firebase/firestore', async (importOriginal) => {
   return {
     ...actual,
     collection: fake.collection,
+    doc: fake.doc,
+    getDoc: fake.getDoc,
+    runTransaction: fake.runTransaction,
+    writeBatch: fake.writeBatch,
     query: fake.query,
     where: fake.where,
     limit: fake.limit,
@@ -213,15 +265,173 @@ describe('Offline replay idempotency', () => {
   });
 
   describe('syncOfflineRepairs', () => {
-    it('still adopts a ticket uploaded before replay keys existed, by ticket number', async () => {
-      fake.seed('repairs', 'srv_legacy', { ticketNumber: 'TKT-0012', customerName: 'Karim' });
+    const localTickets = (): Array<{ id: string; ticketNumber?: string }> =>
+      JSON.parse(localStorage.getItem('offline_repairs') || '[]');
+
+    it('uploads a ticket whose number already belongs to another device', async () => {
+      // Two intakes minted TKT-0042 while each device was cut off. Matching an existing
+      // document by that number used to hand this ticket over to the other device's
+      // document: the sync reported it as synced, the counter's own job was never
+      // uploaded, and the phone left the bench unrecorded.
+      fake.seed('repairs', 'srv_other_device', { ticketNumber: 'TKT-0042', customerName: 'Sofiane' });
       localStorage.setItem('offline_repairs', JSON.stringify([
-        { id: 'offline_tkt_9', ticketNumber: 'TKT-0012', customerName: 'Karim' },
+        { id: 'offline_tkt_9', ticketNumber: 'TKT-0042', customerName: 'Karim' },
+      ]));
+
+      expect(await unifiedOfflineSyncService.syncOfflineRepairs()).toBe(1);
+      expect(fake.counters.adds).toBe(1);
+      expect(fake.docsIn('repairs')).toHaveLength(2);
+      expect(localTickets()[0].id).not.toBe('srv_other_device');
+    });
+
+    it('adopts the ticket the server committed under the key this device wrote', async () => {
+      fake.seed('repairs', 'srv_committed_ticket', {
+        ticketNumber: 'TKT-0042',
+        customerName: 'Karim',
+        idempotencyKey: 'ticket_landed',
+      });
+      localStorage.setItem('offline_repairs', JSON.stringify([
+        { id: 'offline_tkt_9', ticketNumber: 'TKT-0042', customerName: 'Karim', idempotencyKey: 'ticket_landed' },
       ]));
 
       expect(await unifiedOfflineSyncService.syncOfflineRepairs()).toBe(1);
       expect(fake.counters.adds).toBe(0);
-      expect(JSON.parse(localStorage.getItem('offline_repairs') || '[]')[0].id).toBe('srv_legacy');
+      expect(fake.docsIn('repairs')).toHaveLength(1);
+      expect(localTickets()[0].id).toBe('srv_committed_ticket');
+    });
+  });
+
+  describe('a create the counter never heard about', () => {
+    /** The write reaches the server; the caller is told it timed out and files the record locally. */
+    const writeLandedButWasLost = () => {
+      fake.flags.loseTheWrite = true;
+    };
+
+    it('stamps a customer log so the replay recognises it and posts it once', async () => {
+      writeLandedButWasLost();
+      const logged = await customerLogService.log({
+        customerId: 'cust_1',
+        customerName: 'Karim',
+        actionType: 'note_added',
+        actionTitle: 'Phone unreachable',
+        actionDescription: 'Left a message with the neighbour',
+        actorName: 'Abdou',
+      });
+      fake.flags.loseTheWrite = false;
+
+      // The event is filed under an id this device invented, so the only thing the next
+      // pass can find the committed document by is the key the log was written with.
+      expect(logged.id).toMatch(/^offline_log_/);
+      expect(logged.idempotencyKey).toBeTruthy();
+      const landed = fake.docsIn('customer_activity_logs');
+      expect(landed).toHaveLength(1);
+      expect(landed[0].data.idempotencyKey).toBe(logged.idempotencyKey);
+
+      expect(await unifiedOfflineSyncService.syncOfflineLogs()).toBe(1);
+      expect(fake.counters.adds).toBe(1);
+      expect(fake.docsIn('customer_activity_logs')).toHaveLength(1);
+      const stored = JSON.parse(localStorage.getItem('offline_customer_activity_logs') || '[]');
+      expect(stored[0].id).toBe(landed[0].id);
+    });
+
+    it('stamps a product the same way, so one SKU stays one document', async () => {
+      writeLandedButWasLost();
+      const created = await inventoryService.addProduct({
+        name: 'Xiaomi Redmi 13',
+        model: 'Redmi 13',
+        brand: 'Xiaomi',
+        price: 62000,
+        costPrice: 51000,
+        stock: 4,
+        stockStatus: 'in_stock',
+        sku: 'XIAO-R13-256',
+        category: 'smartphone',
+        lowStockThreshold: 1,
+      });
+      fake.flags.loseTheWrite = false;
+
+      expect(created.id).toMatch(/^offline_prod_/);
+      const landed = fake.docsIn('inventory');
+      expect(landed).toHaveLength(1);
+      expect(landed[0].data.idempotencyKey).toBe(created.idempotencyKey);
+
+      expect(await unifiedOfflineSyncService.syncOfflineProducts()).toBe(1);
+      expect(fake.counters.adds).toBe(1);
+      expect(fake.docsIn('inventory')).toHaveLength(1);
+      expect(inventoryService.getPendingProducts()).toHaveLength(0);
+    });
+
+    it('stamps a repair ticket so the board shows the job, not a copy of it', async () => {
+      writeLandedButWasLost();
+      const created = await repairService.createTicket({
+        customerName: 'Karim',
+        customerPhone: '0555123456',
+        deviceBrand: 'Apple',
+        deviceModel: 'iPhone 13',
+        issueDescription: 'Screen replacement',
+        estimatedCost: 15000,
+        status: 'pending',
+      });
+      fake.flags.loseTheWrite = false;
+
+      expect(created.id).toMatch(/^offline_tkt_/);
+      const landed = fake.docsIn('repairs');
+      expect(landed).toHaveLength(1);
+      expect(landed[0].data.idempotencyKey).toBe(created.idempotencyKey);
+
+      expect(await unifiedOfflineSyncService.syncOfflineRepairs()).toBe(1);
+      expect(fake.counters.adds).toBe(1);
+      expect(fake.docsIn('repairs')).toHaveLength(1);
+      expect(JSON.parse(localStorage.getItem('offline_repairs') || '[]')[0].id).toBe(landed[0].id);
+    });
+  });
+
+  describe('a bulk import whose commit was not acknowledged', () => {
+    const row = (idx: number) => ({
+      name: `Part ${idx}`,
+      model: `P-${idx}`,
+      price: 1000,
+      costPrice: 500,
+      stock: 10,
+      stockStatus: 'in_stock' as const,
+      sku: `PRT-${idx}`,
+      category: 'repair_part' as const,
+      lowStockThreshold: 2,
+    });
+
+    it('re-queues only its own rows, and the replay adopts what already landed', async () => {
+      fake.flags.failBulkCommitAfter = 0;
+      const created = await inventoryService.addProductsBulk([row(1), row(2)]);
+      fake.flags.failBulkCommitAfter = null;
+
+      expect(created.every(p => p.id.startsWith('offline_prod_'))).toBe(true);
+      expect(inventoryService.getPendingProducts()).toHaveLength(2);
+
+      // The batch was applied; the counter was simply never told.
+      const landed = fake.docsIn('inventory');
+      expect(landed).toHaveLength(2);
+
+      expect(await unifiedOfflineSyncService.syncOfflineProducts()).toBe(2);
+      expect(fake.docsIn('inventory')).toHaveLength(2);
+      expect(inventoryService.getPendingProducts()).toHaveLength(0);
+    });
+
+    it('keeps the rows a finished batch already committed out of the queue', async () => {
+      // 501 rows is two batches: the first one lands and is acknowledged, the second is lost.
+      // The old catch filed the entire sheet as pending, so those 500 SKUs were imported twice.
+      const sheet = Array.from({ length: 501 }, (_, idx) => row(idx + 1));
+      fake.flags.failBulkCommitAfter = 1;
+      const created = await inventoryService.addProductsBulk(sheet);
+      fake.flags.failBulkCommitAfter = null;
+
+      const pending = inventoryService.getPendingProducts();
+      expect(pending).toHaveLength(1);
+      expect(created).toHaveLength(501);
+      expect(created.filter(p => p.id.startsWith('offline_prod_'))).toHaveLength(1);
+      expect(fake.docsIn('inventory')).toHaveLength(501);
+
+      expect(await unifiedOfflineSyncService.syncOfflineProducts()).toBe(1);
+      expect(fake.docsIn('inventory')).toHaveLength(501);
     });
   });
 });

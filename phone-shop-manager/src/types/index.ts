@@ -35,6 +35,10 @@ export interface PhoneModel {
   lowStockThreshold: number;
   notes?: string;
   imageUrl?: string;
+  /** The replay key of a product created while this device was cut off — see
+   *  `SaleTransaction.idempotencyKey`. An import whose commit the counter never heard
+   *  about would otherwise be written a second time, splitting one SKU over two documents. */
+  idempotencyKey?: string;
 }
 
 // --- Sales / POS ---
@@ -265,6 +269,11 @@ export interface RepairTicket {
   mergedIntoTicketId?: string;
   /** ISO timestamp of when this ticket was merged */
   mergedAt?: string;
+  /** The replay key of a ticket created while this device was cut off — see
+   *  `SaleTransaction.idempotencyKey`. It is the only safe way to recognise a ticket the
+   *  server already has: matching by `ticketNumber` instead can pick up a different device's
+   *  job that happens to carry the same number, and this ticket is then never uploaded. */
+  idempotencyKey?: string;
 }
 
 export interface RepairReturnRecord {
@@ -401,6 +410,8 @@ export interface CustomerActivityLog {
   date: string;
   metadata?: Record<string, unknown>;
   createdAt?: string;
+  /** The replay key of this audit event — see `SaleTransaction.idempotencyKey`. */
+  idempotencyKey?: string;
 }
 
 // --- B2B Checkout Options (Parts Sales) ---
