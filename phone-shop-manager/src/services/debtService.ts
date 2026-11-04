@@ -11,6 +11,7 @@ import {
   orderBy,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { newIdempotencyKey } from './idempotentReplay';
 import type { CustomerDebtEntry, CustomerDebtPayment } from '../types';
 
 const COLLECTION = 'customer_debts';
@@ -118,6 +119,9 @@ export const debtService = {
       remainingBalance,
       status,
       payments: initialPayments,
+      // Stamped before the first attempt, so an entry the server saved while this
+      // race was giving up is still recognisable to the sync that follows.
+      idempotencyKey: newIdempotencyKey('debt'),
       createdAt: now,
       updatedAt: now,
     };

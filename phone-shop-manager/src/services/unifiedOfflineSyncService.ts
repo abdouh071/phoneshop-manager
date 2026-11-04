@@ -23,7 +23,7 @@ import {
   getDoc,
   updateDoc,
 } from 'firebase/firestore';
-import { addIdempotently, findExistingDocId } from './idempotentReplay';
+import { addIdempotently, findExistingDocId, replayKeyOf } from './idempotentReplay';
 import { offlineDeadLetterStore } from './offlineDeadLetterStore';
 import { offlineQueueMirror } from './offlineQueueMirror';
 import { db } from '../lib/firebase';
@@ -407,7 +407,7 @@ export const unifiedOfflineSyncService = {
         const oldTempId = tx.id;
         const { id: _, ...txData } = tx;
 
-        const realDocId = await addIdempotently('transactions', oldTempId, { ...txData });
+        const realDocId = await addIdempotently('transactions', replayKeyOf(tx, oldTempId), { ...txData });
 
         remapped.set(oldTempId, realDocId);
         synced++;
@@ -459,7 +459,7 @@ export const unifiedOfflineSyncService = {
         const oldTempId = debt.id;
         const { id: _, ...debtData } = debt;
 
-        const realDocId = await addIdempotently('customer_debts', oldTempId, { ...debtData });
+        const realDocId = await addIdempotently('customer_debts', replayKeyOf(debt, oldTempId), { ...debtData });
 
         remapped.set(oldTempId, realDocId);
         synced++;

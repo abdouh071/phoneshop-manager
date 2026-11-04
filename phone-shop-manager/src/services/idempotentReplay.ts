@@ -1,13 +1,19 @@
 /**
  * Idempotent replay of records created while offline.
  * ====================================================
- * Every document written during replay is stamped with `idempotencyKey`, the temporary
- * id the device minted when the record was created offline (offline_tx_…, offline_tkt_…).
+ * Every document written during replay is stamped with `idempotencyKey` — the key the
+ * record was created with, which for a sale or a debt is minted before its first write
+ * and falls back to the temporary id (offline_tx_…, offline_debt_…) when a record
+ * predates that rule.
  *
  * Without it the replay is a bare addDoc followed by a localStorage rewrite, so a crash
  * (or a killed app) in that window leaves the record still carrying its offline_ id and
  * the next sync posts a second copy of the same sale, debt or log. With it, a re-run
  * finds the document by its key and adopts the real id instead of adding a duplicate.
+ *
+ * The key has to exist on the document the *online* write produced. A 2.5-second race
+ * can lose a write that the server actually committed, and the copy stored in that
+ * case is otherwise unrecognisable: the replay would look for a key no document has.
  *
  * A failed lookup propagates rather than being treated as "not found": the caller leaves
  * the record queued, so the worst case is a retry, never a duplicate.
@@ -25,6 +31,27 @@ export const findExistingDocId = async (
   const snap = await getDocs(query(collection(db, collectionName), where(field, '==', value), limit(1)));
   return snap.empty ? null : snap.docs[0].id;
 };
+
+/**
+ * A dedupe key, minted once — before the record's first write, never at the replay.
+ *
+ * The counter stamps it on the document it creates and keeps it on the local copy it
+ * stores when the write appears to fail. That is the only way a replay can tell "the
+ * server saved this sale and the counter never heard" apart from "this sale never
+ * happened": a document written without a key on it matches nothing.
+ */
+export const newIdempotencyKey = (kind: 'tx' | 'debt'): string =>
+  `${kind}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+/**
+ * The key a record actually replays under: its own stamp when it carries one, the
+ * temporary id when it does not. Records already sitting in localStorage from before
+ * the stamp existed keep replaying on the old rule — which can duplicate, never drop.
+ */
+export const replayKeyOf = (record: { idempotencyKey?: unknown }, tempId: string): string =>
+  typeof record.idempotencyKey === 'string' && record.idempotencyKey
+    ? record.idempotencyKey
+    : tempId;
 
 /**
  * Adds `data` under `collectionName`, unless a document carrying the same idempotencyKey

@@ -6,7 +6,7 @@
  * `transactions`, and nothing less than a per-collection store can show it.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { addIdempotently } from './idempotentReplay';
+import { addIdempotently, newIdempotencyKey, replayKeyOf } from './idempotentReplay';
 import { unifiedOfflineSyncService } from './unifiedOfflineSyncService';
 
 type FakeDoc = Record<string, unknown>;
@@ -141,6 +141,24 @@ describe('Offline replay idempotency', () => {
     });
   });
 
+  describe('the key a record replays under', () => {
+    it('prefers the stamp the record was written with over the local temporary id', () => {
+      expect(replayKeyOf({ idempotencyKey: 'tx_landed' }, 'offline_tx_1')).toBe('tx_landed');
+    });
+
+    it('falls back to the temporary id for records stored before the stamp existed', () => {
+      expect(replayKeyOf({}, 'offline_tx_1')).toBe('offline_tx_1');
+      expect(replayKeyOf({ idempotencyKey: '' }, 'offline_tx_1')).toBe('offline_tx_1');
+      expect(replayKeyOf({ idempotencyKey: 42 }, 'offline_tx_1')).toBe('offline_tx_1');
+    });
+
+    it('gives two sales written in the same millisecond different keys', () => {
+      const keys = new Set(Array.from({ length: 50 }, () => newIdempotencyKey('tx')));
+      expect(keys.size).toBe(50);
+      for (const key of keys) expect(key).toMatch(/^tx_[a-z0-9]+_[a-z0-9]+$/);
+    });
+  });
+
   describe('syncOfflineTransactions', () => {
     const storedSales = (): Array<{ id: string }> =>
       JSON.parse(localStorage.getItem('offline_transactions') || '[]');
@@ -171,6 +189,26 @@ describe('Offline replay idempotency', () => {
       expect(fake.counters.adds).toBe(0);
       expect(storedSales()[0].id).toBe('offline_tx_1');
       expect(unifiedOfflineSyncService.getTotalPendingCount()).toBe(1);
+    });
+
+    it('adopts a sale the server committed while the counter was looking at a timeout', async () => {
+      // transactionService.save races addDoc against 2.5s and stores the sale locally
+      // when it loses — but the write often lands anyway. The document on the server
+      // carries the key the sale was minted with, which is the only thing the replay
+      // can find it by: the temporary id exists solely on this machine.
+      fake.seed('transactions', 'srv_committed', {
+        total: 5000,
+        idempotencyKey: 'tx_landed',
+      });
+      localStorage.setItem(
+        'offline_transactions',
+        JSON.stringify([{ ...OFFLINE_SALE, idempotencyKey: 'tx_landed' }])
+      );
+
+      expect(await unifiedOfflineSyncService.syncOfflineTransactions()).toBe(1);
+      expect(fake.counters.adds).toBe(0);
+      expect(fake.docsIn('transactions')).toHaveLength(1);
+      expect(storedSales()[0].id).toBe('srv_committed');
     });
   });
 

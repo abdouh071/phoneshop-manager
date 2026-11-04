@@ -10,6 +10,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { newIdempotencyKey } from './idempotentReplay';
 import type { SaleTransaction } from '../types';
 
 const COLLECTION = 'transactions';
@@ -158,28 +159,31 @@ export const transactionService = {
 
   save: async (tx: Omit<SaleTransaction, 'id'>): Promise<SaleTransaction> => {
     const local = getLocalTransactions();
+    // Minted before the first attempt and carried by every copy of this sale, so a
+    // replay can recognise the document the counter only *thinks* it failed to write.
+    const stamped: Omit<SaleTransaction, 'id'> = { ...tx, idempotencyKey: newIdempotencyKey('tx') };
 
     // If offline, store locally immediately with zero delay
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       const offlineId = `offline_tx_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const created = { ...tx, id: offlineId };
+      const created = { ...stamped, id: offlineId };
       saveLocalTransactions([created, ...local]);
       return created;
     }
 
     try {
-      const addDocPromise = addDoc(collection(db, COLLECTION), tx);
+      const addDocPromise = addDoc(collection(db, COLLECTION), stamped);
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Firestore addDoc timeout')), 2500)
       );
       const docRef = await Promise.race([addDocPromise, timeoutPromise]);
-      const created = { ...tx, id: docRef.id };
+      const created = { ...stamped, id: docRef.id };
       saveLocalTransactions([created, ...local.filter(t => t.id !== created.id)]);
       return created;
     } catch (err) {
       console.warn('Failed to save transaction to Firestore, storing locally:', err);
       const offlineId = `offline_tx_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const created = { ...tx, id: offlineId };
+      const created = { ...stamped, id: offlineId };
       saveLocalTransactions([created, ...local]);
       return created;
     }

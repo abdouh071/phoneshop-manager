@@ -70,6 +70,13 @@ export interface SaleTransaction {
   shopName?: string;
   saleType?: 'retail' | 'parts_b2b';
   invoiceNumber?: string;
+  /**
+   * Minted before the first attempt to write this sale and stamped on the document,
+   * so the offline sync can find what the counter already wrote. The replay's own
+   * temporary id is no use here: a sale the server committed while the 2.5-second
+   * race was giving up has no local id in its document, so it gets written twice.
+   */
+  idempotencyKey?: string;
   accountSettlement?: {
     type: 'paid_full' | 'charged_to_account' | 'partial_payment';
     paidAmount: number;
@@ -348,6 +355,9 @@ export interface CustomerDebtEntry {
   notes?: string;
   transactionId?: string;
   invoiceNumber?: string;
+  /** The replay key of the debt entry — see `SaleTransaction.idempotencyKey`. A
+   *  duplicated debt is the shop chasing money a customer already paid. */
+  idempotencyKey?: string;
   itemsSummary?: string;
   type?: 'general' | 'parts_b2b' | 'repair';
   /** Explicit link to the RepairTicket Firestore document ID that originated this debt.
