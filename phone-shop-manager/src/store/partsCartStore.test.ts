@@ -8,18 +8,26 @@
  * product on the shelf. A cart line's `product` is the live inventory object, so a
  * discount that wrote through it would quietly reprice the shop's stock — and the
  * receipt would be the only place the old price survived.
+ *
+ * The checkout-ordering tests at the bottom pin a second rule: the shelf moves
+ * before the invoice exists, and a stock write that cannot be made durable aborts
+ * the checkout before anything is billed.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { PhoneModel } from '../types';
+import type { Customer, PhoneModel } from '../types';
 
 const captured = vi.hoisted(() => ({
   transactions: [] as Record<string, unknown>[],
   stockMoves: [] as { productId: string; delta: number }[],
+  /** The order of the awaited writes a checkout performs. */
+  order: [] as string[],
+  failStock: false,
 }));
 
 vi.mock('../services/transactionService', () => ({
   transactionService: {
     save: async (tx: Record<string, unknown>) => {
+      captured.order.push('save');
       captured.transactions.push(tx);
       return { ...tx, id: `tx_${captured.transactions.length}` };
     },
@@ -52,9 +60,20 @@ vi.mock('./customerStore', () => ({
     getState: () => ({
       customers: [],
       recalculateCustomer: async () => undefined,
-      addDebt: async () => ({ id: 'debt_1' }),
+      addDebt: async () => {
+        captured.order.push('debt');
+        return { id: 'debt_1' };
+      },
     }),
   },
+}));
+
+vi.mock('./settingsStore', () => ({
+  useSettingsStore: { getState: () => ({ currency: 'DZD', storeName: 'Shop' }) },
+}));
+
+vi.mock('./privacyStore', () => ({
+  usePrivacyStore: { getState: () => ({ isPrivacyActive: false }) },
 }));
 
 const shelf: PhoneModel = {
@@ -85,6 +104,12 @@ vi.mock('./inventoryStore', () => ({
       adjustStockBy: (productId: string, delta: number) => {
         captured.stockMoves.push({ productId, delta });
       },
+      adjustStockByAsync: async (productId: string, delta: number) => {
+        captured.order.push(`stock:${productId}:${delta}`);
+        captured.stockMoves.push({ productId, delta });
+        if (captured.failStock) throw new Error('stock write failed');
+        return { id: productId, stock: 10 } as PhoneModel;
+      },
     }),
   },
 }));
@@ -110,6 +135,8 @@ beforeEach(() => {
   });
   captured.transactions.length = 0;
   captured.stockMoves.length = 0;
+  captured.order.length = 0;
+  captured.failStock = false;
   emptyCart();
   (shelf as { price: number }).price = 300;
   (screen as { price: number }).price = 9000;
@@ -298,5 +325,57 @@ describe('the basket promise', () => {
     expect(heldBasketDiscountOf(items, { type: 'percent', value: 10 })).toBe(50);
     expect(heldBasketDiscountOf(items, 100)).toBe(100);
     expect(heldBasketDiscountOf(items, null)).toBe(0);
+  });
+});
+
+describe('partsCartStore checkout ordering', () => {
+  it('moves the shelf before the invoice exists', async () => {
+    cable(2);
+    usePartsCartStore.getState().addToCart(screen);
+    await usePartsCartStore.getState().checkout();
+
+    expect(captured.order).toEqual(['stock:part_cable:-2', 'stock:part_screen:-1', 'save']);
+  });
+
+  it('aborts before the write when a stock deduction cannot be made durable', async () => {
+    cable(2);
+    captured.failStock = true;
+
+    await expect(usePartsCartStore.getState().checkout()).rejects.toThrow('stock write failed');
+    expect(captured.order).toEqual(['stock:part_cable:-2']);
+    expect(captured.transactions).toHaveLength(0);
+  });
+
+  it('keeps the B2B order: debt first, then the shelf, then the invoice', async () => {
+    cable(1);
+    const customer: Customer = { id: 'c1', name: 'Shop A', phone: '0550000000', shopName: 'Shop A' } as Customer;
+
+    const result = await usePartsCartStore.getState().checkoutB2B({
+      customer,
+      settlementType: 'partial_payment',
+      paidAmount: 500,
+      paymentMethod: 'cash',
+      chargedAmount: 500,
+    });
+
+    expect(result).not.toBeNull();
+    expect(captured.order).toEqual(['debt', 'stock:part_cable:-1', 'save']);
+  });
+
+  it('a failed deduction in the B2B path also aborts before the invoice', async () => {
+    cable(1);
+    captured.failStock = true;
+
+    const customer: Customer = { id: 'c1', name: 'Shop A', phone: '0550000000', shopName: 'Shop A' } as Customer;
+    await expect(
+      usePartsCartStore.getState().checkoutB2B({
+        customer,
+        settlementType: 'paid_full',
+        paidAmount: 300,
+        paymentMethod: 'cash',
+        chargedAmount: 0,
+      })
+    ).rejects.toThrow('stock write failed');
+    expect(captured.transactions).toHaveLength(0);
   });
 });

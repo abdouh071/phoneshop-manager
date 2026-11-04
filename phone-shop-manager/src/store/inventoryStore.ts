@@ -38,6 +38,28 @@ const codesAlreadyInUse = (rows: readonly PhoneModel[]): Set<string> => {
   return taken;
 };
 
+/** The optimistic shelf update both adjustment actions share, so the UI moves instantly. */
+const applyLocalStockDelta = (
+  set: (fn: (state: InventoryState) => Partial<InventoryState>) => void,
+  id: string,
+  delta: number
+): void => {
+  set(state => ({
+    products: state.products.map(p => {
+      if (p.id !== id) return p;
+      const newStock = Math.max(0, p.stock + delta);
+      const stockStatus = computeStockStatus(newStock, p.lowStockThreshold);
+      return { ...p, stock: newStock, stockStatus };
+    }),
+    parts: state.parts.map(p => {
+      if (p.id !== id) return p;
+      const newStock = Math.max(0, p.stock + delta);
+      const stockStatus = computeStockStatus(newStock, p.lowStockThreshold);
+      return { ...p, stock: newStock, stockStatus };
+    }),
+  }));
+};
+
 interface InventoryState {
   products: PhoneModel[]; // Retail products (Server excludes repair_part from the beginning)
   parts: PhoneModel[];    // Repair parts (Server sends only repair_part from the beginning)
@@ -54,6 +76,13 @@ interface InventoryState {
   restockProduct: (id: string, quantityToAdd: number, opts?: { supplier?: string; note?: string; cost?: number }) => Promise<StockWriteResult>;
   writeOffStock: (id: string, quantity: number, reason: WriteOffReason, note?: string) => Promise<StockWriteResult>;
   adjustStockBy: (id: string, delta: number) => void;  // live adjustment (no async, no server call)
+  /**
+   * The awaited form of adjustStockBy: same optimistic update, but the promise settles
+   * only when the shelf change is durable (committed, or parked in the offline queue)
+   * and rejects when it is not. Checkouts that must not write an invoice ahead of the
+   * stock it consumes wait on this.
+   */
+  adjustStockByAsync: (id: string, delta: number) => Promise<PhoneModel>;
   addProduct: (product: Omit<PhoneModel, 'id'>) => Promise<void>;
   addProductsBulk: (products: Omit<PhoneModel, 'id'>[]) => Promise<void>;
   updateProduct: (id: string, updates: Partial<Omit<PhoneModel, 'id'>>) => Promise<ProductWriteOutcome>;
@@ -222,21 +251,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
 
   // Stock adjustment: updates local state instantly AND persists to Firebase.
   adjustStockBy: (id, delta) => {
-    // 1. Optimistic local update for instant UI feedback
-    set(state => ({
-      products: state.products.map(p => {
-        if (p.id !== id) return p;
-        const newStock = Math.max(0, p.stock + delta);
-        const stockStatus = computeStockStatus(newStock, p.lowStockThreshold);
-        return { ...p, stock: newStock, stockStatus };
-      }),
-      parts: state.parts.map(p => {
-        if (p.id !== id) return p;
-        const newStock = Math.max(0, p.stock + delta);
-        const stockStatus = computeStockStatus(newStock, p.lowStockThreshold);
-        return { ...p, stock: newStock, stockStatus };
-      }),
-    }));
+    applyLocalStockDelta(set, id, delta);
 
     // 2. Persist to Firebase so stock survives reload
     inventoryService.adjustStockAsync(id, delta)
@@ -248,6 +263,16 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
         }));
       })
       .catch(err => console.error(`Failed to persist stock adjustment for ${id}:`, err));
+  },
+
+  adjustStockByAsync: async (id, delta) => {
+    applyLocalStockDelta(set, id, delta);
+    const updated = await inventoryService.adjustStockAsync(id, delta);
+    set(state => ({
+      products: state.products.map(p => p.id === id ? updated : p),
+      parts: state.parts.map(p => p.id === id ? updated : p),
+    }));
+    return updated;
   },
 
   addProduct: async (product) => {

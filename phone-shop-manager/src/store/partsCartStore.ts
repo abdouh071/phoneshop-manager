@@ -512,20 +512,21 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         processedByName: actor?.name,
       };
 
+      // The shelf must move before the invoice exists: an invoice that survives a
+      // crash must never describe stock the till still counts on the shelf. The
+      // awaited form settles only when the delta is committed or parked in the
+      // offline queue, and its failure aborts the checkout before anything is billed.
+      await Promise.all(
+        itemsSnapshot.map(item =>
+          useInventoryStore.getState().adjustStockByAsync(item.product.id, -item.quantity)
+        )
+      );
+
       const saved = await transactionService.save(txData);
 
       // Authoritative update of customer statistics
       if (matchedCust) {
         customerStore.recalculateCustomer(matchedCust.id).catch(console.error);
-      }
-
-      // Immediate stock deduction in Inventory
-      try {
-        itemsSnapshot.forEach(item => {
-          useInventoryStore.getState().adjustStockBy(item.product.id, -item.quantity);
-        });
-      } catch (err) {
-        console.error('Failed to deduct parts stock:', err);
       }
 
       // Keep parts invoices isolated in partsCartStore
@@ -612,6 +613,14 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         }
       }
 
+      // The shelf must move before the invoice exists, and a stock write that cannot
+      // be made durable aborts the checkout before the invoice or the debt is billed.
+      await Promise.all(
+        itemsSnapshot.map(item =>
+          useInventoryStore.getState().adjustStockByAsync(item.product.id, -item.quantity)
+        )
+      );
+
       // 2. Build and save SaleTransaction
       const txData: Omit<SaleTransaction, 'id'> = {
         date: now,
@@ -648,21 +657,12 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         console.error('Failed to update customer purchase stats:', err);
       }
 
-      // 4. Immediate Authoritative Stock Deduction in Inventory
-      try {
-        itemsSnapshot.forEach(item => {
-          useInventoryStore.getState().adjustStockBy(item.product.id, -item.quantity);
-        });
-      } catch (err) {
-        console.error('Failed to deduct parts stock:', err);
-      }
-
-      // 5. Keep parts invoices isolated in partsCartStore
+      // 4. Keep parts invoices isolated in partsCartStore
       set(s => ({
         invoices: [saved, ...s.invoices],
       }));
 
-      // 6. Reset parts active cart
+      // 5. Reset parts active cart
       set({
         items: [],
         customerName: '',
@@ -674,7 +674,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
 
       saveLocalActiveCart([], '', '', null);
 
-      // 7. Double Audit Logging
+      // 6. Double Audit Logging
       const itemsSummary = itemsSnapshot.map(i => `${i.quantity}x ${i.product.name} ${i.product.model}`).join(', ');
       const settlementLabel =
         settlementType === 'paid_full'
