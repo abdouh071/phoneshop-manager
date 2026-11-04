@@ -3,6 +3,9 @@ import { settingsService } from '../services/settingsService';
 import type { StoreSettings, ColorThemeKey } from '../services/settingsService';
 import { errorMessage } from '../utils/errorUtils';
 
+/** The fallback a technician earns when no rate is configured anywhere. */
+const DEFAULT_TECHNICIAN_PERCENT = 50;
+
 interface SettingsState extends StoreSettings {
   colorTheme: ColorThemeKey;
   isLoading: boolean;
@@ -29,7 +32,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   trackingBaseUrl: '',
   storePhone: '',
   storeAddress: '',
-  technicianProfitPercentage: 50, // default fallback to 50%
+  technicianProfitPercentage: DEFAULT_TECHNICIAN_PERCENT, // default fallback
   technicianRates: {},
   weekStartDay: 0, // 0 = Sunday
   receiptPaperWidth: '80mm',
@@ -46,7 +49,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       }
     }
     const def = get().technicianProfitPercentage;
-    return (def !== undefined && def !== null && !isNaN(def)) ? def : 50;
+    return (def !== undefined && def !== null && !isNaN(def)) ? def : DEFAULT_TECHNICIAN_PERCENT;
   },
 
   setTechnicianRate: async (techName: string, rate: number) => {
@@ -69,7 +72,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         ...remoteSettings, 
         colorTheme: remoteSettings.colorTheme || 'default',
         technicianRates: remoteSettings.technicianRates || {},
-        technicianProfitPercentage: remoteSettings.technicianProfitPercentage ?? 50,
+        technicianProfitPercentage: remoteSettings.technicianProfitPercentage ?? DEFAULT_TECHNICIAN_PERCENT,
         isLoading: false, 
         isInitialized: true 
       });
@@ -85,7 +88,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         ...remoteSettings, 
         colorTheme: remoteSettings.colorTheme || 'default',
         technicianRates: remoteSettings.technicianRates || {},
-        technicianProfitPercentage: remoteSettings.technicianProfitPercentage ?? 50,
+        technicianProfitPercentage: remoteSettings.technicianProfitPercentage ?? DEFAULT_TECHNICIAN_PERCENT,
         isLoading: false, 
         isInitialized: true 
       });
