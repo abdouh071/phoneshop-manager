@@ -25,6 +25,7 @@ import {
   isOwnerKey,
   clampStock,
   deriveStockStatus,
+  isSettleAlreadyRecorded,
   type QueueAction,
 } from './offlineQueuePolicy.ts';
 
@@ -254,4 +255,37 @@ test('two sales checked out in the same millisecond still get different keys', (
   const keys = new Set(Array.from({ length: 50 }, () => newIdempotencyKey('sale')));
   assert.equal(keys.size, 50);
   for (const key of keys) assert.match(key, /^sale_[a-z0-9]+_[a-z0-9]+$/);
+});
+
+test('a settle that already landed on the ticket is recognised, and never re-runs its money', () => {
+  // First attempt on an open ticket: the settlement must run.
+  assert.equal(isSettleAlreadyRecorded({ status: 'in_progress' }, 9000, 0), false);
+
+  // Retry after everything landed: the debt row is linked, so nothing may re-run.
+  assert.equal(
+    isSettleAlreadyRecorded({ status: 'completed', paidAmount: 9000, debtEntryId: 'debt_1' }, 9000, 0),
+    true
+  );
+
+  // Paid in full: no debt row exists to link, and the settlement still must not re-run.
+  assert.equal(
+    isSettleAlreadyRecorded({ status: 'completed', paidAmount: 9000, debtEntryId: null }, 9000, 0),
+    true
+  );
+});
+
+test('a settle whose ticket write landed but whose debt write did not still has work to do', () => {
+  // The ticket says completed and paid, but money is owed and no debt row is linked:
+  // the retry must register the debt instead of being treated as a finished settle.
+  assert.equal(
+    isSettleAlreadyRecorded({ status: 'completed', paidAmount: 2000, debtEntryId: null }, 2000, 5000),
+    false
+  );
+});
+
+test('a settle with different figures is a new settlement, not a retry', () => {
+  assert.equal(
+    isSettleAlreadyRecorded({ status: 'completed', paidAmount: 2000, debtEntryId: 'debt_1' }, 9000, 0),
+    false
+  );
 });

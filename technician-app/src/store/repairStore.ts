@@ -19,6 +19,7 @@ import { offlineSyncService } from '../services/offlineSyncService';
 import { notificationService } from '../services/notificationService';
 import { applyPartsDelta } from '../services/stockService';
 import { allocateTicketNumber } from '../services/ticketCounter';
+import { appendHistory, isSettleAlreadyRecorded, type HistoryEntryLike } from '../services/offlineQueuePolicy';
 import { createRefCountedSubscription, type RefCountedSubscription } from '../utils/liveSubscription';
 import type { RepairTicket, RepairStatus, RepairStatusHistoryEntry } from '../types';
 
@@ -306,8 +307,8 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       const actorId = currentUser?.id || 'technician-app';
 
       const localTicket = get().tickets.find(t => t.id === ticketId);
-      const ticketSnap = localTicket ? null : await getDoc(docRef);
-      const ticket = localTicket || (ticketSnap?.data() as RepairTicket);
+      const ticketSnap = await getDoc(docRef);
+      const ticket = (ticketSnap.exists() ? ticketSnap.data() : localTicket) as RepairTicket | undefined;
 
       if (!ticket) {
         throw new Error('Ticket not found');
@@ -321,7 +322,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       const paymentStatus: RepairTicket['paymentStatus'] =
         remainingDebt <= 0 || isZeroPrice ? 'paid' : effectiveTotalPaid > 0 ? 'partial' : 'debt';
 
-      // 1. Resolve customer
+      // 1. Resolve customer before anything is written.
       const targetPhone = customerPhone || ticket.customerPhone || '';
       const targetName = customerName || ticket.customerName || 'Client';
       let customerId = ticket.customerId;
@@ -335,65 +336,81 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         }
       }
 
-      // 2. Create debt record in customer_debts if remaining balance > 0
-      let debtEntryId: string | undefined = undefined;
-      if (remainingDebt > 0 && customerId) {
-        try {
-          debtEntryId = await customerService.createDebtRecord({
-            customerId,
-            customerName: targetName,
-            customerPhone: targetPhone,
-            ticketNumber: ticket.ticketNumber,
-            deviceDescription: `${ticket.deviceBrand} ${ticket.deviceModel}`,
-            totalAmount: finalPrice,
-            amountPaid: effectiveTotalPaid,
-            paymentMethod,
-            actorName,
-            notes: settlementNotes,
-          });
-        } catch (debtErr) {
-          console.error('Failed to register debt:', debtErr);
+      // A retried settle must not count the money twice. When the document already
+      // carries this exact settlement and its debt row is linked (or there is none to
+      // link), the side-effects below already ran on the first attempt — re-running
+      // them would add a second debt row and spend the money a second time.
+      const alreadySettled = isSettleAlreadyRecorded(ticket, effectiveTotalPaid, remainingDebt);
+
+      if (!alreadySettled) {
+        // 2. Write the ticket FIRST. A settle against an id that only exists on this
+        // phone (`offline_tkt_…`) throws here, and a throw before any money moved is a
+        // clean retry once the ticket uploads. The old order wrote the debt row and the
+        // customer spending before this update, so every retry double-counted them.
+        const historyEntry: RepairStatusHistoryEntry = {
+          status: 'completed',
+          changedById: actorId,
+          changedByName: actorName,
+          at: now,
+          timestamp: now,
+          notes: settlementNotes || `Handed over to customer. Paid: ${effectiveTotalPaid} DA.`
+        };
+
+        const updates: any = {
+          status: 'completed',
+          actualCost: finalPrice,
+          paidAmount: effectiveTotalPaid,
+          handoverAmountPaid: handoverAmountPaid || 0,
+          paymentStatus,
+          completedAt: now,
+          customerId: customerId || null,
+          settlementNotes: settlementNotes || null,
+          updatedAt: now,
+          statusHistory: appendHistory(
+            (ticket.statusHistory || []) as unknown as HistoryEntryLike[],
+            historyEntry as unknown as HistoryEntryLike
+          ),
+        };
+
+        // Preserve existing assigned technician!
+        if (ticket.assignedTechnician) {
+          updates.assignedTechnician = ticket.assignedTechnician;
+        }
+
+        await updateDoc(docRef, updates);
+
+        // 3. Debt row, idempotent by ticket number: a crash between the ticket write
+        // and this write must not leave a second row behind on the retry. A debt the
+        // retry cannot register is a failure, not a silent drop — the ticket already
+        // says the money is owed.
+        if (remainingDebt > 0 && customerId) {
+          try {
+            const debtEntryId = await customerService.createDebtRecord({
+              customerId,
+              customerName: targetName,
+              customerPhone: targetPhone,
+              ticketNumber: ticket.ticketNumber,
+              deviceDescription: `${ticket.deviceBrand} ${ticket.deviceModel}`,
+              totalAmount: finalPrice,
+              amountPaid: effectiveTotalPaid,
+              paymentMethod,
+              actorName,
+              notes: settlementNotes,
+            });
+            await updateDoc(docRef, { debtEntryId });
+          } catch (debtErr) {
+            console.error('Failed to register debt:', debtErr);
+            throw debtErr;
+          }
+        }
+
+        // 4. Update customer total spending
+        if (customerId) {
+          await customerService.recordCustomerSpending(customerId, finalPrice);
         }
       }
 
-      // 3. Update customer total spending
-      if (customerId) {
-        await customerService.recordCustomerSpending(customerId, finalPrice);
-      }
-
-      // 4. Append status history
-      const historyEntry: RepairStatusHistoryEntry = {
-        status: 'completed',
-        changedById: actorId,
-        changedByName: actorName,
-        at: now,
-        timestamp: now,
-        notes: settlementNotes || `Handed over to customer. Paid: ${effectiveTotalPaid} DA.`
-      };
-
-      // 5. Update repair document with full financial settlement
-      const updates: any = {
-        status: 'completed',
-        actualCost: finalPrice,
-        paidAmount: effectiveTotalPaid,
-        handoverAmountPaid: handoverAmountPaid || 0,
-        paymentStatus,
-        completedAt: now,
-        debtEntryId: debtEntryId || null,
-        customerId: customerId || null,
-        settlementNotes: settlementNotes || null,
-        updatedAt: now,
-        statusHistory: [...(ticket.statusHistory || []), historyEntry],
-      };
-
-      // Preserve existing assigned technician!
-      if (ticket.assignedTechnician) {
-        updates.assignedTechnician = ticket.assignedTechnician;
-      }
-
-      await updateDoc(docRef, updates);
-
-      // 6. Activity log
+      // 5. Activity log
       const debtDesc = remainingDebt > 0 ? ` Paid: ${effectiveTotalPaid} DA. Debt: ${remainingDebt} DA.` : ` Paid in full: ${effectiveTotalPaid} DA.`;
       await activityLogService.log(
         'repairs',

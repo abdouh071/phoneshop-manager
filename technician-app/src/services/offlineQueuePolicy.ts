@@ -360,6 +360,23 @@ export const clampStock = (value: unknown): number => {
   return Math.floor(n);
 };
 
+/**
+ * A settle is retried by re-tapping the same numbers after a failure, and the ticket
+ * document is the anchor for whether its money side-effects already ran. Once the
+ * document carries this exact settlement, re-running them would open a second debt
+ * row and spend the money twice. The debt link must also be present whenever money
+ * is owed: the ticket write can land while the debt write is still pending, and that
+ * retry still has work to do.
+ */
+export const isSettleAlreadyRecorded = (
+  ticket: { status?: unknown; paidAmount?: unknown; debtEntryId?: unknown },
+  effectiveTotalPaid: number,
+  remainingDebt: number
+): boolean =>
+  ticket.status === 'completed' &&
+  ticket.paidAmount === effectiveTotalPaid &&
+  (!!ticket.debtEntryId || remainingDebt === 0);
+
 export const deriveStockStatus = (stock: number, thresholdRaw: unknown): 'out_of_stock' | 'low_stock' | 'in_stock' => {
   const threshold = clampStock(thresholdRaw);
   if (stock <= 0) return 'out_of_stock';

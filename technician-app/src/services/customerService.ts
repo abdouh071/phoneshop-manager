@@ -154,6 +154,20 @@ export const customerService = {
     actorName?: string;
     notes?: string;
   }): Promise<string> => {
+    // One debt row per ticket: a settle that is retried after a crash between the
+    // ticket write and this write must adopt the row the first attempt left behind
+    // instead of opening the account a second time.
+    if (params.ticketNumber) {
+      try {
+        const existingSnap = await getDocs(
+          query(collection(db, 'customer_debts'), where('ticketNumber', '==', params.ticketNumber), limit(1))
+        );
+        if (!existingSnap.empty) return existingSnap.docs[0].id;
+      } catch (lookupErr) {
+        console.warn('[CustomerService] Debt dedupe lookup failed, creating a row anyway:', lookupErr);
+      }
+    }
+
     const now = new Date().toISOString();
     const remainingBalance = Math.max(0, params.totalAmount - params.amountPaid);
     const status =
