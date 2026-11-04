@@ -52,6 +52,8 @@ export interface Customer {
   accountType?: 'retail' | 'shop_repairer' | 'b2b';
   shopName?: string;
   creditLimit?: number;
+  /** Avoir: money the shop holds for the customer, the same field the counter uses. */
+  storeCredit?: number;
   totalPurchases: number;
   totalSpent: number;
   totalDebt?: number;

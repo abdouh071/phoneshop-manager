@@ -383,6 +383,16 @@ export const planSaleEdit = (
 };
 
 /**
+ * The difference between the over-collection an account held before an edit and the
+ * one it holds after: what a correction must move into (or back out of) the
+ * customer's Avoir. The same arithmetic the counter's `editTransaction` uses.
+ * Positive means the shop holds more of the customer's money now; negative means an
+ * earlier Avoir is covered by the invoice again.
+ */
+export const surplusShiftOf = (paid: number, newTotal: number, oldTotal: number): number =>
+  Math.max(0, paid - newTotal) - Math.max(0, paid - oldTotal);
+
+/**
  * The changes reduced to what a remote admin reads on their own screen before they
  * answer: which line shrank, which price moved, which product was put on the
  * invoice. The screen owns the wording, so this stays numbers and product names

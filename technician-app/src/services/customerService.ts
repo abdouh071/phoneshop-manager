@@ -60,7 +60,6 @@ export const customerService = {
     try {
       const { id: _drop, ...data } = local;
       const docRef = await addDoc(collection(db, 'customers'), data);
-      const resolved: Customer = { ...local, id: docRef.id };
       await customerService.cacheCustomers(replaceCachedCustomer(cached, offlineId, docRef.id));
       return docRef.id;
     } catch (err) {
@@ -166,6 +165,47 @@ export const customerService = {
       await customerService.cacheCustomers([offlineCustomer, ...cached]);
       return offlineCustomer;
     }
+  },
+
+  /**
+   * Move the customer's Avoir by a signed amount, never below zero.
+   *
+   * The same `storeCredit` field the counter's Avoir lives in, so money an invoice
+   * edit keeps here shows up on the counter's screen too. The note is written as an
+   * activity entry with the same action types the counter issues, so a balance that
+   * moved always says which receipt moved it.
+   */
+  shiftStoreCredit: async (
+    customerId: string,
+    delta: number,
+    note: string,
+    actorName?: string
+  ): Promise<number> => {
+    const ref = doc(db, 'customers', customerId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error('Customer not found');
+    const cust = snap.data() as Customer;
+    const current = Math.max(0, Number(cust.storeCredit) || 0);
+    const next = Math.max(0, Math.round((current + delta) * 100) / 100);
+
+    await updateDoc(ref, { storeCredit: next });
+
+    const issued = delta >= 0;
+    await addDoc(collection(db, 'customer_activity_logs'), {
+      customerId,
+      customerName: cust.name || 'Customer',
+      actionType: issued ? 'store_credit_issued' : 'store_credit_used',
+      actionTitle: issued ? 'Store Credit (Avoir) Issued' : 'Store Credit (Avoir) Redeemed',
+      actionDescription: issued
+        ? `Issued ${Math.abs(delta)} DA Store Credit. New balance: ${next} DA (${note}) by ${actorName || 'Staff'}.`
+        : `Redeemed ${Math.abs(delta)} DA Store Credit. Remaining balance: ${next} DA (${note}) by ${actorName || 'Staff'}.`,
+      actorName: actorName || 'Staff',
+      metadata: { amount: Math.abs(delta), newCredit: next, note },
+      date: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    }).catch(err => console.warn('[CustomerService] Avoir activity log could not be written:', err));
+
+    return next;
   },
 
   /**

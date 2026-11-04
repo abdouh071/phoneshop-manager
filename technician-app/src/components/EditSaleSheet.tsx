@@ -445,6 +445,15 @@ export const EditSaleSheet = ({
             })
           : t('salesHistory.editSavedBody', 'Transaction {{id}} has been modified.', { id: transaction.id })) +
           difference +
+          // Money the customer handed over for an invoice that has just been priced
+          // below what he paid does not leave the drawer — the counter's rule keeps it
+          // on his profile. Without this line the phone has just told the till to go
+          // looking for a refund nobody owes in cash.
+          (outcome.avoirHeld > 0
+            ? t('salesHistory.editSavedAvoir', ' Nothing is paid out: {{amount}} DA is kept as Avoir on the customer account.', {
+                amount: amount(outcome.avoirHeld),
+              })
+            : '') +
           // The invoice says the customer owes this; his account still says something
           // else, and only a person can close the gap. Saying nothing would let the
           // till believe the correction was finished.

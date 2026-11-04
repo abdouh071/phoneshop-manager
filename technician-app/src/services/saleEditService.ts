@@ -22,9 +22,10 @@
 import { addDoc, collection, doc, getDoc, getDocs, limit, query, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
-import type { SaleEditPlan } from '../utils/saleEdit';
+import { surplusShiftOf, type SaleEditPlan } from '../utils/saleEdit';
 import type { SaleTransaction } from '../types';
 import { activityLogService } from './activityLogService';
+import { customerService } from './customerService';
 import { notificationService } from './notificationService';
 import { offlineSyncService } from './offlineSyncService';
 import { applyStockLines, readStockLevels, type StockLine } from './stockService';
@@ -54,6 +55,12 @@ export interface SaleEditOutcome {
    * balance. The reports and the account then disagree until someone closes it.
    */
   accountUnreconciled: number;
+  /**
+   * What this correction absorbed from money the customer had already handed over and
+   * the counter therefore holds for him as Avoir. The invoice says it owes him nothing
+   * back; only this figure says where the difference went.
+   */
+  avoirHeld: number;
 }
 
 /**
@@ -372,6 +379,7 @@ export const applySaleEdit = async (
 
   let debtSynced = false;
   let accountUnreconciled = 0;
+  let avoirHeld = 0;
   // What the corrected invoice itself puts on the account.
   //
   // A balance standing there with no entry reached is a second document telling a
@@ -386,6 +394,37 @@ export const applySaleEdit = async (
     const debt = await findLinkedDebt(tx);
     if (debt) {
       debtSynced = await syncLinkedDebt(tx, plan, debt);
+
+      // Money the customer already handed over is a fact; correcting the invoice
+      // cannot un-pay it. What the account held before this edit and what it holds
+      // after is the difference between the two over-collections, and the counter's
+      // rule for absorbed money — the one a void already uses — is to keep it as
+      // Avoir on the profile rather than let the correction quietly eat it. The
+      // difference is what keeps a second correction of the same invoice from
+      // granting the same money again.
+      const paid = Number(debt.amountPaid) || 0;
+      const surplusShift = surplusShiftOf(paid, plan.total, tx.total || 0);
+      const creditHolder = tx.customerId || debt.customerId;
+      const receipt = tx.invoiceNumber || tx.id.slice(0, 8);
+
+      if (surplusShift !== 0 && creditHolder) {
+        try {
+          await customerService.shiftStoreCredit(
+            creditHolder,
+            surplusShift,
+            surplusShift > 0
+              ? `Over-collection on corrected Receipt #${receipt} held as Avoir`
+              : `Avoir released by corrected Receipt #${receipt}`,
+            user?.name || 'Staff'
+          );
+          avoirHeld = Math.max(0, surplusShift);
+        } catch (err) {
+          // The correction itself stands; the Avoir that could not be written is
+          // surfaced to the caller rather than silently dropped.
+          console.warn('[SaleEdit] Avoir could not be written:', err);
+          accountUnreconciled = Math.max(accountUnreconciled, Math.abs(surplusShift));
+        }
+      }
     } else {
       accountUnreconciled = chargedOnAccount;
       // No entry involved means the whole invoice was handed over, so its profile
@@ -431,5 +470,5 @@ export const applySaleEdit = async (
     }).catch(err => console.warn('[SaleEdit] Customer timeline entry could not be written:', err));
   }
 
-  return { total: plan.total, status: plan.status, stockFailures, debtSynced, accountUnreconciled };
+  return { total: plan.total, status: plan.status, stockFailures, debtSynced, accountUnreconciled, avoirHeld };
 };

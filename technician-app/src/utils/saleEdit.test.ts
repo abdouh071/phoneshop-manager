@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PhoneModel, SaleTransaction } from '../types/index.ts';
-import { diffSaleEdit, planSaleEdit, rescalePayments } from './saleEdit.ts';
+import { diffSaleEdit, planSaleEdit, rescalePayments, surplusShiftOf } from './saleEdit.ts';
 
 const makeProduct = (over: Partial<PhoneModel> = {}): PhoneModel => ({
   id: over.id ?? 'p1',
@@ -511,9 +511,29 @@ test('a receipt that would come out owed is reported, not floored to nothing', (
 
   // The sale line is gone and the trade-in stands: the shop would owe 5 000 DA. The
   // planner says so — `applySaleEdit` refuses to write it, because only the counter
-  // decides how a surplus leaves.
+  // decides how a surplus like that leaves the shop.
   assert.equal(plan.total, -5000);
   assert.equal(plan.surplusOwedToCustomer, true);
+});
+
+test('a correction that swallows money the account already held puts it in the Avoir', () => {
+  // 8 000 DA was handed over against a 20 000 DA invoice; the correction knocks the
+  // invoice to 5 000, so 3 000 of what he gave is now more than the receipt is worth.
+  assert.equal(surplusShiftOf(8000, 5000, 20000), 3000);
+});
+
+test('a correction that lifts the invoice back over what was paid hands the Avoir back', () => {
+  // The earlier correction granted 3 000 DA of Avoir; this one prices the receipt
+  // above what was handed over, so that credit is covered again and must come off.
+  assert.equal(surplusShiftOf(8000, 9000, 5000), -3000);
+});
+
+test('a correction of a fully paid invoice moves no Avoir', () => {
+  // Nothing was absorbed before and nothing is absorbed now — a till that re-priced
+  // an invoice under its own payments would otherwise grant the surplus every time.
+  assert.equal(surplusShiftOf(8000, 8000, 8000), 0);
+  assert.equal(surplusShiftOf(8000, 12000, 8000), 0);
+  assert.equal(surplusShiftOf(0, 5000, 20000), 0);
 });
 
 test('a trade-in of more units than were sold is not read as a shrinking sale', () => {

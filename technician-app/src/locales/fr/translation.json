@@ -544,6 +544,7 @@
     "editSavedQueued": "La transaction {{id}} a été modifiée. {{count}} mouvement de stock n'a pas pu être enregistré et est en file pour la prochaine synchronisation.",
     "editSavedRefund": " Remboursement dû : {{amount}} DA",
     "editSavedExtra": " Encaissé en plus : {{amount}} DA",
+    "editSavedAvoir": " Rien n'est remboursé : {{amount}} DA est conservé en Avoir sur le compte client.",
     "editSavedUnreconciled": " Son solde de {{amount}} DA reste ouvert sur le compte client — à solder depuis l'onglet Clients.",
     "editFailedTitle": "Échec de la modification",
     "editBlockedTitle": "Ces unités ne sont pas en boutique",

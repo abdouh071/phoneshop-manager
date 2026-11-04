@@ -544,6 +544,7 @@
     "editSavedQueued": "تم تعديل العملية {{id}}. تعذر كتابة {{count}} تغيير في المخزون، وهو في قائمة الانتظار للمزامنة القادمة.",
     "editSavedRefund": " المستحق للاسترداد: {{amount}} دج",
     "editSavedExtra": " المحصّل إضافيًا: {{amount}} دج",
+    "editSavedAvoir": " لا يُدفع شيء: {{amount}} دج تُحفَظ كرصيد على حساب الزبون (Avoir).",
     "editSavedUnreconciled": " رصيده البالغ {{amount}} دج ما زال مفتوحًا في حساب العميل — يجب تصفيته من تبويب العملاء.",
     "editFailedTitle": "فشل التعديل",
     "editBlockedTitle": "هذه الوحدات غير موجودة في المحل",
