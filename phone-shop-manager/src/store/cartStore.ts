@@ -985,6 +985,29 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     if (!tx) return;
 
+    // The till's own arithmetic over the corrected basket: a line the customer handed
+    // back comes off the invoice instead of being added to it, and the discount is
+    // measured on what was bought — the two rules `checkoutCart` already applies to
+    // the same exchange rung at the counter.
+    const {
+      purchases,
+      returns,
+      discountAmount: discountAmt,
+      total,
+    } = cartTotalsOf(newItems, tx.discount || null);
+    const subtotal = purchases - returns;
+
+    // A basket whose returns outweigh its purchases is an exchange surplus, and the
+    // till is the only place that gets to ask where that money goes — back as cash,
+    // onto the account as Avoir, or off what he owes. Flooring it here would eat the
+    // difference in silence, so nothing is written and the edit is refused.
+    if (total < 0) {
+      throw new Error(
+        `This correction leaves the receipt owing ${formatCurrency(Math.abs(total))} to the customer. ` +
+          'Settle that exchange at the till, where the shop can record how it was paid back.'
+      );
+    }
+
     // Stock follows the diff, and a line the invoice never carried is a diff of its
     // whole quantity. The signs and the shelf check are `planSaleEditStock`'s.
     const { deltas, shortages } = planSaleEditStock(
@@ -1011,15 +1034,6 @@ export const useCartStore = create<CartState>((set, get) => ({
       await Promise.all(stockPromises).catch(console.error);
       await useInventoryStore.getState().fetchProducts().catch(console.error);
     }
-
-    const subtotal = newItems.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-    // The same rule as the two carts: dinars to the nearest whole one, never more
-    // than the basket. A corrected invoice is reprinted, and a percentage
-    // re-expanded by the printer without rounding leaves it not footing itself.
-    const discountAmt = tx.discount
-      ? discountAmountOf(subtotal, { mode: tx.discount.type, value: tx.discount.value })
-      : 0;
-    const total = Math.max(0, subtotal - discountAmt);
 
     let status: NonNullable<SaleTransaction['status']> = tx.status || 'completed';
     if (newItems.length === 0 || total === 0) {

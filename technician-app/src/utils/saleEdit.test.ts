@@ -428,3 +428,106 @@ test('a line discounted on an invoice that also carries a basket promise keeps b
   assert.equal(plan.subtotal, 8800);
   assert.equal(plan.total, 8600);
 });
+
+/**
+ * The same two directions of money the counter sees. The phone used to add every line
+ * up as a purchase, so a trade-in was billed a second time and the payment lines were
+ * rescaled to the inflated figure; and it floored the total at zero, which ate an
+ * exchange surplus and flipped the sale to refunded. Both terminals now run one
+ * arithmetic: purchases, less what came back, less the concession measured on the
+ * purchases.
+ */
+const tradeIn = (price: number): PhoneModel =>
+  makeProduct({ id: 'p9', name: 'Old phone in trade', price });
+
+test('a line the customer handed back comes off the invoice instead of onto it', () => {
+  const tx = makeTx({
+    items: [line(makeProduct({ price: 20000 }), 1), returnLine(tradeIn(5000), 1)],
+    subtotal: 15000,
+    total: 15000,
+  });
+  const plan = planSaleEdit(tx, {});
+
+  assert.equal(plan.purchases, 20000);
+  assert.equal(plan.returns, 5000);
+  assert.equal(plan.subtotal, 15000);
+  // The sum of every line read as a purchase would have been 25 000 DA.
+  assert.equal(plan.total, 15000);
+  assert.equal(plan.status, 'completed');
+});
+
+test('the discount is measured on what was bought, not on the net of a return', () => {
+  const tx = makeTx({
+    items: [line(makeProduct({ price: 20000 }), 1), returnLine(tradeIn(5000), 1)],
+    discount: { type: 'percent', value: 10 },
+    subtotal: 15000,
+    total: 13000,
+  });
+  const plan = planSaleEdit(tx, {});
+
+  // Ten per cent of the 20 000 DA he took, not of the 15 000 DA left after the trade.
+  assert.equal(plan.discountAmount, 2000);
+  assert.equal(plan.total, 13000);
+});
+
+test('a taken-back line is priced at what the counter agreed to pay for it', () => {
+  const tx = makeTx({
+    items: [
+      line(makeProduct({ price: 20000 }), 1),
+      // The shelf still asks 5 000 for the old phone; the counter paid him 3 000.
+      { ...returnLine(tradeIn(5000), 1), customReturnPrice: 3000 },
+    ],
+    subtotal: 17000,
+    total: 17000,
+  });
+  const plan = planSaleEdit(tx, {});
+
+  assert.equal(plan.returns, 3000);
+  assert.equal(plan.total, 17000);
+});
+
+test('a corrected price on a trade-in moves the number the basket is priced from', () => {
+  const tx = makeTx({
+    items: [line(makeProduct({ price: 20000 }), 1), returnLine(tradeIn(5000), 1)],
+    subtotal: 15000,
+    total: 15000,
+  });
+  const plan = planSaleEdit(tx, { p9: { quantity: 1, unitPrice: 3500 } });
+
+  const lineBack = plan.items.find(item => item.isReturn);
+  assert.equal(lineBack?.customReturnPrice, 3500);
+  assert.equal(lineBack?.product.price, 3500);
+  assert.equal(lineBack?.unitPrice, 3500);
+  assert.equal(plan.total, 16500);
+});
+
+test('a receipt that would come out owed is reported, not floored to nothing', () => {
+  const tx = makeTx({
+    items: [line(makeProduct({ price: 20000 }), 1), returnLine(tradeIn(5000), 1)],
+    subtotal: 15000,
+    total: 15000,
+  });
+  const plan = planSaleEdit(tx, { p1: { quantity: 0, unitPrice: 20000 } });
+
+  // The sale line is gone and the trade-in stands: the shop would owe 5 000 DA. The
+  // planner says so — `applySaleEdit` refuses to write it, because only the counter
+  // decides how a surplus leaves.
+  assert.equal(plan.total, -5000);
+  assert.equal(plan.surplusOwedToCustomer, true);
+});
+
+test('a trade-in of more units than were sold is not read as a shrinking sale', () => {
+  const tx = makeTx({
+    items: [line(makeProduct({ price: 20000 }), 1), returnLine(tradeIn(5000), 2)],
+    subtotal: 10000,
+    total: 10000,
+  });
+  const plan = planSaleEdit(tx, {});
+
+  // Nothing moved, yet measuring the rows against each other by product id alone made
+  // the sale look short of the units it sold, and marked an untouched invoice
+  // partially refunded.
+  assert.equal(plan.total, 10000);
+  assert.equal(plan.status, 'completed');
+  assert.equal(plan.hasChanges, false);
+});

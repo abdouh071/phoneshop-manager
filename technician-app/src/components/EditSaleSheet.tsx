@@ -58,6 +58,8 @@ type EditRow = {
   originalQty: number;
   originalUnit: number;
   added: boolean;
+  /** A line the customer handed over rather than bought: its money comes off. */
+  isReturn: boolean;
 };
 
 /** A runaway tap should not be able to write a hundred-unit invoice. */
@@ -162,6 +164,7 @@ export const EditSaleSheet = ({
       originalQty: wholeUnits(item.quantity),
       originalUnit: soldUnitPrice(item),
       added: false,
+      isReturn: Boolean(item.isReturn),
     }));
     const fresh = addedIds.map(id => {
       const product = addedProducts[id];
@@ -171,6 +174,7 @@ export const EditSaleSheet = ({
         originalQty: 0,
         originalUnit: Math.max(0, Number(product?.price) || 0),
         added: true,
+        isReturn: false,
       };
     });
     return [...sold, ...fresh];
@@ -388,6 +392,17 @@ export const EditSaleSheet = ({
 
   const commit = async () => {
     if (!transaction || !plan || !plan.hasChanges || isSaving) return;
+    // Goods the customer handed back outweighing the basket is a surplus, and only
+    // the counter settles one — so nothing here is written, shelf included.
+    if (plan.surplusOwedToCustomer) {
+      Alert.alert(
+        t('salesHistory.editSurplusTitle', 'This correction leaves the receipt owing the customer'),
+        t('salesHistory.editSurplusBody', '{{amount}} DA more is coming back than this invoice holds. Settle it at the counter, where the shop records whether it went back as cash, onto his account, or off what he owes.', {
+          amount: amount(Math.abs(plan.total)),
+        })
+      );
+      return;
+    }
     setIsSaving(true);
     try {
       // The shelf may have emptied since the sheet opened — another till sold the
@@ -573,14 +588,19 @@ export const EditSaleSheet = ({
               const stepLabel = row.added ? String(quantity) : `${quantity} / ${originalQty}`;
 
               return (
-                <View key={pid || `row-${index}`} style={styles.line}>
+                <View
+                  key={pid ? `${pid}::${row.isReturn ? 'return' : 'sale'}-${index}` : `row-${index}`}
+                  style={styles.line}
+                >
                   <View style={styles.lineHead}>
                     <View style={styles.lineHeadText}>
                       <Text style={styles.lineName} numberOfLines={1}>
                         {name}
                       </Text>
                       <Text style={styles.lineSub} numberOfLines={1}>
-                        {row.added
+                        {row.isReturn
+                          ? t('salesHistory.editLineReturn', 'Taken back · comes off this invoice')
+                          : row.added
                           ? typeof onShelf === 'number'
                             ? t('salesHistory.editLineNewShelf', 'New line · {{count}} on the shelf', {
                                 count: onShelf,
@@ -602,7 +622,10 @@ export const EditSaleSheet = ({
                                 })}
                       </Text>
                     </View>
-                    <Text style={styles.lineTotal}>{amount(unitPrice * quantity)} DA</Text>
+                    <Text style={[styles.lineTotal, row.isReturn && styles.summaryDanger]}>
+                      {row.isReturn ? '-' : ''}
+                      {amount(unitPrice * quantity)} DA
+                    </Text>
                   </View>
 
                   {!pid && (
@@ -757,6 +780,17 @@ export const EditSaleSheet = ({
                 value={`${amount(transaction.total)} DA`}
               />
               <SummaryRow
+                label={t('salesHistory.editPurchases', 'Bought on this receipt')}
+                value={`${amount(plan.purchases)} DA`}
+              />
+              {plan.returns > 0 && (
+                <SummaryRow
+                  label={t('salesHistory.editReturns', 'Taken back from the customer')}
+                  value={`-${amount(plan.returns)} DA`}
+                  tone="danger"
+                />
+              )}
+              <SummaryRow
                 label={t('salesHistory.editNewSubtotal', 'New Subtotal')}
                 value={`${amount(plan.subtotal)} DA`}
               />
@@ -779,6 +813,14 @@ export const EditSaleSheet = ({
                 value={`${amount(plan.total)} DA`}
                 strong
               />
+              {plan.surplusOwedToCustomer && (
+                <Text style={styles.surplusNote}>
+                  {t(
+                    'salesHistory.editSurplusNote',
+                    'This cannot be saved — the receipt would leave the shop owing the customer. Bring the lines level, or void the sale and ring the exchange at the counter.'
+                  )}
+                </Text>
+              )}
               {plan.refundDue > 0 && (
                 <SummaryRow
                   label={t('salesHistory.editRefundDue', 'Refund Due to Client')}
@@ -821,7 +863,7 @@ export const EditSaleSheet = ({
             <Button
               mode="contained"
               onPress={handleSave}
-              disabled={!plan.hasChanges || isSaving}
+              disabled={!plan.hasChanges || isSaving || plan.surplusOwedToCustomer}
               loading={isSaving}
               style={styles.footerBtn}
             >
@@ -1093,6 +1135,12 @@ const styles = StyleSheet.create({
   summaryDanger: { color: colors.danger },
   summarySuccess: { color: colors.success },
   statusNote: { fontSize: fontSize.caption, color: colors.warningText, marginTop: spacing.xxs },
+  surplusNote: {
+    fontSize: fontSize.caption,
+    color: colors.danger,
+    marginTop: spacing.xs,
+    lineHeight: 18,
+  },
   warning: {
     flexDirection: 'row',
     alignItems: 'center',

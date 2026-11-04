@@ -17,7 +17,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { SearchInput } from '../../components/ui/Input';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
-import { useCartStore } from '../../store/cartStore';
+import { useCartStore, cartTotalsOf } from '../../store/cartStore';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
@@ -28,7 +28,6 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { errorMessage } from '../../utils/errorUtils';
 import {
   DISCOUNT_APPROVAL_PERCENT,
-  discountAmountOf,
   lineDiscountOf,
   requiresLineDiscountApproval,
   unitPriceAfterDiscount,
@@ -43,9 +42,15 @@ interface EditTransactionModalProps {
 /** A row of the editor: a line the document carries, or one the counter is putting on it. */
 interface EditRow {
   id: string;
+  /** One SKU can sit on a document twice — the phone sold and the same phone taken
+   *  back in trade. They share one edit control, as the till's rule says, but they
+   *  are two rows, so they need two React keys. */
+  rowKey: string;
   product: PhoneModel;
   originalQty: number;
   added: boolean;
+  /** A line the customer handed over rather than bought: its money comes off. */
+  isReturn: boolean;
 }
 
 /** The ceiling only ever clamps; a product this till does not list is left unbounded. */
@@ -127,13 +132,22 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   const rows: EditRow[] = [
     ...transaction.items.map(item => ({
       id: item.product.id,
+      rowKey: `${item.product.id}::${item.isReturn ? 'return' : 'sale'}`,
       product: item.product,
       originalQty: item.quantity,
       added: false,
+      isReturn: Boolean(item.isReturn),
     })),
     ...addedIds
       .filter(id => addedProducts[id])
-      .map(id => ({ id, product: addedProducts[id], originalQty: 0, added: true })),
+      .map(id => ({
+        id,
+        rowKey: `${id}::sale`,
+        product: addedProducts[id],
+        originalQty: 0,
+        added: true,
+        isReturn: false,
+      })),
   ];
 
   // Sold units are already committed; anything new has to come off the counter.
@@ -193,27 +207,44 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
     .map<CartItem>(row => {
       const priced: PhoneModel = { ...row.product, price: editedPrices[row.id] ?? row.product.price };
       const quantity = editedQuantities[row.id] ?? row.originalQty;
+      // A trade-in of the same model already on the document is found by its kind as
+      // well as its product id. Matching on the id alone hands the return row the
+      // sale row's shape, and the shop then bills the customer for a phone he brought
+      // back.
       const original = row.added
         ? undefined
-        : transaction.items.find(item => item.product.id === row.id);
+        : transaction.items.find(
+            item => item.product.id === row.id && Boolean(item.isReturn) === row.isReturn
+          );
       return original
-        ? { ...original, quantity, product: priced }
+        ? {
+            ...original,
+            quantity,
+            product: priced,
+            // The till prices a taken-back line by what it agreed to pay for it, so a
+            // corrected price moves that number too — otherwise the basket below and
+            // the line the printer draws disagree.
+            ...(row.isReturn ? { customReturnPrice: priced.price } : {}),
+          }
         : { product: priced, quantity };
     })
     .filter(item => item.quantity > 0);
 
-  const newSubtotal = newItems.reduce((sum, i) => sum + i.product.price * i.quantity, 0);
-
-  // What the store will write, not what the arithmetic says: the discount is
-  // resolved in whole dinars against the corrected basket, so the preview the
-  // editor shows and the invoice that comes out of the printer agree.
-  const newDiscountAmt = transaction.discount
-    ? discountAmountOf(newSubtotal, { mode: transaction.discount.type, value: transaction.discount.value })
-    : 0;
-  const newTotal = Math.max(0, newSubtotal - newDiscountAmt);
+  // What the store will write, not what a hand-added column says: one basket, the
+  // returns taken off it, and the discount measured on the purchases — the till's own
+  // `cartTotalsOf`, so this preview and the corrected invoice cannot drift apart.
+  const {
+    purchases: newPurchases,
+    returns: newReturns,
+    discountAmount: newDiscountAmt,
+    total: newTotal,
+  } = cartTotalsOf(newItems, transaction.discount || null);
+  const newSubtotal = newPurchases - newReturns;
   const diff = transaction.total - newTotal;
   const refundAmount = diff > 0 ? diff : 0;
   const additionalDue = diff < 0 ? Math.abs(diff) : 0;
+  /** A basket whose returns outweigh its purchases: the store refuses to write it. */
+  const owesCustomer = newTotal < 0;
 
   /** What each line gives away against the price the document carried for it. */
   const concessions = rows
@@ -290,7 +321,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   };
 
   const handleSave = () => {
-    if (!hasChanges || isProcessing) return;
+    if (!hasChanges || isProcessing || owesCustomer) return;
     if (needsDiscountApproval) {
       setIsAskingDiscount(true);
       return;
@@ -315,10 +346,12 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
           <Button
             variant="primary"
             onClick={handleSave}
-            disabled={!hasChanges}
+            disabled={!hasChanges || owesCustomer}
             isLoading={isProcessing}
           >
-            {needsDiscountApproval
+            {owesCustomer
+              ? 'Surplus owed at the till'
+              : needsDiscountApproval
               ? `Authorize Discount (${deepConcessions.length} line${deepConcessions.length > 1 ? 's' : ''})`
               : refundAmount > 0
               ? `Refund Difference (${formatCurrency(refundAmount)})`
@@ -332,7 +365,8 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
         <p style={{ fontSize: '13px', color: 'var(--color-on-surface-variant)', margin: 0 }}>
           Adjust item unit prices, quantities and discounts, put a product the invoice never carried onto it, or
-          drop a line back to zero. Inventory and transaction totals recalculate automatically, a line the shelf
+          drop a line back to zero. A line the customer handed back comes off the receipt rather than onto it.
+          Inventory and transaction totals recalculate automatically, a line the shelf
           cannot give is refused before anything is written, and a discount deeper than{' '}
           {DISCOUNT_APPROVAL_PERCENT}% of what that line was listed at needs an admin to authorize it.
         </p>
@@ -364,12 +398,14 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                 const gatedDiscount = requiresLineDiscountApproval(role, concession.percent);
 
                 return (
-                  <tr key={pid} style={{ borderBottom: '1px solid var(--color-outline-variant)' }}>
+                  <tr key={row.rowKey} style={{ borderBottom: '1px solid var(--color-outline-variant)' }}>
                     <td style={{ padding: '12px 14px' }}>
                       <div style={{ fontWeight: 600 }}>{row.product.name}</div>
                       <div style={{ fontSize: '11px', color: 'var(--color-on-surface-variant)' }}>
                         {row.added
                           ? `New line · ${onShelf === undefined ? 'stock unknown' : `${onShelf} on the shelf`}`
+                          : row.isReturn
+                          ? 'Taken back · comes off this invoice'
                           : row.product.category}
                       </div>
                     </td>
@@ -490,7 +526,12 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                       )}
                     </td>
                     <td style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <div style={{ fontWeight: 600 }}>{formatCurrency(currentPrice * currentQty)}</div>
+                      <div
+                        style={{ fontWeight: 600, color: row.isReturn ? 'var(--color-danger-text, #dc2626)' : undefined }}
+                      >
+                        {row.isReturn ? '−' : ''}
+                        {formatCurrency(currentPrice * currentQty)}
+                      </div>
                       {concession.granted > 0 && (
                         <div style={{ fontSize: '11px', color: 'var(--color-danger-text, #dc2626)' }}>
                           was {formatCurrency(row.product.price * currentQty)}
@@ -565,6 +606,16 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
             <span>{formatCurrency(transaction.total)}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+            <span style={{ color: 'var(--color-on-surface-variant)' }}>Bought on this receipt:</span>
+            <span>{formatCurrency(newPurchases)}</span>
+          </div>
+          {newReturns > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--color-danger-text)' }}>
+              <span>Taken back from the customer:</span>
+              <span>-{formatCurrency(newReturns)}</span>
+            </div>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
             <span style={{ color: 'var(--color-on-surface-variant)' }}>New Subtotal:</span>
             <span>{formatCurrency(newSubtotal)}</span>
           </div>
@@ -588,8 +639,21 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
             <span style={{ color: 'var(--color-on-surface-variant)' }}>New Total:</span>
-            <strong style={{ fontSize: '15px' }}>{formatCurrency(newTotal)}</strong>
+            <strong style={{ fontSize: '15px', color: owesCustomer ? 'var(--color-danger-text, #dc2626)' : undefined }}>
+              {formatCurrency(newTotal)}
+            </strong>
           </div>
+          {owesCustomer && (
+            <div style={{ display: 'flex', gap: '8px', fontSize: '12px', color: 'var(--color-danger-text, #dc2626)', background: 'var(--color-surface-container-lowest, #ffffff)', border: '1px solid var(--color-danger-text, #dc2626)', padding: '10px 12px', borderRadius: '8px', marginTop: '4px' }}>
+              <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+              <span>
+                What the customer handed back is more than this receipt holds, so it owes{' '}
+                {formatCurrency(Math.abs(newTotal))}. The till is where a surplus like that gets settled — cash
+                back, onto his account as Avoir, or off what he owes — so this cannot be saved onto the receipt.
+                Bring the lines back level, or void the sale and ring the exchange.
+              </span>
+            </div>
+          )}
           {refundAmount > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', borderTop: '1px solid var(--color-outline-variant)', paddingTop: '8px', marginTop: '4px' }}>
               <span style={{ fontWeight: 600, color: 'var(--color-danger-text)' }}>

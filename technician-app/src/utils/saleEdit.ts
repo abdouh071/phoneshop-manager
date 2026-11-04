@@ -44,11 +44,19 @@ export interface SaleStockLine {
 
 export interface SaleEditPlan {
   items: CartItem[];
+  /** What the corrected basket holds in purchases, before any line comes back off it. */
+  purchases: number;
+  /** What the customer handed back, priced at what the counter agreed to pay for it. */
+  returns: number;
+  /** The net the document carries: purchases less what came back. */
   subtotal: number;
   discountAmount: number;
   /** What each line was knocked down to, kept for the shop's totals. */
   lineDiscounts: LineConcession[];
+  /** Negative when the lines coming back outweigh the basket — see `surplusOwedToCustomer`. */
   total: number;
+  /** The receipt would leave the shop owing the customer; the save refuses it. */
+  surplusOwedToCustomer: boolean;
   /** Taken back from the customer, in dinars. */
   refundDue: number;
   /** Owed to the shop because the invoice grew, in dinars. */
@@ -149,6 +157,9 @@ export const planSaleEdit = (
         // that updates only one of them prints the old number somewhere.
         unitPrice,
         product: { ...product, price: unitPrice },
+        // A line taken back is priced by what the counter pays for it, not by what the
+        // shelf still asks, so a corrected trade-in moves that number with it.
+        ...(item.isReturn ? { customReturnPrice: unitPrice } : {}),
       };
     })
     .filter(item => wholeUnits(item.quantity, 0) > 0);
@@ -249,23 +260,51 @@ export const planSaleEdit = (
     else deduct.push(line);
   });
 
-  const subtotal = items.reduce(
+  /**
+   * The till's own arithmetic, one rule with `cartTotalsOf` on the counter: the
+   * basket is what was BOUGHT, a line the customer handed back comes off it instead
+   * of being added to it, and the discount is measured on the purchases — because a
+   * phone coming back onto the shelf must not shrink the concession he was owed on
+   * what he took. `subtotal` is therefore the net the desktop writes.
+   *
+   * Not floored at zero: a basket whose returns outweigh its purchases is an
+   * exchange surplus, and the till is where the shop decides how that money leaves.
+   * `applySaleEdit` refuses to write one; rounding it down here would eat it.
+   */
+  const unitOf = (item: CartItem): number =>
     // The basket prices off the product snapshot, as the counter does. A row too old
     // to carry one keeps its own line price instead of contributing zero.
-    (sum, item) => sum + money(item.product?.price ?? item.unitPrice, 0) * wholeUnits(item.quantity, 0),
+    money(item.product?.price ?? item.unitPrice, 0);
+
+  /** What the counter agreed to pay for a line it took back, which is not always the
+   *  price the shelf still shows for it. */
+  const returnUnitOf = (item: CartItem): number =>
+    typeof item.customReturnPrice === 'number' && Number.isFinite(item.customReturnPrice)
+      ? money(item.customReturnPrice, 0)
+      : unitOf(item);
+
+  const purchases = items.reduce(
+    (sum, item) => (item.isReturn ? sum : sum + unitOf(item) * wholeUnits(item.quantity, 0)),
     0
   );
+  const returns = items.reduce(
+    (sum, item) => (item.isReturn ? sum + returnUnitOf(item) * wholeUnits(item.quantity, 0) : sum),
+    0
+  );
+  const subtotal = purchases - returns;
   // One arithmetic with the counter and the till screen: the share resolved against
-  // this basket, rounded once, never more than the basket holds. Re-expanding a
+  // what was bought, rounded once, never more than it holds. Re-expanding a
   // percentage by hand is how the phone came to a total a dinar away from the one
   // the receipt prints.
   const discountAmount = tx.discount
-    ? discountAmountOf(subtotal, {
+    ? discountAmountOf(purchases, {
         mode: tx.discount.type === 'percent' ? 'percent' : 'flat',
         value: tx.discount.value,
       })
     : 0;
-  const total = Math.max(0, subtotal - discountAmount);
+  const total = purchases - discountAmount - returns;
+  /** The receipt would owe the customer money — `applySaleEdit` will not write it. */
+  const surplusOwedToCustomer = total < 0;
 
   /**
    * What this edit knocks off the invoice, line by line, measured against the price
@@ -294,7 +333,14 @@ export const planSaleEdit = (
     status = 'refunded';
   } else if (
     tx.items.some(orig => {
-      const match = items.find(ni => ni.product?.id === orig.product?.id);
+      // By product id AND kind, as the counter does: the trade-in of the same model
+      // is a different line, and reading it as the sale row hides the units that
+      // came off it.
+      const match = items.find(
+        ni =>
+          ni.product?.id === orig.product?.id &&
+          Boolean(ni.isReturn) === Boolean(orig.isReturn)
+      );
       return !match || wholeUnits(match.quantity, 0) < wholeUnits(orig.quantity, 0);
     })
   ) {
@@ -319,10 +365,13 @@ export const planSaleEdit = (
 
   return {
     items,
+    purchases,
+    returns,
     subtotal,
     discountAmount,
     lineDiscounts,
     total,
+    surplusOwedToCustomer,
     refundDue: diff > 0 ? diff : 0,
     additionalDue: diff < 0 ? Math.abs(diff) : 0,
     status,

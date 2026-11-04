@@ -293,6 +293,17 @@ export const applySaleEdit = async (
   tx: SaleTransaction,
   plan: SaleEditPlan
 ): Promise<SaleEditOutcome> => {
+  // A basket whose returns outweigh its purchases leaves the receipt owing the
+  // customer money. Only the counter gets to decide how that leaves the shop — cash
+  // back, onto the account, or off what he owes — and writing it here would either
+  // round it down to nothing or hand the account a balance nobody settled.
+  if (plan.surplusOwedToCustomer) {
+    throw new Error(
+      `This correction leaves the receipt owing ${Math.abs(plan.total)} DA to the customer. ` +
+        'Settle that exchange at the counter, where the shop can record how it was paid back.'
+    );
+  }
+
   const user = useAuthStore.getState().user;
   const now = new Date().toISOString();
 

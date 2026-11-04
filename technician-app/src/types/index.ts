@@ -181,6 +181,9 @@ export interface CartItem {
    * back, but a void that missed the sign would restock goods that were never sold.
    */
   isReturn?: boolean;
+  /** What the counter agreed to pay for a line it took back, when that is not the
+   *  price the shelf still shows. The till prices an exchange off this first. */
+  customReturnPrice?: number;
   /** False when a returned line was kept off the shelf (faulty, sent for repair). */
   restock?: boolean;
 }

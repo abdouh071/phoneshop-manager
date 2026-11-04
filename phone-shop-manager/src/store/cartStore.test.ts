@@ -14,6 +14,10 @@ import type { CartItem, PhoneModel, SaleTransaction } from '../types';
 
 const captured = vi.hoisted(() => ({
   transactions: [] as Record<string, unknown>[],
+  /** Every document write the edit path asked Firestore for, in the order it asked. */
+  updates: [] as Array<{ id: string; updates: Record<string, unknown> }>,
+  /** Every stock move the edit path asked the shelf for, in the order it asked. */
+  stock: [] as number[],
   /** The account entries the customer store reports — the edit path reads these cold. */
   debts: [] as Array<{ id: string; customerId: string; amountPaid: number; totalAmount: number; invoiceNumber: string }>,
   /** Every Avoir move the corrected invoice asked for, in the order it asked. */
@@ -26,7 +30,8 @@ vi.mock('../services/transactionService', () => ({
       captured.transactions.push(tx);
       return { ...tx, id: `tx_${captured.transactions.length}` };
     },
-    updateTransaction: async (_id: string, updates: Record<string, unknown>) => {
+    updateTransaction: async (id: string, updates: Record<string, unknown>) => {
+      captured.updates.push({ id, updates });
       Object.assign(captured.transactions[captured.transactions.length - 1] ?? {}, updates);
       return true;
     },
@@ -47,7 +52,10 @@ vi.mock('../services/cartService', () => ({
 
 vi.mock('../services/inventoryService', () => ({
   inventoryService: {
-    adjustStockAsync: async () => undefined,
+    adjustStockAsync: async (_productId: string, delta: number) => {
+      captured.stock.push(delta);
+      return undefined;
+    },
   },
 }));
 
@@ -139,6 +147,8 @@ beforeEach(() => {
     value: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined },
   });
   captured.transactions.length = 0;
+  captured.updates.length = 0;
+  captured.stock.length = 0;
   captured.debts.length = 0;
   captured.credit.length = 0;
   emptyCart();
@@ -326,5 +336,97 @@ describe('a corrected invoice that collected more than it now says', () => {
     await edit(8000);
 
     expect(captured.credit).toEqual([]);
+  });
+});
+
+/**
+ * An exchange invoice carries money in two directions, and the editor read it as
+ * though every line were a purchase: the phone the customer handed back was ADDED to
+ * the receipt he was already paying for, and the payments were then rescaled to the
+ * inflated figure. `editTransaction` now runs the till's own `cartTotalsOf`, so a
+ * corrected basket foots the way a fresh one does — the trade-in comes off, and the
+ * discount is still measured on what was bought.
+ *
+ * A basket that comes out owed is refused rather than floored to zero. Flooring it is
+ * how an exchange surplus disappeared while the sale flipped to `refunded`, and the
+ * refusal happens before the shelf moves, so a rejected edit leaves nothing half-done.
+ */
+describe('a corrected invoice that carries a line back off the basket', () => {
+  const tradeIn = (price: number): PhoneModel =>
+    ({ ...phone, id: 'sku_trade_in', name: 'Old phone in trade', price }) as unknown as PhoneModel;
+
+  /** One phone bought, one handed back in trade. */
+  const basket = (salePrice: number, returnPrice = 5000): CartItem[] => [
+    { product: { ...phone, price: salePrice }, quantity: 1 },
+    {
+      product: tradeIn(returnPrice),
+      quantity: 1,
+      isReturn: true,
+      customReturnPrice: returnPrice,
+    },
+  ];
+
+  const park = (
+    items: CartItem[],
+    fields: { subtotal: number; total: number; discount?: { type: 'percent' | 'flat'; value: number } }
+  ) => {
+    useCartStore.setState({
+      transactions: [
+        {
+          id: 'tx_exchange',
+          date: '2026-11-02T10:00:00.000Z',
+          items,
+          subtotal: fields.subtotal,
+          discount: fields.discount,
+          total: fields.total,
+          payments: [{ method: 'cash', amount: fields.total }],
+          status: 'completed',
+          invoiceNumber: 'INV-777777',
+        } as unknown as SaleTransaction,
+      ],
+    });
+  };
+
+  const edit = (newItems: CartItem[]) =>
+    useCartStore.getState().editTransaction('tx_exchange', newItems, {});
+
+  it('takes the line back off the receipt instead of billing it a second time', async () => {
+    park(basket(20000), { subtotal: 15000, total: 15000 });
+    await edit(basket(20000));
+
+    const written = captured.updates[0]?.updates as Record<string, unknown>;
+    expect(written.subtotal).toBe(15000);
+    expect(written.total).toBe(15000);
+    expect(written.payments).toEqual([{ method: 'cash', amount: 15000 }]);
+    expect(written.status).toBe('completed');
+  });
+
+  it('measures the discount on what was bought, not on the net of a return', async () => {
+    park(basket(20000), { subtotal: 15000, total: 14000, discount: { type: 'flat', value: 1000 } });
+    await edit(basket(20000));
+
+    const written = captured.updates[0]?.updates as Record<string, unknown>;
+    expect(written.total).toBe(14000);
+    // 20 000 bought − 1 000 given away − 5 000 taken back: the printed lines and the
+    // printed total are the same arithmetic.
+    expect(written.subtotal).toBe(15000);
+  });
+
+  it('prices a taken-back line at what the counter pays for it', async () => {
+    park(basket(20000), { subtotal: 15000, total: 15000 });
+    await edit(basket(20000, 3000));
+
+    const written = captured.updates[0]?.updates as Record<string, unknown>;
+    expect(written.total).toBe(17000);
+    expect(written.subtotal).toBe(17000);
+  });
+
+  it('refuses a correction that would leave the receipt owing the customer', async () => {
+    // Only the trade-in line is left on the invoice, so nothing was bought to cover it.
+    park(basket(20000), { subtotal: 15000, total: 15000 });
+
+    await expect(edit([basket(20000)[1]])).rejects.toThrow(/leaves the receipt owing/);
+    expect(captured.updates).toEqual([]);
+    expect(captured.stock).toEqual([]);
   });
 });
