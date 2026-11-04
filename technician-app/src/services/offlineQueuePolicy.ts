@@ -377,6 +377,17 @@ export const isSettleAlreadyRecorded = (
   ticket.paidAmount === effectiveTotalPaid &&
   (!!ticket.debtEntryId || remainingDebt === 0);
 
+/** An id that only exists in this phone's cache, never on the server. */
+export const isOfflineCustomerId = (id: unknown): boolean =>
+  typeof id === 'string' && id.startsWith('offline_');
+
+/** Swap one cached row's temp id for the server id its upload was given. */
+export const replaceCachedCustomer = <T extends { id: string }>(
+  cached: T[],
+  offlineId: string,
+  serverId: string
+): T[] => cached.map(c => (c.id === offlineId ? { ...c, id: serverId } : c));
+
 export const deriveStockStatus = (stock: number, thresholdRaw: unknown): 'out_of_stock' | 'low_stock' | 'in_stock' => {
   const threshold = clampStock(thresholdRaw);
   if (stock <= 0) return 'out_of_stock';

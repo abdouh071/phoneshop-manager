@@ -26,6 +26,8 @@ import {
   clampStock,
   deriveStockStatus,
   isSettleAlreadyRecorded,
+  isOfflineCustomerId,
+  replaceCachedCustomer,
   type QueueAction,
 } from './offlineQueuePolicy.ts';
 
@@ -288,4 +290,23 @@ test('a settle with different figures is a new settlement, not a retry', () => {
     isSettleAlreadyRecorded({ status: 'completed', paidAmount: 2000, debtEntryId: 'debt_1' }, 9000, 0),
     false
   );
+});
+
+test('only a cached temp id counts as an offline customer id', () => {
+  assert.equal(isOfflineCustomerId('offline_cust_123'), true);
+  assert.equal(isOfflineCustomerId('srv_cust_123'), false);
+  assert.equal(isOfflineCustomerId('offline_tx_123'), true, 'every temp id is a temp id, whatever it names');
+  assert.equal(isOfflineCustomerId(undefined), false);
+  assert.equal(isOfflineCustomerId(42), false);
+});
+
+test('a cached customer row is re-pointed at its server id, and only that row', () => {
+  const cached = [
+    { id: 'offline_cust_1', name: 'A' },
+    { id: 'srv_real', name: 'B' },
+  ];
+  const rebased = replaceCachedCustomer(cached, 'offline_cust_1', 'srv_abc');
+  assert.deepEqual(rebased.map(c => c.id), ['srv_abc', 'srv_real']);
+  assert.equal(rebased[0].name, 'A', 'the row keeps its data, only the id changes');
+  assert.deepEqual(cached.map(c => c.id), ['offline_cust_1', 'srv_real'], 'the input list is not mutated');
 });

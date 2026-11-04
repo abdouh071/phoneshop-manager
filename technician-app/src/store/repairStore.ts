@@ -19,7 +19,7 @@ import { offlineSyncService } from '../services/offlineSyncService';
 import { notificationService } from '../services/notificationService';
 import { applyPartsDelta } from '../services/stockService';
 import { allocateTicketNumber } from '../services/ticketCounter';
-import { appendHistory, isSettleAlreadyRecorded, type HistoryEntryLike } from '../services/offlineQueuePolicy';
+import { appendHistory, isSettleAlreadyRecorded, isOfflineCustomerId, type HistoryEntryLike } from '../services/offlineQueuePolicy';
 import { createRefCountedSubscription, type RefCountedSubscription } from '../utils/liveSubscription';
 import type { RepairTicket, RepairStatus, RepairStatusHistoryEntry } from '../types';
 
@@ -334,6 +334,13 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         } catch (cErr) {
           console.warn('Customer resolution failed:', cErr);
         }
+      }
+
+      // A customer that only exists in this phone's cache must not be referenced by
+      // the ticket or its debt row: upload it now when the network allows.
+      if (customerId && isOfflineCustomerId(customerId)) {
+        const resolved = await customerService.resolveOfflineCustomer(customerId);
+        if (resolved) customerId = resolved;
       }
 
       // A retried settle must not count the money twice. When the document already

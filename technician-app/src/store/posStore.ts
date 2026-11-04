@@ -12,7 +12,7 @@ import { useAuthStore } from './authStore';
 import { activityLogService } from '../services/activityLogService';
 import { offlineSyncService } from '../services/offlineSyncService';
 import { customerService } from '../services/customerService';
-import { newIdempotencyKey } from '../services/offlineQueuePolicy';
+import { isOfflineCustomerId, newIdempotencyKey } from '../services/offlineQueuePolicy';
 import { notificationService } from '../services/notificationService';
 import { applyStockLines, type StockLine } from '../services/stockService';
 import { discountAmountOf } from '../utils/discountPolicy';
@@ -167,7 +167,15 @@ export const usePosStore = create<PosState>((set, get) => ({
 
     const currentUser = useAuthStore.getState().user;
     const now = new Date().toISOString();
-    const cust = params.customer || selectedCustomer;
+    // A customer created on this phone while it had no signal exists only in the
+    // cache: a sale referencing its id would point at a profile the server never
+    // had. Upload it now when the network is back; when it is not, the queued sale
+    // and debt rows resolve the id at the sync pass before they are written.
+    let cust = params.customer || selectedCustomer;
+    if (cust && isOfflineCustomerId(cust.id)) {
+      const resolvedId = await customerService.resolveOfflineCustomer(cust.id);
+      if (resolvedId) cust = { ...cust, id: resolvedId };
+    }
     const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
     // Minted here, before either document is attempted, and stamped on both. A
     // replay looks a record up by this key, so it is the only thing that can tell

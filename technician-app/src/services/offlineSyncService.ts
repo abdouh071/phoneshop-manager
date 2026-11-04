@@ -34,6 +34,7 @@ import {
   buildStatusPatch,
   dedupeById,
   isDue,
+  isOfflineCustomerId,
   isOwnerKey,
   needsTicketNumber,
   queueKey,
@@ -705,6 +706,17 @@ const flushSales = async (): Promise<FlushResult> => {
 
     try {
       const { id: _localId, ...dataToSave } = payload;
+      // A sale written while the customer only existed on this phone carries a
+      // phantom id. Resolve it to the real document before the invoice references
+      // it; when the upload is not possible yet, retry rather than write the
+      // reference — a sale pointing at a customer the server never had loses its
+      // profile, and the counter reads the profile to know who owes it money.
+      const rawCustomerId = String(dataToSave.customerId || '');
+      if (isOfflineCustomerId(rawCustomerId)) {
+        const resolved = await customerService.resolveOfflineCustomer(rawCustomerId);
+        if (!resolved) throw new Error(`Customer ${rawCustomerId} not on the server yet`);
+        dataToSave.customerId = resolved;
+      }
       // Replayed under the key the sale was written with, not a fresh one: the
       // document this attempt is looking for is the one the till believes failed.
       const { id, created } = await addIdempotently('transactions', replayKeyOf(payload, action.id), {
@@ -774,6 +786,12 @@ const flushDebts = async (): Promise<FlushResult> => {
 
     try {
       const { id: _localId, ...dataToSave } = payload;
+      const rawCustomerId = String(dataToSave.customerId || '');
+      if (isOfflineCustomerId(rawCustomerId)) {
+        const resolved = await customerService.resolveOfflineCustomer(rawCustomerId);
+        if (!resolved) throw new Error(`Customer ${rawCustomerId} not on the server yet`);
+        dataToSave.customerId = resolved;
+      }
       await addIdempotently('customer_debts', replayKeyOf(payload, action.id), dataToSave);
       await removeActions('debt', new Set([action.id]));
       out.synced++;

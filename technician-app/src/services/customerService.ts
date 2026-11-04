@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../lib/firebase';
+import { isOfflineCustomerId, replaceCachedCustomer } from './offlineQueuePolicy';
 import type { Customer, CustomerDebtEntry } from '../types';
 
 const CACHED_CUSTOMERS_KEY = '@cached_customers';
@@ -37,6 +38,34 @@ export const customerService = {
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
+    }
+  },
+
+  /**
+   * Give an `offline_cust_…` id its real document.
+   *
+   * The temp id exists only in this phone's cache, so a sale or a debt row that
+   * references it would point at a customer the server never had. Uploads the cached
+   * row and returns the server id it got; null when the row is gone or the server is
+   * unreachable, in which case the caller must retry instead of writing the reference.
+   */
+  resolveOfflineCustomer: async (offlineId: string): Promise<string | null> => {
+    if (!isOfflineCustomerId(offlineId)) return offlineId;
+    const cached = await customerService.getCachedCustomers();
+    const local = cached.find(c => c.id === offlineId);
+    if (!local) {
+      console.warn(`[CustomerService] No cached row for ${offlineId}; it cannot be resolved.`);
+      return null;
+    }
+    try {
+      const { id: _drop, ...data } = local;
+      const docRef = await addDoc(collection(db, 'customers'), data);
+      const resolved: Customer = { ...local, id: docRef.id };
+      await customerService.cacheCustomers(replaceCachedCustomer(cached, offlineId, docRef.id));
+      return docRef.id;
+    } catch (err) {
+      console.warn('[CustomerService] Offline customer could not be uploaded:', err);
+      return null;
     }
   },
 
