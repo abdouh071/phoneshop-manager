@@ -3,6 +3,7 @@ import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { useToast } from '../../components/ui/Toast';
 import type { CartItem, Customer } from '../../types';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { discountPercentOf } from '../../utils/discountPolicy';
 
 interface PosCheckoutUnlockModalsProps {
   showCreditLimitUnlock: boolean;
@@ -16,6 +17,8 @@ interface PosCheckoutUnlockModalsProps {
   matchedCustomer: Customer | null;
   customerName: string;
   total: number;
+  /** The basket before any discount — what a discount is a share of. */
+  discountBase: number;
   items: CartItem[];
 }
 
@@ -31,9 +34,15 @@ export const PosCheckoutUnlockModals: React.FC<PosCheckoutUnlockModalsProps> = (
   matchedCustomer,
   customerName,
   total,
+  discountBase,
   items,
 }) => {
   const toast = useToast();
+  /** The dinars say nothing about depth on their own — an admin signing for 900 DA on
+      a small basket is giving away far more than the number suggests. */
+  const pendingPercent = pendingDiscountValue === null
+    ? 0
+    : discountPercentOf(discountBase, { mode: 'flat', value: pendingDiscountValue });
 
   return (
     <>
@@ -73,11 +82,14 @@ export const PosCheckoutUnlockModals: React.FC<PosCheckoutUnlockModalsProps> = (
             toast.success('Discount Authorized', 'Admin authorization verified.');
           }
         }}
-        actionName={`Authorize discount of ${pendingDiscountValue ? formatCurrency(pendingDiscountValue) : ''}`}
+        actionName={`Authorize discount of ${pendingDiscountValue ? formatCurrency(pendingDiscountValue) : ''}${
+          pendingDiscountValue ? ` (${pendingPercent.toFixed(1)}% of the basket)` : ''
+        }`}
         actionType="pos_discount_override"
         actionData={{
           itemType: 'pos_discount',
           discountAmount: pendingDiscountValue || 0,
+          discountPercent: Number(pendingPercent.toFixed(1)),
           cartTotal: total,
           customerName: matchedCustomer?.name || customerName || 'Walk-in Customer',
           itemCount: items.length,

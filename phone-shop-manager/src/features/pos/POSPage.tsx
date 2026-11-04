@@ -747,6 +747,7 @@ export const POSPage = () => {
         matchedCustomer={matchedCustomer}
         customerName={customerName}
         total={total}
+        discountBase={getPurchasesSubtotal()}
         items={items}
       />
     </div>

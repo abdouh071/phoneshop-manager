@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import type { CartItem, Customer } from '../../types';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { DISCOUNT_APPROVAL_PERCENT, discountPercentOf, requiresDiscountApproval } from '../../utils/discountPolicy';
 import styles from './POS.module.css';
 
 interface PosCartFooterProps {
@@ -85,6 +86,15 @@ export const PosCartFooter: React.FC<PosCartFooterProps> = ({
   setShowCreditLimitUnlock,
   setShowDiscountUnlock,
 }) => {
+  /**
+   * The share of the basket the till is giving away, whatever the cashier typed into
+   * the dinar field. A number of dinars says nothing about depth on its own — the
+   * threshold is a share, so the screen has to name it.
+   */
+  const discountShare = discount
+    ? discountPercentOf(getPurchasesSubtotal(), { mode: discount.type === 'percent' ? 'percent' : 'flat', value: discount.value })
+    : 0;
+
   return (
           <div className={styles.cartFooter}>
             {/* If net total is negative (Shop owes customer money) — choose settlement method (Problem 6 fix) */}
@@ -432,6 +442,7 @@ export const PosCartFooter: React.FC<PosCartFooterProps> = ({
                 <input
                   type="number"
                   placeholder="0"
+                  title={`${DISCOUNT_APPROVAL_PERCENT}% of the basket or less; deeper needs an admin`}
                   value={pendingDiscountValue !== null ? pendingDiscountValue.toString() : (discount?.value ? discount.value.toString() : '')}
                   onChange={e => {
                     const raw = e.target.value;
@@ -441,8 +452,11 @@ export const PosCartFooter: React.FC<PosCartFooterProps> = ({
                       return;
                     }
                     const v = Number(raw);
-                    // Problem 5 fix: Require admin authorization for manual discounts > 1,000 DA
-                    if (v > 1000 && !isAdmin) {
+                    // The rule is the share of the basket, not a number of dinars: a
+                    // thousand off a cable was stopped while a thousand off a phone —
+                    // one percent of it — was free, and a deeper cut on a small sale
+                    // walked straight through. Same measure the technician phone runs.
+                    if (requiresDiscountApproval(isAdmin ? 'admin' : 'sales_agent', getPurchasesSubtotal(), { mode: 'flat', value: v })) {
                       setPendingDiscountValue(v);
                       setShowDiscountUnlock(true);
                     } else if (v > 0) {
@@ -459,7 +473,7 @@ export const PosCartFooter: React.FC<PosCartFooterProps> = ({
 
               {getDiscountAmount() > 0 && (
                 <div className={styles.totalRow} style={{ color: 'var(--color-danger-text, #dc2626)' }}>
-                  <span>Discount</span>
+                  <span>Discount ({discountShare.toFixed(1)}%)</span>
                   <span>-{formatCurrency(getDiscountAmount())}</span>
                 </div>
               )}

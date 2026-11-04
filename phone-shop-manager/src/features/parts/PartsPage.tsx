@@ -14,6 +14,7 @@ import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
 import { useTranslation } from 'react-i18next';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
+import { discountPercentOf, requiresDiscountApproval } from '../../utils/discountPolicy';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { groupProductsByBaseModel } from '../../utils/productGrouping';
 import type { ProductGroup } from '../../utils/productGrouping';
@@ -407,7 +408,13 @@ export const PartsPage = () => {
             toast.success('Discount Authorized', 'Admin authorization verified.');
           }
         }}
-        actionName={`authorize parts discount of ${pendingDiscountValue ? formatCurrency(pendingDiscountValue) : ''}`}
+        // The dinars say nothing about depth on their own; an admin signing for 900 DA
+        // on a small basket is giving away far more than the number suggests.
+        actionName={`authorize parts discount of ${pendingDiscountValue ? formatCurrency(pendingDiscountValue) : ''}${
+          pendingDiscountValue
+            ? ` (${discountPercentOf(getSubtotal(), { mode: 'flat', value: pendingDiscountValue }).toFixed(1)}% of the basket)`
+            : ''
+        }`}
       />
 
       <ReceiptModal
@@ -1213,7 +1220,9 @@ export const PartsPage = () => {
                           return;
                         }
                         const v = Number(raw);
-                        if (v > 1000 && !isAdmin) {
+                        // One rule for one shop: the share of the basket, not a number of
+                        // dinars, and the same threshold the till and the phone run.
+                        if (requiresDiscountApproval(isAdmin ? 'admin' : 'sales_agent', getSubtotal(), { mode: 'flat', value: v })) {
                           setPendingDiscountValue(v);
                           setShowDiscountUnlock(true);
                         } else if (v > 0) {
