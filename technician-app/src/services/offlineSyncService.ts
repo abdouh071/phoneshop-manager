@@ -37,6 +37,7 @@ import {
   isOwnerKey,
   needsTicketNumber,
   queueKey,
+  recordDeferral,
   recordFailure,
   rebaseActions,
   replayKeyOf,
@@ -371,12 +372,30 @@ const parkOrFail = async (
   return { result: 'failed', list };
 };
 
-const deferAction = async (kind: QueueKind, action: QueueAction, reason: string) => {
+const deferAction = async (
+  kind: QueueKind,
+  action: QueueAction,
+  reason: string
+): Promise<'deferred' | 'dropped'> => {
   const list = await loadQueue(kind);
   const idx = list.findIndex((a) => a.id === action.id);
-  const deferred: QueueAction = { ...action, nextAttemptAt: nowMs() + DEFER_MS, lastError: reason };
-  if (idx >= 0) list[idx] = deferred;
-  await saveQueue(kind, list);
+  if (idx < 0) return 'deferred';
+
+  const { action: deferred, exhausted } = recordDeferral(action, nowMs(), DEFER_MS, reason);
+  if (!exhausted) {
+    list[idx] = deferred;
+    await saveQueue(kind, list);
+    return 'deferred';
+  }
+
+  // The ticket this waited on is not coming back — it dead-lettered, or the map that joined
+  // their ids was cleared. Re-arming it held the pending banner lit, and a billed read every
+  // pass, for a change that could never be applied.
+  const dead = await getDeadLetters();
+  dead.unshift(toDeadLetter(deferred, nowIso()));
+  await saveDeadLetters(dedupeById(dead) as DeadLetterEntry[]);
+  await saveQueue(kind, list.filter((a) => a.id !== deferred.id));
+  return 'dropped';
 };
 
 const record = (action: QueueAction): Record<string, unknown> =>
@@ -471,8 +490,9 @@ const flushStatuses = async (map: IdMap, queuedTicketIds: Set<string>): Promise<
     const ticketId = resolveRef(map, rawRef) as string;
 
     if (!ticketId || ticketId.startsWith('offline_') || isTicketStillQueued(map, rawRef, queuedTicketIds)) {
-      await deferAction('status', action, 'Waiting for the ticket to upload');
-      out.deferred++;
+      const waited = await deferAction('status', action, 'Waiting for the ticket to upload');
+      if (waited === 'dropped') out.dropped.push(action.id);
+      else out.deferred++;
       continue;
     }
 
@@ -520,8 +540,9 @@ const flushParts = async (map: IdMap, queuedTicketIds: Set<string>): Promise<Flu
     const ticketId = resolveRef(map, (payload.ticketId as string) || action.ticketRef) as string;
 
     if (!ticketId || ticketId.startsWith('offline_') || isTicketStillQueued(map, payload.ticketId as string, queuedTicketIds)) {
-      await deferAction('parts', action, 'Waiting for the ticket to upload');
-      out.deferred++;
+      const waited = await deferAction('parts', action, 'Waiting for the ticket to upload');
+      if (waited === 'dropped') out.dropped.push(action.id);
+      else out.deferred++;
       continue;
     }
 
@@ -600,8 +621,9 @@ const flushRemarks = async (map: IdMap, queuedTicketIds: Set<string>): Promise<F
     const ticketId = resolveRef(map, (payload.ticketId as string) || action.ticketRef) as string;
 
     if (!ticketId || ticketId.startsWith('offline_') || isTicketStillQueued(map, payload.ticketId as string, queuedTicketIds)) {
-      await deferAction('remark', action, 'Waiting for the ticket to upload');
-      out.deferred++;
+      const waited = await deferAction('remark', action, 'Waiting for the ticket to upload');
+      if (waited === 'dropped') out.dropped.push(action.id);
+      else out.deferred++;
       continue;
     }
 

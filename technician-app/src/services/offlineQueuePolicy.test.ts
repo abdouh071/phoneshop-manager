@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {
   MAX_ATTEMPTS,
   MAX_BACKOFF_MS,
+  MAX_DEFERRALS,
   backoffDelayMs,
   isDue,
+  recordDeferral,
   recordFailure,
   shouldDeadLetter,
   toDeadLetter,
@@ -69,11 +71,52 @@ test('a long error message is trimmed rather than bloating storage', () => {
 });
 
 test('the dead-letter entry keeps everything an admin needs to redo the write', () => {
-  const parked = toDeadLetter(recordFailure(action({ ticketRef: 'offline_tkt_9' }), NOW, 'boom'), iso);
+  const parked = toDeadLetter(
+    recordFailure(action({ ticketRef: 'offline_tkt_9', deferrals: 12 }), NOW, 'boom'),
+    iso
+  );
   assert.equal(parked.kind, 'sale');
   assert.equal(parked.attempts, 1);
+  assert.equal(parked.deferrals, 12, 'an admin must be able to tell a wait from a failure');
   assert.equal(parked.lastError, 'boom');
   assert.equal(parked.ticketRef, 'offline_tkt_9');
+});
+
+test('waiting for a ticket is rearmed, not failed', () => {
+  const { action: waited, exhausted } = recordDeferral(
+    action({ kind: 'status', ticketRef: 'offline_tkt_9', attempts: 2, lastError: 'an old failure' }),
+    NOW,
+    20_000,
+    'Waiting for the ticket to upload'
+  );
+  assert.equal(exhausted, false);
+  assert.equal(waited.deferrals, 1);
+  assert.equal(waited.attempts, 2, 'a pass that only waited is not a failed write');
+  assert.equal(waited.nextAttemptAt, NOW + 20_000);
+  assert.equal(waited.lastError, 'Waiting for the ticket to upload');
+});
+
+test('an action queued before waits were counted starts at zero', () => {
+  const { action: waited, exhausted } = recordDeferral(action({ kind: 'status' }), NOW, 20_000, 'Waiting');
+  assert.equal(waited.deferrals, 1, 'absent is 0, not NaN');
+  assert.equal(exhausted, false);
+});
+
+test('a wait that never ends is parked instead of re-armed forever', () => {
+  let a = action({ kind: 'status', ticketRef: 'offline_tkt_9' });
+  for (let pass = 1; pass <= MAX_DEFERRALS; pass++) {
+    const { action: next, exhausted } = recordDeferral(a, NOW, 20_000, 'Waiting for the ticket to upload');
+    a = next;
+    assert.equal(exhausted, pass === MAX_DEFERRALS, `pass ${pass} of ${MAX_DEFERRALS}`);
+  }
+  assert.equal(a.deferrals, MAX_DEFERRALS);
+  // The reason a park happened is the reason of the wait, not a generic failure.
+  assert.equal(toDeadLetter(a, iso).lastError, 'Waiting for the ticket to upload');
+});
+
+test('a wait reason is trimmed like any other error', () => {
+  const { action: waited } = recordDeferral(action(), NOW, 20_000, 'y'.repeat(5000));
+  assert.ok((waited.lastError || '').length <= 400);
 });
 
 test('duplicate queue entries collapse to one replay', () => {

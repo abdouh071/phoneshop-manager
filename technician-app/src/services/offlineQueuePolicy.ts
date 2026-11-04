@@ -31,6 +31,11 @@ export interface QueueAction<T = unknown> {
    * only becomes a real Firestore doc id once the ticket itself has been uploaded.
    */
   ticketRef?: string;
+  /**
+   * How many times this action has been put back because the ticket it waits on has
+   * not uploaded yet. Absent on actions queued before this was counted: 0.
+   */
+  deferrals?: number;
 }
 
 export interface DeadLetterEntry<T = unknown> {
@@ -38,6 +43,7 @@ export interface DeadLetterEntry<T = unknown> {
   kind: QueueKind;
   payload: T;
   attempts: number;
+  deferrals?: number;
   lastError: string;
   movedAt: string;
   ticketRef?: string;
@@ -84,6 +90,36 @@ export const recordFailure = <T>(
 export const shouldDeadLetter = (action: Pick<QueueAction, 'attempts'>): boolean =>
   action.attempts >= MAX_ATTEMPTS;
 
+/**
+ * The ticket a status, a remark or a part-line waits on may never arrive: it can
+ * dead-letter after its own six attempts, or the id map that joined them can be
+ * cleared. An unbounded wait looks identical from inside the queue — the action is
+ * re-armed every pass, the banner keeps claiming work is pending, and every pass
+ * reads the collections again for it. Sixty deferrals is about an hour of passes,
+ * longer than the ticket's own retry budget, so a wait that ends here was never
+ * going to be answered.
+ */
+export const MAX_DEFERRALS = 60;
+
+/** Re-arm a waiting action, and say whether its patience has run out. */
+export const recordDeferral = <T>(
+  action: QueueAction<T>,
+  nowMs: number,
+  deferMs: number,
+  message: string
+): { action: QueueAction<T>; exhausted: boolean } => {
+  const deferrals = (action.deferrals ?? 0) + 1;
+  return {
+    action: {
+      ...action,
+      deferrals,
+      lastError: message.slice(0, 400),
+      nextAttemptAt: nowMs + deferMs,
+    },
+    exhausted: deferrals >= MAX_DEFERRALS,
+  };
+};
+
 export const toDeadLetter = <T>(
   action: QueueAction<T>,
   nowIso: string
@@ -92,6 +128,7 @@ export const toDeadLetter = <T>(
   kind: action.kind,
   payload: action.payload,
   attempts: action.attempts,
+  deferrals: action.deferrals,
   lastError: action.lastError || 'Repeated sync failures',
   movedAt: nowIso,
   ticketRef: action.ticketRef,
