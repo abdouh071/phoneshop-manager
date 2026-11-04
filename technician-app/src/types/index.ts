@@ -209,6 +209,12 @@ export interface SaleTransaction {
   saleType?: 'retail' | 'parts_b2b';
   invoiceNumber?: string;
   /**
+   * True when the number came off the phone's own clock because the shared counter
+   * could not be reached. A clock number repeats inside a busy day, so this says which
+   * references a match on `invoiceNumber` may not trust.
+   */
+  invoiceNumberProvisional?: boolean;
+  /**
    * Minted before the first attempt to write this sale and stamped on the document,
    * so a replay can find what it already wrote. Without it the queue's own id is the
    * only key, and a sale the server saved while the phone saw a timeout is a sale

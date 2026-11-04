@@ -14,6 +14,7 @@ import { offlineSyncService } from '../services/offlineSyncService';
 import { customerService } from '../services/customerService';
 import { isOfflineCustomerId, newIdempotencyKey } from '../services/offlineQueuePolicy';
 import { notificationService } from '../services/notificationService';
+import { claimInvoiceNumber } from '../services/invoiceCounter';
 import { applyStockLines, type StockLine } from '../services/stockService';
 import { discountAmountOf } from '../utils/discountPolicy';
 import { salePayments } from '../utils/salePayments';
@@ -166,7 +167,8 @@ export const usePosStore = create<PosState>((set, get) => ({
     const total = Math.max(0, subtotal - discountAmount);
 
     const currentUser = useAuthStore.getState().user;
-    const now = new Date().toISOString();
+    const moment = new Date();
+    const now = moment.toISOString();
     // A customer created on this phone while it had no signal exists only in the
     // cache: a sale referencing its id would point at a profile the server never
     // had. Upload it now when the network is back; when it is not, the queued sale
@@ -176,7 +178,11 @@ export const usePosStore = create<PosState>((set, get) => ({
       const resolvedId = await customerService.resolveOfflineCustomer(cust.id);
       if (resolvedId) cust = { ...cust, id: resolvedId };
     }
-    const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
+    // One reference per sale, drawn from the counter's own daily book — the same
+    // document the till's desktop reads — so a phone and the counter cannot print the
+    // same number twice. `invoiceNumber` is also the key both apps match a debt to its
+    // invoice on, so the account entry written below carries this exact string.
+    const { invoiceNumber, provisional: numberGuessed } = await claimInvoiceNumber(moment);
     // Minted here, before either document is attempted, and stamped on both. A
     // replay looks a record up by this key, so it is the only thing that can tell
     // "the server saved this sale and the phone never heard" apart from "this sale
@@ -222,6 +228,7 @@ export const usePosStore = create<PosState>((set, get) => ({
       customerId: cust?.id || undefined,
       saleType: 'retail', // Crucial: Enables desktop app POS history and analytics to find and display this transaction
       invoiceNumber,
+      invoiceNumberProvisional: numberGuessed || undefined,
       idempotencyKey: saleKey,
       accountSettlement: settlement,
       processedById: currentUser?.id || 'technician-app',
