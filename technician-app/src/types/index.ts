@@ -95,6 +95,8 @@ export interface CustomerDebtEntry {
    * a sale that was written while the shop had no network.
    */
   invoiceNumber?: string;
+  /** The replay key of the debt entry — see `SaleTransaction.idempotencyKey`. */
+  idempotencyKey?: string;
   itemsSummary?: string;
   createdAt: string;
   updatedAt: string;
@@ -201,6 +203,13 @@ export interface SaleTransaction {
   customerId?: string;
   saleType?: 'retail' | 'parts_b2b';
   invoiceNumber?: string;
+  /**
+   * Minted before the first attempt to write this sale and stamped on the document,
+   * so a replay can find what it already wrote. Without it the queue's own id is the
+   * only key, and a sale the server saved while the phone saw a timeout is a sale
+   * nothing can recognise — so the next sync posts it a second time.
+   */
+  idempotencyKey?: string;
   accountSettlement?: {
     type: 'paid_full' | 'charged_to_account' | 'partial_payment';
     paidAmount: number;

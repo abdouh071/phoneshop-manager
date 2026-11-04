@@ -10,6 +10,11 @@
  * twice. Stamping the minted id and looking it up first turns a replay into an
  * adoption of the document that already exists.
  *
+ * The stamp has to be minted where the sale is, before its first write, and the
+ * online write has to carry it: a sale the server actually saved while the phone
+ * saw a timeout is otherwise invisible to this lookup, because the document that
+ * exists carries no key at all and the replay mints a fresh one.
+ *
  * A failed lookup propagates rather than being treated as "not found": the caller
  * leaves the record queued, so the worst case is a retry, never a duplicate.
  */

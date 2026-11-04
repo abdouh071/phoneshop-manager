@@ -12,6 +12,7 @@ import { useAuthStore } from './authStore';
 import { activityLogService } from '../services/activityLogService';
 import { offlineSyncService } from '../services/offlineSyncService';
 import { customerService } from '../services/customerService';
+import { newIdempotencyKey } from '../services/offlineQueuePolicy';
 import { notificationService } from '../services/notificationService';
 import { applyStockLines, type StockLine } from '../services/stockService';
 import { discountAmountOf } from '../utils/discountPolicy';
@@ -168,6 +169,12 @@ export const usePosStore = create<PosState>((set, get) => ({
     const now = new Date().toISOString();
     const cust = params.customer || selectedCustomer;
     const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
+    // Minted here, before either document is attempted, and stamped on both. A
+    // replay looks a record up by this key, so it is the only thing that can tell
+    // "the server saved this sale and the phone never heard" apart from "this sale
+    // never happened" — and a document written without it cannot be found at all.
+    const saleKey = newIdempotencyKey('sale');
+    const debtKey = newIdempotencyKey('debt');
 
     // Calculate debt if payment method is 'debt' or partial payment
     const debtAmount = params.paymentMethod === 'debt' 
@@ -207,6 +214,7 @@ export const usePosStore = create<PosState>((set, get) => ({
       customerId: cust?.id || undefined,
       saleType: 'retail', // Crucial: Enables desktop app POS history and analytics to find and display this transaction
       invoiceNumber,
+      idempotencyKey: saleKey,
       accountSettlement: settlement,
       processedById: currentUser?.id || 'technician-app',
       processedByName: currentUser?.name || 'Sales Agent',
@@ -301,6 +309,7 @@ export const usePosStore = create<PosState>((set, get) => ({
         // that survives a sale that was written while the shop had no network. Without
         // either, nothing in either app could find this debt again from the invoice.
         invoiceNumber,
+        idempotencyKey: debtKey,
         transactionId: saleUploaded ? realTx.id : undefined,
         createdAt: now,
         updatedAt: now,

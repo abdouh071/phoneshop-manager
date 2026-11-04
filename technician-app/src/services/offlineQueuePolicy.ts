@@ -14,7 +14,8 @@
 export type QueueKind = 'ticket' | 'sale' | 'status' | 'debt' | 'remark' | 'parts' | 'stock';
 
 export interface QueueAction<T = unknown> {
-  /** Minted once, at enqueue time. Survives every retry and is the idempotency key. */
+  /** Minted once, at enqueue time. Survives every retry; the replay key when the
+   *  record carries no `idempotencyKey` of its own — see `replayKeyOf`. */
   id: string;
   kind: QueueKind;
   /** The record to write (a ticket, a sale, a debt) or the field patch to apply. */
@@ -111,6 +112,28 @@ export const dedupeById = <T extends Pick<QueueAction, 'id'>>(actions: T[]): T[]
   }
   return out;
 };
+
+/**
+ * A dedupe key, minted once — before the record's first write, never at the replay.
+ *
+ * The till stamps it on the document it creates and keeps it on the local record it
+ * queues. That is the only way a replay can tell "the server saved this sale and the
+ * phone never heard" apart from "this sale never happened": a document written
+ * without a key on it matches nothing, so the next sync posts the sale again.
+ */
+export const newIdempotencyKey = (kind: 'sale' | 'debt' | 'ticket'): string =>
+  `${kind}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+/**
+ * The key a queued record actually replays under: its own stamp when it has one,
+ * the queue's id when it does not. The fallback keeps records that were already
+ * parked on a device before the stamp existed replaying at all — they just keep
+ * the weaker rule, which can only duplicate, never drop.
+ */
+export const replayKeyOf = (record: { idempotencyKey?: unknown }, queueActionId: string): string =>
+  typeof record.idempotencyKey === 'string' && record.idempotencyKey
+    ? record.idempotencyKey
+    : queueActionId;
 
 export type IdMap = Record<string, string>;
 

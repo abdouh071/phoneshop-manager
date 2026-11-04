@@ -11,6 +11,8 @@ import {
   dedupeById,
   resolveRef,
   rebaseActions,
+  replayKeyOf,
+  newIdempotencyKey,
   appendHistory,
   buildStatusPatch,
   nextTicketNumber,
@@ -190,4 +192,23 @@ test('stock is floored at zero and the status threshold is honoured', () => {
   assert.equal(deriveStockStatus(2, 2), 'low_stock');
   assert.equal(deriveStockStatus(3, 2), 'in_stock');
   assert.equal(deriveStockStatus(1, undefined), 'low_stock', 'a missing threshold still flags the last unit');
+});
+
+test('a queued sale replays under the key it was written with', () => {
+  // The whole point: the document the server committed while the phone saw a
+  // timeout carries this key, so the replay finds it and adopts it instead of
+  // posting the invoice — and the stock delta — a second time.
+  assert.equal(replayKeyOf({ idempotencyKey: 'sale_abc_1' }, 'sale_xyz_9'), 'sale_abc_1');
+});
+
+test('a record parked before the stamp existed still replays, on the weaker rule', () => {
+  assert.equal(replayKeyOf({}, 'sale_xyz_9'), 'sale_xyz_9');
+  assert.equal(replayKeyOf({ idempotencyKey: '' }, 'sale_xyz_9'), 'sale_xyz_9', 'an empty stamp is no stamp');
+  assert.equal(replayKeyOf({ idempotencyKey: 42 }, 'sale_xyz_9'), 'sale_xyz_9', 'a foreign shape cannot become a key');
+});
+
+test('two sales checked out in the same millisecond still get different keys', () => {
+  const keys = new Set(Array.from({ length: 50 }, () => newIdempotencyKey('sale')));
+  assert.equal(keys.size, 50);
+  for (const key of keys) assert.match(key, /^sale_[a-z0-9]+_[a-z0-9]+$/);
 });

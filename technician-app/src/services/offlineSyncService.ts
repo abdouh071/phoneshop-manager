@@ -7,9 +7,10 @@
  *     no longer replays user A's unsynced sale under user B's name. Legacy
  *     device-global entries are folded into the first account that signs in after
  *     the upgrade rather than dropped.
- *   • Replay-safe. Every record carries an `idempotencyKey` minted once at enqueue
- *     time; a crash between "uploaded" and "queue rewritten" is resolved by
- *     adopting the document that already exists instead of adding a second sale.
+ *   • Replay-safe. A sale carries an `idempotencyKey` minted before its first write
+ *     and stamped on the document it creates, so a crash — or a timeout on a write
+ *     the server actually committed — is resolved by adopting the document that
+ *     already exists instead of adding a second sale.
  *   • Bounded. Failures back off exponentially and park in the dead-letter store
  *     after MAX_ATTEMPTS, where the UI can show them. Previously a poisoned action
  *     retried every 15 seconds forever and a broken ticket reference could never
@@ -38,6 +39,7 @@ import {
   queueKey,
   recordFailure,
   rebaseActions,
+  replayKeyOf,
   resolveRef,
   shouldDeadLetter,
   toDeadLetter,
@@ -681,7 +683,9 @@ const flushSales = async (): Promise<FlushResult> => {
 
     try {
       const { id: _localId, ...dataToSave } = payload;
-      const { id, created } = await addIdempotently('transactions', action.id, {
+      // Replayed under the key the sale was written with, not a fresh one: the
+      // document this attempt is looking for is the one the till believes failed.
+      const { id, created } = await addIdempotently('transactions', replayKeyOf(payload, action.id), {
         ...dataToSave,
         saleType: dataToSave.saleType || 'retail',
       });
@@ -748,7 +752,7 @@ const flushDebts = async (): Promise<FlushResult> => {
 
     try {
       const { id: _localId, ...dataToSave } = payload;
-      await addIdempotently('customer_debts', action.id, dataToSave);
+      await addIdempotently('customer_debts', replayKeyOf(payload, action.id), dataToSave);
       await removeActions('debt', new Set([action.id]));
       out.synced++;
     } catch (err) {
