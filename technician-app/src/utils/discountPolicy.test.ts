@@ -4,7 +4,10 @@ import {
   DISCOUNT_APPROVAL_PERCENT,
   discountAmountOf,
   discountPercentOf,
+  lineDiscountOf,
   requiresDiscountApproval,
+  requiresLineDiscountApproval,
+  unitPriceAfterDiscount,
 } from './discountPolicy.ts';
 
 test('a percentage is taken off the basket and rounded once, for the screen and the ledger alike', () => {
@@ -55,4 +58,38 @@ test('junk input reads as no discount instead of a NaN the cart would print', ()
     assert.equal(discountPercentOf(1000, { mode: 'flat', value }), 0);
     assert.equal(requiresDiscountApproval('sales_agent', 1000, { mode: 'flat', value }), false);
   }
+});
+
+test('one line is measured against the price the document carried for it', () => {
+  const line = lineDiscountOf(1000, 800, 2);
+  assert.equal(line.granted, 400);
+  assert.equal(line.percent, 20);
+});
+
+test('a raised price is not a discount, and a line with no units has nothing to discount', () => {
+  assert.deepEqual(lineDiscountOf(1000, 1100, 1), { granted: 0, percent: 0 });
+  assert.deepEqual(lineDiscountOf(1000, 500, 0), { granted: 0, percent: 0 });
+  assert.deepEqual(lineDiscountOf(0, 0, 3), { granted: 0, percent: 0 });
+});
+
+test('the price a discount writes is the discount the line reads back', () => {
+  // The sheet keeps one truth — the unit price — so the field the cashier typed and
+  // the number the invoice stores cannot drift apart by the rounding between them.
+  assert.equal(unitPriceAfterDiscount(1000, 100, 3), 966.67);
+  assert.equal(lineDiscountOf(1000, 966.67, 3).granted, 99.99);
+  assert.equal(unitPriceAfterDiscount(4500, 500, 1), 4000);
+  assert.equal(lineDiscountOf(4500, 4000, 1).granted, 500);
+});
+
+test('a discount deeper than the line floors at nothing rather than a negative price', () => {
+  assert.equal(unitPriceAfterDiscount(300, 900, 1), 0);
+  assert.equal(unitPriceAfterDiscount(300, 0, 2), 300);
+  assert.equal(unitPriceAfterDiscount(300, Number.NaN, 2), 300);
+});
+
+test('an agent putting a fifth of one product off a settled invoice needs an admin', () => {
+  assert.equal(requiresLineDiscountApproval('sales_agent', 20), true);
+  assert.equal(requiresLineDiscountApproval('repair_agent', DISCOUNT_APPROVAL_PERCENT), false);
+  assert.equal(requiresLineDiscountApproval('admin', 90), false);
+  assert.equal(requiresLineDiscountApproval('sales_agent', Number.NaN), false);
 });

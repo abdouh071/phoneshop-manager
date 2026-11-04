@@ -32,12 +32,23 @@ import { usePosStore } from '../store/posStore';
 import { applySaleEdit, findOversoldLines, type SaleEditOutcome } from '../services/saleEditService';
 import { readStockLevels } from '../services/stockService';
 import { diffSaleEdit, planSaleEdit, type SaleLineEdits, type SaleRestockChoices } from '../utils/saleEdit';
+import {
+  DISCOUNT_APPROVAL_PERCENT,
+  lineDiscountOf,
+  requiresLineDiscountApproval,
+  unitPriceAfterDiscount,
+} from '../utils/discountPolicy.ts';
 import { buildSearch, matchesSearch } from '../utils/search';
 import { AdminApprovalSheet, type ApprovalPayload } from './AdminApprovalSheet';
 import { colors, fontSize, radius, spacing } from '../theme/tokens';
 import type { CartItem, PhoneModel, SaleTransaction } from '../types';
 
-type LineDraft = { quantity: number; price: string };
+/**
+ * `discount` is the number exactly as it was typed. The price is the truth the
+ * document stores, and a discount re-derived from it lands on 99.99 where the
+ * cashier typed 100 — rewriting the field under the caret.
+ */
+type LineDraft = { quantity: number; price: string; discount?: string };
 
 /** One line on the sheet: a row of the document, or a product added to it. */
 type EditRow = {
@@ -203,6 +214,28 @@ export const EditSaleSheet = ({
     [transaction, edits, restock, addedLines]
   );
 
+  /**
+   * What each line gives away against the price the document carried for it — whether
+   * that came from the discount field or from a price cut by hand. The customer and
+   * the reports see only a price, so the approval has to be asked for both alike, or
+   * the rule would have a side door.
+   */
+  const concessions = useMemo(
+    () =>
+      rows
+        .map(row => {
+          const quantity = draft[row.id]?.quantity ?? row.originalQty;
+          const unitPrice = edits[row.id]?.unitPrice ?? row.originalUnit;
+          return { row, quantity, ...lineDiscountOf(row.originalUnit, unitPrice, quantity) };
+        })
+        .filter(line => line.granted > 0),
+    [draft, edits, rows]
+  );
+
+  const concessionsTotal = concessions.reduce((sum, line) => sum + line.granted, 0);
+  const deepConcessions = concessions.filter(line => requiresLineDiscountApproval(user?.role, line.percent));
+  const deepestDiscountPercent = deepConcessions.reduce((worst, line) => Math.max(worst, line.percent), 0);
+
   const invoiceLabel = transaction?.invoiceNumber || transaction?.id.slice(-6) || '';
 
   /** The badge wording the history list uses — a snake_case Firestore token
@@ -223,13 +256,29 @@ export const EditSaleSheet = ({
       [id]: {
         ...prev[id],
         quantity: Math.max(0, Math.min(Math.max(0, maxQty), Math.trunc(Number(quantity) || 0))),
+        // Another unit changes what a typed discount is worth, so the field reads the
+        // concession back off the line instead of holding a stale number.
+        discount: undefined,
       },
     }));
   };
 
   const setPrice = (id: string, price: string) => {
     if (!id) return;
-    setDraft(prev => ({ ...prev, [id]: { ...prev[id], price } }));
+    setDraft(prev => ({ ...prev, [id]: { ...prev[id], price, discount: undefined } }));
+  };
+
+  /**
+   * The discount and the unit price are one number seen from two sides: the
+   * concession is measured from the price the document carried and spread over the
+   * units it holds, so the line the till prints and the line the reports add up stay
+   * the same line.
+   */
+  const setDiscount = (id: string, raw: string, listUnit: number, quantity: number) => {
+    if (!id) return;
+    const parsed = Number(String(raw).replace(',', '.'));
+    const unit = unitPriceAfterDiscount(listUnit, Number.isFinite(parsed) ? parsed : 0, quantity);
+    setDraft(prev => ({ ...prev, [id]: { ...prev[id], discount: raw, price: String(unit) } }));
   };
 
   /** A product on the document is edited on its own row; the picker must not offer it twice. */
@@ -431,6 +480,14 @@ export const EditSaleSheet = ({
       // had are going out of the shop.
       (newLineCount > 0
         ? t('salesHistory.editApprovalAdds', ' — plus {{count}} new line(s)', { count: newLineCount })
+        : '') +
+      // An admin who only reads the headline still learns that a fifth of a product
+      // is being given away, not just that the total moved.
+      (deepConcessions.length > 0
+        ? t('salesHistory.editApprovalDiscounts', ' — plus {{percent}}% off {{count}} line(s)', {
+            percent: deepestDiscountPercent.toFixed(1),
+            count: deepConcessions.length,
+          })
         : ''),
     targetId: transaction?.id,
     actionData: {
@@ -443,6 +500,13 @@ export const EditSaleSheet = ({
       resultingStatus: plan?.status,
       customerName: transaction?.customerName || t('pos.walkInCustomer', 'Walk-in Customer'),
       changes,
+      lineDiscountAmount: Math.round(concessionsTotal),
+      deepestLineDiscountPercent: Number(deepestDiscountPercent.toFixed(1)),
+      deepLineDiscounts: deepConcessions.map(line => ({
+        name: line.row.name,
+        percent: Number(line.percent.toFixed(1)),
+        amount: Math.round(line.granted),
+      })),
       unitsBackOnShelf: plan?.restock.reduce((sum, l) => sum + l.quantity, 0) || 0,
       unitsTakenFromShelf: plan?.deduct.reduce((sum, l) => sum + l.quantity, 0) || 0,
     },
@@ -502,6 +566,8 @@ export const EditSaleSheet = ({
                   ? MAX_UNITS
                   : Math.min(MAX_UNITS, originalQty + Math.max(0, onShelf ?? 0));
               const atCeiling = quantity >= maxQty;
+              const concession = lineDiscountOf(originalUnit, unitPrice, quantity);
+              const overDiscount = requiresLineDiscountApproval(user?.role, concession.percent);
               // A row of the document reads "what you have now / what was sold";
               // a line nobody bought yet has nothing to be measured against.
               const stepLabel = row.added ? String(quantity) : `${quantity} / ${originalQty}`;
@@ -579,6 +645,40 @@ export const EditSaleSheet = ({
                         </TouchableOpacity>
                       </View>
                     </View>
+                  ) : null}
+
+                  {pid ? (
+                    <View style={styles.discountRow}>
+                      <TextInput
+                        label={t('salesHistory.editDiscountInput', 'Discount (DA)')}
+                        value={
+                          draft[pid]?.discount ?? (concession.granted > 0 ? String(concession.granted) : '')
+                        }
+                        onChangeText={next => setDiscount(pid, next, originalUnit, quantity)}
+                        mode="outlined"
+                        dense
+                        keyboardType="decimal-pad"
+                        returnKeyType="done"
+                        disabled={quantity <= 0}
+                        style={styles.discountInput}
+                        accessibilityLabel={t('salesHistory.editDiscountA11y', 'Discount on this line (DA)')}
+                      />
+                      {concession.granted > 0 && (
+                        <Text style={[styles.discountPercent, overDiscount && styles.discountOver]}>
+                          −{concession.percent.toFixed(1)}%
+                        </Text>
+                      )}
+                    </View>
+                  ) : null}
+
+                  {pid && overDiscount ? (
+                    <Text style={styles.discountNote}>
+                      {t(
+                        'salesHistory.editDiscountOver',
+                        'Over {{percent}}% of what this line was sold at — an admin has to approve it.',
+                        { percent: DISCOUNT_APPROVAL_PERCENT }
+                      )}
+                    </Text>
                   ) : null}
 
                   {row.added ? (
@@ -660,6 +760,13 @@ export const EditSaleSheet = ({
                 label={t('salesHistory.editNewSubtotal', 'New Subtotal')}
                 value={`${amount(plan.subtotal)} DA`}
               />
+              {concessionsTotal > 0 && (
+                <SummaryRow
+                  label={t('salesHistory.editLineDiscounts', 'Given away on lines')}
+                  value={`-${amount(Math.round(concessionsTotal))} DA`}
+                  tone="danger"
+                />
+              )}
               {plan.discountAmount > 0 && (
                 <SummaryRow
                   label={t('salesHistory.editDiscount', 'Discount Applied')}
@@ -821,6 +928,16 @@ export const EditSaleSheet = ({
             from: amount(transaction.total),
             to: amount(plan.total),
           }),
+          // The depth of each giveaway, not only the dinars: 900 DA off a small line is
+          // a different decision from 900 DA off a phone.
+          ...deepConcessions.slice(0, 3).map(
+            line =>
+              t('salesHistory.editApprovalLineDiscount', 'Discount on {{name}}: −{{percent}}% ({{dinars}} DA)', {
+                name: line.row.name,
+                percent: line.percent.toFixed(1),
+                dinars: amount(Math.round(line.granted)),
+              })
+          ),
           ...changes.slice(0, 6).map(change => {
             if (change.kind === 'add') {
               return t('salesHistory.editApprovalLineAdd', '{{name}}: new line, {{qty}} × {{price}} DA', {
@@ -918,6 +1035,11 @@ const styles = StyleSheet.create({
   stepBtnOff: { opacity: 0.4 },
   stepValue: { minWidth: 42, textAlign: 'center', fontSize: fontSize.bodyStrong, fontWeight: '700', color: colors.textPrimary },
   priceInput: { flex: 1, minHeight: 44 },
+  discountRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  discountInput: { flex: 1, minHeight: 44 },
+  discountPercent: { minWidth: 58, fontSize: fontSize.bodyStrong, fontWeight: '700', color: colors.dangerText },
+  discountOver: { color: colors.warningInk },
+  discountNote: { fontSize: fontSize.caption, color: colors.warningInk },
   restockRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   restockText: { flex: 1, fontSize: fontSize.label },
   restockYes: { color: colors.success, fontWeight: '700' },

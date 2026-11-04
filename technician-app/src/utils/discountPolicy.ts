@@ -56,3 +56,70 @@ export const requiresDiscountApproval = (
   if (discountAmountOf(subtotal, input) <= 0) return false;
   return discountPercentOf(subtotal, input) > DISCOUNT_APPROVAL_PERCENT;
 };
+
+/**
+ * One line of a settled invoice, seen the same way.
+ * -----------------------------------------------
+ * The counter's editor and this phone's sheet both let a single product be
+ * discounted — the customer who comes back for a second cable is answered on the
+ * invoice he already left with. The concession is written into that line's own unit
+ * price rather than stored beside it, because every renderer (the till's ESC-POS
+ * server, its browser receipt, the ledger, the customer statement) prices the line
+ * from its unit price and the reports add those lines back up. Kept separately, the
+ * printed lines would stop footing to the printed total.
+ */
+
+/** What one line gives away, and how deep that is against what it was listed at. */
+export interface LineDiscount {
+  granted: number;
+  percent: number;
+}
+
+const roundCents = (n: number): number => Math.round(n * 100) / 100;
+
+/**
+ * The concession a line actually carries, measured from the price the document held
+ * before this edit. Raising a price is not a discount, so the share never goes
+ * negative; a line with no units, or no price to measure against, has nothing.
+ */
+export const lineDiscountOf = (
+  listUnitPrice: number,
+  chargedUnitPrice: number,
+  quantity: number
+): LineDiscount => {
+  const units = Math.trunc(Number(quantity));
+  const listed = Number(listUnitPrice);
+  const charged = Number(chargedUnitPrice);
+  if (!Number.isFinite(units) || units <= 0) return { granted: 0, percent: 0 };
+  if (!Number.isFinite(listed) || listed <= 0) return { granted: 0, percent: 0 };
+  if (!Number.isFinite(charged)) return { granted: 0, percent: 0 };
+  const granted = roundCents((listed - charged) * units);
+  if (granted <= 0) return { granted: 0, percent: 0 };
+  return { granted, percent: (granted / (listed * units)) * 100 };
+};
+
+/**
+ * The unit price that takes `amount` dinars off a line of `quantity` units. The
+ * discount is spread over the units because the document stores a unit price and
+ * every renderer multiplies it back out — and a line cannot fall below nothing.
+ */
+export const unitPriceAfterDiscount = (
+  listUnitPrice: number,
+  amount: number,
+  quantity: number
+): number => {
+  const listed = Number(listUnitPrice);
+  if (!Number.isFinite(listed) || listed <= 0) return 0;
+  const units = Math.trunc(Number(quantity));
+  if (!Number.isFinite(units) || units <= 0) return roundCents(listed);
+  const wanted = Number(amount);
+  if (!Number.isFinite(wanted) || wanted <= 0) return roundCents(listed);
+  // A discount deeper than the line is taken as the whole line, so the field never
+  // shows a negative price the till would then have to explain.
+  return roundCents(listed - Math.min(listed, wanted / units));
+};
+
+export const requiresLineDiscountApproval = (
+  role: User['role'] | undefined,
+  percent: number
+): boolean => role !== 'admin' && Number.isFinite(percent) && percent > DISCOUNT_APPROVAL_PERCENT;
