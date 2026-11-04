@@ -119,3 +119,37 @@ export const unitPriceAfterDiscount = (
 
 export const requiresLineDiscountApproval = (role: DiscountRole, percent: number): boolean =>
   role !== 'admin' && Number.isFinite(percent) && percent > DISCOUNT_APPROVAL_PERCENT;
+
+/** One line's giveaway, kept for the shop to read back later. */
+export interface LineConcession {
+  productId: string;
+  name: string;
+  granted: number;
+  percent: number;
+}
+
+/**
+ * Everything one sale gave away — the basket promise and each line knocked down.
+ * A concession folded into a line's price is invisible to a totaliser that reads
+ * only the document's discount field, so the shop's "Discounts Given" reported
+ * money it had really handed over. The lines are written on the sale to keep the
+ * figure honest without repricing anything.
+ */
+export const discountsGivenOf = (tx: {
+  subtotal?: number;
+  total?: number;
+  discount?: { type: 'percent' | 'flat'; value: number } | number | null;
+  lineDiscounts?: { granted: number }[] | null;
+}): number => {
+  const raw = tx.discount;
+  // A share is a share of the basket; an older receipt that never wrote one is
+  // measured against what it did write.
+  const subtotal = Number(tx.subtotal) || Number(tx.total) || 0;
+  let basket = 0;
+  if (typeof raw === 'number') basket = Math.max(0, raw);
+  else if (raw && typeof raw === 'object') {
+    const mode = raw.type === 'percent' ? 'percent' : 'flat';
+    basket = discountAmountOf(subtotal, { mode, value: Number(raw.value) });
+  }
+  return basket + (tx.lineDiscounts ?? []).reduce((sum, line) => sum + (Number(line.granted) || 0), 0);
+};

@@ -58,6 +58,10 @@ export interface SaleTransaction {
   items: CartItem[];
   subtotal: number;
   discount?: { type: 'percent' | 'flat'; value: number };
+  /** What each line was knocked down to, in dinars. A concession folded into a
+   *  line's price is invisible to anything that adds up the document's discount
+   *  field, so the shop keeps the giveaway written down where it can total it. */
+  lineDiscounts?: { productId: string; name: string; granted: number; percent: number }[];
   total: number;
   payments: { method: PaymentMethod; amount: number }[];
   customerName?: string;

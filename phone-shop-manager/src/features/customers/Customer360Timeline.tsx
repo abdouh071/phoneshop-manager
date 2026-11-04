@@ -7,6 +7,7 @@ import {
 import { RepairStatusBadge } from '../../components/ui/Badge';
 import type { SaleTransaction, CustomerDebtEntry, RepairTicket } from '../../types';
 import { formatPrivateCurrency } from '../../utils/formatCurrency';
+import { discountsGivenOf } from '../../utils/discountPolicy';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { isDebtOverdue, getDaysOverdue } from '../../utils/debtAlerts';
 import styles from './Timeline.module.css';
@@ -43,6 +44,8 @@ const SaleCard: React.FC<{ event: SaleEvent; onViewReceipt?: (tx: SaleTransactio
   const tx = event.data;
   const isB2B = tx.saleType === 'parts_b2b' || Boolean(tx.invoiceNumber);
   const refCode = tx.invoiceNumber ? `#${tx.invoiceNumber}` : `TX-#${tx.id.slice(-6)}`;
+
+  const discountsGiven = discountsGivenOf(tx);
 
   const paymentMethods = tx.payments && tx.payments.length > 0
     ? tx.payments.map(p => {
@@ -89,10 +92,10 @@ const SaleCard: React.FC<{ event: SaleEvent; onViewReceipt?: (tx: SaleTransactio
               </div>
             ))}
           </div>
-          {tx.discount && (typeof tx.discount === 'object' ? tx.discount.value > 0 : Number(tx.discount) > 0) && (
+          {discountsGiven > 0 && (
             <div className={styles.debtRow} style={{ color: '#15803d', fontWeight: 600 }}>
               <span>{t('customers.discountApplied', '🏷️ Discount Applied')}</span>
-              <span>-{formatPrivateCurrency(typeof tx.discount === 'object' ? (tx.discount.type === 'percent' ? ((tx.subtotal || tx.total) * tx.discount.value / 100) : tx.discount.value) : Number(tx.discount))}</span>
+              <span>-{formatPrivateCurrency(discountsGiven)}</span>
             </div>
           )}
           <div className={styles.cardFooter}>

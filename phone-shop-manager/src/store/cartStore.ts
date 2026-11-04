@@ -9,7 +9,7 @@ import { useAuthStore } from './authStore';
 import { useCustomerStore } from './customerStore';
 import { cartService } from '../services/cartService';
 import { formatCurrency } from '../utils/formatCurrency';
-import { discountAmountOf } from '../utils/discountPolicy';
+import { discountAmountOf, lineDiscountOf } from '../utils/discountPolicy';
 import { planSaleEditStock } from '../utils/saleEditStock';
 import { foldStockDeltas } from '../utils/stockDeltas';
 
@@ -140,6 +140,29 @@ interface CartState {
 
 const initialActive = loadLocalActiveCart();
 const initialSuspended = loadLocalSuspendedCarts();
+
+/**
+ * The counter's money, worked out from a line list instead of the live cart. A
+ * suspended basket is read by a screen that is not the till, and it has to show
+ * the number the till will show when that customer walks back to the counter —
+ * same purchases, same returns priced at what they come back for, one discount
+ * measured on the purchases and rounded once.
+ */
+export const cartTotalsOf = (
+  items: CartItem[],
+  discount: { type: 'percent' | 'flat'; value: number } | null
+): { purchases: number; returns: number; discountAmount: number; total: number } => {
+  const purchases = items
+    .filter(i => !i.isReturn)
+    .reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+  const returns = items
+    .filter(i => i.isReturn)
+    .reduce((sum, item) => sum + (item.customReturnPrice ?? item.product.price) * item.quantity, 0);
+  const discountAmount = discount
+    ? discountAmountOf(purchases, { mode: discount.type, value: discount.value })
+    : 0;
+  return { purchases, returns, discountAmount, total: (purchases - discountAmount) - returns };
+};
 
 export const useCartStore = create<CartState>((set, get) => ({
   items: initialActive.items,
@@ -1055,6 +1078,32 @@ export const useCartStore = create<CartState>((set, get) => ({
       payments: adjustedPayments,
     };
 
+    /**
+     * What this correction knocks off the invoice, line by line, measured against
+     * the price the document carried for each line before it — a line that joined
+     * the invoice is priced at what it was sold for, so it records nothing. The
+     * concession lives inside the line's own price, invisible to anything adding
+     * up the discount field, so the shop writes it down where its totals can see
+     * it. A later correction that gives a price back leaves the record standing:
+     * a till that over-counts money walked out of is the safer way to be wrong.
+     */
+    const lineConcessions = pricedItems
+      .map(item => {
+        const charged = item.unitPrice ?? item.product.price;
+        const before = tx.items.find(orig =>
+          orig.product.id === item.product.id && Boolean(orig.isReturn) === Boolean(item.isReturn)
+        );
+        const listUnit = before ? (before.unitPrice ?? before.product.price) : charged;
+        return {
+          productId: item.product.id,
+          name: `${item.product.name} ${item.product.model || ''}`.trim(),
+          ...lineDiscountOf(listUnit, charged, item.quantity),
+        };
+      })
+      .filter(line => line.granted > 0);
+
+    if (lineConcessions.length > 0) updates.lineDiscounts = lineConcessions;
+
     // A sale written before the till stored its discount in dinars still carries a
     // percentage, and re-expanding one at print time is exactly how a reprint came
     // out a dinar off its own lines. The corrected invoice gets written once, in
@@ -1121,35 +1170,20 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
   },
 
-  getPurchasesSubtotal: () =>
-    get().items
-      .filter(i => !i.isReturn)
-      .reduce((sum, item) => sum + item.product.price * item.quantity, 0),
+  getPurchasesSubtotal: () => cartTotalsOf(get().items, null).purchases,
 
-  getReturnsSubtotal: () =>
-    get().items
-      .filter(i => i.isReturn)
-      .reduce((sum, item) => sum + (item.customReturnPrice ?? item.product.price) * item.quantity, 0),
+  getReturnsSubtotal: () => cartTotalsOf(get().items, null).returns,
 
   getSubtotal: () =>
     get().getPurchasesSubtotal() - get().getReturnsSubtotal(),
 
-  getDiscountAmount: () => {
-    const { discount } = get();
-    if (!discount) return 0;
-    // Measured against the purchases, not the net basket: a returned phone coming
-    // back onto the shelf must not shrink the discount a trade customer was owed on
-    // what he took. One rule with the parts counter and the technician phone.
-    return discountAmountOf(get().getPurchasesSubtotal(), { mode: discount.type, value: discount.value });
-  },
+  // Measured against the purchases, not the net basket: a returned phone coming
+  // back onto the shelf must not shrink the discount a trade customer was owed on
+  // what he took. One rule with the parts counter and the technician phone.
+  getDiscountAmount: () => cartTotalsOf(get().items, get().discount).discountAmount,
 
-  getTotal: () => {
-    const purchases = get().getPurchasesSubtotal();
-    const returns = get().getReturnsSubtotal();
-    const discount = get().getDiscountAmount();
-    // Net difference: positive = customer pays, negative = shop owes refund/credit
-    return (purchases - discount) - returns;
-  },
+  // Net difference: positive = customer pays, negative = shop owes refund/credit
+  getTotal: () => cartTotalsOf(get().items, get().discount).total,
 
   getItemCount: () =>
     get().items.reduce((sum, item) => sum + item.quantity, 0),

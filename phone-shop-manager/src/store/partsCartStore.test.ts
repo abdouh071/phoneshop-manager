@@ -194,6 +194,7 @@ describe('the sale as it is written down', () => {
       items: { product: { price: number }; quantity: number; unitPrice: number; totalPrice: number }[];
       subtotal: number;
       total: number;
+      lineDiscounts?: { productId: string; granted: number; name: string }[];
     };
     expect(tx.items[0].product.price).toBe(250);
     expect(tx.items[0].unitPrice).toBe(250);
@@ -202,6 +203,12 @@ describe('the sale as it is written down', () => {
     const lines = tx.items.reduce((sum, i) => sum + i.product.price * i.quantity, 0);
     expect(lines).toBe(tx.subtotal);
     expect(tx.total).toBe(tx.subtotal);
+    // The giveaway lives inside the line price now, so it is written down beside it
+    // or the shop's "Discounts Given" reports money it handed over as revenue.
+    const [recorded] = tx.lineDiscounts ?? [];
+    expect(recorded?.productId).toBe(shelf.id);
+    expect(recorded?.name).toBe('Type-C cable 1m');
+    expect(recorded?.granted).toBe(100);
     // And the shelf never saw any of it.
     expect(shelf.price).toBe(300);
   });
@@ -263,9 +270,12 @@ describe('the basket promise', () => {
       subtotal: number;
       total: number;
       discount?: { type: 'percent' | 'flat'; value: number };
+      lineDiscounts?: unknown[];
     };
     expect(tx.discount).toEqual({ type: 'flat', value: 300 });
     expect(tx.total).toBe(tx.subtotal - 300);
+    // Nothing was knocked off a line, so nothing is recorded as knocked off a line.
+    expect(tx.lineDiscounts).toBeUndefined();
   });
 
   it('clears the promise rather than leaving a zero behind', () => {

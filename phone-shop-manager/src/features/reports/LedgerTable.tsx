@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { discountsGivenOf } from '../../utils/discountPolicy';
 import type { SaleTransaction, RepairTicket } from '../../types';
 import type { ReportData } from '../../services/reportsService';
 import type { LedgerTab } from './reportTypes';
@@ -119,9 +120,9 @@ export const LedgerTable: React.FC<LedgerTableProps> = ({
                             <span style={{ color: 'var(--color-on-surface-variant)' }}> ({formatCurrency(i.product.price * i.quantity)})</span>
                           </span>
                         ))}
-                        {tx.discount && (
+                        {discountsGivenOf(tx) > 0 && (
                           <span style={{ color: 'var(--color-warning)', fontSize: '11px' }}>
-                            Discount: -{tx.discount.value}{tx.discount.type === 'percent' ? '%' : ' DA'}
+                            Discount: -{formatCurrency(discountsGivenOf(tx))}
                           </span>
                         )}
                       </div>

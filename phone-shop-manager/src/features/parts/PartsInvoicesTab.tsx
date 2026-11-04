@@ -4,6 +4,7 @@ import { Printer, Store, User, FileText, Calendar, CheckCircle2, Clock, AlertCir
 import { usePartsCartStore } from '../../store/partsCartStore';
 import { useAuthStore } from '../../store/authStore';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { discountsGivenOf } from '../../utils/discountPolicy';
 import type { SaleTransaction, Customer } from '../../types';
 import { PartsInvoiceModal } from './PartsInvoiceModal';
 import { EditTransactionModal } from '../pos/EditTransactionModal';
@@ -238,9 +239,9 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={{ textAlign: 'right' }}>
                       <span style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>{formatCurrency(tx.total)}</span>
-                      {tx.discount && (
+                      {discountsGivenOf(tx) > 0 && (
                         <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>
-                          Discount: {formatCurrency(typeof tx.discount === 'number' ? tx.discount : tx.discount.value)}
+                          Discount: {formatCurrency(discountsGivenOf(tx))}
                         </div>
                       )}
                     </div>

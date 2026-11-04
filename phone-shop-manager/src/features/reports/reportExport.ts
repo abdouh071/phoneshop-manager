@@ -1,4 +1,5 @@
 import { formatCurrency } from '../../utils/formatCurrency';
+import { discountsGivenOf } from '../../utils/discountPolicy';
 import type { DailyIncomeDetail, ReportData } from '../../services/reportsService';
 import type { RepairTicket, SaleTransaction } from '../../types';
 
@@ -38,7 +39,7 @@ export const buildFinancialSummaryCsv = (data: ReportData): CsvPayload => {
 };
 
 export const buildSalesLedgerCsv = (filteredSalesLedger: SaleTransaction[]): CsvPayload => {
-  const headers = ['Date', 'Transaction ID', 'Customer', 'Items', 'Cashier', 'Payment Method', 'Discount', 'Total (DA)', 'Status'];
+  const headers = ['Date', 'Transaction ID', 'Customer', 'Items', 'Cashier', 'Payment Method', 'Discount (DA)', 'Total (DA)', 'Status'];
   const rows = filteredSalesLedger.map(t => [
     new Date(t.date).toLocaleString(),
     t.id,
@@ -46,7 +47,7 @@ export const buildSalesLedgerCsv = (filteredSalesLedger: SaleTransaction[]): Csv
     t.items.map(i => `${i.quantity}x ${i.product.name} ${i.product.model}`).join('; '),
     t.processedByName || 'Store Cashier',
     t.payments.map(p => p.method).join('+'),
-    t.discount ? `${t.discount.value}${t.discount.type === 'percent' ? '%' : ' DA'}` : '0 DA',
+    discountsGivenOf(t),
     t.total,
     t.status || 'completed'
   ]);

@@ -19,6 +19,7 @@ import { customerLogService } from '../services/customerLogService';
 import { partsCartService } from '../services/partsCartService';
 import { formatCurrency } from '../utils/formatCurrency';
 import { discountAmountOf, lineDiscountOf, unitPriceAfterDiscount } from '../utils/discountPolicy';
+import type { LineConcession } from '../utils/discountPolicy';
 
 const getInventoryProducts = () => {
   const { parts } = useInventoryStore.getState();
@@ -199,12 +200,7 @@ export interface PartsCartState {
 }
 
 /** One discounted line: the dinars it carries off, and how deep that is as a share. */
-export interface PartsLineConcession {
-  productId: string;
-  name: string;
-  granted: number;
-  percent: number;
-}
+export type PartsLineConcession = LineConcession;
 
 const initialActive = loadLocalActiveCart();
 const initialSuspended = loadLocalSuspendedCarts();
@@ -474,6 +470,9 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
     if (items.length === 0) return null;
 
     set({ isCheckingOut: true });
+    // What each line gave away, kept on the sale: a concession folded into a
+    // line's own price is invisible to anything adding up the discount field.
+    const concessions = get().getLineConcessions();
     const itemsSnapshot = foldLineConcessions(items);
 
     try {
@@ -500,6 +499,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         items: itemsSnapshot,
         subtotal,
         discount: discount > 0 ? { type: 'flat', value: discount } : undefined,
+        lineDiscounts: concessions.length > 0 ? concessions : undefined,
         total,
         payments: payments.map(p => ({ ...p, amount: p.amount || total })),
         customerName: customerName || undefined,
@@ -566,6 +566,9 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
     if (items.length === 0) return null;
 
     set({ isCheckingOut: true });
+    // What each line gave away, kept on the sale: a concession folded into a
+    // line's own price is invisible to anything adding up the discount field.
+    const concessions = get().getLineConcessions();
     const itemsSnapshot = foldLineConcessions(items);
 
     try {
@@ -615,6 +618,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         items: itemsSnapshot,
         subtotal,
         discount: discount > 0 ? { type: 'flat', value: discount } : undefined,
+        lineDiscounts: concessions.length > 0 ? concessions : undefined,
         total,
         payments: txPayments,
         customerName: customer.name,

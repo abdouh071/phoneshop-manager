@@ -5,6 +5,7 @@ import { endOfDayService, type EndOfDayRecord } from './endOfDayService';
 import { debtService } from './debtService';
 import { toDateStr } from '../store/endOfDayStore';
 import { computeDayFigures } from '../utils/dayFigures';
+import { discountsGivenOf } from '../utils/discountPolicy';
 import { reconcileEodDay, type EodReconciliation } from '../utils/eodReconcile';
 import {
   isClaimedAndPaidRepair,
@@ -627,10 +628,10 @@ export const reportsService = {
         if (i.isReturn) totalUnitsSold -= i.quantity;
         else totalUnitsSold += i.quantity;
       });
-      if (t.discount) {
-        if (t.discount.type === 'flat') discountsTotal += t.discount.value;
-        else discountsTotal += (t.subtotal * (t.discount.value / 100));
-      }
+      // Both sides of the giveaway: the basket promise, and what each line was
+      // knocked down to — a concession folded into a line's price never shows up
+      // in the discount field, and the till was handing the money out anyway.
+      discountsTotal += discountsGivenOf(t);
     });
     totalUnitsSold = Math.max(0, totalUnitsSold);
 

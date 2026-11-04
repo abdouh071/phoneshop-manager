@@ -13,6 +13,7 @@ import {
   DISCOUNT_APPROVAL_PERCENT,
   discountAmountOf,
   discountPercentOf,
+  discountsGivenOf,
   lineDiscountOf,
   requiresDiscountApproval,
   requiresLineDiscountApproval,
@@ -133,5 +134,35 @@ describe('requiresLineDiscountApproval', () => {
     expect(requiresLineDiscountApproval('sales_agent', 20)).toBe(true);
     expect(requiresLineDiscountApproval('sales_agent', 14.9)).toBe(false);
     expect(requiresLineDiscountApproval('admin', 90)).toBe(false);
+  });
+});
+
+describe('discountsGivenOf', () => {
+  it('counts the basket promise the till recorded in dinars', () => {
+    expect(discountsGivenOf({ subtotal: 1000, discount: { type: 'flat', value: 200 } })).toBe(200);
+  });
+
+  it('reads a percentage as the dinars it came to, not the figure itself', () => {
+    expect(discountsGivenOf({ subtotal: 1000, discount: { type: 'percent', value: 10 } })).toBe(100);
+    // A sale written before the till stored its discount in dinars.
+    expect(discountsGivenOf({ subtotal: 1000, discount: 250 })).toBe(250);
+  });
+
+  it('counts what each line was knocked down to, which the discount field never saw', () => {
+    const tx = {
+      subtotal: 9300,
+      discount: { type: 'flat' as const, value: 300 },
+      lineDiscounts: [{ granted: 100 }, { granted: 50 }],
+    };
+    expect(discountsGivenOf(tx)).toBe(450);
+  });
+
+  it('reports nothing on a sale that gave nothing away', () => {
+    expect(discountsGivenOf({ subtotal: 500 })).toBe(0);
+    expect(discountsGivenOf({ subtotal: 500, lineDiscounts: [] })).toBe(0);
+  });
+
+  it('shrugs off a line written without a number', () => {
+    expect(discountsGivenOf({ subtotal: 500, lineDiscounts: [{ granted: NaN }, { granted: 50 }] })).toBe(50);
   });
 });

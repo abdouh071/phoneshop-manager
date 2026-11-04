@@ -3,6 +3,7 @@ import type { SaleTransaction } from '../../types';
 import { Receipt, FileText, FileEdit, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { formatPrivateCurrency } from '../../utils/formatCurrency';
+import { discountsGivenOf } from '../../utils/discountPolicy';
 import styles from './CustomerProfile.module.css';
 
 interface CustomerPurchasesTabProps {
@@ -71,10 +72,10 @@ export const CustomerPurchasesTab: React.FC<CustomerPurchasesTabProps> = ({
                           <span>{formatPrivateCurrency(item.product.price * item.quantity)}</span>
                         </div>
                       ))}
-                      {tx.discount && (typeof tx.discount === 'object' ? tx.discount.value > 0 : Number(tx.discount) > 0) && (
+                      {discountsGivenOf(tx) > 0 && (
                         <div className={styles.saleItemRow} style={{ color: '#15803d', fontWeight: 600 }}>
                           <span>{t('customers.discountApplied', '🏷️ Discount Applied')}</span>
-                          <span>-{formatPrivateCurrency(typeof tx.discount === 'object' ? (tx.discount.type === 'percent' ? ((tx.subtotal || tx.total) * tx.discount.value / 100) : tx.discount.value) : Number(tx.discount))}</span>
+                          <span>-{formatPrivateCurrency(discountsGivenOf(tx))}</span>
                         </div>
                       )}
                     </div>

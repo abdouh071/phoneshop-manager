@@ -2,18 +2,8 @@ import React from 'react';
 import { Clock, ArrowLeft, Search, X, User, Trash2 } from 'lucide-react';
 import type { SuspendedCart } from '../../types';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { cartTotalsOf } from '../../store/cartStore';
 import styles from './POS.module.css';
-
-const getSuspendedCartTotal = (cart: SuspendedCart) => {
-  const subtotal = cart.items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-  let discountAmt = 0;
-  if (cart.discount) {
-    discountAmt = cart.discount.type === 'percent'
-      ? subtotal * (cart.discount.value / 100)
-      : cart.discount.value;
-  }
-  return Math.max(0, subtotal - discountAmt);
-};
 
 interface PosSuspendedCartListProps {
   suspendedCount: number;
@@ -83,7 +73,7 @@ export const PosSuspendedCartList: React.FC<PosSuspendedCartListProps> = ({
         </div>
       ) : (
         filteredSuspendedCarts.map(cart => {
-          const cartTotal = getSuspendedCartTotal(cart);
+          const { discountAmount, total } = cartTotalsOf(cart.items, cart.discount);
           const totalUnits = cart.items.reduce((sum, i) => sum + i.quantity, 0);
           return (
             <div key={cart.id} className={styles.suspendedCard}>
@@ -102,7 +92,7 @@ export const PosSuspendedCartList: React.FC<PosSuspendedCartListProps> = ({
                   </div>
                 </div>
                 <div className={styles.suspendedCardTotalBadge}>
-                  {formatCurrency(cartTotal)}
+                  {formatCurrency(total)}
                 </div>
               </div>
 
@@ -117,18 +107,18 @@ export const PosSuspendedCartList: React.FC<PosSuspendedCartListProps> = ({
                       {item.product.color ? ` • ${item.product.color}` : ''}
                     </span>
                     <span className={styles.suspendedItemPrice}>
-                      {formatCurrency(item.product.price * item.quantity)}
+                      {item.isReturn
+                        ? `−${formatCurrency((item.customReturnPrice ?? item.product.price) * item.quantity)}`
+                        : formatCurrency(item.product.price * item.quantity)}
                     </span>
                   </div>
                 ))}
-                {cart.discount && (
+                {discountAmount > 0 && (
                   <div className={styles.suspendedDiscountRow}>
-                    <span>Discount Applied</span>
                     <span>
-                      {cart.discount.type === 'percent'
-                        ? `-${cart.discount.value}%`
-                        : `-${formatCurrency(cart.discount.value)}`}
+                      Discount Applied{cart.discount?.type === 'percent' ? ` (${cart.discount.value}%)` : ''}
                     </span>
+                    <span>−{formatCurrency(discountAmount)}</span>
                   </div>
                 )}
               </div>

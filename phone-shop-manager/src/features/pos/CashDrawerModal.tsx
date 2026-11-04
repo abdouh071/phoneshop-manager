@@ -8,6 +8,7 @@ import { useCustomerStore } from '../../store/customerStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useAuthStore } from '../../store/authStore';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { discountsGivenOf } from '../../utils/discountPolicy';
 import { printZReportDirect, openZReportPrintWindow } from '../../utils/printWindow';
 import { useToast } from '../../components/ui/Toast';
 import { EndOfDayButton } from '../endofday/EndOfDayButton';
@@ -149,13 +150,7 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
         .reduce((s, i) => s + i.quantity, 0);
     }, 0);
 
-    const discountsTotal = completed.reduce((sum, t) => {
-      if (!t.discount) return sum;
-      if (t.discount.type === 'percent') {
-        return sum + t.subtotal * (t.discount.value / 100);
-      }
-      return sum + Math.min(t.discount.value, t.subtotal);
-    }, 0);
+    const discountsTotal = completed.reduce((sum, t) => sum + discountsGivenOf(t), 0);
 
     const avgTicket = salesCount > 0 ? Math.round(grossSales / salesCount) : 0;
 

@@ -106,7 +106,7 @@ vi.mock('./inventoryStore', () => ({
   },
 }));
 
-const { useCartStore } = await import('./cartStore');
+const { useCartStore, cartTotalsOf } = await import('./cartStore');
 
 const emptyCart = () =>
   useCartStore.setState({
@@ -116,6 +116,7 @@ const emptyCart = () =>
     customerPhone: '',
     payments: [{ method: 'cash', amount: 0 }],
     isCheckingOut: false,
+    suspendedCarts: [],
   });
 
 beforeEach(() => {
@@ -204,5 +205,34 @@ describe('the sale as it is written down', () => {
 
     expect(useCartStore.getState().items).toEqual([]);
     expect(useCartStore.getState().discount).toBeNull();
+  });
+});
+
+describe('a basket parked in the suspended drawer', () => {
+  it('shows the money the counter will show when the customer walks back', () => {
+    add(phone);
+    useCartStore.getState().addReturnItem(cable, { quantity: 1, customReturnPrice: 250 });
+    useCartStore.getState().setDiscount({ type: 'percent', value: 10 });
+    const onCounter = useCartStore.getState().getTotal();
+
+    useCartStore.getState().suspendCart();
+    const parked = useCartStore.getState().suspendedCarts[0];
+    const { discountAmount, total } = cartTotalsOf(parked.items, parked.discount);
+
+    // The promise was 10% of what he took, and the exchange coming back onto the
+    // shelf is priced at what the counter agreed to give for it — not at the new
+    // price on the shelf, and not added to the basket as if it were another sale.
+    expect(discountAmount).toBe(1001);
+    expect(total).toBe(8754);
+    expect(total).toBe(onCounter);
+  });
+
+  it('shows nothing as given away on a basket that gave nothing away', () => {
+    add(cable);
+    useCartStore.getState().suspendCart();
+    const parked = useCartStore.getState().suspendedCarts[0];
+
+    expect(cartTotalsOf(parked.items, parked.discount).discountAmount).toBe(0);
+    expect(cartTotalsOf(parked.items, parked.discount).total).toBe(300);
   });
 });
