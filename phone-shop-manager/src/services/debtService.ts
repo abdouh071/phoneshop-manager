@@ -42,8 +42,16 @@ const docToDebt = (id: string, data: Record<string, unknown>): CustomerDebtEntry
 });
 
 export const debtService = {
-  getAll: async (): Promise<CustomerDebtEntry[]> => {
+  /**
+   * `allowLocalFallback: false` makes this read throw instead of answering from this device's
+   * cache. A customer's `totalDebt` is written as an absolute figure from what the caller read,
+   * so the caller has to know when the list it got is a cache and not the shop's ledger.
+   */
+  getAll: async (options?: { allowLocalFallback?: boolean }): Promise<CustomerDebtEntry[]> => {
+    const mayFallBack = options?.allowLocalFallback !== false;
+
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (!mayFallBack) throw new Error("Offline: the debts on this device are not the shop's ledger.");
       return getLocalDebts();
     }
 
@@ -59,6 +67,7 @@ export const debtService = {
       return items;
     } catch (err) {
       console.warn('Firestore debts fetch failed, using local cache:', err);
+      if (!mayFallBack) throw err;
       return getLocalDebts();
     }
   },

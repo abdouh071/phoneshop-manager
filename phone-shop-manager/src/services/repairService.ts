@@ -183,8 +183,16 @@ const getNextTicketNumber = async (localTickets: RepairTicket[]): Promise<string
 let createTicketLock: Promise<unknown> = Promise.resolve(null);
 
 export const repairService = {
-  getAll: async (): Promise<RepairTicket[]> => {
+  /**
+   * `allowLocalFallback: false` makes this read throw instead of answering from this device's
+   * cache after 2.5 seconds. Screens may show a cache; a caller about to WRITE an absolute
+   * figure off what it read has to know when it is not looking at the shop's real history.
+   */
+  getAll: async (options?: { allowLocalFallback?: boolean }): Promise<RepairTicket[]> => {
+    const mayFallBack = options?.allowLocalFallback !== false;
+
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (!mayFallBack) throw new Error("Offline: the repair history on this device is not the shop's history.");
       return deduplicateTickets(getLocalRepairs());
     }
 
@@ -223,6 +231,7 @@ export const repairService = {
       return deduped;
     } catch (err) {
       console.warn('Firestore repairs fetch failed, using local cache:', err);
+      if (!mayFallBack) throw err;
       return deduplicateTickets(getLocalRepairs());
     }
   },

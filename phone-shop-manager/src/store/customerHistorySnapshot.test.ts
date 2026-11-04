@@ -18,7 +18,10 @@ const data = vi.hoisted(() => ({
   localCart: [] as Array<Record<string, unknown>>,
   localInvoices: [] as Array<Record<string, unknown>>,
   localTickets: [] as Array<Record<string, unknown>>,
-  stats: { transactions: 0, tickets: 0 },
+  writes: [] as Array<Record<string, unknown>>,
+  /** Each flag makes that read answer only from this device's cache, as a slow network does. */
+  fail: { transactions: false, tickets: false, debts: false },
+  stats: { transactions: 0, tickets: 0, debts: 0 },
 }));
 
 const customer = {
@@ -34,12 +37,23 @@ const customer = {
 vi.mock('../services/customerService', () => ({
   customerService: {
     getAll: () => Promise.resolve(data.customers),
-    updateCustomer: () => Promise.resolve(undefined),
+    updateCustomer: (id: string, updates: Record<string, unknown>) => {
+      data.writes.push({ id, ...updates });
+      return Promise.resolve(undefined);
+    },
   },
 }));
 
 vi.mock('../services/debtService', () => ({
-  debtService: { getAll: () => Promise.resolve(data.debts) },
+  debtService: {
+    getAll: (options?: { allowLocalFallback?: boolean }) => {
+      data.stats.debts++;
+      if (data.fail.debts && options?.allowLocalFallback === false) {
+        return Promise.reject(new Error('unavailable'));
+      }
+      return Promise.resolve(data.debts);
+    },
+  },
 }));
 
 vi.mock('../services/customerLogService', () => ({
@@ -52,8 +66,13 @@ vi.mock('../services/activityLogService', () => ({
 
 vi.mock('../services/transactionService', () => ({
   transactionService: {
-    getAll: () => {
+    getAll: (options?: { allowLocalFallback?: boolean }) => {
       data.stats.transactions++;
+      // The store asks for a strict read: it must be refused, not answered from a cache,
+      // when the server did not reply.
+      if (data.fail.transactions && options?.allowLocalFallback === false) {
+        return Promise.reject(new Error('unavailable'));
+      }
       return Promise.resolve(data.transactions);
     },
   },
@@ -61,8 +80,11 @@ vi.mock('../services/transactionService', () => ({
 
 vi.mock('../services/repairService', () => ({
   repairService: {
-    getAll: () => {
+    getAll: (options?: { allowLocalFallback?: boolean }) => {
       data.stats.tickets++;
+      if (data.fail.tickets && options?.allowLocalFallback === false) {
+        return Promise.reject(new Error('unavailable'));
+      }
       return Promise.resolve(data.tickets);
     },
   },
@@ -119,8 +141,11 @@ describe('customerStore shared history snapshot', () => {
     data.localCart = [];
     data.localInvoices = [];
     data.localTickets = [];
+    data.writes = [];
+    data.fail = { transactions: false, tickets: false, debts: false };
     data.stats.transactions = 0;
     data.stats.tickets = 0;
+    data.stats.debts = 0;
   });
 
   it('reads the two history collections once for concurrent mounts', async () => {
@@ -208,5 +233,93 @@ describe('customerStore shared history snapshot', () => {
     await reloading;
 
     expect(store.getState().customers.length).toBe(1);
+  });
+
+  describe('a history read that did not reach the server', () => {
+    it('writes nothing after a sale when the sale history could not be read', async () => {
+      vi.useFakeTimers();
+      try {
+        const store = await loadStore();
+        const state = store.getState();
+
+        data.fail.transactions = true;
+        await state.fetchCustomers();
+        expect(data.writes).toEqual([]);
+
+        // The till overlays its own newest sale, so a recalculation would happily produce a
+        // figure — from one device's memory of the shop rather than the shop's history.
+        data.localCart = [
+          { id: 'tx_9', customerId: 'cust_1', total: 1000, status: 'completed', date: '2026-01-06T10:00:00.000Z' },
+        ];
+        await state.recalculateCustomer('cust_1');
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(data.writes).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('still writes when the same read succeeds', async () => {
+      vi.useFakeTimers();
+      try {
+        const store = await loadStore();
+        const state = store.getState();
+
+        await state.fetchCustomers();
+        await state.recalculateCustomer('cust_1');
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(data.writes.length).toBeGreaterThan(0);
+        expect(data.writes[data.writes.length - 1]).toMatchObject({
+          id: 'cust_1',
+          totalSpent: 2500,
+          totalDebt: 0,
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('skips the background repair of every customer when the debt ledger is only a cache', async () => {
+      vi.useFakeTimers();
+      try {
+        const store = await loadStore();
+        const state = store.getState();
+
+        data.fail.debts = true;
+        await state.fetchCustomers();
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        // Mounting the customers tab computes totals that differ from the documents and used to
+        // push them straight to Firestore. The ledger here is this device's, so nothing is sent.
+        expect(data.writes).toEqual([]);
+        expect(data.stats.debts).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('refuses the recompute of every customer on a degraded read', async () => {
+      vi.useFakeTimers();
+      try {
+        const store = await loadStore();
+        const state = store.getState();
+
+        await state.fetchCustomers();
+        // Let the repair that fetch scheduled on a healthy read finish, then start the refusal
+        // check from an empty log so only the degraded pass can be recorded.
+        await vi.advanceTimersByTimeAsync(2_000);
+        data.writes = [];
+        data.fail.tickets = true;
+
+        await state.recalculateAllCustomerFinancials();
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(data.writes).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

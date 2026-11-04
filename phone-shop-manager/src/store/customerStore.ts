@@ -152,6 +152,12 @@ interface HistorySnapshot {
   transactions: SaleTransaction[];
   tickets: RepairTicket[];
   takenAt: number;
+  /**
+   * False when either read did not reach the server. The arrays are then this device's cache —
+   * enough to show, not enough to write lifetime totals from, because a device only ever holds
+   * the records it personally saw.
+   */
+  complete: boolean;
 }
 
 let historySnapshot: HistorySnapshot | null = null;
@@ -161,6 +167,15 @@ function invalidateCustomerHistory(): void {
   historySnapshot = null;
 }
 
+/** The debt ledger, and whether what came back is the shop's or one device's memory of it. */
+async function readDebtLedger(): Promise<{ items: CustomerDebtEntry[]; serverBacked: boolean }> {
+  try {
+    return { items: await debtService.getAll({ allowLocalFallback: false }), serverBacked: true };
+  } catch {
+    return { items: await debtService.getAll(), serverBacked: false };
+  }
+}
+
 async function loadHistorySnapshot(force = false): Promise<HistorySnapshot> {
   if (!force && historySnapshot && Date.now() - historySnapshot.takenAt < HISTORY_SNAPSHOT_TTL_MS) {
     return historySnapshot;
@@ -168,11 +183,20 @@ async function loadHistorySnapshot(force = false): Promise<HistorySnapshot> {
   if (historyInFlight) return historyInFlight;
 
   historyInFlight = (async () => {
+    let complete = true;
+    // Strict reads: the fallback the services offer is what made a degraded history look like
+    // a quiet success, and a degraded history is the one thing these totals must not be built from.
     const [transactions, tickets] = await Promise.all([
-      transactionService.getAll().catch(() => [] as SaleTransaction[]),
-      repairService.getAll().catch(() => [] as RepairTicket[]),
+      transactionService.getAll({ allowLocalFallback: false }).catch(() => {
+        complete = false;
+        return [] as SaleTransaction[];
+      }),
+      repairService.getAll({ allowLocalFallback: false }).catch(() => {
+        complete = false;
+        return [] as RepairTicket[];
+      }),
     ]);
-    historySnapshot = { transactions, tickets, takenAt: Date.now() };
+    historySnapshot = { transactions, tickets, takenAt: Date.now(), complete };
     return historySnapshot;
   })().finally(() => {
     historyInFlight = null;
@@ -195,14 +219,17 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
     if (get().customers.length === 0) set({ isLoading: true });
     set({ error: null });
     try {
-      const [customers, debts, logs, history] = await Promise.all([
+      const [customers, ledger, logs, history] = await Promise.all([
         customerService.getAll(),
-        debtService.getAll(),
+        readDebtLedger(),
         customerLogService.getAll(),
         loadHistorySnapshot(options?.force === true),
       ]);
+      const debts = ledger.items;
       const transactions = history.transactions;
       const tickets = history.tickets;
+      /** Whether this pass may write absolute figures back (see the repair below). */
+      const historyComplete = history.complete && ledger.serverBacked;
       
       // 1. Enrich existing customer documents with financials and devices from their repair tickets
       const merged = customers.map(c => {
@@ -332,25 +359,33 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       const allMerged = [...merged, ...synthesizedCustomers];
       set({ customers: allMerged, debts, customerLogs: logs, isLoading: false });
 
-      // Asynchronously repair any corrupted or stale records in Firestore in background
-      setTimeout(() => {
-        merged.forEach(c => {
-          const original = customers.find(orig => orig.id === c.id);
-          if (
-            original &&
-            (Math.abs((original.totalSpent || 0) - c.totalSpent) > 0.01 ||
-              (original.totalDebt || 0) !== c.totalDebt ||
-              (original.totalPurchases || 0) !== c.totalPurchases)
-          ) {
-            customerService.updateCustomer(c.id, {
-              totalSpent: c.totalSpent,
-              totalDebt: c.totalDebt,
-              totalPurchases: c.totalPurchases,
-              lastVisitDate: c.lastVisitDate,
-            }).catch(console.warn);
-          }
-        });
-      }, 1000);
+      // Asynchronously repair any corrupted or stale records in Firestore in background.
+      // Only from a complete read: these are ABSOLUTE lifetime figures, and a history that did
+      // not reach the server is this device's memory of the shop. Writing that back quietly
+      // shortens a customer's lifetime spend, and the next healthy mount does not necessarily
+      // put it right — the shop stops seeing money a customer actually paid.
+      if (historyComplete) {
+        setTimeout(() => {
+          merged.forEach(c => {
+            const original = customers.find(orig => orig.id === c.id);
+            if (
+              original &&
+              (Math.abs((original.totalSpent || 0) - c.totalSpent) > 0.01 ||
+                (original.totalDebt || 0) !== c.totalDebt ||
+                (original.totalPurchases || 0) !== c.totalPurchases)
+            ) {
+              customerService.updateCustomer(c.id, {
+                totalSpent: c.totalSpent,
+                totalDebt: c.totalDebt,
+                totalPurchases: c.totalPurchases,
+                lastVisitDate: c.lastVisitDate,
+              }).catch(console.warn);
+            }
+          });
+        }, 1000);
+      } else {
+        console.warn('[CustomerStore] Skipped the background repair of customer totals: the history read did not reach the server.');
+      }
     } catch {
       set({ error: 'Failed to load customers', isLoading: false });
     }
@@ -869,6 +904,14 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       // Shared history snapshot — the in-memory stores below still overlay whatever this device
       // has written since it was taken, so the newest sale is never missing from the totals.
       const history = await loadHistorySnapshot();
+      // Same rule as the background repair in fetchCustomers: this writes absolute lifetime
+      // figures, so a history that did not reach the server means it is not this customer's
+      // lifetime the calculation is looking at. The figures on screen stay at the last known
+      // good values instead of being replaced by a fragment.
+      if (!history.complete) {
+        console.warn('[CustomerStore] Did not recalculate customer totals: the history read did not reach the server.');
+        return;
+      }
       const transactions = history.transactions;
       const tickets = history.tickets;
 
@@ -932,6 +975,12 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       // A full recompute is the deliberate "make everything right" action, so it never reads the
       // shared snapshot from cache.
       const history = await loadHistorySnapshot(true);
+      // Least of all from a fragment of the history: this pass rewrites every customer in the
+      // shop, so one degraded read is the corruption spread to the whole book at once.
+      if (!history.complete) {
+        console.warn('[CustomerStore] Did not recalculate all customer totals: the history read did not reach the server.');
+        return;
+      }
       const transactions = history.transactions;
       const tickets = history.tickets;
 

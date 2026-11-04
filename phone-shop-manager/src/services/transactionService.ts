@@ -91,8 +91,16 @@ export const transactionService = {
     }
   },
 
-  getAll: async (): Promise<SaleTransaction[]> => {
+  /**
+   * `allowLocalFallback: false` makes this read throw instead of quietly answering from this
+   * device's cache. Screens may show a cache; a caller about to WRITE an absolute figure off
+   * what it read has to know when it is not looking at the shop's real history.
+   */
+  getAll: async (options?: { allowLocalFallback?: boolean }): Promise<SaleTransaction[]> => {
+    const mayFallBack = options?.allowLocalFallback !== false;
+
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      if (!mayFallBack) throw new Error("Offline: the sale history on this device is not the shop's history.");
       return getLocalTransactions();
     }
 
@@ -111,6 +119,7 @@ export const transactionService = {
       return merged;
     } catch (err) {
       console.warn('Firestore transactions fetch failed, using local cache:', err);
+      if (!mayFallBack) throw err;
       return getLocalTransactions();
     }
   },
