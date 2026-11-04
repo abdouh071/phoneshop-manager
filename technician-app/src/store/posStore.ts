@@ -192,7 +192,11 @@ export const usePosStore = create<PosState>((set, get) => ({
       date: now,
       items: formattedItems,
       subtotal,
-      discount: params.discountValue ? { type: params.discountType || 'flat', value: params.discountValue } : undefined,
+      // Whole dinars, not the percentage: the counter's printer re-expands a share
+      // without rounding while the total is rounded, so a receipt of this sale would
+      // print its own lines a dinar off its own total. The dinars the promise came
+      // to is the money the shop gave, and it is the only number that reconciles.
+      discount: discountAmount > 0 ? { type: 'flat', value: discountAmount } : undefined,
       total,
       // One line per tender, and they add up to the invoice: the counter reads the
       // `debt` lines to know what the shop is owed today, so an account sale written

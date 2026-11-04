@@ -39,6 +39,7 @@ import { RoleBottomNav } from '../components/RoleBottomNav';
 import { usePermissions } from '../hooks/usePermissions';
 import { useTranslation } from 'react-i18next';
 import { buildSearch, matchesSearch } from '../utils/search';
+import { discountsGivenOf } from '../utils/discountPolicy';
 import {
   colors,
   fontSize,
@@ -570,12 +571,9 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
                       <Text style={styles.subtotalLabel}>
                         {t('pos.subtotal', 'Subtotal')}: {(item.subtotal || 0).toLocaleString()} DA
                       </Text>
-                      {Boolean(item.discount) && (
+                      {discountsGivenOf(item) > 0 && (
                         <Text style={styles.discountLabel}>
-                          {t('salesHistory.discountLabel', 'Discount:')}{' '}
-                          {item.discount?.type === 'percent'
-                            ? `-${item.discount.value}%`
-                            : `-${item.discount?.value} DA`}
+                          {t('salesHistory.discountLabel', 'Discount:')} -{discountsGivenOf(item).toLocaleString()} DA
                         </Text>
                       )}
                     </View>

@@ -296,7 +296,7 @@ export const applySaleEdit = async (
   const user = useAuthStore.getState().user;
   const now = new Date().toISOString();
 
-  await updateDoc(doc(db, 'transactions', tx.id), {
+  const updates: Record<string, unknown> = {
     items: plan.items,
     subtotal: plan.subtotal,
     total: plan.total,
@@ -307,7 +307,24 @@ export const applySaleEdit = async (
     editedAt: now,
     editedById: user?.id ?? null,
     editedByName: user?.name ?? 'Staff',
-  });
+  };
+
+  // A sale written before the till stored its discount in dinars still carries a
+  // percentage, and re-expanding one at print time is how a reprint comes out a
+  // dinar off its own lines. The corrected invoice is written once, in the dinars
+  // the customer was actually given.
+  if (tx.discount?.type === 'percent' && plan.discountAmount > 0) {
+    updates.discount = { type: 'flat', value: plan.discountAmount };
+  }
+
+  // What each line was knocked down to, kept where the shop's totals can read it:
+  // the concession itself lives inside the line's price, so nothing that adds up
+  // the discount field ever saw the money. Written only when there is something to
+  // say — a correction that hands a price back leaves the earlier record standing,
+  // which over-counts a giveaway rather than hiding it.
+  if (plan.lineDiscounts.length > 0) updates.lineDiscounts = plan.lineDiscounts;
+
+  await updateDoc(doc(db, 'transactions', tx.id), updates);
 
   const stockFailures: SaleEditFailure[] = [];
   const queued: { line: StockLine; delta: number }[] = [];

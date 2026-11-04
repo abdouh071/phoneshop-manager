@@ -4,6 +4,7 @@ import {
   DISCOUNT_APPROVAL_PERCENT,
   discountAmountOf,
   discountPercentOf,
+  discountsGivenOf,
   lineDiscountOf,
   requiresDiscountApproval,
   requiresLineDiscountApproval,
@@ -92,4 +93,31 @@ test('an agent putting a fifth of one product off a settled invoice needs an adm
   assert.equal(requiresLineDiscountApproval('repair_agent', DISCOUNT_APPROVAL_PERCENT), false);
   assert.equal(requiresLineDiscountApproval('admin', 90), false);
   assert.equal(requiresLineDiscountApproval('sales_agent', Number.NaN), false);
+});
+
+test('the money a sale gave away is the basket promise plus each line knocked down', () => {
+  assert.equal(discountsGivenOf({ subtotal: 1000, discount: { type: 'flat', value: 200 } }), 200);
+  // A percentage is read as the dinars it came to, never as its own face value — a
+  // repairer's 10% is 100 DA off this basket, not ten dinars.
+  assert.equal(discountsGivenOf({ subtotal: 1000, discount: { type: 'percent', value: 10 } }), 100);
+  // A sale written before either terminal stored its discount in dinars.
+  assert.equal(discountsGivenOf({ subtotal: 1000, discount: 250 }), 250);
+  // The lines are the part the document's discount field never held.
+  assert.equal(
+    discountsGivenOf({
+      subtotal: 9300,
+      discount: { type: 'flat', value: 300 },
+      lineDiscounts: [{ granted: 100 }, { granted: 50 }],
+    }),
+    450
+  );
+});
+
+test('a sale that gave nothing away reports nothing given away', () => {
+  assert.equal(discountsGivenOf({ subtotal: 500 }), 0);
+  assert.equal(discountsGivenOf({ subtotal: 500, lineDiscounts: [] }), 0);
+  assert.equal(discountsGivenOf({ subtotal: 500, lineDiscounts: [{ granted: Number.NaN }, { granted: 50 }] }), 50);
+  // A percentage needs a basket to be a share of; an old line with no subtotal at
+  // all is read against what the customer actually paid.
+  assert.equal(discountsGivenOf({ total: 900, discount: { type: 'percent', value: 10 } }), 90);
 });

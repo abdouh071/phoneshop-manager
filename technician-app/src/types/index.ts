@@ -189,6 +189,11 @@ export interface SaleTransaction {
   items: CartItem[];
   subtotal: number;
   discount?: { type: 'percent' | 'flat'; value: number };
+  /** What each line was knocked down to, in dinars — the same field the counter
+   *  writes. A concession folded into a line's price is invisible to anything that
+   *  adds up the document's discount field, so the shop keeps it written down here
+   *  where its totals can see it. */
+  lineDiscounts?: { productId: string; name: string; granted: number; percent: number }[];
   total: number;
   payments: { method: PaymentMethod; amount: number }[];
   customerName?: string;

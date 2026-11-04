@@ -123,3 +123,38 @@ export const requiresLineDiscountApproval = (
   role: User['role'] | undefined,
   percent: number
 ): boolean => role !== 'admin' && Number.isFinite(percent) && percent > DISCOUNT_APPROVAL_PERCENT;
+
+/**
+ * Everything one sale gave away.
+ * ------------------------------
+ * A basket promise is recorded on the document; a line knocked down is not — it
+ * lives inside that line's own price, so anything adding up the `discount` field
+ * reports the money the till handed over as revenue. The counter writes the lines
+ * beside the sale (`lineDiscounts`) and both terminals total them through here, so
+ * a discount is counted once and the same way whichever screen did the selling.
+ */
+export interface LineConcession {
+  productId: string;
+  name: string;
+  granted: number;
+  percent: number;
+}
+
+export const discountsGivenOf = (tx: {
+  subtotal?: number;
+  total?: number;
+  discount?: { type: 'percent' | 'flat'; value: number } | number | null;
+  lineDiscounts?: { granted: number }[] | null;
+}): number => {
+  const raw = tx.discount;
+  const subtotal = Number(tx.subtotal) || Number(tx.total) || 0;
+  let basket = 0;
+  if (typeof raw === 'number') basket = Math.max(0, raw);
+  else if (raw && typeof raw === 'object') {
+    basket = discountAmountOf(subtotal, {
+      mode: raw.type === 'percent' ? 'percent' : 'flat',
+      value: Number(raw.value),
+    });
+  }
+  return basket + (tx.lineDiscounts ?? []).reduce((sum, line) => sum + (Number(line.granted) || 0), 0);
+};

@@ -24,6 +24,8 @@
  * and writes it and two of them on one document cannot run at the same time.
  */
 import type { CartItem, SaleTransaction } from '../types/index.ts';
+import { discountAmountOf, lineDiscountOf } from './discountPolicy.ts';
+import type { LineConcession } from './discountPolicy.ts';
 
 export interface SaleLineEdit {
   quantity: number;
@@ -44,6 +46,8 @@ export interface SaleEditPlan {
   items: CartItem[];
   subtotal: number;
   discountAmount: number;
+  /** What each line was knocked down to, kept for the shop's totals. */
+  lineDiscounts: LineConcession[];
   total: number;
   /** Taken back from the customer, in dinars. */
   refundDue: number;
@@ -251,12 +255,39 @@ export const planSaleEdit = (
     (sum, item) => sum + money(item.product?.price ?? item.unitPrice, 0) * wholeUnits(item.quantity, 0),
     0
   );
-  let discountAmount = 0;
-  if (tx.discount) {
-    discountAmount =
-      tx.discount.type === 'percent' ? subtotal * (tx.discount.value / 100) : tx.discount.value;
-  }
+  // One arithmetic with the counter and the till screen: the share resolved against
+  // this basket, rounded once, never more than the basket holds. Re-expanding a
+  // percentage by hand is how the phone came to a total a dinar away from the one
+  // the receipt prints.
+  const discountAmount = tx.discount
+    ? discountAmountOf(subtotal, {
+        mode: tx.discount.type === 'percent' ? 'percent' : 'flat',
+        value: tx.discount.value,
+      })
+    : 0;
   const total = Math.max(0, subtotal - discountAmount);
+
+  /**
+   * What this edit knocks off the invoice, line by line, measured against the price
+   * the document held for that line before — a row that only just joined the invoice
+   * is priced at what it was sold for, so it records nothing. The concession lives
+   * inside the line's own price, invisible to anything adding up the discount field,
+   * so the shop writes it down where its totals can see it, in the same words the
+   * counter uses.
+   */
+  const lineDiscounts: LineConcession[] = items.reduce<LineConcession[]>((lines, item) => {
+    const id = item?.product?.id;
+    if (!id) return lines;
+    const charged = money(item.unitPrice ?? item.product.price, 0);
+    const before = tx.items.find(
+      orig => orig.product?.id === id && Boolean(orig.isReturn) === Boolean(item.isReturn)
+    );
+    const listUnit = before ? money(before.unitPrice ?? before.product?.price, charged) : charged;
+    const concession = lineDiscountOf(listUnit, charged, item.quantity);
+    if (concession.granted <= 0) return lines;
+    lines.push({ productId: id, name: `${item.product.name} ${item.product.model || ''}`.trim(), ...concession });
+    return lines;
+  }, []);
 
   let status: NonNullable<SaleTransaction['status']> = tx.status || 'completed';
   if (items.length === 0 || total === 0) {
@@ -290,6 +321,7 @@ export const planSaleEdit = (
     items,
     subtotal,
     discountAmount,
+    lineDiscounts,
     total,
     refundDue: diff > 0 ? diff : 0,
     additionalDue: diff < 0 ? Math.abs(diff) : 0,

@@ -140,9 +140,10 @@ test('the discount granted on the sale is taken in full and the total floors at 
   });
   const plan = planSaleEdit(tx, { p1: { quantity: 1, unitPrice: 400 } });
 
-  // The counter subtracts the 700 DA it was told to subtract, which leaves nothing
-  // to collect — the invoice is refunded, and the customer is not left "owing" 300.
-  assert.equal(plan.discountAmount, 700);
+  // The basket shrank under the discount, so the invoice has nothing left to take
+  // off it: the counter caps a giveaway at what the sale is worth and floors the
+  // total at zero, rather than recording 700 DA walked out of a till holding 400.
+  assert.equal(plan.discountAmount, 400);
   assert.equal(plan.total, 0);
   assert.equal(plan.status, 'refunded');
 });
@@ -378,4 +379,52 @@ test('one edit moves a sale line and a new line in the directions the counter ex
 
   assert.deepEqual(plan.restock, [{ productId: 'p1', name: 'Hoco EQ2', quantity: 1 }]);
   assert.deepEqual(plan.deduct, [{ productId: 'p9', name: 'Cable', quantity: 2 }]);
+});
+
+test('a line knocked down on the invoice is written down where the shop can total it', () => {
+  const tx = makeTx({ items: [line(makeProduct(), 2)] });
+  const plan = planSaleEdit(tx, { p1: { quantity: 2, unitPrice: 4050 } });
+
+  // 900 DA off two units listed at 4 500. The concession lives inside the line's own
+  // price — that is what makes the printed receipt foot — so nothing that adds up the
+  // document's discount field ever saw it, and the giveaway has to be written beside it.
+  assert.deepEqual(plan.lineDiscounts, [
+    { productId: 'p1', name: 'Hoco EQ2 BT-EQ2', granted: 900, percent: 10 },
+  ]);
+  assert.equal(plan.subtotal, 8100);
+  assert.equal(plan.total, 8100);
+});
+
+test('a row that only just joined the invoice gave nothing away', () => {
+  const tx = makeTx({ items: [line(makeProduct(), 1)] });
+  const plan = planSaleEdit(tx, {}, {}, [line(cable(), 2)]);
+
+  // A new row is priced at what it was sold for, so there is no earlier price to
+  // measure a concession against — and inventing one would double-count the shelf.
+  assert.deepEqual(plan.lineDiscounts, []);
+});
+
+test('a price handed back on a correction is not recorded as money given away', () => {
+  const tx = makeTx({ items: [line(makeProduct({ price: 4000 }), 1)] });
+  const plan = planSaleEdit(tx, { p1: { quantity: 1, unitPrice: 4500 } });
+
+  assert.deepEqual(plan.lineDiscounts, []);
+});
+
+test('a line discounted on an invoice that also carries a basket promise keeps both', () => {
+  const tx = makeTx({
+    items: [line(makeProduct(), 2), line(cable(), 2)],
+    discount: { type: 'flat', value: 200 },
+    total: 9000,
+  });
+  const plan = planSaleEdit(tx, { p1: { quantity: 2, unitPrice: 4300 } });
+
+  // The basket promise stays the basket promise; the 400 DA taken off the headset is
+  // the part the discount field never held.
+  assert.equal(plan.discountAmount, 200);
+  assert.deepEqual(plan.lineDiscounts, [
+    { productId: 'p1', name: 'Hoco EQ2 BT-EQ2', granted: 400, percent: 4.444444444444445 },
+  ]);
+  assert.equal(plan.subtotal, 8800);
+  assert.equal(plan.total, 8600);
 });
