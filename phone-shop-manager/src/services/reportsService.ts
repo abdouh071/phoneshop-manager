@@ -468,7 +468,9 @@ export const reportsService = {
           refundsCash: eod.refundsCash || 0,
 
           totalRevenue: eod.totalRevenue,
-          totalCOGS: eod.salesCogs + eod.repairsPartsCost + (eod.partsCogs || 0),
+          // Older seals predate some of these fields; an undefined cost must read as
+          // zero, or the whole row sums to NaN and the report prints "NaN DA".
+          totalCOGS: (eod.salesCogs || 0) + (eod.repairsPartsCost || 0) + (eod.partsCogs || 0),
           totalNetProfit: eod.totalNetProfit,
           totalPhysicalCash: eod.totalCash,
         });
