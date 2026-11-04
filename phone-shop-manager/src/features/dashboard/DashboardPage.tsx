@@ -15,11 +15,14 @@ import { useAuthStore } from '../../store/authStore';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useCartStore } from '../../store/cartStore';
+import { usePartsCartStore } from '../../store/partsCartStore';
 import { useRepairStore } from '../../store/repairStore';
 import { useCustomerStore } from '../../store/customerStore';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { usePermissions } from '../../hooks/usePermissions';
 import { EndOfDayButton } from '../endofday/EndOfDayButton';
+import { toDateStr } from '../../store/endOfDayStore';
+import { computeDayFigures, mergeDayInvoices } from '../../utils/dayFigures';
 import { AdminMobileDashboard } from './AdminMobileDashboard';
 import type { RevenueDataPoint, SaleTransaction } from '../../types';
 import styles from './Dashboard.module.css';
@@ -28,7 +31,6 @@ import { getOverdueDebts } from '../../utils/debtAlerts';
 import {
   isClaimedAndPaidRepair,
   getClaimedRepairRevenue,
-  getClaimedRepairHandoverCash,
   getClaimedRepairPartsCost,
 } from '../../utils/repairFinancials';
 
@@ -109,6 +111,7 @@ export const DashboardPage = () => {
   usePrivacyStore((s) => s.isPrivacyActive);
   const { products, fetchProducts, isLoading: productsLoading, error: productsError } = useInventoryStore();
   const { transactions, fetchTransactions, isLoadingTransactions, error: transactionsError } = useCartStore();
+  const { invoices: partsInvoices } = usePartsCartStore();
   const { debts, customers, fetchCustomers, isLoading: customersLoading, error: customersError } = useCustomerStore();
   const { tickets, fetchTickets, isLoading: ticketsLoading, error: ticketsError } = useRepairStore();
   const { user, isHistoryUnlocked } = useAuthStore();
@@ -189,13 +192,6 @@ export const DashboardPage = () => {
     () => todayRepairs.reduce((s,r) => s + getClaimedRepairRevenue(r), 0),
     [todayRepairs]
   );
-  const todayDebtCollected = useMemo(() => {
-    return debts
-      .flatMap(d => (d.payments || []).filter(p => isSameDay(p.date, today)))
-      .filter(p => String(p.method || '').toLowerCase() === 'cash')
-      .reduce((s, p) => s + (p.amount || 0), 0);
-  }, [debts, today]);
-
   const dailyRevenue = todaySalesRev + todayRepRev;
 
   const yestSalesRev = useMemo(() => yesterdayTx.reduce((s,t) => s+t.total, 0), [yesterdayTx]);
@@ -223,52 +219,24 @@ export const DashboardPage = () => {
   );
   const todayNetProfit = dailyRevenue - (todaySalesCOGS + todayRepairsCOGS);
 
-  // Today's Cash Drawer Balance (reconciled with cash sales + handover cash + intake deposits + debt collections)
-  const todayCash = useMemo(() => {
-    // Cash in: completed (non-refunded, non-cancelled) POS sales & parts B2B
-    let cashIn = 0;
-    todayTx.forEach(t => {
-      if (t.payments && t.payments.length > 0) {
-        t.payments.forEach(p => {
-          if (String(p.method || '').toLowerCase() === 'cash') cashIn += (p.amount || 0);
-        });
-      } else {
-        // Fallback for transactions without an explicit payments array
-        cashIn += Math.max(0, t.total || 0);
-      }
-    });
-
-    const repairHandovers = todayRepairs.reduce((s, r) => s + getClaimedRepairHandoverCash(r), 0);
-    const repairDeposits = tickets
-      .filter(t => isSameDay(t.createdAt, today))
-      .reduce((s, t) => s + (t.depositAmount || 0), 0);
-
-    return Math.max(0, cashIn + repairHandovers + repairDeposits + todayDebtCollected);
-  }, [todayTx, todayRepairs, tickets, todayDebtCollected, today]);
-
-  const todayCard = useMemo(() => {
-    let card = 0;
-    todayTx.forEach(t => {
-      if (t.payments && t.payments.length > 0) {
-        t.payments.forEach(p => {
-          if (String(p.method || '').toLowerCase() === 'card') card += (p.amount || 0);
-        });
-      }
-    });
-    return card;
-  }, [todayTx]);
-
-  const todayMobile = useMemo(() => {
-    let mob = 0;
-    todayTx.forEach(t => {
-      if (t.payments && t.payments.length > 0) {
-        t.payments.forEach(p => {
-          if (String(p.method || '').toLowerCase() === 'mobile') mob += (p.amount || 0);
-        });
-      }
-    });
-    return mob;
-  }, [todayTx]);
+  // The drawer, card and mobile-pay cards read the one day-figures formula the
+  // End-of-Day seal uses, over the same merged invoice lists, so the dashboard
+  // and the sealed day can never disagree about the till's money.
+  const todayTender = useMemo(
+    () =>
+      computeDayFigures(
+        {
+          transactions: mergeDayInvoices(transactions, partsInvoices),
+          repairs: tickets,
+          debts,
+        },
+        toDateStr(today)
+      ),
+    [transactions, partsInvoices, tickets, debts, today]
+  );
+  const todayCash = todayTender.totalCash;
+  const todayCard = todayTender.totalCard;
+  const todayMobile = todayTender.totalMobile;
 
   // Weekly & Monthly Combined Revenues (Sales + Repairs)
   const weeklyRevenue = useMemo(() => {

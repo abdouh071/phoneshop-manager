@@ -60,10 +60,14 @@ export interface DayFigures {
   partsCard: number;
   partsMobile: number;
   partsTransfer: number;
+  partsDebt: number;
+  partsStoreCredit: number;
   partsCOGS: number;
   partsNetProfit: number;
 
   debtCollectedCash: number;
+  debtCollectedCard: number;
+  debtCollectedMobile: number;
 
   totalRevenue: number;
   totalCOGS: number;
@@ -76,15 +80,44 @@ export interface DayFigures {
 const hasFinalStatus = (tx: SaleTransaction): boolean =>
   !EXCLUDED_SALE_STATUSES.includes((tx.status ?? 'completed') as (typeof EXCLUDED_SALE_STATUSES)[number]);
 
+/**
+ * The one rule for what a document put in the till, for any tender.
+ *
+ * The recorded `payments` array is the truth — including an empty one: an invoice
+ * charged entirely to a customer's account is stored with `payments: []`, and that
+ * says "no cash came in", not "assume the whole total was cash". The drawer cards
+ * used to fall back to `total` for an empty array, which put the full value of every
+ * account-charged parts invoice in the till on paper and made the card disagree with
+ * the sealed day. Only a document written before the till recorded a tender at all
+ * (no array field) falls back, and only to cash — that till was cash-only.
+ */
+export const tenderOf = (tx: SaleTransaction, method: string): number => {
+  const payments = tx.payments;
+  if (!Array.isArray(payments)) {
+    return method.toLowerCase() === 'cash' ? Math.max(0, tx.total || 0) : 0;
+  }
+  return payments
+    .filter(p => String(p.method ?? '').toLowerCase() === method.toLowerCase())
+    .reduce((a, p) => a + (p.amount || 0), 0);
+};
+
+/**
+ * Two stores, one day's invoices: the till keeps retail and parts B2B apart, and the
+ * drawer, the seal and the reports all read them merged. Deduping by id matters — the
+ * same invoice can be present in both lists, and counting it twice is invented money.
+ */
+export const mergeDayInvoices = (...lists: SaleTransaction[][]): SaleTransaction[] => {
+  const seen = new Map<string, SaleTransaction>();
+  for (const list of lists) {
+    for (const t of list) {
+      if (t && t.id && !seen.has(t.id)) seen.set(t.id, t);
+    }
+  }
+  return Array.from(seen.values());
+};
+
 const sumPayment = (txList: SaleTransaction[], method: string): number =>
-  txList.reduce(
-    (sum, tx) =>
-      sum +
-      (tx.payments || [])
-        .filter(p => String(p.method ?? '').toLowerCase() === method.toLowerCase())
-        .reduce((a, p) => a + (p.amount || 0), 0),
-    0
-  );
+  txList.reduce((sum, tx) => sum + tenderOf(tx, method), 0);
 
 const sumCogs = (txList: SaleTransaction[]): number =>
   txList.reduce(
@@ -128,10 +161,15 @@ export function computeDayFigures(sources: DayFigureSources, dateStr: string): D
 
   const partsRevenue = partsTx.reduce((s, t) => s + (t.total || 0), 0);
   const partsCOGS = sumCogs(partsTx);
-  const debtCollectedCash = (sources.debts || [])
-    .flatMap(d => (d.payments || []).filter(p => isSameLocalDate(p.date, dateStr)))
-    .filter(p => String(p.method ?? '').toLowerCase() === 'cash')
-    .reduce((s, p) => s + (p.amount || 0), 0);
+  const dayDebtPayments = (sources.debts || [])
+    .flatMap(d => (d.payments || []).filter(p => isSameLocalDate(p.date, dateStr)));
+  const debtTender = (method: string): number =>
+    dayDebtPayments
+      .filter(p => String(p.method ?? '').toLowerCase() === method.toLowerCase())
+      .reduce((s, p) => s + (p.amount || 0), 0);
+  const debtCollectedCash = debtTender('cash');
+  const debtCollectedCard = debtTender('card');
+  const debtCollectedMobile = debtTender('mobile');
 
   const totalRevenue = salesGrossRevenue + repairsRevenue + partsRevenue;
   const totalCOGS = salesCOGS + repairsPartsCost + partsCOGS;
@@ -166,10 +204,14 @@ export function computeDayFigures(sources: DayFigureSources, dateStr: string): D
     partsCard: sumPayment(partsTx, 'card'),
     partsMobile: sumPayment(partsTx, 'mobile'),
     partsTransfer: sumPayment(partsTx, 'transfer'),
+    partsDebt: sumPayment(partsTx, 'debt'),
+    partsStoreCredit: sumPayment(partsTx, 'store_credit'),
     partsCOGS,
     partsNetProfit: partsRevenue - partsCOGS,
 
     debtCollectedCash,
+    debtCollectedCard,
+    debtCollectedMobile,
 
     totalRevenue,
     totalCOGS,

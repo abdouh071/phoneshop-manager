@@ -13,7 +13,8 @@ import { printZReportDirect, openZReportPrintWindow } from '../../utils/printWin
 import { useToast } from '../../components/ui/Toast';
 import { EndOfDayButton } from '../endofday/EndOfDayButton';
 import { isSameLocalDate, toDateStr } from '../../store/endOfDayStore';
-import { isClaimedAndPaidRepair, getClaimedRepairHandoverCash } from '../../utils/repairFinancials';
+import { isClaimedAndPaidRepair } from '../../utils/repairFinancials';
+import { computeDayFigures, mergeDayInvoices } from '../../utils/dayFigures';
 import styles from './CashDrawer.module.css';
 import { errorMessage } from '../../utils/errorUtils';
 
@@ -58,8 +59,15 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
     return Array.from(txMap.values()).filter(t => isSameLocalDate(t.date, targetDateStr));
   }, [transactions, partsInvoices, targetDateStr]);
 
-  // Calculations for real exact cash & income
+  // Every money figure below is read off the one day-figures formula the End-of-Day
+  // seal and the reports use, so the drawer card and the sealed day are the same money.
+  // The counts and the staff breakdown are presentation-only and stay local.
   const stats = useMemo(() => {
+    const figures = computeDayFigures(
+      { transactions: mergeDayInvoices(transactions || [], partsInvoices || []), repairs: tickets, debts },
+      targetDateStr
+    );
+
     const isCancelledOrVoided = (t: typeof shiftTransactions[0]) =>
       t.status === 'voided' || t.status === 'cancelled' || t.status === 'pending_approval';
     const isRefunded = (t: typeof shiftTransactions[0]) => t.status === 'refunded';
@@ -74,64 +82,21 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
     const refundsAmount = refunded.reduce((sum, t) => sum + t.total, 0);
     const refundsCount = refunded.length;
 
-    // 1. Direct POS Retail vs Parts B2B Cash split
     const posRetailTxs = completed.filter(t => t.saleType !== 'parts_b2b');
     const partsB2BTxs = completed.filter(t => t.saleType === 'parts_b2b');
-
-    const sumPayment = (txList: typeof completed, method: string) => {
-      return txList.reduce((sum, t) => {
-        if (t.payments && t.payments.length > 0) {
-          const match = t.payments
-            .filter(p => String(p.method || '').toLowerCase() === method.toLowerCase())
-            .reduce((s, p) => s + (p.amount || 0), 0);
-          return sum + match;
-        }
-        return sum + (method.toLowerCase() === 'cash' ? Math.max(0, t.total || 0) : 0);
-      }, 0);
-    };
-
-    const posRetailCash = sumPayment(posRetailTxs, 'cash');
-    const partsB2BCash = sumPayment(partsB2BTxs, 'cash');
-    const cashIn = posRetailCash + partsB2BCash;
-
-    // All tender breakdown for completed sales
-    const cardTotal = sumPayment(completed, 'card');
-    const mobileTotal = sumPayment(completed, 'mobile');
-    const transferTotal = sumPayment(completed, 'transfer');
-    const debtTotal = sumPayment(completed, 'debt');
-    const creditTotal = sumPayment(completed, 'store_credit');
 
     // Cancelled / Voided transactions
     const cancelled = shiftTransactions.filter(t => isCancelledOrVoided(t));
     const cancelledCount = cancelled.length;
     const cancelledAmount = cancelled.reduce((sum, t) => sum + t.total, 0);
 
-    // 2. Repairs Cash (intake deposits + handover completions)
-    // Handovers only counted for claimed+paid phones; pure-debt completions excluded
     const completedRepairs = tickets.filter(t =>
       t.status === 'completed' &&
       isSameLocalDate(t.completedAt || t.updatedAt, targetDateStr)
     );
     const claimedPaidRepairs = completedRepairs.filter(r => isClaimedAndPaidRepair(r));
-    const repairHandoversCash = claimedPaidRepairs.reduce((s, r) => {
-      return s + getClaimedRepairHandoverCash(r);
-    }, 0);
-
     const createdRepairs = tickets.filter(t => isSameLocalDate(t.createdAt, targetDateStr));
-    const repairDepositsCash = createdRepairs.reduce((s, t) => s + (t.depositAmount || 0), 0);
-    const repairsCashIn = repairHandoversCash + repairDepositsCash;
-
-    // 3. Customer Debt Tab Collections Cash
     const todayDebtPayments = debts.flatMap(d => (d.payments || []).filter(p => isSameLocalDate(p.date, targetDateStr)));
-    const debtCollectedCash = todayDebtPayments
-      .filter(p => String(p.method || '').toLowerCase() === 'cash')
-      .reduce((s, p) => s + (p.amount || 0), 0);
-    const debtCollectedCard = todayDebtPayments
-      .filter(p => String(p.method || '').toLowerCase() === 'card')
-      .reduce((s, p) => s + (p.amount || 0), 0);
-    const debtCollectedMobile = todayDebtPayments
-      .filter(p => String(p.method || '').toLowerCase() === 'mobile')
-      .reduce((s, p) => s + (p.amount || 0), 0);
 
     // Counts
     const posRetailCount = posRetailTxs.length;
@@ -139,10 +104,6 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
     const repairHandoversCount = claimedPaidRepairs.length;
     const repairDepositsCount = createdRepairs.filter(t => (t.depositAmount || 0) > 0).length;
     const debtCollectionsCount = todayDebtPayments.filter(p => String(p.method || '').toLowerCase() === 'cash').length;
-
-    // 4. Exact Physical Cash in Drawer
-    // Completed transactions only include real money kept; refunded and cancelled transactions are excluded (contribute 0 cash)
-    const netCash = Math.max(0, cashIn + repairsCashIn + debtCollectedCash);
 
     const unitsSold = completed.reduce((sum, t) => {
       return sum + t.items
@@ -175,32 +136,32 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
       refundsCount,
       cancelledCount,
       cancelledAmount,
-      netCash,
-      cashIn,
-      posRetailCash,
+      netCash: figures.totalCash,
+      cashIn: figures.salesCash + figures.partsCash,
+      posRetailCash: figures.salesCash,
       posRetailCount,
-      partsB2BCash,
+      partsB2BCash: figures.partsCash,
       partsB2BCount,
-      repairsCashIn,
-      repairHandoversCash,
+      repairsCashIn: figures.repairsCash,
+      repairHandoversCash: figures.repairsHandoverCash,
       repairHandoversCount,
-      repairDepositsCash,
+      repairDepositsCash: figures.repairsDepositCash,
       repairDepositsCount,
-      debtCollectedCash,
-      debtCollectedCard,
-      debtCollectedMobile,
+      debtCollectedCash: figures.debtCollectedCash,
+      debtCollectedCard: figures.debtCollectedCard,
+      debtCollectedMobile: figures.debtCollectedMobile,
       debtCollectionsCount,
-      cardTotal,
-      mobileTotal,
-      transferTotal,
-      debtTotal,
-      creditTotal,
+      cardTotal: figures.totalCard,
+      mobileTotal: figures.totalMobile,
+      transferTotal: figures.salesTransfer + figures.partsTransfer,
+      debtTotal: figures.salesDebt + figures.partsDebt,
+      creditTotal: figures.salesStoreCredit + figures.partsStoreCredit,
       unitsSold,
       discountsTotal,
       avgTicket,
       staffBreakdown,
     };
-  }, [shiftTransactions, tickets, debts, targetDateStr]);
+  }, [shiftTransactions, tickets, debts, targetDateStr, transactions, partsInvoices]);
 
   const formattedDateTitle = useMemo(() => {
     const d = new Date(targetDateStr + 'T00:00:00');

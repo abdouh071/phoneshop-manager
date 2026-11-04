@@ -7,7 +7,7 @@
  * numbers move, every sealed day suddenly disagrees with the same day recomputed.
  */
 import { describe, it, expect } from 'vitest';
-import { computeDayFigures } from './dayFigures';
+import { computeDayFigures, mergeDayInvoices } from './dayFigures';
 import type { CustomerDebtEntry, PhoneModel, RepairTicket, SaleTransaction } from '../types';
 
 const DAY = '2026-02-10';
@@ -219,6 +219,63 @@ describe('computeDayFigures', () => {
     expect(figures.totalRevenue).toBe(0);
     expect(figures.totalCash).toBe(0);
     expect(figures.repairsCompletedCount).toBe(0);
+  });
+
+  it('an invoice charged entirely to the account puts no cash in the drawer', () => {
+    // checkoutB2B stores `payments: []` when nothing was tendered. The drawer cards
+    // used to read that as "all cash", which put the whole invoice in the till on
+    // paper while the sealed day said otherwise.
+    const figures = computeDayFigures(
+      {
+        transactions: [
+          tx('tx-account', 50000, [], { saleType: 'parts_b2b' }),
+          tx('tx-partial', 9000, [['debt', 9000]], { saleType: 'parts_b2b' }),
+        ],
+        repairs: [],
+        debts: [],
+      },
+      DAY
+    );
+    expect(figures.partsCash).toBe(0);
+    expect(figures.partsDebt).toBe(9000);
+    expect(figures.totalCash).toBe(0);
+  });
+
+  it('a document written before the till recorded tenders still counts as cash', () => {
+    const legacy = tx('tx-pre-tender', 600, []);
+    delete (legacy as { payments?: unknown }).payments;
+    const figures = computeDayFigures({ transactions: [legacy], repairs: [], debts: [] }, DAY);
+    expect(figures.salesCash).toBe(600);
+    expect(figures.salesCard).toBe(0);
+    expect(figures.totalCash).toBe(600);
+  });
+
+  it('parts tenders split the same way retail tenders do', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: [
+          tx('p-card', 100, [['card', 100]], { saleType: 'parts_b2b' }),
+          tx('p-store', 200, [['store_credit', 200]], { saleType: 'parts_b2b' }),
+          tx('p-transfer', 300, [['transfer', 300]], { saleType: 'parts_b2b' }),
+        ],
+        repairs: [],
+        debts: [],
+      },
+      DAY
+    );
+    expect(figures.partsCard).toBe(100);
+    expect(figures.partsStoreCredit).toBe(200);
+    expect(figures.partsTransfer).toBe(300);
+    expect(figures.totalCard).toBe(100);
+    expect(figures.totalCash).toBe(0);
+  });
+
+  it('merging the two invoice lists keeps one copy of a shared invoice', () => {
+    const shared = tx('tx-shared', 500, [['cash', 500]]);
+    const merged = mergeDayInvoices([shared], [shared, tx('tx-b', 200, [['cash', 200]])]);
+    expect(merged.map(t => t.id)).toEqual(['tx-shared', 'tx-b']);
+    const figures = computeDayFigures({ transactions: merged, repairs: [], debts: [] }, DAY);
+    expect(figures.salesCash, 'a double-counted invoice is invented money').toBe(700);
   });
 
   it('ignores rows whose date cannot be read', () => {

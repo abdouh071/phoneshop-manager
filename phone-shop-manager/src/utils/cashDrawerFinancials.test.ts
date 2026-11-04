@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { isSameLocalDate, toDateStr } from '../store/endOfDayStore';
+import { computeDayFigures } from './dayFigures';
 import type { PhoneModel, SaleTransaction } from '../types';
 
 describe('Cash Drawer Financials & Date Scoping', () => {
@@ -150,14 +151,16 @@ describe('Cash Drawer Financials & Date Scoping', () => {
     expect(totalSalesVolume).toBe(10400);
   });
 
-  it('handles case-insensitive payment methods and legacy transactions with missing payments array', () => {
-    const legacyTx: SaleTransaction = {
-      id: 'tx-legacy',
+  it('counts only the tender the counter stored, whatever case, and never invents cash', () => {
+    const chargedToAccount: SaleTransaction = {
+      id: 'tx-account',
       date: new Date().toISOString(),
-      items: [{ product: { id: 'p7', name: 'Adaptor', price: 600 } as PhoneModel, quantity: 1 }],
+      items: [{ product: { id: 'p7', name: 'Screen', price: 600 } as PhoneModel, quantity: 1 }],
       subtotal: 600,
       total: 600,
-      payments: [], // missing/empty payments
+      // Nothing was tendered: this invoice went to the customer's account. The old
+      // drawer cards read an empty array as "all cash" and put the invoice in the till.
+      payments: [],
       status: 'completed',
     };
 
@@ -172,20 +175,27 @@ describe('Cash Drawer Financials & Date Scoping', () => {
       status: 'completed',
     };
 
-    const sumPayment = (txList: SaleTransaction[], method: string) => {
-      return txList.reduce((sum, t) => {
-        if (t.payments && t.payments.length > 0) {
-          const match = t.payments
-            .filter(p => String(p.method || '').toLowerCase() === method.toLowerCase())
-            .reduce((s, p) => s + (p.amount || 0), 0);
-          return sum + match;
-        }
-        return sum + (method.toLowerCase() === 'cash' ? Math.max(0, t.total || 0) : 0);
-      }, 0);
-    };
+    const figures = computeDayFigures(
+      { transactions: [chargedToAccount, mixedCaseTx], repairs: [], debts: [] },
+      todayStr
+    );
+    expect(figures.salesCash).toBe(400); // only the 'CASH' row
+    expect(figures.totalCash).toBe(400);
+  });
 
-    const extractedCash = sumPayment([legacyTx, mixedCaseTx], 'cash');
-    expect(extractedCash).toBe(1000); // 600 from legacy fallback + 400 from 'CASH'
+  it('a document written before the till recorded tenders still counts as cash', () => {
+    const legacy = {
+      id: 'tx-pre-tender',
+      date: new Date().toISOString(),
+      items: [{ product: { id: 'p9', name: 'Adaptor', price: 600 } as PhoneModel, quantity: 1 }],
+      subtotal: 600,
+      total: 600,
+      status: 'completed',
+    } as unknown as SaleTransaction;
+
+    const figures = computeDayFigures({ transactions: [legacy], repairs: [], debts: [] }, todayStr);
+    expect(figures.salesCash).toBe(600);
+    expect(figures.totalCash).toBe(600);
   });
 
   it('ensures debt collections are excluded from invoiced revenue and net profit to prevent double-counting', () => {

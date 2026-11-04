@@ -1,9 +1,17 @@
 import type { SaleTransaction, RepairTicket, CustomerDebtEntry } from '../../types';
-import { isSameLocalDate, toDateStr } from '../../store/endOfDayStore';
-import { isClaimedAndPaidRepair, getClaimedRepairHandoverCash } from '../../utils/repairFinancials';
+import { toDateStr } from '../../store/endOfDayStore';
+import { computeDayFigures, mergeDayInvoices } from '../../utils/dayFigures';
 
-// Pure Today Net Cash in Drawer aggregation (strictly cash tender: POS cash + parts cash + repairs cash + debt collections, excluding refunded/cancelled sales).
-// Copied verbatim from POSPage's todayNetCash useMemo; takes all inputs as arguments.
+/**
+ * The till's live "net cash in drawer" number.
+ *
+ * This is the same formula the End-of-Day seal and the reports use — the drawer card
+ * and the sealed day must be the same money, so the only thing this function does is
+ * merge the two invoice lists the till keeps apart and hand them to the one formula.
+ * A previous version re-derived the arithmetic here with a fallback that counted an
+ * invoice with an empty `payments` array as all cash, which made the card claim money
+ * the till never received on every parts invoice charged to a customer's account.
+ */
 export const computeTodayNetCash = (
   transactions: SaleTransaction[],
   partsInvoices: SaleTransaction[],
@@ -11,47 +19,8 @@ export const computeTodayNetCash = (
   debts: CustomerDebtEntry[],
 ): number => {
   const todayStr = toDateStr(new Date());
-
-  const allTx = [...(transactions || []), ...(partsInvoices || [])];
-  const uniqueTxMap = new Map<string, typeof allTx[0]>();
-  allTx.forEach(t => uniqueTxMap.set(t.id, t));
-
-  // 1. Completed sales (strictly excluding refunded, voided, cancelled, and pending approval)
-  const completed = Array.from(uniqueTxMap.values()).filter(t =>
-    t.status !== 'refunded' &&
-    t.status !== 'voided' &&
-    t.status !== 'cancelled' &&
-    t.status !== 'pending_approval' &&
-    isSameLocalDate(t.date, todayStr)
-  );
-
-  const posCash = completed.reduce((sum, t) => {
-    if (t.payments && t.payments.length > 0) {
-      const cashPart = t.payments
-        .filter(p => String(p.method || '').toLowerCase() === 'cash')
-        .reduce((s, p) => s + (p.amount || 0), 0);
-      return sum + cashPart;
-    }
-    return sum + Math.max(0, t.total || 0);
-  }, 0);
-
-  // 2. Repairs Cash (intake deposits + handover cash)
-  const completedRepairs = tickets.filter(t =>
-    t.status === 'completed' &&
-    isSameLocalDate(t.completedAt || t.updatedAt, todayStr)
-  );
-  const claimedPaidRepairs = completedRepairs.filter(r => isClaimedAndPaidRepair(r));
-  const repairHandoversCash = claimedPaidRepairs.reduce((s, r) => s + getClaimedRepairHandoverCash(r), 0);
-
-  const createdRepairs = tickets.filter(t => isSameLocalDate(t.createdAt, todayStr));
-  const repairDepositsCash = createdRepairs.reduce((s, t) => s + (t.depositAmount || 0), 0);
-  const repairsCash = repairHandoversCash + repairDepositsCash;
-
-  // 3. Customer Debt Cash Collections
-  const todayDebtPayments = debts.flatMap(d => (d.payments || []).filter(p => isSameLocalDate(p.date, todayStr)));
-  const debtCollectedCash = todayDebtPayments
-    .filter(p => String(p.method || '').toLowerCase() === 'cash')
-    .reduce((s, p) => s + (p.amount || 0), 0);
-
-  return Math.max(0, posCash + repairsCash + debtCollectedCash);
+  return computeDayFigures(
+    { transactions: mergeDayInvoices(transactions, partsInvoices), repairs: tickets, debts },
+    todayStr
+  ).totalCash;
 };
