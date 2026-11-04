@@ -8,7 +8,7 @@ import { StockBadge } from '../../components/ui/Badge';
 import { Pagination } from '../../components/ui/Pagination';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { useInventoryStore } from '../../store/inventoryStore';
-import { usePartsCartStore } from '../../store/partsCartStore';
+import { heldBasketDiscountOf, usePartsCartStore } from '../../store/partsCartStore';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import {
   DISCOUNT_APPROVAL_PERCENT,
+  discountAmountOf,
   discountPercentOf,
   lineDiscountOf,
   requiresDiscountApproval,
@@ -134,6 +135,15 @@ export const PartsPage = () => {
   const [lineDiscountText, setLineDiscountText] = useState<Record<string, string>>({});
   const [pendingLine, setPendingLine] = useState<{ productId: string; name: string; amount: number; percent: number } | null>(null);
   const [showLineUnlock, setShowLineUnlock] = useState(false);
+
+  /** The basket promise seen from both sides, so the field can hold a wholesale
+   *  percentage while the cashier still reads the dinars it is worth today. */
+  const basketDiscountAmount = discount
+    ? discountAmountOf(getSubtotal(), { mode: discount.type, value: discount.value })
+    : 0;
+  const basketDiscountPercent = discount
+    ? discountPercentOf(getSubtotal(), { mode: discount.type, value: discount.value })
+    : 0;
 
   /**
    * One part's discount, judged by the same rule as the basket and as a corrected
@@ -470,7 +480,7 @@ export const PartsPage = () => {
         onSuccess={() => {
           setShowDiscountUnlock(false);
           if (pendingDiscountValue !== null) {
-            setDiscount(pendingDiscountValue);
+            setDiscount({ type: 'flat', value: pendingDiscountValue });
             setPendingDiscountValue(null);
             toast.success('Discount Authorized', 'Admin authorization verified.');
           }
@@ -1148,11 +1158,8 @@ export const PartsPage = () => {
                   <button onClick={() => setShowSuspended(false)}><X size={14} /></button>
                 </div>
                 {suspendedCarts.map((sc: SuspendedCart) => {
-                  const scDisc = typeof sc.discount === 'number'
-                    ? sc.discount
-                    : (sc.discount && typeof sc.discount === 'object' ? sc.discount.value : 0) || 0;
-                  const scItemsTotal = sc.items.reduce((s, i) => s + i.product.price * i.quantity, 0);
-                  const scFinalTotal = Math.max(0, scItemsTotal - scDisc);
+                  const scItemsTotal = sc.items.reduce((s, i) => s + (i.unitPrice ?? i.product.price) * i.quantity, 0);
+                  const scFinalTotal = Math.max(0, scItemsTotal - heldBasketDiscountOf(sc.items, sc.discount));
 
                   return (
                     <div key={sc.id} className={posStyles.suspendedItem}>
@@ -1335,18 +1342,23 @@ export const PartsPage = () => {
                 )}
 
                 <div className={posStyles.discountRow}>
-                  <span>Discount</span>
+                  <span>{pendingDiscountValue === null && discount?.type === 'percent' ? 'Discount (%)' : 'Discount'}</span>
                   <div className={posStyles.discountInputWrapper}>
                     <input
                       type="number"
                       min="0"
                       max={getSubtotal()}
-                      value={pendingDiscountValue !== null ? pendingDiscountValue.toString() : (discount ? discount.toString() : '')}
+                      title={
+                        pendingDiscountValue === null && discount?.type === 'percent'
+                          ? `A promise of ${discount.value}% of the basket — it grows and shrinks with what is on the counter. Typing here replaces it with a number of dinars.`
+                          : `Dinars off the basket. ${DISCOUNT_APPROVAL_PERCENT}% of it or less; deeper needs an admin.`
+                      }
+                      value={pendingDiscountValue !== null ? pendingDiscountValue.toString() : (discount?.value ? discount.value.toString() : '')}
                       onChange={e => {
                         const raw = e.target.value;
                         if (raw === '') {
                           setPendingDiscountValue(null);
-                          setDiscount(0);
+                          setDiscount(null);
                           return;
                         }
                         const v = Number(raw);
@@ -1357,10 +1369,10 @@ export const PartsPage = () => {
                           setShowDiscountUnlock(true);
                         } else if (v > 0) {
                           setPendingDiscountValue(null);
-                          setDiscount(v);
+                          setDiscount({ type: 'flat', value: v });
                         } else {
                           setPendingDiscountValue(null);
-                          setDiscount(0);
+                          setDiscount(null);
                         }
                       }}
                       placeholder="0"
@@ -1368,6 +1380,13 @@ export const PartsPage = () => {
                     />
                   </div>
                 </div>
+
+                {basketDiscountAmount > 0 && (
+                  <div className={posStyles.totalRow} style={{ color: '#dc2626' }}>
+                    <span>Discount ({basketDiscountPercent.toFixed(1)}%)</span>
+                    <span>-{formatCurrency(basketDiscountAmount)}</span>
+                  </div>
+                )}
 
                 <div className={posStyles.totalRow}>
                   <span>Total</span>

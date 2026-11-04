@@ -18,7 +18,7 @@ import { activityLogService } from '../services/activityLogService';
 import { customerLogService } from '../services/customerLogService';
 import { partsCartService } from '../services/partsCartService';
 import { formatCurrency } from '../utils/formatCurrency';
-import { lineDiscountOf, unitPriceAfterDiscount } from '../utils/discountPolicy';
+import { discountAmountOf, lineDiscountOf, unitPriceAfterDiscount } from '../utils/discountPolicy';
 
 const getInventoryProducts = () => {
   const { parts } = useInventoryStore.getState();
@@ -47,30 +47,62 @@ const foldLineConcessions = (items: CartItem[]): CartItem[] =>
 const STORAGE_KEY_PARTS_ACTIVE = 'parts_active_cart';
 const STORAGE_KEY_PARTS_SUSPENDED = 'parts_suspended_carts';
 
+/**
+ * What the basket discount is, kept as it was promised: a trade percentage stays a
+ * percentage so it follows the basket as lines come and go, instead of freezing at
+ * whatever the basket was worth the moment it was set.
+ */
+export interface PartsBasketDiscount {
+  type: 'percent' | 'flat';
+  value: number;
+}
+
+/** A cart saved by an earlier build holds a bare number of dinars; read it as flat. */
+const readBasketDiscount = (raw: unknown): PartsBasketDiscount | null => {
+  if (raw && typeof raw === 'object') {
+    const { type, value } = raw as Partial<PartsBasketDiscount>;
+    const num = Number(value);
+    return Number.isFinite(num) && num > 0
+      ? { type: type === 'percent' ? 'percent' : 'flat', value: num }
+      : null;
+  }
+  const num = Number(raw);
+  return Number.isFinite(num) && num > 0 ? { type: 'flat', value: num } : null;
+};
+
+/**
+ * What a held cart's stored promise is worth against a given basket, so a card
+ * written before percentages were held as promises can no longer read a promised
+ * 10% as ten dinars. Lines are priced as the cart carries them, because a part
+ * given away at the counter is already cheaper than the shelf says.
+ */
+export const heldBasketDiscountOf = (items: CartItem[], raw: unknown): number => {
+  const subtotal = items.reduce((sum, item) => sum + (item.unitPrice ?? item.product.price) * item.quantity, 0);
+  const disc = readBasketDiscount(raw);
+  return disc ? discountAmountOf(subtotal, { mode: disc.type, value: disc.value }) : 0;
+};
+
 interface LocalPartsActiveState {
   items: CartItem[];
   customerName: string;
   customerPhone: string;
-  discount: number;
+  discount: PartsBasketDiscount | null;
 }
 
 const loadLocalActiveCart = (): LocalPartsActiveState => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PARTS_ACTIVE);
-    if (!raw) return { items: [], customerName: '', customerPhone: '', discount: 0 };
+    if (!raw) return { items: [], customerName: '', customerPhone: '', discount: null };
     const parsed = JSON.parse(raw);
-    const discVal = typeof parsed.discount === 'number'
-      ? parsed.discount
-      : (parsed.discount?.value ?? 0);
 
     return {
       items: Array.isArray(parsed.items) ? parsed.items : [],
       customerName: typeof parsed.customerName === 'string' ? parsed.customerName : '',
       customerPhone: typeof parsed.customerPhone === 'string' ? parsed.customerPhone : '',
-      discount: discVal,
+      discount: readBasketDiscount(parsed.discount),
     };
   } catch {
-    return { items: [], customerName: '', customerPhone: '', discount: 0 };
+    return { items: [], customerName: '', customerPhone: '', discount: null };
   }
 };
 
@@ -89,7 +121,7 @@ const saveLocalActiveCart = (
   items: CartItem[],
   customerName: string,
   customerPhone: string,
-  discount: number
+  discount: PartsBasketDiscount | null
 ) => {
   try {
     if (items.length === 0 && !customerName && !customerPhone && !discount) {
@@ -123,7 +155,7 @@ export interface PartsCartState {
   customerName: string;
   customerPhone: string;
   selectedCustomer: Customer | null;
-  discount: number;
+  discount: PartsBasketDiscount | null;
   suspendedCarts: SuspendedCart[];
   invoices: SaleTransaction[];
 
@@ -137,7 +169,7 @@ export interface PartsCartState {
   setCustomerName: (name: string) => void;
   setCustomerPhone: (phone: string) => void;
   setSelectedCustomer: (customer: Customer | null) => void;
-  setDiscount: (discount: number | { type: 'percent' | 'flat'; value: number } | null) => void;
+  setDiscount: (discount: PartsBasketDiscount | null) => void;
   /**
    * Take `amount` dinars off one line of the cart. The concession lands on that
    * line's own unit price, so a cashier who types a lower price instead is judged
@@ -285,10 +317,10 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       customerName: '',
       customerPhone: '',
       selectedCustomer: null,
-      discount: 0,
+      discount: null,
       payments: [{ method: 'cash', amount: 0 }],
     });
-    saveLocalActiveCart([], '', '', 0);
+    saveLocalActiveCart([], '', '', null);
   },
 
   setPayments: (payments) => set({ payments }),
@@ -314,20 +346,16 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
   },
 
   setDiscount: (discountInput) => {
-    let numDiscount = 0;
-    if (typeof discountInput === 'number') {
-      numDiscount = Math.max(0, discountInput);
-    } else if (discountInput && typeof discountInput === 'object') {
-      if (discountInput.type === 'percent') {
-        const sub = get().getSubtotal();
-        numDiscount = Math.round((sub * discountInput.value) / 100);
-      } else {
-        numDiscount = discountInput.value;
-      }
-    }
+    const value = Number(discountInput?.value);
+    // A percentage is kept as a percentage. Converting it to dinars here froze the
+    // trade promise at whatever the basket was worth that second, so a repairer
+    // owed 10% quietly lost the rest of it as soon as another part was added.
+    const discount = discountInput && Number.isFinite(value) && value > 0
+      ? { type: discountInput.type, value }
+      : null;
     const state = get();
-    set({ discount: numDiscount });
-    saveLocalActiveCart(state.items, state.customerName, state.customerPhone, numDiscount);
+    set({ discount });
+    saveLocalActiveCart(state.items, state.customerName, state.customerPhone, discount);
   },
 
   setLineDiscount: (productId, amount) => {
@@ -349,7 +377,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       id: `parts_cart_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       items: [...items],
       customerName: customerName || '',
-      discount: discount > 0 ? { type: 'flat', value: discount } : null,
+      discount: discount ?? null,
       date: new Date().toISOString(),
     };
 
@@ -360,12 +388,12 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       customerName: '',
       customerPhone: '',
       selectedCustomer: null,
-      discount: 0,
+      discount: null,
       payments: [{ method: 'cash', amount: 0 }],
     });
 
     saveLocalSuspendedCarts(updatedSuspended);
-    saveLocalActiveCart([], '', '', 0);
+    saveLocalActiveCart([], '', '', null);
     partsCartService.saveSuspendedCart(newCart).catch(console.error);
   },
 
@@ -382,7 +410,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         id: `parts_cart_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         items: [...state.items],
         customerName: state.customerName || '',
-        discount: state.discount > 0 ? { type: 'flat', value: state.discount } : null,
+        discount: state.discount ?? null,
         date: new Date().toISOString(),
       };
       updatedSuspended = [activeAsSuspended, ...updatedSuspended];
@@ -413,20 +441,20 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       }
     });
 
-    const discNum = typeof target.discount === 'number'
-      ? target.discount
-      : (target.discount?.value || 0);
-
+    // A cart held overnight by an older build carries its discount as bare dinars;
+    // read that as a flat promise and keep a percentage as the percentage it was
+    // promised in, so resuming does not quietly shrink the trade discount.
+    const disc = readBasketDiscount(target.discount);
     set({
       suspendedCarts: updatedSuspended,
       items: validatedItems,
       customerName: target.customerName || '',
-      discount: discNum,
+      discount: disc,
       payments: [{ method: 'cash', amount: 0 }],
     });
 
     saveLocalSuspendedCarts(updatedSuspended);
-    saveLocalActiveCart(validatedItems, target.customerName || '', '', discNum);
+    saveLocalActiveCart(validatedItems, target.customerName || '', '', disc);
     partsCartService.deleteSuspendedCart(id).catch(console.error);
 
     return { success: true, warnings };
@@ -511,11 +539,11 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         customerName: '',
         customerPhone: '',
         selectedCustomer: null,
-        discount: 0,
+        discount: null,
         payments: [{ method: 'cash', amount: 0 }],
       });
 
-      saveLocalActiveCart([], '', '', 0);
+      saveLocalActiveCart([], '', '', null);
 
       // Audit logs
       const itemsDesc = itemsSnapshot.map(i => `${i.quantity}x ${i.product.name} ${i.product.model}`).join(', ');
@@ -636,11 +664,11 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         customerName: '',
         customerPhone: '',
         selectedCustomer: null,
-        discount: 0,
+        discount: null,
         payments: [{ method: 'cash', amount: 0 }],
       });
 
-      saveLocalActiveCart([], '', '', 0);
+      saveLocalActiveCart([], '', '', null);
 
       // 7. Double Audit Logging
       const itemsSummary = itemsSnapshot.map(i => `${i.quantity}x ${i.product.name} ${i.product.model}`).join(', ');
@@ -712,9 +740,9 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
     get().getLineConcessions().reduce((sum, line) => sum + line.granted, 0),
 
   getDiscountAmount: () => {
-    const sub = get().getSubtotal();
     const disc = get().discount;
-    return Math.min(sub, Math.max(0, disc || 0));
+    if (!disc) return 0;
+    return discountAmountOf(get().getSubtotal(), { mode: disc.type, value: disc.value });
   },
 
   getTotal: () => {

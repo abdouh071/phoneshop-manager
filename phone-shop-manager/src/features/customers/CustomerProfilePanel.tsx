@@ -312,7 +312,7 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
   const handleStartPartsOrder = () => {
     usePartsCartStore.getState().setSelectedCustomer(customer);
     if (customer.wholesaleDiscountPercent && customer.wholesaleDiscountPercent > 0) {
-      usePartsCartStore.getState().setDiscount(customer.wholesaleDiscountPercent);
+      usePartsCartStore.getState().setDiscount({ type: 'percent', value: customer.wholesaleDiscountPercent });
       toast.success(t('customers.b2bDiscountApplied', 'B2B Discount Applied'), t('customers.b2bDiscountDesc', '{{name}} attached with {{percent}}% wholesale discount.', { name: customer.shopName || customer.name, percent: customer.wholesaleDiscountPercent }));
     } else {
       toast.success(t('customers.b2bAccountAttached', 'B2B Account Attached'), t('customers.b2bAccountAttachedDesc', '{{name}} attached for parts order.', { name: customer.shopName || customer.name }));

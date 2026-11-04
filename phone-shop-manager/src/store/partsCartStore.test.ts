@@ -89,13 +89,13 @@ vi.mock('./inventoryStore', () => ({
   },
 }));
 
-const { usePartsCartStore } = await import('./partsCartStore');
+const { heldBasketDiscountOf, usePartsCartStore } = await import('./partsCartStore');
 const { lineDiscountOf } = await import('../utils/discountPolicy');
 
 const emptyCart = () =>
   usePartsCartStore.setState({
     items: [],
-    discount: 0,
+    discount: null,
     customerName: '',
     customerPhone: '',
     selectedCustomer: null,
@@ -221,11 +221,72 @@ describe('the sale as it is written down', () => {
   it('subtracts the basket discount from an already discounted subtotal, once', async () => {
     cable(2);
     usePartsCartStore.getState().setLineDiscount(shelf.id, 100);
-    usePartsCartStore.getState().setDiscount(100);
+    usePartsCartStore.getState().setDiscount({ type: 'flat', value: 100 });
     await usePartsCartStore.getState().checkout();
 
     const tx = captured.transactions[0] as { subtotal: number; total: number };
     expect(tx.subtotal).toBe(500);
     expect(tx.total).toBe(400);
+  });
+});
+
+describe('the basket promise', () => {
+  it('keeps a trade percentage a percentage instead of reading it as dinars', () => {
+    cable(10);
+    // A repairer's shop is owed 10% of whatever the basket turns out to be. Handed
+    // over as a bare number, the till used to take it for ten dinars.
+    usePartsCartStore.getState().setDiscount({ type: 'percent', value: 10 });
+
+    expect(usePartsCartStore.getState().getSubtotal()).toBe(3000);
+    expect(usePartsCartStore.getState().getDiscountAmount()).toBe(300);
+    expect(usePartsCartStore.getState().getTotal()).toBe(2700);
+  });
+
+  it('grows and shrinks the promised percentage with the basket', () => {
+    cable(2);
+    usePartsCartStore.getState().setDiscount({ type: 'percent', value: 10 });
+    expect(usePartsCartStore.getState().getDiscountAmount()).toBe(60);
+
+    // Another part on the counter: the promise was 10% of the sale, not 10% of the
+    // sale as it looked the moment the customer was attached.
+    usePartsCartStore.getState().addToCart(screen);
+    expect(usePartsCartStore.getState().getDiscountAmount()).toBe(960);
+    expect(usePartsCartStore.getState().getTotal()).toBe(8640);
+  });
+
+  it('writes the dinars the percentage came to, so the printed lines still foot', async () => {
+    cable(10);
+    usePartsCartStore.getState().setDiscount({ type: 'percent', value: 10 });
+    await usePartsCartStore.getState().checkout();
+
+    const tx = captured.transactions[0] as {
+      subtotal: number;
+      total: number;
+      discount?: { type: 'percent' | 'flat'; value: number };
+    };
+    expect(tx.discount).toEqual({ type: 'flat', value: 300 });
+    expect(tx.total).toBe(tx.subtotal - 300);
+  });
+
+  it('clears the promise rather than leaving a zero behind', () => {
+    cable(2);
+    usePartsCartStore.getState().setDiscount({ type: 'flat', value: 100 });
+    usePartsCartStore.getState().setDiscount(null);
+
+    expect(usePartsCartStore.getState().discount).toBeNull();
+    expect(usePartsCartStore.getState().getDiscountAmount()).toBe(0);
+    expect(usePartsCartStore.getState().getTotal()).toBe(600);
+  });
+
+  it('prices a held cart by the promise it was held with', () => {
+    cable(2);
+    usePartsCartStore.getState().setLineDiscount(shelf.id, 100);
+    const items = usePartsCartStore.getState().items;
+
+    // 500 on the counter with 10% owed is 450 — not 490, which is what reading the
+    // percentage as dinars gave a cart held by an earlier build.
+    expect(heldBasketDiscountOf(items, { type: 'percent', value: 10 })).toBe(50);
+    expect(heldBasketDiscountOf(items, 100)).toBe(100);
+    expect(heldBasketDiscountOf(items, null)).toBe(0);
   });
 });
