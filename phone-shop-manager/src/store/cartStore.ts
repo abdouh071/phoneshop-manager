@@ -1122,6 +1122,36 @@ export const useCartStore = create<CartState>((set, get) => ({
     );
     if (linkedDebt) {
       const itemsSummary = newItems.map(i => `${i.quantity}x ${i.product.name} ${i.product.model}`).join(', ');
+      // Money the customer already handed over is a fact; correcting the invoice
+      // cannot un-pay it. What the account held before this edit and what it holds
+      // after is the difference between the two over-collections, and the shop's
+      // own rule for absorbed money — the one a void already uses — is to keep it
+      // as Avoir rather than let `Math.max(0, …)` quietly eat it.
+      const paid = linkedDebt.amountPaid || 0;
+      const surplusShift = Math.max(0, paid - total) - Math.max(0, paid - (tx.total || 0));
+      const creditHolder = tx.customerId || linkedDebt.customerId;
+      const receipt = tx.invoiceNumber || txId.slice(0, 8);
+
+      if (surplusShift > 0 && creditHolder) {
+        await customerStore
+          .addStoreCredit(
+            creditHolder,
+            surplusShift,
+            `Over-collection on corrected Receipt #${receipt} held as Avoir`
+          )
+          .catch(console.error);
+      } else if (surplusShift < 0 && creditHolder) {
+        // The invoice came back up to what was already paid, so the Avoir written
+        // by the earlier correction is money the shop has now handed over twice.
+        await customerStore
+          .useStoreCredit(
+            creditHolder,
+            Math.abs(surplusShift),
+            `Avoir released by corrected Receipt #${receipt}`
+          )
+          .catch(console.error);
+      }
+
       customerStore.updateDebtAmount(linkedDebt.id, total, itemsSummary).catch(console.error);
     }
 

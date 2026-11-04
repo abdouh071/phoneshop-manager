@@ -10,10 +10,14 @@
  * rounded, and then a receipt prints lines that do not add up to its own total.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { PhoneModel } from '../types';
+import type { CartItem, PhoneModel, SaleTransaction } from '../types';
 
 const captured = vi.hoisted(() => ({
   transactions: [] as Record<string, unknown>[],
+  /** The account entries the customer store reports — the edit path reads these cold. */
+  debts: [] as Array<{ id: string; customerId: string; amountPaid: number; totalAmount: number; invoiceNumber: string }>,
+  /** Every Avoir move the corrected invoice asked for, in the order it asked. */
+  credit: [] as Array<{ kind: 'add' | 'use'; customerId: string; amount: number; note: string }>,
 }));
 
 vi.mock('../services/transactionService', () => ({
@@ -63,10 +67,19 @@ vi.mock('./customerStore', () => ({
   useCustomerStore: {
     getState: () => ({
       customers: [],
-      debts: [],
+      debts: captured.debts,
       recalculateCustomer: async () => undefined,
       addDebt: async () => ({ id: 'debt_1' }),
+      updateDebtAmount: async () => undefined,
       getCustomerDebtTotal: () => 0,
+      addStoreCredit: async (customerId: string, amount: number, note = '') => {
+        captured.credit.push({ kind: 'add', customerId, amount, note });
+        return amount;
+      },
+      useStoreCredit: async (customerId: string, amount: number, note = '') => {
+        captured.credit.push({ kind: 'use', customerId, amount, note });
+        return amount;
+      },
     }),
   },
 }));
@@ -126,6 +139,8 @@ beforeEach(() => {
     value: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined },
   });
   captured.transactions.length = 0;
+  captured.debts.length = 0;
+  captured.credit.length = 0;
   emptyCart();
   (phone as { price: number }).price = 10005;
 });
@@ -234,5 +249,82 @@ describe('a basket parked in the suspended drawer', () => {
 
     expect(cartTotalsOf(parked.items, parked.discount).discountAmount).toBe(0);
     expect(cartTotalsOf(parked.items, parked.discount).total).toBe(300);
+  });
+});
+
+/**
+ * What a downward correction does to money the customer already handed over.
+ *
+ * The invoice total drops, the collected amount does not, and the account entry's
+ * balance is `Math.max(0, total - paid)` — so the surplus used to round down to
+ * nothing. It is the shop's own money, owed to the customer, and it belonged in the
+ * Avoir ledger the void path already writes to. These pin the move to the
+ * *difference* between the surplus before and after, so correcting the same invoice
+ * twice cannot grant the same 2 000 DA twice.
+ */
+describe('a corrected invoice that collected more than it now says', () => {
+  const INVOICE = 'INV-123456';
+  const line = (price: number): CartItem[] => [{ product: { ...phone, price }, quantity: 1 }];
+
+  const park = (invoiceTotal: number, collected: number) => {
+    useCartStore.setState({
+      transactions: [
+        {
+          id: 'tx_debt',
+          date: '2026-11-02T10:00:00.000Z',
+          items: line(invoiceTotal),
+          subtotal: invoiceTotal,
+          total: invoiceTotal,
+          payments: [{ method: 'debt', amount: invoiceTotal }],
+          status: 'completed',
+          invoiceNumber: INVOICE,
+          customerId: 'cust_1',
+        } as unknown as SaleTransaction,
+      ],
+    });
+    captured.debts.push({
+      id: 'debt_1',
+      customerId: 'cust_1',
+      amountPaid: collected,
+      totalAmount: invoiceTotal,
+      invoiceNumber: INVOICE,
+    });
+  };
+
+  const edit = (newTotal: number) =>
+    useCartStore.getState().editTransaction('tx_debt', line(newTotal), {});
+
+  it('holds an over-collection as Avoir instead of letting it round down to nothing', async () => {
+    park(10000, 10000);
+    await edit(8000);
+
+    expect(captured.credit).toEqual([
+      { kind: 'add', customerId: 'cust_1', amount: 2000, note: `Over-collection on corrected Receipt #${INVOICE} held as Avoir` },
+    ]);
+  });
+
+  it('does not grant the same over-collection twice on a second correction', async () => {
+    // The surplus is already on the ledger from the first edit; re-deriving it from
+    // what the customer paid would hand over the same 2 000 DA again.
+    park(8000, 10000);
+    await edit(8000);
+
+    expect(captured.credit).toEqual([]);
+  });
+
+  it('releases the Avoir when a later correction asks for what was already paid', async () => {
+    park(8000, 10000);
+    await edit(10000);
+
+    expect(captured.credit).toHaveLength(1);
+    expect(captured.credit[0].kind).toBe('use');
+    expect(captured.credit[0].amount).toBe(2000);
+  });
+
+  it('leaves an under-paid account alone', async () => {
+    park(10000, 4000);
+    await edit(8000);
+
+    expect(captured.credit).toEqual([]);
   });
 });
