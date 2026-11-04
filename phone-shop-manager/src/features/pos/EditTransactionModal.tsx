@@ -4,19 +4,34 @@
  * One control per SKU, and a line only climbs as far as the shelf can give. The
  * technician phone mirrors this screen (`technician-app/src/components/EditSaleSheet.tsx`),
  * so a rule that changes here has to change there.
+ *
+ * A line may also be discounted. The concession is written into the line's own unit
+ * price rather than stored beside it, because the receipt, the ledger, the customer
+ * statement and the reports all price that line from its unit price and add those
+ * lines back up — a discount kept separately would print a sum of lines that does
+ * not foot to the printed total. What the till is left to enforce is how deep a
+ * concession anyone may make without an admin signing for it.
  */
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { SearchInput } from '../../components/ui/Input';
+import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { useCartStore } from '../../store/cartStore';
 import { useInventoryStore } from '../../store/inventoryStore';
+import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
 import { Minus, Plus, AlertTriangle, Trash2 } from 'lucide-react';
 import type { SaleTransaction, CartItem, PhoneModel } from '../../types';
 import { formatCurrency, getCurrencySymbol } from '../../utils/formatCurrency';
 import { useSettingsStore } from '../../store/settingsStore';
 import { errorMessage } from '../../utils/errorUtils';
+import {
+  DISCOUNT_APPROVAL_PERCENT,
+  lineDiscountOf,
+  requiresLineDiscountApproval,
+  unitPriceAfterDiscount,
+} from '../../utils/discountPolicy';
 
 interface EditTransactionModalProps {
   isOpen: boolean;
@@ -35,7 +50,7 @@ interface EditRow {
 /** The ceiling only ever clamps; a product this till does not list is left unbounded. */
 const UNBOUNDED_QTY = 999;
 
-const withoutKey = (record: Record<string, number>, key: string): Record<string, number> =>
+const withoutKey = <T,>(record: Record<string, T>, key: string): Record<string, T> =>
   Object.fromEntries(Object.entries(record).filter(([id]) => id !== key));
 
 export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
@@ -45,16 +60,31 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
 }) => {
   const { editTransaction } = useCartStore();
   const { currency } = useSettingsStore();
+  const role = useAuthStore(state => state.user?.role);
   const inventory = useInventoryStore(state => state.products);
   const parts = useInventoryStore(state => state.parts);
   const currencySymbol = getCurrencySymbol(currency);
   const toast = useToast();
   const [isProcessing, setIsProcessing] = useState(false);
+  /**
+   * An admin's answer belongs to the exact concessions it was given for — deepen the
+   * discount afterwards and the number they signed for is no longer the number being
+   * written, so the key has to be re-asked. The till gates a discount the same way.
+   */
+  const [approvedKey, setApprovedKey] = useState<string | null>(null);
+  const [isAskingDiscount, setIsAskingDiscount] = useState(false);
 
   // Editable items state: productId -> quantity
   const [editedQuantities, setEditedQuantities] = useState<Record<string, number>>({});
   // Editable prices state: productId -> unit price
   const [editedPrices, setEditedPrices] = useState<Record<string, number>>({});
+  /**
+   * The discount exactly as it was typed, kept apart from the price it produced.
+   * Re-deriving the field from the price would rewrite the number under the caret —
+   * 100 DA over three units lands back as 99.99 — so the text lives here until
+   * something else moves the line, and then the field reads the truth again.
+   */
+  const [discountInputs, setDiscountInputs] = useState<Record<string, string>>({});
   // Return to stock options: productId -> boolean (true = return to stock)
   const [returnToStock, setReturnToStock] = useState<Record<string, boolean>>({});
   // Products the counter puts on an invoice that never carried them
@@ -76,10 +106,13 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
       setEditedQuantities(initialQtys);
       setEditedPrices(initialPrices);
       setReturnToStock(initialStockOpts);
+      setDiscountInputs({});
       setAddedIds([]);
       setAddedProducts({});
       setIsPicking(false);
       setPickSearch('');
+      setApprovedKey(null);
+      setIsAskingDiscount(false);
     }
   }, [transaction]);
 
@@ -125,11 +158,29 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   const handleQuantityChange = (productId: string, newQty: number, maxQty: number) => {
     const validQty = Math.max(0, Math.min(maxQty, newQty));
     setEditedQuantities(prev => ({ ...prev, [productId]: validQty }));
+    // Another unit changes what a typed discount is worth, so the field reads the
+    // concession back off the line rather than keeping a stale number.
+    setDiscountInputs(prev => withoutKey(prev, productId));
   };
 
   const handlePriceChange = (productId: string, newPrice: number) => {
     const validPrice = Math.max(0, newPrice);
     setEditedPrices(prev => ({ ...prev, [productId]: validPrice }));
+    setDiscountInputs(prev => withoutKey(prev, productId));
+  };
+
+  /**
+   * The discount and the unit price are one number seen from two sides, so typing in
+   * one moves the other rather than fighting it: the concession is measured from the
+   * price the document carried and spread over the units it holds.
+   */
+  const handleDiscountChange = (row: EditRow, quantity: number, raw: string) => {
+    const parsed = parseFloat(raw);
+    setDiscountInputs(prev => ({ ...prev, [row.id]: raw }));
+    setEditedPrices(prev => ({
+      ...prev,
+      [row.id]: unitPriceAfterDiscount(row.product.price, Number.isFinite(parsed) ? parsed : 0, quantity),
+    }));
   };
 
   const handleToggleStock = (productId: string) => {
@@ -163,6 +214,33 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   const refundAmount = diff > 0 ? diff : 0;
   const additionalDue = diff < 0 ? Math.abs(diff) : 0;
 
+  /** What each line gives away against the price the document carried for it. */
+  const concessions = rows
+    .map(row => {
+      const quantity = editedQuantities[row.id] ?? row.originalQty;
+      const unitPrice = editedPrices[row.id] ?? row.product.price;
+      return { row, quantity, ...lineDiscountOf(row.product.price, unitPrice, quantity) };
+    })
+    .filter(line => line.granted > 0);
+
+  const concessionsTotal = concessions.reduce((sum, line) => sum + line.granted, 0);
+
+  /**
+   * A concession deeper than the shop's own threshold, which is the only thing an
+   * admin here is being asked to sign for — the rest of the edit was already
+   * authorised to reach this screen.
+   */
+  const deepConcessions = concessions.filter(line => requiresLineDiscountApproval(role, line.percent));
+  const concessionKey = deepConcessions
+    .map(line => `${line.row.id}:${Math.round(line.percent * 10) / 10}`)
+    .sort()
+    .join('|');
+  const needsDiscountApproval = deepConcessions.length > 0 && approvedKey !== concessionKey;
+  const deepestPercent = deepConcessions.reduce((worst, line) => Math.max(worst, line.percent), 0);
+  const discountSummary = deepConcessions
+    .map(line => `${line.row.product.name} −${line.percent.toFixed(1)}% (${formatCurrency(line.granted)})`)
+    .join(', ');
+
   const onInvoice = new Set(transaction.items.map(item => item.product.id));
 
   const pickProduct = (product: PhoneModel) => {
@@ -181,6 +259,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
     setAddedIds(prev => prev.filter(id => id !== productId));
     setEditedQuantities(prev => withoutKey(prev, productId));
     setEditedPrices(prev => withoutKey(prev, productId));
+    setDiscountInputs(prev => withoutKey(prev, productId));
   };
 
   const addedLineCount = rows.filter(row => row.added && (editedQuantities[row.id] ?? 0) > 0).length;
@@ -193,8 +272,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
         (editedPrices[item.product.id] !== undefined && editedPrices[item.product.id] !== item.product.price)
     );
 
-  const handleSave = async () => {
-    if (!hasChanges || isProcessing) return;
+  const commitEdit = async () => {
     setIsProcessing(true);
     try {
       await editTransaction(transaction.id, newItems, returnToStock);
@@ -208,6 +286,15 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleSave = () => {
+    if (!hasChanges || isProcessing) return;
+    if (needsDiscountApproval) {
+      setIsAskingDiscount(true);
+      return;
+    }
+    void commitEdit();
   };
 
   return (
@@ -230,7 +317,9 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
             disabled={!hasChanges}
             isLoading={isProcessing}
           >
-            {refundAmount > 0
+            {needsDiscountApproval
+              ? `Authorize Discount (${deepConcessions.length} line${deepConcessions.length > 1 ? 's' : ''})`
+              : refundAmount > 0
               ? `Refund Difference (${formatCurrency(refundAmount)})`
               : additionalDue > 0
               ? `Collect Difference (${formatCurrency(additionalDue)})`
@@ -241,9 +330,10 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
         <p style={{ fontSize: '13px', color: 'var(--color-on-surface-variant)', margin: 0 }}>
-          Adjust item unit prices and quantities, put a product the invoice never carried onto it, or drop a line
-          back to zero. Inventory and transaction totals recalculate automatically, and a line the shelf cannot
-          give is refused before anything is written.
+          Adjust item unit prices, quantities and discounts, put a product the invoice never carried onto it, or
+          drop a line back to zero. Inventory and transaction totals recalculate automatically, a line the shelf
+          cannot give is refused before anything is written, and a discount deeper than{' '}
+          {DISCOUNT_APPROVAL_PERCENT}% of what that line was listed at needs an admin to authorize it.
         </p>
 
         {/* Line Items Table */}
@@ -252,7 +342,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
             <thead>
               <tr style={{ background: 'var(--color-surface-variant)', borderBottom: '1px solid var(--color-outline-variant)' }}>
                 <th style={{ padding: '10px 14px' }}>Item</th>
-                <th style={{ padding: '10px 14px' }}>Unit Price ({currencySymbol})</th>
+                <th style={{ padding: '10px 14px' }}>Unit Price & Discount ({currencySymbol})</th>
                 <th style={{ padding: '10px 14px', textAlign: 'center' }}>Quantity</th>
                 <th style={{ padding: '10px 14px', textAlign: 'right' }}>Line Total</th>
                 <th style={{ padding: '10px 14px', textAlign: 'center' }}>Return Stock?</th>
@@ -269,6 +359,8 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                 const maxQty = ceilingOf(row);
                 const atCeiling = currentQty >= maxQty;
                 const onShelf = shelfOf(pid);
+                const concession = lineDiscountOf(row.product.price, currentPrice, currentQty);
+                const gatedDiscount = requiresLineDiscountApproval(role, concession.percent);
 
                 return (
                   <tr key={pid} style={{ borderBottom: '1px solid var(--color-outline-variant)' }}>
@@ -280,33 +372,78 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                           : row.product.category}
                       </div>
                     </td>
-                    <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        value={currentPrice}
-                        onChange={e => {
-                          const v = parseFloat(e.target.value);
-                          handlePriceChange(pid, isNaN(v) ? 0 : v);
-                        }}
-                        style={{
-                          width: '95px',
-                          padding: '5px 8px',
-                          borderRadius: '6px',
-                          border: '1px solid var(--color-outline, #cbd5e1)',
-                          fontSize: '13px',
-                          fontWeight: 600,
-                          background: 'var(--color-surface-container-lowest, #ffffff)',
-                          color: 'var(--color-on-surface, #0f172a)',
-                          outline: 'none',
-                        }}
-                      />
+                    <td style={{ padding: '12px 14px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          aria-label={`Unit price in dinars on ${row.product.name}`}
+                          value={currentPrice}
+                          onChange={e => {
+                            const v = parseFloat(e.target.value);
+                            handlePriceChange(pid, isNaN(v) ? 0 : v);
+                          }}
+                          style={{
+                            width: '95px',
+                            padding: '5px 8px',
+                            borderRadius: '6px',
+                            border: '1px solid var(--color-outline, #cbd5e1)',
+                            fontSize: '13px',
+                            fontWeight: 600,
+                            background: 'var(--color-surface-container-lowest, #ffffff)',
+                            color: 'var(--color-on-surface, #0f172a)',
+                            outline: 'none',
+                          }}
+                        />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            placeholder={`Disc. ${currencySymbol}`}
+                            aria-label={`Discount in dinars on ${row.product.name}`}
+                            value={discountInputs[pid] ?? (concession.granted > 0 ? String(concession.granted) : '')}
+                            onChange={e => handleDiscountChange(row, currentQty, e.target.value)}
+                            disabled={currentQty <= 0}
+                            style={{
+                              width: '95px',
+                              padding: '4px 8px',
+                              borderRadius: '6px',
+                              border: `1px ${concession.granted > 0 ? 'solid' : 'dashed'} var(--color-outline, #cbd5e1)`,
+                              fontSize: '12px',
+                              background: 'var(--color-surface-container-lowest, #ffffff)',
+                              color: concession.granted > 0 ? 'var(--color-danger-text, #dc2626)' : 'var(--color-on-surface, #0f172a)',
+                              outline: 'none',
+                              opacity: currentQty > 0 ? 1 : 0.4,
+                            }}
+                          />
+                          {concession.granted > 0 && (
+                            <span
+                              style={{
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                whiteSpace: 'nowrap',
+                                color: gatedDiscount ? 'var(--color-danger-text, #dc2626)' : 'var(--color-on-surface-variant)',
+                              }}
+                            >
+                              -{concession.percent.toFixed(1)}%
+                            </span>
+                          )}
+                        </div>
+                        {gatedDiscount && (
+                          <div style={{ fontSize: '11px', color: 'var(--color-warning-text)', maxWidth: '160px' }}>
+                            Over {DISCOUNT_APPROVAL_PERCENT}% — an admin has to authorize this line before it saves.
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'var(--color-surface-variant)', padding: '4px 8px', borderRadius: '8px' }}>
                         <button
                           type="button"
+                          aria-label={`Decrease quantity of ${row.product.name}`}
+                          title="Decrease quantity"
                           onClick={() => handleQuantityChange(pid, currentQty - 1, maxQty)}
                           disabled={currentQty <= 0}
                           style={{
@@ -326,6 +463,8 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                         </span>
                         <button
                           type="button"
+                          aria-label={`Increase quantity of ${row.product.name}`}
+                          title="Increase quantity"
                           onClick={() => handleQuantityChange(pid, currentQty + 1, maxQty)}
                           disabled={atCeiling}
                           style={{
@@ -349,8 +488,13 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                         </div>
                       )}
                     </td>
-                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                      {formatCurrency(currentPrice * currentQty)}
+                    <td style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <div style={{ fontWeight: 600 }}>{formatCurrency(currentPrice * currentQty)}</div>
+                      {concession.granted > 0 && (
+                        <div style={{ fontSize: '11px', color: 'var(--color-danger-text, #dc2626)' }}>
+                          was {formatCurrency(row.product.price * currentQty)}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                       {row.added ? (
@@ -423,6 +567,12 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
             <span style={{ color: 'var(--color-on-surface-variant)' }}>New Subtotal:</span>
             <span>{formatCurrency(newSubtotal)}</span>
           </div>
+          {concessionsTotal > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--color-danger-text)' }}>
+              <span>Given away on lines:</span>
+              <span>-{formatCurrency(concessionsTotal)}</span>
+            </div>
+          )}
           {addedLineCount > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
               <span style={{ color: 'var(--color-on-surface-variant)' }}>New lines added:</span>
@@ -543,6 +693,30 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
           </Button>
         </div>
       </Modal>
+
+      {/* The same override the till asks for on a deep discount, so one rule and one
+          audit trail cover a concession made at either moment. */}
+      <AdminUnlockModal
+        isOpen={isAskingDiscount}
+        onClose={() => setIsAskingDiscount(false)}
+        onSuccess={() => {
+          setIsAskingDiscount(false);
+          setApprovedKey(concessionKey);
+          void commitEdit();
+        }}
+        actionName={`Authorize line discounts on receipt #${transaction.invoiceNumber || transaction.id.slice(0, 8)}: ${discountSummary}`}
+        actionType="pos_discount_override"
+        targetId={transaction.id}
+        actionData={{
+          itemType: 'pos_discount',
+          invoiceNumber: transaction.invoiceNumber || transaction.id,
+          discountAmount: Math.round(concessionsTotal),
+          discountPercent: Number(deepestPercent.toFixed(1)),
+          discountLines: discountSummary,
+          customerName: transaction.customerName || 'Walk-in Customer',
+          newTotal: Math.round(newTotal),
+        }}
+      />
     </>
   );
 };
