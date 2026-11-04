@@ -129,6 +129,8 @@
     "dropHintRetriesExhausted": "La synchronisation a échoué cinq fois de suite ; l'action a donc été retirée de la file. Réessayez pour la remettre en file.",
     "dropHintNoHandler": "Aucun gestionnaire n'était enregistré pour ce type d'action ; elle a été abandonnée dès le premier passage. Réessayez après une mise à jour de l'application.",
     "dropHintDocumentMissing": "Le document visé par cette modification a été supprimé ou n'a jamais été créé ; elle n'a pas pu être appliquée. Ne réessayez que si ce document existe de nouveau.",
+    "dropReasonUnrecoverable": "Impossible à appliquer",
+    "dropHintUnrecoverable": "Cette modification visait une référence qui n'a jamais existé que sur cet appareil ; aucune tentative n'aurait pu l'atteindre. Le document se synchronise avec ce changement déjà intégré ; ne réessayez que s'il manque encore après cela.",
     "dropAttempts_one": "{{count}} tentative effectuée",
     "dropAttempts_other": "{{count}} tentatives effectuées",
     "dropQueuedAt": "En file :",

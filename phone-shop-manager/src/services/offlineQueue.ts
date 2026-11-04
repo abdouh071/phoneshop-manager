@@ -36,6 +36,18 @@ function backoffDelayMs(retryCount: number): number {
 /** Free-form JSON bag. The concrete shape is declared by each action's registered handler. */
 export type OfflineActionPayload = Record<string, unknown>;
 
+/**
+ * A handler's way of saying this action can never reach its target, so the retry ladder
+ * would only hide it for five passes before admitting the same thing. `flush` puts it in
+ * the dead-letter log on the first attempt instead of re-queueing it.
+ */
+export class UnrecoverableSyncActionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnrecoverableSyncActionError';
+  }
+}
+
 export interface OfflineAction {
   id: string;
   type: string;
@@ -196,9 +208,20 @@ export const offlineQueue = {
         await handler(action.payload);
         success++;
       } catch (err) {
-        console.error(`[OfflineQueue] Failed to sync action ${action.type} (attempt ${action.retryCount + 1}/${MAX_RETRY_COUNT}):`, err);
         failed++;
-        if (action.retryCount < MAX_RETRY_COUNT - 1) {
+        if (err instanceof UnrecoverableSyncActionError) {
+          console.warn(`[OfflineQueue] Action ${action.type} can never reach its target — dead-lettered:`, err);
+          offlineDeadLetterStore.record({
+            source: 'action_queue',
+            type: action.type,
+            payload: action.payload,
+            reason: 'unrecoverable',
+            attempts: action.retryCount,
+            enqueuedAt: action.enqueuedAt,
+            detail: errorMessage(err),
+          });
+        } else if (action.retryCount < MAX_RETRY_COUNT - 1) {
+          console.error(`[OfflineQueue] Failed to sync action ${action.type} (attempt ${action.retryCount + 1}/${MAX_RETRY_COUNT}):`, err);
           const nextRetry = new Date(now + backoffDelayMs(action.retryCount)).toISOString();
           remaining.push({
             ...action,
@@ -206,7 +229,7 @@ export const offlineQueue = {
             nextRetryAfter: nextRetry,
           });
         } else {
-          console.error(`[OfflineQueue] Action ${action.type} (id=${action.id}) permanently dropped after ${MAX_RETRY_COUNT} attempts.`);
+          console.error(`[OfflineQueue] Action ${action.type} (id=${action.id}) permanently dropped after ${MAX_RETRY_COUNT} attempts:`, err);
           offlineDeadLetterStore.record({
             source: 'action_queue',
             type: action.type,

@@ -8,12 +8,28 @@
  * Handlers are responsible for re-executing the Firebase call when the queue
  * is flushed on network recovery.
  */
-import { offlineQueue } from './offlineQueue';
+import { offlineQueue, UnrecoverableSyncActionError } from './offlineQueue';
 import { repairService } from './repairService';
 import { transactionService } from './transactionService';
 import type { PhoneModel, RepairStatusHistoryEntry, RepairTicket, SaleTransaction } from '../types';
 
 let registered = false;
+
+/**
+ * An id starting with `offline_` names a ticket this device invented and never uploaded:
+ * the document it points at does not exist and never will, so no retry can land it. The
+ * ticket's own data is not lost — the sync creates the document from the local copy, which
+ * already carries these changes. Before this guard the service re-queued such an action and
+ * returned success, so it was re-born on every pass and the shop was told each time that the
+ * sync had completed.
+ */
+function assertUploadedTicketId(id: unknown, actionType: string): void {
+  if (typeof id === 'string' && id.startsWith('offline_')) {
+    throw new UnrecoverableSyncActionError(
+      `${actionType} targets ${id}, a ticket id that only ever existed on this device.`
+    );
+  }
+}
 
 export function registerOfflineHandlers(): void {
   if (registered) return;
@@ -31,6 +47,7 @@ export function registerOfflineHandlers(): void {
     status: RepairTicket['status'];
     history?: RepairStatusHistoryEntry[];
   }) => {
+    assertUploadedTicketId(payload.id, 'UPDATE_REPAIR_STATUS');
     await repairService.updateStatus(payload.id, payload.status, payload.history, { throwOnError: true });
   });
 
@@ -42,6 +59,7 @@ export function registerOfflineHandlers(): void {
     id: string;
     updates: Partial<RepairTicket>;
   }) => {
+    assertUploadedTicketId(payload.id, 'UPDATE_REPAIR_TICKET');
     await repairService.updateTicket(payload.id, payload.updates, { throwOnError: true });
   });
 
@@ -63,6 +81,7 @@ export function registerOfflineHandlers(): void {
   offlineQueue.registerHandler('DELETE_REPAIR_TICKET', async (payload: {
     id: string;
   }) => {
+    assertUploadedTicketId(payload.id, 'DELETE_REPAIR_TICKET');
     await repairService.deleteTicket(payload.id, { throwOnError: true });
   });
 

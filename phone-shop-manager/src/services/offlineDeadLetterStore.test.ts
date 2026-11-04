@@ -2,7 +2,7 @@
  * Dead-letter visibility for abandoned offline writes.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { offlineQueue } from './offlineQueue';
+import { offlineQueue, UnrecoverableSyncActionError } from './offlineQueue';
 import { offlineDeadLetterStore } from './offlineDeadLetterStore';
 import { inventoryService } from './inventoryService';
 import { unifiedOfflineSyncService } from './unifiedOfflineSyncService';
@@ -75,6 +75,24 @@ describe('offlineDeadLetterStore', () => {
 
       expect(offlineQueue.getPendingCount()).toBe(0);
       expect(offlineDeadLetterStore.list()[0].reason).toBe('no_handler');
+    });
+
+    it('logs the action once when its handler says no retry could ever land it', async () => {
+      offlineQueue.registerHandler('TEST_TEMP_ID', async () => {
+        throw new UnrecoverableSyncActionError('targets offline_tkt_1, an id only this device knew');
+      });
+      await offlineQueue.enqueue({ type: 'TEST_TEMP_ID', payload: { id: 'offline_tkt_1' } });
+
+      await offlineQueue.flush();
+
+      // Gone from the queue on the first pass, not retried five times, and visible to the
+      // shop either way: an immortal entry used to be counted as synced on every pass.
+      expect(offlineQueue.getPendingCount()).toBe(0);
+      const letters = offlineDeadLetterStore.list();
+      expect(letters).toHaveLength(1);
+      expect(letters[0].reason).toBe('unrecoverable');
+      expect(letters[0].attempts).toBe(0);
+      expect(letters[0].detail).toContain('only this device knew');
     });
 
     it('does not log an action that is merely waiting to be retried', async () => {

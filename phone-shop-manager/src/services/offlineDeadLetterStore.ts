@@ -1,11 +1,12 @@
 /**
  * Dead-letter log for abandoned offline writes.
  * =============================================
- * Three situations remove data from a sync queue without it ever reaching Firestore: an
- * action that runs out of retries, an action whose type has no registered handler, and a
- * stock adjustment whose document was deleted. Before this log each of those left nothing
- * behind but a console line, so a dropped sale simply never appeared in the books and
- * nobody could tell when.
+ * Four situations remove data from a sync queue without it ever reaching Firestore: an
+ * action that runs out of retries, an action whose type has no registered handler, a stock
+ * adjustment whose document was deleted, and an action whose handler can say up front that
+ * no retry could ever land it — a write aimed at a document id that only ever existed on
+ * this device. Before this log each of those left nothing behind but a console line, so a
+ * dropped sale simply never appeared in the books and nobody could tell when.
  *
  * A queue that could not be *persisted* is a different failure and belongs to
  * `offlineQueueMirror`, which keeps a durable second copy and reports its own health.
@@ -24,7 +25,7 @@ const MAX_KEPT = 200;
 
 export type DeadLetterSource = 'action_queue' | 'stock_adjustment';
 
-export type DeadLetterReason = 'retries_exhausted' | 'no_handler' | 'document_missing';
+export type DeadLetterReason = 'retries_exhausted' | 'no_handler' | 'document_missing' | 'unrecoverable';
 
 export interface DeadLetter {
   id: string;

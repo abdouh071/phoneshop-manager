@@ -129,6 +129,8 @@
     "dropHintRetriesExhausted": "Syncing failed five times in a row, so the action was removed from the queue. Retry to queue it again.",
     "dropHintNoHandler": "No handler was registered for this action type, so it was dropped on the first pass. Retry after the app has been updated.",
     "dropHintDocumentMissing": "The record this change targeted was deleted or was never created, so it could not be applied. Retry only if that record exists again.",
+    "dropReasonUnrecoverable": "Could never be applied",
+    "dropHintUnrecoverable": "This change was aimed at a reference that only ever existed on this device, so no retry could reach it. The record uploads with this change already inside it; retry only if it is still missing afterwards.",
     "dropAttempts_one": "{{count}} retry attempted",
     "dropAttempts_other": "{{count}} retries attempted",
     "dropQueuedAt": "Queued:",

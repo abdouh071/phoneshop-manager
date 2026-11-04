@@ -405,7 +405,17 @@ export const repairService = {
     // Save to local storage immediately
     saveLocalRepairs(local.map(t => t.id === id ? updatedLocal : t));
 
-    if (id.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+    // A ticket whose id starts with `offline_` has no document to update: that id was
+    // invented here, and `syncOfflineRepairs` creates the document from the local ticket
+    // exactly as it now stands — this status, its history and all. So the write above is
+    // already on its way to Firestore, and queueing an action keyed on the temporary id
+    // only ever made work: the replay landed back in this branch and queued it again,
+    // which is how one entry survived every sync pass the shop ran.
+    if (id.startsWith('offline_')) {
+      return updatedLocal;
+    }
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
       offlineQueue.enqueue({
         type: 'UPDATE_REPAIR_STATUS',
         payload: { id, status, history: statusHistory }
@@ -532,7 +542,13 @@ export const repairService = {
     const merged = { ...(existing || ({} as RepairTicket)), ...updates, id, updatedAt: new Date().toISOString() };
     saveLocalRepairs(local.map(t => t.id === id ? merged : t));
 
-    if (id.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+    // Same rule as the status change: a temporary id names no document, and the local
+    // ticket the sync uploads already carries these fields.
+    if (id.startsWith('offline_')) {
+      return merged;
+    }
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
       offlineQueue.enqueue({
         type: 'UPDATE_REPAIR_TICKET',
         payload: { id, updates }

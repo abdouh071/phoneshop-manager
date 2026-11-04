@@ -29,12 +29,14 @@ const REASON_LABEL_KEY: Record<DeadLetterReason, string> = {
   retries_exhausted: 'common.dropReasonRetriesExhausted',
   no_handler: 'common.dropReasonNoHandler',
   document_missing: 'common.dropReasonDocumentMissing',
+  unrecoverable: 'common.dropReasonUnrecoverable',
 };
 
 const REASON_HINT_KEY: Record<DeadLetterReason, string> = {
   retries_exhausted: 'common.dropHintRetriesExhausted',
   no_handler: 'common.dropHintNoHandler',
   document_missing: 'common.dropHintDocumentMissing',
+  unrecoverable: 'common.dropHintUnrecoverable',
 };
 
 const formatWhen = (iso: string | undefined): string => {

@@ -80,6 +80,38 @@ describe('Offline Fast-Path & Zero-Hang Operations', () => {
       const local = JSON.parse(mockStorage.get('offline_repairs') || '[]');
       expect(local[0].status).toBe('ready');
       expect(local[0].actualCost).toBe(16000);
+
+      // Nothing to queue: this id names no document, and the sync uploads the local
+      // ticket with these fields already inside it.
+      expect(mockStorage.get('offline_action_queue')).toBeUndefined();
+    });
+
+    it('queues no status or field update for a ticket id this device invented, even online', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+
+      const offlineId = 'offline_tkt_99999';
+      mockStorage.set('offline_repairs', JSON.stringify([{
+        id: offlineId,
+        ticketNumber: 'TKT-0099',
+        customerName: 'Karim',
+        deviceBrand: 'Apple',
+        deviceModel: 'iPhone 13',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }]));
+
+      // The shape of a queue replay: an action whose payload id is still temporary. This
+      // used to enqueue that action again and report success, so it outlived every pass —
+      // pending count, toast and activity log all claiming work that could never land.
+      const updated = await repairService.updateStatus(offlineId, 'ready', undefined, { throwOnError: true });
+      await repairService.updateTicket(offlineId, { actualCost: 4000 }, { throwOnError: true });
+
+      expect(updated.status).toBe('ready');
+      const local = JSON.parse(mockStorage.get('offline_repairs') || '[]');
+      expect(local[0].status).toBe('ready');
+      expect(local[0].actualCost).toBe(4000);
+      expect(mockStorage.get('offline_action_queue')).toBeUndefined();
     });
 
     it('updates ticket with online doc ID immediately when offline and enqueues to offlineQueue', async () => {
