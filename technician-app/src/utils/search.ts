@@ -49,6 +49,13 @@ const asText = (value: unknown): string => {
   return '';
 };
 
+/** Arabic-Indic and Eastern Arabic-Indic digits folded to ASCII, so a phone typed
+ *  on an Arabic keyboard matches the ASCII digits the desktop app stored. */
+const foldDigits = (text: string): string =>
+  text.replace(ARABIC_DIGITS, (ch) =>
+    String(ch.charCodeAt(0) - (ch.charCodeAt(0) >= 0x06f0 ? 0x06f0 : 0x0660))
+  );
+
 /**
  * Case-folded, diacritic-stripped, letter-folded, whitespace-collapsed text that
  * two records can be compared in even when one was typed on an Arabic keyboard
@@ -59,17 +66,16 @@ export const normalizeForSearch = (value: unknown): string => {
   text = text.replace(ARABIC_MARKS, '').replace(COMBINING_MARKS, '');
   for (const [pattern, replacement] of ARABIC_FOLDS) text = text.replace(pattern, replacement);
   for (const [pattern, replacement] of LATIN_FOLDS) text = text.replace(pattern, replacement);
-  // Arabic-Indic digits are folded so a phone typed on an Arabic keyboard matches the
-  // ASCII digits the desktop app stored.
-  text = text.replace(ARABIC_DIGITS, (ch) =>
-    String(ch.charCodeAt(0) - (ch.charCodeAt(0) >= 0x06f0 ? 0x06f0 : 0x0660))
-  );
+  text = foldDigits(text);
   return text.replace(NON_ALPHANUMERIC, ' ').replace(/\s+/g, ' ').trim();
 };
 
-/** Every digit in the values, concatenated — so `0770 12 34 56` matches `0770123456`. */
+/** Every digit in the values, concatenated — so `0770 12 34 56` matches `0770123456`.
+ *  Arabic-Indic digits are folded FIRST: `\D` is ASCII-only and used to strip them
+ *  from both sides of the comparison, so a phone typed on an Arabic keyboard found
+ *  nothing at all. */
 const digitsOf = (values: readonly unknown[]): string =>
-  values.map(asText).join('').replace(/\D/g, '');
+  values.map(asText).map(foldDigits).join('').replace(/\D/g, '');
 
 export type SearchDoc = {
   /** Normalised, space-separated haystack for this record. */

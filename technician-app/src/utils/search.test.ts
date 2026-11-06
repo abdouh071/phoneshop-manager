@@ -21,6 +21,20 @@ test('folds Arabic-Indic digits to ASCII', () => {
   assert.equal(normalizeForSearch('٠٧٧٠١٢٣'), '0770123');
 });
 
+test('a phone stored in ASCII digits is found by an Arabic-keyboard query', () => {
+  const doc = buildSearch('Karim', '0770 12 34 56');
+  assert.equal(doc.digits, '0770123456');
+  assert.equal(matchesSearch(doc, '٠٧٧٠-١٢٣٤٥٦'), true);
+  assert.equal(matchesSearch(doc, '٠٧٧٠ ١٢ ٣٤ ٥٦'), true);
+});
+
+test('a phone stored in Arabic digits is found by an ASCII query', () => {
+  const doc = buildSearch('Karim', '٠٧٧٠-١٢٣٤٥٦');
+  assert.equal(doc.digits, '0770123456');
+  assert.equal(matchesSearch(doc, '0770123456'), true);
+  assert.equal(matchesSearch(doc, '0770 12 34 56'), true);
+});
+
 test('coerces missing, null and non-string fields instead of throwing', () => {
   const doc = buildSearch(undefined, null, 42, { not: 'a string' }, 'Samsung');
   assert.equal(doc.text, '42 samsung');
