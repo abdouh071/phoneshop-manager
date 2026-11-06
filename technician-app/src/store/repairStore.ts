@@ -19,7 +19,7 @@ import { offlineSyncService } from '../services/offlineSyncService';
 import { notificationService } from '../services/notificationService';
 import { applyPartsDelta } from '../services/stockService';
 import { allocateTicketNumber } from '../services/ticketCounter';
-import { appendHistory, isSettleAlreadyRecorded, isOfflineCustomerId, type HistoryEntryLike } from '../services/offlineQueuePolicy';
+import { appendHistory, buildStatusPatch, isSettleAlreadyRecorded, isOfflineCustomerId, type HistoryEntryLike } from '../services/offlineQueuePolicy';
 import { createRefCountedSubscription, type RefCountedSubscription } from '../utils/liveSubscription';
 import type { RepairTicket, RepairStatus, RepairStatusHistoryEntry } from '../types';
 
@@ -213,59 +213,26 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       const now = new Date().toISOString();
       const actorName = changerName || currentUser?.name || 'Technician';
 
-      // Find local or current ticket state to safely preserve assignedTechnician & history
-      let currentHistory: RepairStatusHistoryEntry[] = [];
-      let currentAssignedTechnician: string | undefined = undefined;
-      const localTicket = get().tickets.find(t => t.id === id);
+      // The patch is built against the LIVE document, not the phone's snapshot. A
+      // whole-array `statusHistory: [...local, entry]` write used to erase every
+      // entry the counter added after the last sync; the offline replay path merges
+      // with the same builder, so both directions are now append-only.
+      const currentSnap = await getDoc(docRef);
+      const current = currentSnap.exists() ? (currentSnap.data() as Record<string, unknown>) : null;
 
-      if (localTicket) {
-        currentHistory = localTicket.statusHistory || [];
-        currentAssignedTechnician = localTicket.assignedTechnician;
-      } else {
-        const currentSnap = await getDoc(docRef);
-        if (currentSnap.exists()) {
-          const data = currentSnap.data() as RepairTicket;
-          currentHistory = data.statusHistory || [];
-          currentAssignedTechnician = data.assignedTechnician;
-        }
-      }
-
-      // Safe technician assignment: Never overwrite an existing technician when a sales agent updates status
-      let assignedTechnician = currentAssignedTechnician;
-      if (additionalUpdates?.assignedTechnician !== undefined) {
-        assignedTechnician = additionalUpdates.assignedTechnician;
-      } else if (!assignedTechnician && (status === 'in_progress' || status === 'ready')) {
-        assignedTechnician = actorName;
-      }
-
-      const newHistoryEntry: RepairStatusHistoryEntry = {
+      const patch = buildStatusPatch(current, {
         status,
-        changedById: changerId,
-        changedByName: actorName,
-        at: now,
         timestamp: now,
-        notes: additionalUpdates?.notes || `Status changed to ${status} via Technician App`
-      };
+        actorId: changerId,
+        actorName,
+        notes: typeof additionalUpdates?.notes === 'string' ? additionalUpdates.notes : undefined,
+        additionalUpdates: (additionalUpdates as Record<string, unknown> | null) ?? null,
+      });
 
-      const updates: any = {
-        status,
-        assignedTechnician: assignedTechnician || null,
-        statusHistory: [...currentHistory, newHistoryEntry],
-        updatedAt: now,
-        ...additionalUpdates
-      };
-
-      // Set timestamp based on status transition
-      if (status === 'ready' && !updates.repairedAt) {
-        updates.repairedAt = now;
-      }
-      if (status === 'completed' && !updates.completedAt) {
-        updates.completedAt = now;
-      }
-
-      await updateDoc(docRef, updates);
+      await updateDoc(docRef, patch);
 
       // Log to shared activityLogs collection
+      const localTicket = get().tickets.find(t => t.id === id);
       const ticketNum = localTicket?.ticketNumber || id;
       await activityLogService.log(
         'repairs',
