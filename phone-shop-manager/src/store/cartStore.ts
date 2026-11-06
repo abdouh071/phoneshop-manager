@@ -484,11 +484,23 @@ export const useCartStore = create<CartState>((set, get) => ({
       const subtotal = get().getSubtotal();
       const discountAmount = get().getDiscountAmount();
       const total = get().getTotal();
+      // A surplus is money leaving the shop, and the document has to name the door it
+      // left by. Every surplus used to be stamped as negative cash, so an Avoir or a
+      // debt deduction took the refund out of the drawer on paper while the same sum
+      // was also granted on the customer's account — the day closed short twice, and
+      // the receipt told the customer he had been handed cash he never got.
+      const refundType = total < 0 ? (options?.refundType ?? 'cash') : undefined;
+      const recordedPayments: SaleTransaction['payments'] = refundType
+        ? [{
+            method: refundType === 'store_credit' ? 'store_credit' : refundType === 'debt_deduction' ? 'debt' : 'cash',
+            amount: total,
+          }]
+        : payments;
       const hasReturn = itemsSnapshot.some(i => i.isReturn === true);
       const actor = useAuthStore.getState().user;
 
       let matchedOrCreatedCustomer: Customer | null | undefined = null;
-      const isDebt = payments.some(p => p.method === 'debt');
+      const isDebt = recordedPayments.some(p => p.method === 'debt');
       const isCreditUsed = !!(options?.storeCreditUsed && options.storeCreditUsed > 0);
       const isSurplusAccount = total < 0 && !!(options?.refundType && options.refundType !== 'cash');
 
@@ -507,8 +519,15 @@ export const useCartStore = create<CartState>((set, get) => ({
         }
       }
 
+      // Avoir and debt deductions live on an account. With no account the settlement
+      // below has nowhere to go and used to do nothing at all, filing a refund the
+      // shop never gave. Refuse before anything is written.
+      if (refundType && refundType !== 'cash' && !matchedOrCreatedCustomer) {
+        throw new Error('Attach a customer to issue store credit or deduct a debt, or refund in cash.');
+      }
+
       // Problem 2 fix: Pre-validate Credit Limit BEFORE transaction save
-      const debtPayment = payments.find(p => p.method === 'debt');
+      const debtPayment = recordedPayments.find(p => p.method === 'debt');
       const debtAmount = debtPayment ? debtPayment.amount : 0;
       if (debtAmount > 0) {
         if (!matchedOrCreatedCustomer) {
@@ -539,7 +558,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         // rounded, and then its own lines stop adding up to its own total.
         discount: discountAmount > 0 ? { type: 'flat', value: discountAmount } : undefined,
         total,
-        payments,
+        payments: recordedPayments,
         customerName: customerName || matchedOrCreatedCustomer?.name || undefined,
         customerPhone: customerPhone || matchedOrCreatedCustomer?.phone || undefined,
         customerId: matchedOrCreatedCustomer?.id,
@@ -555,7 +574,7 @@ export const useCartStore = create<CartState>((set, get) => ({
               returnedTotal: returnsSubtotal,
               purchasedTotal: purchasesSubtotal,
               netDifference: total,
-              refundType: total < 0 ? (options?.refundType || 'cash') : undefined,
+              refundType,
               storeCreditUsed: options?.storeCreditUsed,
             }
           : undefined,
@@ -567,7 +586,6 @@ export const useCartStore = create<CartState>((set, get) => ({
       // 2. Handle Surplus Settlement (When Shop owes customer, total < 0)
       if (total < 0 && matchedOrCreatedCustomer) {
         const refundAmount = Math.abs(total);
-        const refundType = options?.refundType || 'cash';
 
         if (refundType === 'store_credit') {
           await useCustomerStore.getState().addStoreCredit(

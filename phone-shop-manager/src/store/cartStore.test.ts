@@ -12,6 +12,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { CartItem, PhoneModel, SaleTransaction } from '../types';
 import { buildCorrectedLines } from '../utils/saleEditLines';
+import { computeDayFigures } from '../utils/dayFigures';
+import { toDateStr } from '../utils/localDate';
 
 const captured = vi.hoisted(() => ({
   transactions: [] as Record<string, unknown>[],
@@ -23,6 +25,8 @@ const captured = vi.hoisted(() => ({
   debts: [] as Array<{ id: string; customerId: string; amountPaid: number; totalAmount: number; invoiceNumber: string }>,
   /** Every Avoir move the corrected invoice asked for, in the order it asked. */
   credit: [] as Array<{ kind: 'add' | 'use'; customerId: string; amount: number; note: string }>,
+  /** Every surplus the till applied against an open debt balance. */
+  debtDeductions: [] as Array<{ customerId: string; amount: number; note: string }>,
   /** Every account entry the till asked for, so a sale and its debt can be compared. */
   newDebts: [] as Record<string, unknown>[],
   /** What the till is handed when it asks for a reference. Real Firestore is not involved. */
@@ -108,6 +112,10 @@ vi.mock('./customerStore', () => ({
         captured.credit.push({ kind: 'use', customerId, amount, note });
         return amount;
       },
+      deductFromDebt: async (customerId: string, amount: number, note = '') => {
+        captured.debtDeductions.push({ customerId, amount, note });
+        return amount;
+      },
     }),
   },
 }));
@@ -171,6 +179,7 @@ beforeEach(() => {
   captured.stock.length = 0;
   captured.debts.length = 0;
   captured.credit.length = 0;
+  captured.debtDeductions.length = 0;
   captured.newDebts.length = 0;
   captured.counter = { invoiceNumber: 'INV-261104-0007', provisional: false };
   emptyCart();
@@ -284,6 +293,78 @@ describe('the sale as it is written down', () => {
     // A clock number repeats every sixteen and a half minutes, so the shop has to be
     // able to find the sales carrying one instead of trusting them to be unique.
     expect(tx.invoiceNumberProvisional).toBe(true);
+  });
+});
+
+describe('a return that leaves the shop owing the customer', () => {
+  const handBack = () => useCartStore.getState().addReturnItem(cable, { quantity: 1 });
+  const savedDoc = () => captured.transactions[0] as unknown as SaleTransaction;
+  const drawerWith = (docs: SaleTransaction[]) =>
+    computeDayFigures({ transactions: docs, repairs: [], debts: [] }, toDateStr(new Date())).totalCash;
+  const morningSale: SaleTransaction = {
+    id: 'sale-1',
+    date: new Date().toISOString(),
+    items: [],
+    subtotal: 1000,
+    total: 1000,
+    payments: [{ method: 'cash', amount: 1000 }],
+    status: 'completed',
+    saleType: 'retail',
+  };
+
+  it('takes a cash refund out of the drawer and names cash on the document', async () => {
+    handBack();
+    await useCartStore.getState().checkout({ refundType: 'cash' });
+
+    const doc = savedDoc();
+    expect(doc.total).toBe(-300);
+    expect(doc.payments).toEqual([{ method: 'cash', amount: -300 }]);
+    expect(doc.exchangeSummary?.refundType).toBe('cash');
+    expect(drawerWith([morningSale, doc])).toBe(700);
+  });
+
+  it('keeps an Avoir out of the drawer while granting it on the account', async () => {
+    handBack();
+    useCartStore.setState({ customerName: 'Yacine' });
+    await useCartStore.getState().checkout({ refundType: 'store_credit' });
+
+    const doc = savedDoc();
+    expect(doc.payments).toEqual([{ method: 'store_credit', amount: -300 }]);
+    expect(doc.exchangeSummary?.refundType).toBe('store_credit');
+    expect(captured.credit).toEqual([
+      { kind: 'add', customerId: 'cust_1', amount: 300, note: expect.any(String) },
+    ]);
+    // The 300 was granted on the account, not handed over the counter, so the drawer
+    // still holds the morning's 1 000. Stamping it as cash took the same 300 out twice:
+    // once here and once when the Avoir was added to the customer.
+    expect(drawerWith([morningSale, doc])).toBe(1000);
+  });
+
+  it('keeps a debt deduction out of the drawer and opens no new credit record', async () => {
+    handBack();
+    useCartStore.setState({ customerName: 'Yacine' });
+    await useCartStore.getState().checkout({ refundType: 'debt_deduction' });
+
+    const doc = savedDoc();
+    expect(doc.payments).toEqual([{ method: 'debt', amount: -300 }]);
+    expect(doc.exchangeSummary?.refundType).toBe('debt_deduction');
+    expect(captured.debtDeductions).toEqual([
+      { customerId: 'cust_1', amount: 300, note: expect.any(String) },
+    ]);
+    expect(captured.newDebts).toEqual([]);
+    expect(drawerWith([morningSale, doc])).toBe(1000);
+  });
+
+  it('refuses an account settlement with nobody to hold it, before anything is written', async () => {
+    handBack();
+    await expect(
+      useCartStore.getState().checkout({ refundType: 'store_credit' })
+    ).rejects.toThrow(/Attach a customer/);
+
+    expect(captured.transactions).toEqual([]);
+    expect(captured.credit).toEqual([]);
+    expect(useCartStore.getState().isCheckingOut).toBe(false);
+    expect(useCartStore.getState().items).toHaveLength(1);
   });
 });
 

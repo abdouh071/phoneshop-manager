@@ -245,7 +245,8 @@ export const POSPage = () => {
       if (total < 0) {
         const refundDue = Math.abs(total);
         try {
-          setPayments([{ method: 'cash', amount: total }]);
+          // The till records the door the money left by; stamping cash here booked a
+          // drawer payout for an Avoir or a debt deduction that never touched the till.
           const tx = await checkout({ refundType: surplusRefundMethod, customerAttached });
           if (tx) {
             setCompletedTx(tx);
@@ -258,10 +259,13 @@ export const POSPage = () => {
               `${refundLabel} Issued!`,
               `Return of ${formatCurrency(refundDue)} settled as ${refundLabel} for ${customerName || 'customer'}.`
             );
+            // The next return starts at the drawer again: a choice left selected would
+            // settle the next customer's refund on this one's account.
+            setSurplusRefundMethod('cash');
           }
         } catch (err) {
           console.error(err);
-          toast.error('Failed to complete return. Please try again.');
+          toast.error('Return Not Completed', errorMessage(err) || 'Failed to complete return. Please try again.');
         }
         return;
       }
