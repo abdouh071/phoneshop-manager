@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { CartItem, PhoneModel } from '../types/index.ts';
-import { voidStockLines } from './saleVoid.ts';
+import { isSaleClosed, voidStockLines } from './saleVoid.ts';
 
 const product = (over: Partial<PhoneModel> = {}): PhoneModel => ({
   id: over.id ?? 'p1',
@@ -65,4 +65,21 @@ test('a quantity the document lost still moves one unit, and nothing moves twice
 test('an invoice with no lines, or a document missing them, moves no shelf', () => {
   assert.deepEqual(voidStockLines([]), { restore: [], deduct: [] });
   assert.deepEqual(voidStockLines(undefined), { restore: [], deduct: [] });
+});
+
+test('both terminals spell a closed sale, and both are refused a second void', () => {
+  // The counter writes `refunded`, the phone writes `voided`. Reading only one of them
+  // let a phone restock an invoice the counter had already refunded across the till.
+  assert.equal(isSaleClosed('refunded'), true);
+  assert.equal(isSaleClosed('voided'), true);
+  assert.equal(isSaleClosed('cancelled'), true);
+});
+
+test('a sale still carrying goods the shop can take back is not closed', () => {
+  assert.equal(isSaleClosed('completed'), false);
+  // Part of this invoice was handed back; the rest of it is still sold.
+  assert.equal(isSaleClosed('partially_refunded'), false);
+  assert.equal(isSaleClosed('pending_approval'), false);
+  assert.equal(isSaleClosed(undefined), false);
+  assert.equal(isSaleClosed(null), false);
 });

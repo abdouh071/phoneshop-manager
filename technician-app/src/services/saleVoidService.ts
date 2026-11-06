@@ -20,7 +20,7 @@
  * no credit ledger to write to, so the collected part simply leaves what the profile
  * has spent and the counter hands the cash back across the till.
  */
-import { addDoc, collection, doc, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, runTransaction, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
 import type { SaleTransaction } from '../types';
@@ -28,8 +28,26 @@ import { activityLogService } from './activityLogService';
 import { offlineSyncService } from './offlineSyncService';
 import { applyStockLines } from './stockService';
 import type { SaleStockLine } from '../utils/saleEdit';
-import { voidStockLines } from '../utils/saleVoid';
+import { isSaleClosed, voidStockLines } from '../utils/saleVoid';
 import { findLinkedDebt, sumOpenDebt, writeCustomerTotals } from './saleEditService';
+
+/** Claiming the void is one read and one write; a till must not hang on a locked row. */
+const VOID_TX_TIMEOUT_MS = 6_000;
+
+const withTimeout = <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
 
 export interface SaleVoidFailure {
   name: string;
@@ -90,21 +108,36 @@ export const voidSale = async (
   reason: string
 ): Promise<SaleVoidOutcome> => {
   const empty: SaleVoidOutcome = { voided: false, stockFailures: [], debtSettled: false, accountUnreconciled: 0 };
-  // A second void would put the same goods on the shelf twice. The list gates its own
-  // button, but two phones on the same day, or an admin answering a stale request,
-  // can both reach this line.
-  if (tx.status === 'voided' || tx.status === 'refunded' || tx.status === 'cancelled') return empty;
+  // A cheap refusal when the caller already knows. It is not the gate: the copy in the
+  // list is whatever this phone last fetched.
+  if (isSaleClosed(tx.status)) return empty;
 
   const user = useAuthStore.getState().user;
   const now = new Date().toISOString();
   const invoice = tx.invoiceNumber || tx.id.slice(-6);
 
-  await updateDoc(doc(db, 'transactions', tx.id), {
-    status: 'voided',
-    voidedAt: now,
-    voidedBy: user ? { uid: user.id, name: user.name } : null,
-    voidReason: reason,
-  });
+  // Two phones on the same day, or an admin answering a stale request, both reach here
+  // holding `completed` for an invoice one of them is about to close. Reading the status
+  // and stamping it in one transaction makes the first void the only one that gets past
+  // this line, so the shelf moves once and the account is settled once.
+  const claimed = await withTimeout(
+    runTransaction(db, async (t) => {
+      const ref = doc(db, 'transactions', tx.id);
+      const snap = await t.get(ref);
+      if (!snap.exists()) throw new Error(`Invoice ${invoice} no longer exists.`);
+      if (isSaleClosed((snap.data() as { status?: string }).status)) return false;
+      t.update(ref, {
+        status: 'voided',
+        voidedAt: now,
+        voidedBy: user ? { uid: user.id, name: user.name } : null,
+        voidReason: reason,
+      });
+      return true;
+    }),
+    VOID_TX_TIMEOUT_MS,
+    'saleVoidTransaction'
+  );
+  if (!claimed) return empty;
 
   // Purchases go back on the shelf, exchange lines come off it — the counter's refund
   // makes the same split, and an invoice a till edited can now carry both kinds.
