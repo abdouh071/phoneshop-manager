@@ -59,6 +59,15 @@ export const customerService = {
     }
     try {
       const { id: _drop, ...data } = local;
+      // A crash between the upload and the cache remap used to upload the same
+      // person again on the retry — two accounts, one client. The phone line is
+      // the identity key: if the profile already landed, adopt it instead of
+      // minting a second account.
+      const alreadyUploaded = data.phone ? await customerService.findByPhone(data.phone) : null;
+      if (alreadyUploaded) {
+        await customerService.cacheCustomers(replaceCachedCustomer(cached, offlineId, alreadyUploaded.id));
+        return alreadyUploaded.id;
+      }
       const docRef = await addDoc(collection(db, 'customers'), data);
       await customerService.cacheCustomers(replaceCachedCustomer(cached, offlineId, docRef.id));
       return docRef.id;
@@ -171,7 +180,7 @@ export const customerService = {
       return createdCustomer;
     } catch (createErr) {
       console.warn('[CustomerService] Offline fallback: creating local customer profile:', createErr);
-      const offlineId = `offline_cust_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const offlineId = `offline_cust_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
       const offlineCustomer: Customer = { id: offlineId, ...newCustomerData };
       const cached = await customerService.getCachedCustomers();
       await customerService.cacheCustomers([offlineCustomer, ...cached]);
