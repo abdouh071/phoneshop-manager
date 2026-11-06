@@ -90,7 +90,15 @@ export const customerService = {
    */
   findByPhone: async (phone: string): Promise<Customer | null> => {
     if (!phone) return null;
-    const cleanPhone = phone.replace(/\D/g, '');
+    // Arabic-Indic digits are folded to ASCII before extraction: `\D` is ASCII-only,
+    // so a number typed on an Arabic keyboard used to read as having no digits at
+    // all and the lookup silently returned null, which made findOrCreate mint a
+    // duplicate profile.
+    const foldDigits = (s: string): string =>
+      s.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (ch) =>
+        String(ch.charCodeAt(0) - (ch.charCodeAt(0) >= 0x06f0 ? 0x06f0 : 0x0660))
+      );
+    const cleanPhone = foldDigits(phone).replace(/\D/g, '');
     if (cleanPhone.length < 8) return null;
 
     try {
@@ -106,16 +114,20 @@ export const customerService = {
         return { id: d.id, ...d.data() } as Customer;
       }
 
-      // 2. Scan fallback for non-standard formatted phone numbers
+      // 2. Scan fallback for non-standard formatted phone numbers. The scan is
+      // bounded for the read budget, so it is a heuristic, not a census — which is
+      // why it must never MISlink: a stored number shorter than a real phone (a
+      // placeholder) used to suffix-match a real query and hand the ticket to the
+      // wrong customer's account.
       const allSnap = await getDocs(query(collection(db, 'customers'), limit(100)));
       for (const d of allSnap.docs) {
         const data = d.data() as Customer;
-        const cDigits = (data.phone || '').replace(/\D/g, '');
+        const cDigits = foldDigits(data.phone || '').replace(/\D/g, '');
+        if (cDigits.length < 8) continue;
         if (
-          cDigits &&
-          (cDigits === cleanPhone ||
-            cDigits.endsWith(cleanPhone) ||
-            cleanPhone.endsWith(cDigits))
+          cDigits === cleanPhone ||
+          cDigits.endsWith(cleanPhone) ||
+          cleanPhone.endsWith(cDigits)
         ) {
           return { ...data, id: d.id };
         }
