@@ -197,6 +197,8 @@
     "customerInfo": "بيانات الزبون",
     "customerName": "اسم الزبون *",
     "phoneNumber": "رقم الهاتف",
+    "linkCustomer": "ربط",
+    "linked": "مرتبط",
     "deviceDetails": "تفاصيل الجهاز",
     "brand": "العلامة التجارية *",
     "model": "الموديل *",

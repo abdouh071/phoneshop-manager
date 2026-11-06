@@ -197,6 +197,8 @@
     "customerInfo": "Informations client",
     "customerName": "Nom du client *",
     "phoneNumber": "Numéro de téléphone",
+    "linkCustomer": "Lier",
+    "linked": "Lié",
     "deviceDetails": "Détails de l'appareil",
     "brand": "Marque *",
     "model": "Modèle *",

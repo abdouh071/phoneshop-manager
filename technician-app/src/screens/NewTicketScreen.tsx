@@ -13,6 +13,8 @@ export const NewTicketScreen = ({ navigation }: any) => {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [matchedCustomer, setMatchedCustomer] = useState<Customer | null>(null);
+  /** The customer the technician explicitly linked by tapping the banner. */
+  const [linkedCustomerId, setLinkedCustomerId] = useState<string | null>(null);
   const [deviceBrand, setDeviceBrand] = useState('');
   const [deviceModel, setDeviceModel] = useState('');
   const [issueDescription, setIssueDescription] = useState('');
@@ -36,7 +38,9 @@ export const NewTicketScreen = ({ navigation }: any) => {
     fetchStaff();
   }, []);
 
-  // Look up customer when phone number reaches 8+ digits
+  // Look up customer when phone number reaches 8+ digits. The lookup only feeds the
+  // "Known client" banner — the ticket is NOT linked by it; the technician has to
+  // tap Link on the banner, and a different number clears that choice.
   useEffect(() => {
     const cleanPhone = customerPhone.replace(/\D/g, '');
     if (cleanPhone.length >= 8) {
@@ -44,16 +48,19 @@ export const NewTicketScreen = ({ navigation }: any) => {
         const found = await customerService.findByPhone(customerPhone);
         if (found) {
           setMatchedCustomer(found);
+          setLinkedCustomerId(prev => (prev === found.id ? prev : null));
           if (!customerName) {
             setCustomerName(found.name);
           }
         } else {
           setMatchedCustomer(null);
+          setLinkedCustomerId(null);
         }
       }, 350);
       return () => clearTimeout(timer);
     } else {
       setMatchedCustomer(null);
+      setLinkedCustomerId(null);
     }
   }, [customerPhone]);
 
@@ -79,7 +86,7 @@ export const NewTicketScreen = ({ navigation }: any) => {
     setLoading(true);
     try {
       await createTicket({
-        customerId: matchedCustomer?.id,
+        customerId: linkedCustomerId ?? undefined,
         customerName,
         customerPhone,
         deviceBrand,
@@ -132,6 +139,19 @@ export const NewTicketScreen = ({ navigation }: any) => {
               <Text style={styles.matchedCustomerText}>
                 Known client: {matchedCustomer.name} {matchedCustomer.totalDebt ? `(Debt: ${matchedCustomer.totalDebt} DA)` : ''}
               </Text>
+              {linkedCustomerId === matchedCustomer.id ? (
+                <View style={styles.linkedCustomerPill}>
+                  <MaterialCommunityIcons name="link-variant" size={14} color="#065f46" />
+                  <Text style={styles.linkedCustomerText}>{t('newTicket.linked', 'Linked')}</Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.linkCustomerBtn}
+                  onPress={() => setLinkedCustomerId(matchedCustomer.id)}
+                >
+                  <Text style={styles.linkCustomerBtnText}>{t('newTicket.linkCustomer', 'Link')}</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
           <TextInput
@@ -414,6 +434,35 @@ const styles = StyleSheet.create({
     color: '#065f46',
     fontSize: 13,
     fontWeight: '600',
+    flexShrink: 1,
+  },
+  linkCustomerBtn: {
+    marginLeft: 'auto',
+    backgroundColor: '#10b981',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  linkCustomerBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  linkedCustomerPill: {
+    marginLeft: 'auto',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: '#065f46',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  linkedCustomerText: {
+    color: '#065f46',
+    fontSize: 12,
+    fontWeight: '700',
   },
   patternBox: {
     backgroundColor: '#ffffff',

@@ -520,19 +520,10 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       const creatorName = currentUser?.name || ticket.createdByName || 'Technician';
       const creatorId = currentUser?.id || ticket.createdById || 'technician-app';
 
-      // Auto-link or create customer
-      let customerId = ticket.customerId;
-      if (!customerId && ticket.customerPhone) {
-        try {
-          const cust = await customerService.findOrCreate(
-            ticket.customerName || 'Client',
-            ticket.customerPhone
-          );
-          customerId = cust.id;
-        } catch (cErr) {
-          console.warn('Failed to link customer on ticket create:', cErr);
-        }
-      }
+      // A ticket links to a customer only when the technician picks one — the
+      // screen passes customerId from a manual tap. A phone typed freely stays on
+      // the ticket as text; the phone used to findOrCreate by number here and a
+      // placeholder profile could end up owning a stranger's repair.
 
       const initialHistory: RepairStatusHistoryEntry = {
         status: 'pending',
@@ -548,7 +539,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         ticketNumber,
         ticketNumberProvisional,
         trackingPin,
-        customerId: customerId || null,
+        customerId: ticket.customerId || null,
         status: 'pending',
         createdById: creatorId,
         createdByName: creatorName,
