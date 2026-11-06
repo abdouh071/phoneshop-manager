@@ -441,6 +441,22 @@ const flushTickets = async (map: IdMap): Promise<FlushResult> => {
       }
 
       const { id: _localId, ...dataToSave } = body;
+
+      // A check-in written while the customer only existed on this phone carries a
+      // phantom id. Resolve it before the ticket references it — the counter reads
+      // the ticket's customer link to put the repair on the right account, and a
+      // ticket pointing at a customer the server never had loses its profile. This
+      // is the same rule the sale and debt queues run; tickets used to be the one
+      // queue that shipped the reference anyway.
+      const rawCustomerId = String(dataToSave.customerId || '');
+      let resolvedCustomerId: string | undefined;
+      if (isOfflineCustomerId(rawCustomerId)) {
+        const resolved = await customerService.resolveOfflineCustomer(rawCustomerId);
+        if (!resolved) throw new Error(`Customer ${rawCustomerId} not on the server yet`);
+        dataToSave.customerId = resolved;
+        resolvedCustomerId = resolved;
+      }
+
       const { id: realId } = await addIdempotently('repairs', action.id, dataToSave);
 
       done.add(action.id);
@@ -465,7 +481,16 @@ const flushTickets = async (map: IdMap): Promise<FlushResult> => {
       if (cached.some((t) => t && t.id === tempId)) {
         await writeRaw(
           keyFor(CACHED_TICKETS_BASE),
-          cached.map((t) => (t && t.id === tempId ? { ...t, id: realId, ...(body.ticketNumber ? { ticketNumber: body.ticketNumber } : {}) } : t))
+          cached.map((t) =>
+            t && t.id === tempId
+              ? {
+                  ...t,
+                  id: realId,
+                  ...(body.ticketNumber ? { ticketNumber: body.ticketNumber } : {}),
+                  ...(resolvedCustomerId ? { customerId: resolvedCustomerId } : {}),
+                }
+              : t
+          )
         );
       }
     } catch (err) {
