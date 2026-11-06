@@ -2,20 +2,24 @@ import {
   collection,
   doc,
   getDocs,
-  getDoc,
   addDoc,
   updateDoc,
   deleteDoc,
   query,
   where,
   orderBy,
+  runTransaction,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { newIdempotencyKey } from './idempotentReplay';
+import { withTimeout } from '../utils/withTimeout';
 import type { CustomerDebtEntry, CustomerDebtPayment } from '../types';
 
 const COLLECTION = 'customer_debts';
 const LOCAL_STORAGE_KEY = 'offline_customer_debts';
+
+/** A debt entry is read-modify-write, so it gets the stock write's wider budget. */
+const DEBT_TX_TIMEOUT_MS = 2000;
 
 // Local storage fallback helpers
 const getLocalDebts = (): CustomerDebtEntry[] => {
@@ -40,6 +44,34 @@ const docToDebt = (id: string, data: Record<string, unknown>): CustomerDebtEntry
   id,
   payments: (data.payments as CustomerDebtPayment[]) || [],
 });
+
+/**
+ * Read the SERVER entry and write the change inside one transaction.
+ *
+ * `amountPaid` and `payments` are both written whole, so they have to be computed from
+ * the same document the write lands on. Deriving them from this device's mirror erased
+ * whatever another terminal had recorded since that mirror was taken: the phone took
+ * 3000, the till then wrote its own older total plus the new payment, and the 3000 was
+ * gone from the ledger while the customer had genuinely paid it. The transaction makes
+ * two terminals writing the same entry serialize instead of the last one winning.
+ */
+const commitDebtChange = async (
+  debtId: string,
+  change: (debt: CustomerDebtEntry) => Partial<CustomerDebtEntry>
+): Promise<CustomerDebtEntry> =>
+  withTimeout(
+    runTransaction(db, async (tx) => {
+      const ref = doc(db, COLLECTION, debtId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('Debt entry not found');
+      const debt = docToDebt(snap.id, snap.data() as Record<string, unknown>);
+      const updates = change(debt);
+      tx.update(ref, updates);
+      return { ...debt, ...updates };
+    }),
+    DEBT_TX_TIMEOUT_MS,
+    'debtTransaction'
+  );
 
 export const debtService = {
   /**
@@ -206,51 +238,24 @@ export const debtService = {
     }
 
     try {
-      const local = getLocalDebts();
-      const localFound = local.find(d => d.id === debtId);
-      const ref = doc(db, COLLECTION, debtId);
-      let debtData: CustomerDebtEntry;
+      const updatedDebt = await commitDebtChange(debtId, debt => {
+        const newAmountPaid = (debt.amountPaid || 0) + payment.amount;
+        const newRemainingBalance = Math.max(0, debt.totalAmount - newAmountPaid);
+        const newStatus: CustomerDebtEntry['status'] =
+          newRemainingBalance <= 0
+            ? 'paid'
+            : newAmountPaid > 0
+              ? 'partially_paid'
+              : 'unpaid';
 
-      if (localFound) {
-        debtData = localFound;
-      } else {
-        const snapPromise = getDoc(ref);
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Firestore getDoc timeout')), 1200)
-        );
-        const snap = await Promise.race([snapPromise, timeoutPromise]);
-        if (!snap.exists()) throw new Error('Debt entry not found');
-        debtData = docToDebt(snap.id, snap.data() as Record<string, unknown>);
-      }
-
-      const updatedPayments = [...(debtData.payments || []), paymentEntry];
-      const newAmountPaid = (debtData.amountPaid || 0) + payment.amount;
-      const newRemainingBalance = Math.max(0, debtData.totalAmount - newAmountPaid);
-      const newStatus: CustomerDebtEntry['status'] =
-        newRemainingBalance <= 0
-          ? 'paid'
-          : newAmountPaid > 0
-            ? 'partially_paid'
-            : 'unpaid';
-
-      const updates = {
-        amountPaid: newAmountPaid,
-        remainingBalance: newRemainingBalance,
-        status: newStatus,
-        payments: updatedPayments,
-        updatedAt: now,
-      };
-
-      const updatePromise = updateDoc(ref, updates);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Firestore updateDoc timeout')), 1200)
-      );
-      await Promise.race([updatePromise, timeoutPromise]);
-
-      const updatedDebt: CustomerDebtEntry = {
-        ...debtData,
-        ...updates,
-      };
+        return {
+          amountPaid: newAmountPaid,
+          remainingBalance: newRemainingBalance,
+          status: newStatus,
+          payments: [...(debt.payments || []), paymentEntry],
+          updatedAt: now,
+        };
+      });
 
       const updatedLocal = getLocalDebts().map(d => (d.id === debtId ? updatedDebt : d));
       saveLocalDebts(updatedLocal);
@@ -322,53 +327,24 @@ export const debtService = {
     }
 
     try {
-      const local = getLocalDebts();
-      const localFound = local.find(d => d.id === debtId);
-      const ref = doc(db, COLLECTION, debtId);
-      let debtData: CustomerDebtEntry;
+      const updatedDebt = await commitDebtChange(debtId, debt => {
+        const amountPaid = debt.amountPaid || 0;
+        const newRemainingBalance = Math.max(0, newTotalAmount - amountPaid);
+        const newStatus: CustomerDebtEntry['status'] =
+          newRemainingBalance <= 0
+            ? 'paid'
+            : amountPaid > 0
+              ? 'partially_paid'
+              : 'unpaid';
 
-      if (localFound) {
-        debtData = localFound;
-      } else {
-        const snapPromise = getDoc(ref);
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Firestore getDoc timeout')), 1200)
-        );
-        const snap = await Promise.race([snapPromise, timeoutPromise]);
-        if (!snap.exists()) throw new Error('Debt entry not found');
-        debtData = docToDebt(snap.id, snap.data() as Record<string, unknown>);
-      }
-
-      const amountPaid = debtData.amountPaid || 0;
-      const newRemainingBalance = Math.max(0, newTotalAmount - amountPaid);
-      const newStatus: CustomerDebtEntry['status'] =
-        newRemainingBalance <= 0
-          ? 'paid'
-          : amountPaid > 0
-            ? 'partially_paid'
-            : 'unpaid';
-
-      const updates: Partial<CustomerDebtEntry> = {
-        totalAmount: newTotalAmount,
-        remainingBalance: newRemainingBalance,
-        status: newStatus,
-        updatedAt: now,
-      };
-      if (newItemsSummary) {
-        updates.itemsSummary = newItemsSummary;
-        updates.productOrService = newItemsSummary;
-      }
-
-      const updatePromise = updateDoc(ref, updates);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Firestore updateDoc timeout')), 1200)
-      );
-      await Promise.race([updatePromise, timeoutPromise]);
-
-      const updatedDebt: CustomerDebtEntry = {
-        ...debtData,
-        ...updates,
-      };
+        return {
+          totalAmount: newTotalAmount,
+          remainingBalance: newRemainingBalance,
+          status: newStatus,
+          updatedAt: now,
+          ...(newItemsSummary ? { itemsSummary: newItemsSummary, productOrService: newItemsSummary } : {}),
+        };
+      });
 
       const updatedLocal = getLocalDebts().map(d => (d.id === debtId ? updatedDebt : d));
       saveLocalDebts(updatedLocal);
