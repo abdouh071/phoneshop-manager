@@ -19,6 +19,9 @@ import type { Customer, PhoneModel } from '../types';
 const captured = vi.hoisted(() => ({
   transactions: [] as Record<string, unknown>[],
   stockMoves: [] as { productId: string; delta: number }[],
+  /** Accounts the till knows about, and the ones a checkout actually touched. */
+  customers: [] as Customer[],
+  recalculated: [] as string[],
   /** The order of the awaited writes a checkout performs. */
   order: [] as string[],
   failStock: false,
@@ -67,8 +70,10 @@ vi.mock('./authStore', () => ({
 vi.mock('./customerStore', () => ({
   useCustomerStore: {
     getState: () => ({
-      customers: [],
-      recalculateCustomer: async () => undefined,
+      customers: captured.customers,
+      recalculateCustomer: async (id: string) => {
+        captured.recalculated.push(id);
+      },
       addDebt: async () => {
         captured.order.push('debt');
         return { id: 'debt_1' };
@@ -144,6 +149,8 @@ beforeEach(() => {
   });
   captured.transactions.length = 0;
   captured.stockMoves.length = 0;
+  captured.customers.length = 0;
+  captured.recalculated.length = 0;
   captured.order.length = 0;
   captured.failStock = false;
   captured.counter = { invoiceNumber: 'INV-PARTS-261104-0003', provisional: false };
@@ -399,5 +406,45 @@ describe('partsCartStore checkout ordering', () => {
       })
     ).rejects.toThrow('stock write failed');
     expect(captured.transactions).toHaveLength(0);
+  });
+});
+
+describe('who a walk-in parts sale belongs to', () => {
+  const shopA = { id: 'c1', name: 'Shop A', phone: '0550000000', shopName: 'Boutique Amine' } as Customer;
+
+  it('keeps a typed name as text when an account shares it', async () => {
+    captured.customers.push(shopA);
+    cable(1);
+    usePartsCartStore.getState().setCustomerName('Shop A');
+    await usePartsCartStore.getState().checkout();
+
+    const tx = captured.transactions[0] as { customerId?: string; customerName?: string; shopName?: string };
+    expect(tx.customerName).toBe('Shop A');
+    expect(tx.customerId).toBeUndefined();
+    expect(tx.shopName).toBeUndefined();
+    expect(captured.recalculated).toEqual([]);
+  });
+
+  it('does not read a shop name as an account key either', async () => {
+    captured.customers.push(shopA);
+    cable(1);
+    usePartsCartStore.getState().setCustomerName('Boutique Amine');
+    await usePartsCartStore.getState().checkout();
+
+    const tx = captured.transactions[0] as { customerId?: string };
+    expect(tx.customerId).toBeUndefined();
+    expect(captured.recalculated).toEqual([]);
+  });
+
+  it('bills an account the counter attached by hand, and moves its totals', async () => {
+    captured.customers.push(shopA);
+    cable(1);
+    usePartsCartStore.getState().setSelectedCustomer(shopA);
+    await usePartsCartStore.getState().checkout();
+
+    const tx = captured.transactions[0] as { customerId?: string; shopName?: string };
+    expect(tx.customerId).toBe('c1');
+    expect(tx.shopName).toBe('Boutique Amine');
+    expect(captured.recalculated).toEqual(['c1']);
   });
 });

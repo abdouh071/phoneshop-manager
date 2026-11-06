@@ -89,6 +89,13 @@ export const POSPage = () => {
   const [downPayment, setDownPayment] = useState<number>(0);
   // Track whether a customer was explicitly selected (not just typed)
   const [customerAttached, setCustomerAttached] = useState(false);
+  // The account the cashier picked. Re-finding it by name picked a different client
+  // whenever two accounts shared one name, and showed that stranger's debt and credit.
+  const [attachedCustomerId, setAttachedCustomerId] = useState<string | null>(null);
+  const detachAttachedCustomer = useCallback(() => {
+    setCustomerAttached(false);
+    setAttachedCustomerId(null);
+  }, []);
 
   // Problem 2 fix: Admin unlock and override for Credit Limit
   const [creditLimitOverrideApproved, setCreditLimitOverrideApproved] = useState(false);
@@ -117,12 +124,11 @@ export const POSPage = () => {
     fetchCustomers();
   }, [fetchTransactions, fetchCustomers]);
 
-  // Find attached customer details (including current debt balance) - strictly when customer is attached
+  // Find attached customer details (including current debt balance) - strictly the account picked by hand
   const matchedCustomer = useMemo(() => {
-    if (!customerAttached || !customerName || !customerName.trim()) return null;
-    const q = customerName.toLowerCase().trim();
-    return customers.find(c => c.name.toLowerCase().trim() === q) || null;
-  }, [customers, customerName, customerAttached]);
+    if (!customerAttached || !attachedCustomerId) return null;
+    return customers.find(c => c.id === attachedCustomerId) || null;
+  }, [customers, attachedCustomerId, customerAttached]);
 
   // Current active debt balance of matched customer
   const currentCustomerDebt = useMemo(() => {
@@ -245,7 +251,7 @@ export const POSPage = () => {
             setCompletedTx(tx);
             setDownPayment(0);
             setCashTendered('');
-            setCustomerAttached(false);
+            detachAttachedCustomer();
             setCreditLimitOverrideApproved(false);
             const refundLabel = surplusRefundMethod === 'store_credit' ? '🎟️ Store Credit (Avoir)' : surplusRefundMethod === 'debt_deduction' ? '📒 Deducted from Debt' : '💵 Cash Refund';
             toast.success(
@@ -269,7 +275,7 @@ export const POSPage = () => {
             setCompletedTx(tx);
             setDownPayment(0);
             setCashTendered('');
-            setCustomerAttached(false);
+            detachAttachedCustomer();
             setCreditLimitOverrideApproved(false);
             toast.success('Even Exchange Completed! 🔄', '0 DA net difference. Inventory stocks reconciled.');
           }
@@ -351,7 +357,7 @@ export const POSPage = () => {
           setDownPayment(0);
           setCashTendered('');
           setApplyStoreCredit(false);
-          setCustomerAttached(false);
+          detachAttachedCustomer();
           setCreditLimitOverrideApproved(false);
 
           if (paymentMode === 'debt') {
@@ -390,7 +396,7 @@ export const POSPage = () => {
       setIsProcessing(false);
       checkoutLock.current = false;
     }
-  }, [items, checkout, setPayments, getTotal, hasReturnItems, surplusRefundMethod, applyStoreCredit, matchedCustomer, paymentMode, customerName, customerPhone, downPayment, toast, isProcessing, isCheckingOut, customerAttached, isCreditLimitExceeded, creditLimitOverrideApproved, isAdmin, cashTendered]);
+  }, [items, checkout, setPayments, getTotal, hasReturnItems, surplusRefundMethod, applyStoreCredit, matchedCustomer, paymentMode, customerName, customerPhone, downPayment, toast, isProcessing, isCheckingOut, customerAttached, detachAttachedCustomer, isCreditLimitExceeded, creditLimitOverrideApproved, isAdmin, cashTendered]);
 
   // Hardware barcode scanner keystroke listener
   useEffect(() => {
@@ -526,7 +532,7 @@ export const POSPage = () => {
 
   const handleClearCart = () => {
     clearCart();
-    setCustomerAttached(false);
+    detachAttachedCustomer();
     setDownPayment(0);
     setApplyStoreCredit(false);
     toast.info('Cart Cleared', 'Cart and customer cleared.');
@@ -535,7 +541,7 @@ export const POSPage = () => {
   const handleDetachCustomer = () => {
     setCustomerName('');
     setCustomerPhone('');
-    setCustomerAttached(false);
+    detachAttachedCustomer();
     toast.info('Customer Detached', 'Sale will proceed as walk-in buyer.');
   };
 
@@ -544,6 +550,7 @@ export const POSPage = () => {
     if (cust) {
       // Customer selected from dropdown or registered
       setCustomerAttached(true);
+      setAttachedCustomerId(cust.id);
       if (cust.phone) {
         setCustomerPhone(cust.phone);
       }
@@ -556,7 +563,7 @@ export const POSPage = () => {
       // wipe the phone number if the name field was fully cleared.
       // This way, if a cashier typed "Amine" and also typed a phone
       // for the credit tab, editing the name won't erase the phone.
-      setCustomerAttached(false);
+      detachAttachedCustomer();
       if (!name || !name.trim()) {
         setCustomerPhone('');
       }

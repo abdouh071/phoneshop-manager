@@ -484,16 +484,12 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       const now = new Date();
       const { invoiceNumber, provisional: numberGuessed } = await claimInvoiceNumber('parts', now);
 
-      // Resolve matched or selected customer
+      // Only an account the counter attached by hand owns this invoice. A name typed
+      // into the walk-in field is free text: two shops and three passengers can share
+      // it, and reading it as an account key billed the sale to a stranger and rewrote
+      // that stranger's lifetime totals. Attaching one is the operator's act, never a guess.
       const customerStore = useCustomerStore.getState();
-      let matchedCust = get().selectedCustomer;
-      if (!matchedCust && customerName && customerName.trim()) {
-        const q = customerName.toLowerCase().trim();
-        matchedCust = customerStore.customers.find(c =>
-          c.name.toLowerCase().trim() === q ||
-          (c.shopName && c.shopName.toLowerCase().trim() === q)
-        ) || null;
-      }
+      const matchedCust = get().selectedCustomer;
 
       const txData: Omit<SaleTransaction, 'id'> = {
         date: now.toISOString(),

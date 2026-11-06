@@ -13,6 +13,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../lib/firebase';
 import { isOfflineCustomerId, replaceCachedCustomer } from './offlineQueuePolicy';
+import { isRealPhone, isSamePhone } from '../utils/phone';
 import type { Customer, CustomerDebtEntry } from '../types';
 
 const CACHED_CUSTOMERS_KEY = '@cached_customers';
@@ -95,20 +96,15 @@ export const customerService = {
     }
   },
   /**
-   * Look up a customer by phone number (exact or digit suffix match)
+   * Look up a customer by phone line: the same number in any of its stored formats.
    */
   findByPhone: async (phone: string): Promise<Customer | null> => {
     if (!phone) return null;
-    // Arabic-Indic digits are folded to ASCII before extraction: `\D` is ASCII-only,
-    // so a number typed on an Arabic keyboard used to read as having no digits at
-    // all and the lookup silently returned null, which made findOrCreate mint a
+    // Arabic-Indic digits are folded before extraction: `\D` is ASCII-only, so a
+    // number typed on an Arabic keyboard used to read as having no digits at all
+    // and the lookup silently returned null, which made findOrCreate mint a
     // duplicate profile.
-    const foldDigits = (s: string): string =>
-      s.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (ch) =>
-        String(ch.charCodeAt(0) - (ch.charCodeAt(0) >= 0x06f0 ? 0x06f0 : 0x0660))
-      );
-    const cleanPhone = foldDigits(phone).replace(/\D/g, '');
-    if (cleanPhone.length < 8) return null;
+    if (!isRealPhone(phone)) return null;
 
     try {
       // 1. Exact match query
@@ -123,21 +119,15 @@ export const customerService = {
         return { id: d.id, ...d.data() } as Customer;
       }
 
-      // 2. Scan fallback for non-standard formatted phone numbers. The scan is
-      // bounded for the read budget, so it is a heuristic, not a census — which is
-      // why it must never MISlink: a stored number shorter than a real phone (a
-      // placeholder) used to suffix-match a real query and hand the ticket to the
-      // wrong customer's account.
+      // 2. Scan fallback for numbers stored in another format (+213, spaced, no
+      // leading zero). The scan is bounded for the read budget, so it is a
+      // heuristic, not a census — which is why it must never MISlink: it compares
+      // canonical keys for equality, never a suffix, because two different people
+      // can share the last digits of a number.
       const allSnap = await getDocs(query(collection(db, 'customers'), limit(100)));
       for (const d of allSnap.docs) {
         const data = d.data() as Customer;
-        const cDigits = foldDigits(data.phone || '').replace(/\D/g, '');
-        if (cDigits.length < 8) continue;
-        if (
-          cDigits === cleanPhone ||
-          cDigits.endsWith(cleanPhone) ||
-          cleanPhone.endsWith(cDigits)
-        ) {
+        if (isSamePhone(data.phone, phone)) {
           return { ...data, id: d.id };
         }
       }
