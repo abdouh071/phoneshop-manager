@@ -26,7 +26,7 @@ import { EndOfDayButton } from '../endofday/EndOfDayButton';
 import { TechnicianSettlementsTab } from './TechnicianSettlementsTab';
 import { detectIssueTag, getBrandIcon, nextStatusMap, nextActionLabels } from './repairConstants';
 import { isPhoneMatch, normalizePhoneDigits } from '../../utils/phoneUtils';
-import { isTicketActiveReturnPending } from '../../utils/phoneLifecycle';
+import { isTicketActiveReturnPending, isTicketOverdue } from '../../utils/phoneLifecycle';
 
 export type RepairViewMode = 'tables' | 'board' | 'completed' | 'history' | 'cancelled' | 'settlements';
 
@@ -650,13 +650,7 @@ export const RepairsPage = () => {
     completed:   uniqueTickets.filter(t => t.status === 'completed' || (t.status === 'returned' && !isTicketActiveReturnPending(t, uniqueTickets))).length,
     returned:    uniqueTickets.filter(t => isTicketActiveReturnPending(t, uniqueTickets)).length,
     cancelled:   uniqueTickets.filter(t => t.status === 'cancelled').length,
-    overdue:     uniqueTickets.filter(t =>
-      t.estimatedCompletionDate &&
-      new Date(t.estimatedCompletionDate) < new Date() &&
-      t.status !== 'completed' &&
-      t.status !== 'cancelled' &&
-      isTicketActiveReturnPending(t, uniqueTickets)
-    ).length,
+    overdue:     uniqueTickets.filter(t => isTicketOverdue(t)).length,
   }), [uniqueTickets]);
 
   // Dedicated metrics for Completed Repairs Vault

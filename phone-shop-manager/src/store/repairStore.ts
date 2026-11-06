@@ -9,7 +9,7 @@ import { useInventoryStore } from './inventoryStore';
 import { formatCurrency } from '../utils/formatCurrency';
 import { deduplicateTickets, isSameTicketContent, findDuplicateTickets, type DuplicateTicketPair } from '../utils/ticketDeduplication';
 import { mergeRepairPatch } from '../utils/repairPatchMerge';
-import { isTicketActiveReturnPending } from '../utils/phoneLifecycle';
+import { isTicketActiveReturnPending, isTicketOverdue } from '../utils/phoneLifecycle';
 
 // --- Persistent Draft Storage (survives reload & logout) ---
 const STORAGE_KEY_ACTIVE_DRAFT = 'repair_active_draft';
@@ -755,14 +755,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
     const { tickets, searchQuery, statusFilter } = get();
     let filtered = deduplicateTickets(tickets);
     if (statusFilter === 'overdue') {
-      const now = new Date();
-      filtered = filtered.filter(t =>
-        t.estimatedCompletionDate &&
-        new Date(t.estimatedCompletionDate) < now &&
-        t.status !== 'completed' &&
-        t.status !== 'cancelled' &&
-        t.status !== 'returned'
-      );
+      filtered = filtered.filter(t => isTicketOverdue(t));
     } else if (statusFilter !== 'all') {
       filtered = filtered.filter(t => t.status === statusFilter);
     }

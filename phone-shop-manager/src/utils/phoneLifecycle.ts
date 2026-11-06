@@ -112,6 +112,24 @@ export const isTicketActiveReturnPending = (ticket: RepairTicket, allTickets: Re
 };
 
 /**
+ * A ticket is overdue when the shop promised it for a date that has passed and it
+ * is not closed. The board's Overdue pill and the overdue filter must count the
+ * same tickets, so both read this one predicate — the pill used to require
+ * `isTicketActiveReturnPending`, which is only ever true for `returned` tickets,
+ * so a pending repair past its promise date never showed up on the KPI.
+ */
+export const isTicketOverdue = (ticket: RepairTicket, now: Date = new Date()): boolean => {
+  if (!ticket.estimatedCompletionDate) return false;
+  const due = new Date(ticket.estimatedCompletionDate).getTime();
+  if (isNaN(due) || due >= now.getTime()) return false;
+  return (
+    ticket.status !== 'completed' &&
+    ticket.status !== 'cancelled' &&
+    ticket.status !== 'returned'
+  );
+};
+
+/**
  * Returns the effective status of a ticket, healing stale 'returned' status when its return is already resolved.
  */
 export const getEffectiveTicketStatus = (
