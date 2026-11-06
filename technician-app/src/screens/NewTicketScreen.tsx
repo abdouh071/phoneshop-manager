@@ -85,8 +85,14 @@ export const NewTicketScreen = ({ navigation }: any) => {
 
     setLoading(true);
     try {
+      // The one auto-link the shop allows: the phone AND the name both match the
+      // profile exactly. A number that matches but a name that differs waits for
+      // the technician's Link tap — it is never assumed to be the same person.
+      const namesMatchExactly =
+        matchedCustomer !== null &&
+        customerName.trim().toLowerCase() === (matchedCustomer.name ?? '').trim().toLowerCase();
       await createTicket({
-        customerId: linkedCustomerId ?? undefined,
+        customerId: linkedCustomerId ?? (namesMatchExactly ? matchedCustomer?.id : undefined),
         customerName,
         customerPhone,
         deviceBrand,
