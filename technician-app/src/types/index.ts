@@ -177,6 +177,9 @@ export interface CartItem {
   product: PhoneModel;
   quantity: number;
   unitPrice?: number;
+  /** The line's money at the price the document carries, so a reprint of a corrected
+   *  invoice does not have to re-multiply what the counter already wrote down. */
+  totalPrice?: number;
   /**
    * A line the customer handed over instead of bought, so its money comes off the
    * invoice. The counter writes these on an exchange; a phone only has to read them
@@ -188,6 +191,9 @@ export interface CartItem {
   customReturnPrice?: number;
   /** False when a returned line was kept off the shelf (faulty, sent for repair). */
   restock?: boolean;
+  /** Why a line came back, as the counter wrote it. A re-correction rebuilds the line
+   *  from the units, and the reason is the one thing it must not lose. */
+  returnReason?: string;
 }
 
 export interface SaleTransaction {

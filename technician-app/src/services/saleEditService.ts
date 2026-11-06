@@ -95,16 +95,22 @@ export const findOversoldLines = async (plan: SaleEditPlan): Promise<OversoldLin
   return blocked;
 };
 
-/** The counter's line description: `2x Hoco EQ2 BT-EQ2`. */
+/**
+ * The counter's line description: `2x Hoco EQ2 BT-EQ2`.
+ *
+ * A unit the correction hands back is drawn with its minus, as on the desktop. A note
+ * that reads `2x Phone, 1x Phone` in the account statement hides what happened to the
+ * invoice — the credit line is a separate fact the shop has to be able to read.
+ */
 const itemsSummary = (plan: SaleEditPlan): string =>
   plan.items
-    .map(i => `${i.quantity}x ${i.product?.name || ''} ${i.product?.model || ''}`.replace(/\s+/g, ' ').trim())
+    .map(i => `${i.isReturn ? '−' : ''}${i.quantity}x ${i.product?.name || ''} ${i.product?.model || ''}`.replace(/\s+/g, ' ').trim())
     .join(', ');
 
 /** The counter's price column for the audit trails: `2x Hoco EQ2 @ 4500 DA`. */
 const itemsDetail = (plan: SaleEditPlan): string =>
   plan.items
-    .map(i => `${i.quantity}x ${i.product?.name || i.product?.model || 'Item'} @ ${i.product?.price ?? 0} DA`)
+    .map(i => `${i.isReturn ? '−' : ''}${i.quantity}x ${i.product?.name || i.product?.model || 'Item'} @ ${i.product?.price ?? 0} DA`)
     .join(', ');
 
 export interface FoundDebt {

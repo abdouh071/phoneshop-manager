@@ -40,6 +40,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { useTranslation } from 'react-i18next';
 import { buildSearch, matchesSearch } from '../utils/search';
 import { discountsGivenOf } from '../utils/discountPolicy';
+import { lineDisplayOf, netUnitsSold } from '../utils/saleEditLines';
 import {
   colors,
   fontSize,
@@ -476,9 +477,11 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
             const isToday = isSaleToday(item.date);
             const isVoided = item.status === 'voided' || item.status === 'refunded';
             const isPendingApproval = item.status === 'pending_approval';
-            const totalQty = (item.items || []).reduce((s, i) => s + (i.quantity || 0), 0);
-            const status = statusAppearance(saleStatusColors, item.status);
             const items = item.items || [];
+            // The units the customer left with, not the rows the document prints: a
+            // correction's credit line is a unit that did not go out.
+            const totalQty = netUnitsSold(items);
+            const status = statusAppearance(saleStatusColors, item.status);
 
             return (
               <Card style={[styles.txCard, isVoided && styles.txCardVoided]}>
@@ -545,16 +548,24 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
 
                   {/* Items Preview */}
                   <View style={styles.itemsBox}>
-                    {items.slice(0, 3).map((cartItem, idx) => (
-                      <View key={idx} style={styles.itemRow}>
-                        <Text style={styles.itemName} numberOfLines={1}>
-                          • {cartItem.product?.name} {cartItem.product?.model || ''}
-                        </Text>
-                        <Text style={styles.itemQtyPrice}>
-                          x{cartItem.quantity} ({(cartItem.unitPrice || cartItem.product?.price || 0) * (cartItem.quantity || 1)} DA)
-                        </Text>
-                      </View>
-                    ))}
+                    {items.slice(0, 3).map((cartItem, idx) => {
+                      // A unit the correction handed back is its own line and draws
+                      // with its own minus, so the card reads the receipt rather than
+                      // claiming `2x Phone, 1x Phone` sold the same product twice.
+                      const line = lineDisplayOf(cartItem);
+                      return (
+                        <View key={idx} style={styles.itemRow}>
+                          <Text style={styles.itemName} numberOfLines={1}>
+                            • {cartItem.product?.name} {cartItem.product?.model || ''}
+                          </Text>
+                          <Text style={[styles.itemQtyPrice, line.returned && styles.itemQtyReturned]}>
+                            x{line.returned ? '−' : ''}
+                            {line.units} ({line.returned ? '−' : ''}
+                            {line.money} DA)
+                          </Text>
+                        </View>
+                      );
+                    })}
                     {items.length > 3 && (
                       <Text style={styles.moreItemsText}>
                         {t('salesHistory.moreItems', '+{{n}} more items ({{total}} total)', {
@@ -961,6 +972,10 @@ const styles = StyleSheet.create({
     fontSize: fontSize.label,
     fontWeight: '600',
     color: colors.textSecondary,
+  },
+  itemQtyReturned: {
+    color: colors.dangerText,
+    fontWeight: '700',
   },
   moreItemsText: {
     fontSize: fontSize.caption,

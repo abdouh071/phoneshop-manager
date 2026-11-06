@@ -9,7 +9,11 @@
  * Lines are keyed by PRODUCT ID, exactly as the desktop modal keys its
  * `editedQuantities` / `editedPrices` / `returnToStock`. The consequence is the
  * desktop's: one SKU written on two rows of the same invoice is one control, and
- * changing it moves both rows together.
+ * the number that control holds is what the customer LEAVES WITH. The lines
+ * themselves are rebuilt by `saleEditLines.buildCorrectedLines` — the sold row
+ * stays and the units that come back join the invoice as their own `−` line, so a
+ * correction never erases what was sold and a fully refunded invoice still prints
+ * every product.
  *
  * Money rules are the desktop's too — the basket prices off `product.price`, the
  * discount that was granted on the sale stays granted (a percentage scales with
@@ -26,6 +30,13 @@
 import type { CartItem, SaleTransaction } from '../types/index.ts';
 import { discountAmountOf, lineDiscountOf } from './discountPolicy.ts';
 import type { LineConcession } from './discountPolicy.ts';
+import {
+  buildCorrectedLines,
+  groupDocumentLines,
+  linesDiffer,
+  returnedUnits,
+  soldUnits,
+} from './saleEditLines.ts';
 
 export interface SaleLineEdit {
   quantity: number;
@@ -78,11 +89,11 @@ interface StockGroup {
   productId: string;
   name: string;
   isReturn: boolean;
-  /** How many rows carry this SKU, and how many of them were written off instead of restocked. */
-  rows: number;
-  writtenOff: number;
   sold: number;
   now: number;
+  /** Of those handed-back units, how many actually reached the shelf on each side. */
+  restockedSold: number;
+  restockedNow: number;
 }
 
 const wholeUnits = (value: number, fallback: number): number => {
@@ -133,37 +144,6 @@ export const planSaleEdit = (
    */
   added: CartItem[] = []
 ): SaleEditPlan => {
-  // The desktop modal builds the new lines first — every row takes the edited
-  // quantity and price of its product id, and a row that reaches zero leaves the
-  // basket — and only then does the store compare them with the originals.
-  const newItems = tx.items
-    .map((item): CartItem => {
-      const product = item?.product;
-      // A row stored without a product id has no product to edit and no shelf to
-      // move, so it carries through untouched rather than dropping out of the
-      // invoice and quietly taking its money with it.
-      if (!product?.id) return item;
-      const edit = edits[product.id];
-      if (!edit) {
-        return { ...item, quantity: wholeUnits(item.quantity, 0) };
-      }
-      const quantity = wholeUnits(edit.quantity, wholeUnits(item.quantity, 0));
-      const unitPrice = money(edit.unitPrice, money(product.price, 0));
-      return {
-        ...item,
-        quantity,
-        // Both price fields move: the phone's item list and its WhatsApp receipt read
-        // `unitPrice`, the basket prices off `product.price`, and a corrected invoice
-        // that updates only one of them prints the old number somewhere.
-        unitPrice,
-        product: { ...product, price: unitPrice },
-        // A line taken back is priced by what the counter pays for it, not by what the
-        // shelf still asks, so a corrected trade-in moves that number with it.
-        ...(item.isReturn ? { customReturnPrice: unitPrice } : {}),
-      };
-    })
-    .filter(item => wholeUnits(item.quantity, 0) > 0);
-
   /**
    * The new rows. Both terminals offer the add control, and the phone sets the shape
    * here: both price fields are written — the item list and the WhatsApp receipt read
@@ -184,7 +164,14 @@ export const planSaleEdit = (
     addedItems.push({ ...item, quantity, unitPrice, product: { ...product, price: unitPrice } });
   }
 
-  const items = [...newItems, ...addedItems];
+  /**
+   * The lines the correction writes, built by the counter's own file: the sold rows stay
+   * at what they were sold for and the units that come back join the document as their
+   * own `−` line. Bringing a line down to zero used to delete it here, which left a
+   * fully refunded invoice blank — the product, its money and the fact that it ever
+   * existed were all rubbed out together.
+   */
+  const items = buildCorrectedLines(tx.items, edits, restockChoices, addedItems);
 
   const restock: SaleStockLine[] = [];
   const deduct: SaleStockLine[] = [];
@@ -214,28 +201,33 @@ export const planSaleEdit = (
           productId: id,
           name: item.product?.name || item.product?.model || id,
           isReturn,
-          rows: 0,
-          writtenOff: 0,
           sold: 0,
           now: 0,
+          restockedSold: 0,
+          restockedNow: 0,
         };
         groups.set(key, group);
       }
-      group[side] += wholeUnits(item.quantity, 0);
-      group.rows += 1;
-      if (item.restock === false) group.writtenOff += 1;
+      const units = wholeUnits(item.quantity, 0);
+      group[side] += units;
+      if (item.restock !== false) group[side === 'sold' ? 'restockedSold' : 'restockedNow'] += units;
     });
   };
   collect(tx.items, 'sold');
   collect(items, 'now');
 
   groups.forEach(group => {
-    const moved = group.now - group.sold;
+    /**
+     * A line the customer handed back moves the shelf only by the units that actually
+     * went on it. Counting rows instead of their flags was the old gap: a document whose
+     * earlier correction wrote a faulty phone off could have that flag flipped and the
+     * shelf would never hear about it — and this editor now offers the checkbox on every
+     * credit line, because every correction writes one.
+     */
+    const moved = group.isReturn
+      ? group.restockedNow - group.restockedSold
+      : group.now - group.sold;
     if (moved === 0) return;
-
-    // Goods the customer handed back that were never put on the shelf cannot move it
-    // in either direction.
-    if (group.isReturn && group.writtenOff === group.rows) return;
 
     const delta = group.isReturn ? moved : -moved;
 
@@ -313,10 +305,15 @@ export const planSaleEdit = (
    * inside the line's own price, invisible to anything adding up the discount field,
    * so the shop writes it down where its totals can see it, in the same words the
    * counter uses.
+   *
+   * The lines that came back off the invoice are not in it. A concession is money let
+   * on what the customer BOUGHT; measured on a unit he handed back it would record a
+   * giveaway the shop never made — and now that every correction writes `−` lines, it
+   * would do that on every one.
    */
   const lineDiscounts: LineConcession[] = items.reduce<LineConcession[]>((lines, item) => {
     const id = item?.product?.id;
-    if (!id) return lines;
+    if (!id || item.isReturn) return lines;
     const charged = money(item.unitPrice ?? item.product.price, 0);
     const before = tx.items.find(
       orig => orig.product?.id === id && Boolean(orig.isReturn) === Boolean(item.isReturn)
@@ -331,34 +328,22 @@ export const planSaleEdit = (
   let status: NonNullable<SaleTransaction['status']> = tx.status || 'completed';
   if (items.length === 0 || total === 0) {
     status = 'refunded';
-  } else if (
-    tx.items.some(orig => {
-      // By product id AND kind, as the counter does: the trade-in of the same model
-      // is a different line, and reading it as the sale row hides the units that
-      // came off it.
-      const match = items.find(
-        ni =>
-          ni.product?.id === orig.product?.id &&
-          Boolean(ni.isReturn) === Boolean(orig.isReturn)
-      );
-      return !match || wholeUnits(match.quantity, 0) < wholeUnits(orig.quantity, 0);
-    })
-  ) {
-    status = 'partially_refunded';
+  } else {
+    /**
+     * A correction no longer shrinks the sold line — the units that come back join the
+     * invoice as their own `−` line — so the quantity written on a row can stay and yet
+     * leave the customer holding fewer goods. What decides the stamp is what he leaves
+     * with: units bought less units handed back, on the document before and after. A
+     * price-only correction moves money and no goods, and keeps its stamp.
+     */
+    const keptBefore = soldUnits(tx.items) - returnedUnits(tx.items);
+    const keptAfter = soldUnits(items) - returnedUnits(items);
+    if (keptAfter < keptBefore) status = 'partially_refunded';
   }
 
-  const hasChanges =
-    addedItems.length > 0 ||
-    tx.items.some(item => {
-      const edit = item.product?.id ? edits[item.product.id] : undefined;
-      if (!edit) return false;
-      const originalQty = wholeUnits(item.quantity, 0);
-      const originalPrice = money(item.product?.price, 0);
-      return (
-        wholeUnits(edit.quantity, originalQty) !== originalQty ||
-        money(edit.unitPrice, originalPrice) !== originalPrice
-      );
-    });
+  /** The shape the phone is about to write, not the money it nets to: a price cut and a
+   *  unit handed back can land on the same total and still be a document to write. */
+  const hasChanges = linesDiffer(tx.items, items);
 
   // The desktop's own wording for the two directions of the same difference.
   const diff = (tx.total || 0) - total;
@@ -409,20 +394,21 @@ export const diffSaleEdit = (
   added: CartItem[] = []
 ): SaleEditChange[] => {
   const changes: SaleEditChange[] = [];
-  const seen = new Set<string>();
 
-  tx.items.forEach(item => {
-    const id = item.product?.id;
-    const edit = id ? edits[id] : undefined;
-    // One entry per product id: two rows of the same SKU share one control on the
-    // desktop, so reporting them twice would show an admin one change as two.
-    if (!edit || !id || seen.has(id)) return;
-    seen.add(id);
-
-    const name = item.product?.name || item.product?.model || id;
-    const fromQty = wholeUnits(item.quantity, 0);
+  /**
+   * One entry per SKU, measured on what the customer leaves with rather than the number
+   * written on a row: a control that fell from three to two is a unit coming back, and an
+   * invoice that already carries credit rows counts them together — which is what an admin
+   * is being asked to sign for. Grouping also keeps two rows of one SKU from showing the
+   * same change twice.
+   */
+  groupDocumentLines(tx.items).forEach(view => {
+    const edit = edits[view.productId];
+    if (!edit) return;
+    const name = view.name || view.productId;
+    const fromQty = view.kept;
     const toQty = wholeUnits(edit.quantity, fromQty);
-    const fromUnit = money(item.product?.price, 0);
+    const fromUnit = view.listedUnit;
     const toUnit = money(edit.unitPrice, fromUnit);
     if (toQty !== fromQty) changes.push({ kind: 'quantity', name, from: fromQty, to: toQty });
     if (toUnit !== fromUnit) changes.push({ kind: 'price', name, from: fromUnit, to: toUnit });

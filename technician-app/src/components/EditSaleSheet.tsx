@@ -33,6 +33,14 @@ import { applySaleEdit, findOversoldLines, type SaleEditOutcome } from '../servi
 import { readStockLevels } from '../services/stockService';
 import { diffSaleEdit, planSaleEdit, type SaleLineEdits, type SaleRestockChoices } from '../utils/saleEdit';
 import {
+  groupDocumentLines,
+  lineUnit,
+  returnedAmount,
+  returnedUnits,
+  signedLineTotal,
+  soldUnits,
+} from '../utils/saleEditLines';
+import {
   DISCOUNT_APPROVAL_PERCENT,
   lineDiscountOf,
   requiresLineDiscountApproval,
@@ -50,16 +58,21 @@ import type { CartItem, PhoneModel, SaleTransaction } from '../types';
  */
 type LineDraft = { quantity: number; price: string; discount?: string };
 
-/** One line on the sheet: a row of the document, or a product added to it. */
+/**
+ * One row of the sheet: one SKU the document carried, or one being put on it. A SKU can
+ * sit on an invoice twice — the phone sold and the same phone taken back in trade — and
+ * both rows share this one control, because that is the till's rule.
+ */
 type EditRow = {
   id: string;
   name: string;
-  /** What the invoice carried for this product — nothing, for a line just added. */
-  originalQty: number;
-  originalUnit: number;
+  /** Units the document sold. The stepper starts from what he keeps, not this. */
+  sold: number;
+  /** What he leaves with on the document as it stands — where the control opens. */
+  keptNow: number;
+  /** The price the sold line carries, and the base a new concession is measured from. */
+  listedUnit: number;
   added: boolean;
-  /** A line the customer handed over rather than bought: its money comes off. */
-  isReturn: boolean;
 };
 
 /** A runaway tap should not be able to write a hundred-unit invoice. */
@@ -68,19 +81,6 @@ const MAX_UNITS = 999;
 const wholeUnits = (value: number): number => {
   const n = Math.trunc(Number(value));
   return Number.isFinite(n) && n >= 0 ? n : 0;
-};
-
-/**
- * The price the line is worth right now. The desktop prices from the product
- * snapshot and that is what it rewrites, so the snapshot leads; `unitPrice` is the
- * fallback for a row too old to carry one. Reading `unitPrice` first would re-price
- * an invoice the counter has already corrected back to the pre-correction number.
- */
-const soldUnitPrice = (item: CartItem): number => {
-  const snapshot = Number(item.product?.price);
-  if (Number.isFinite(snapshot) && snapshot >= 0) return snapshot;
-  const stored = Number(item.unitPrice);
-  return Number.isFinite(stored) && stored >= 0 ? stored : 0;
 };
 
 /** What the catalogue asks for a product, floored at nothing when it was stored without a price. */
@@ -113,28 +113,38 @@ export const EditSaleSheet = ({
   const insets = useSafeAreaInsets();
   const user = useAuthStore(s => s.user);
 
+  const unknownItem = t('salesHistory.unknownItem', 'Item');
+
   /**
    * Keyed by product id, as the desktop keys `editedQuantities` / `editedPrices` /
-   * `returnToStock` — so one SKU on two rows of the same invoice is one control.
+   * `returnToStock` — so one SKU on two rows of the same invoice is one control. The
+   * number a row holds is what the customer LEAVES WITH, which on an invoice already
+   * corrected is its sold units less whatever it already carries back.
    *
    * Seeded once, on mount, from the document as it stood when the sheet opened. The
    * caller keys this component on the invoice, so a new sale means a new mount, and
    * the live history listener handing over a fresh object every few seconds cannot
    * wipe what the cashier is typing.
    */
+  const carriedLines = useMemo(() => groupDocumentLines(transaction?.items ?? []), [transaction]);
+
   const [draft, setDraft] = useState<Record<string, LineDraft>>(() => {
     const out: Record<string, LineDraft> = {};
-    (transaction?.items ?? []).forEach(item => {
-      const id = item.product?.id;
-      if (!id) return;
-      out[id] = { quantity: wholeUnits(item.quantity), price: String(soldUnitPrice(item)) };
+    groupDocumentLines(transaction?.items ?? []).forEach(view => {
+      out[view.productId] = { quantity: view.kept, price: String(view.listedUnit) };
     });
     return out;
   });
   const [restock, setRestock] = useState<SaleRestockChoices>(() => {
     const out: SaleRestockChoices = {};
-    (transaction?.items ?? []).forEach(item => {
-      if (item.product?.id) out[item.product.id] = true;
+    const items = transaction?.items ?? [];
+    groupDocumentLines(items).forEach(view => {
+      // A unit the document already took back without putting it on the shelf stays off
+      // it. The flag defaults to restocking, so without this the phone would silently
+      // send a faulty phone back onto the shelf it never left.
+      out[view.productId] = !items.some(
+        item => item.product?.id === view.productId && Boolean(item.isReturn) && item.restock === false
+      );
     });
     return out;
   });
@@ -157,28 +167,40 @@ export const EditSaleSheet = ({
   const [pickQuery, setPickQuery] = useState('');
   const [isReadingShelf, setIsReadingShelf] = useState(false);
 
-  const rows = useMemo<EditRow[]>(() => {
-    const sold = (transaction?.items ?? []).map(item => ({
-      id: item.product?.id || '',
-      name: item.product?.name || item.product?.model || t('salesHistory.unknownItem', 'Item'),
-      originalQty: wholeUnits(item.quantity),
-      originalUnit: soldUnitPrice(item),
-      added: false,
-      isReturn: Boolean(item.isReturn),
-    }));
-    const fresh = addedIds.map(id => {
-      const product = addedProducts[id];
-      return {
-        id,
-        name: product?.name || product?.model || t('salesHistory.unknownItem', 'Item'),
-        originalQty: 0,
-        originalUnit: Math.max(0, Number(product?.price) || 0),
-        added: true,
-        isReturn: false,
-      };
-    });
-    return [...sold, ...fresh];
-  }, [addedIds, addedProducts, t, transaction]);
+  /** A product on the document is edited on its own row; the picker must not offer it twice. */
+  const onInvoice = useMemo(
+    () =>
+      new Set(
+        (transaction?.items ?? [])
+          .map(item => item.product?.id)
+          .filter((id): id is string => Boolean(id))
+      ),
+    [transaction]
+  );
+
+  const rows = useMemo<EditRow[]>(
+    () => [
+      ...carriedLines.map(view => ({
+        id: view.productId,
+        name: view.name || unknownItem,
+        sold: view.sold,
+        keptNow: view.kept,
+        listedUnit: view.listedUnit,
+        added: false,
+      })),
+      ...addedIds
+        .filter(id => addedProducts[id] && !onInvoice.has(id))
+        .map(id => ({
+          id,
+          name: addedProducts[id].name || addedProducts[id].model || unknownItem,
+          sold: 0,
+          keptNow: 0,
+          listedUnit: listedPrice(addedProducts[id]),
+          added: true,
+        })),
+    ],
+    [addedIds, addedProducts, carriedLines, onInvoice, unknownItem]
+  );
 
   const edits: SaleLineEdits = useMemo(() => {
     const out: SaleLineEdits = {};
@@ -192,7 +214,7 @@ export const EditSaleSheet = ({
         quantity: entered.quantity,
         // A half-typed number keeps the price the line already had. Reading it as
         // 0 DA would let someone refund a phone by typing into the wrong field.
-        unitPrice: Number.isFinite(parsed) && parsed >= 0 ? parsed : row.originalUnit,
+        unitPrice: Number.isFinite(parsed) && parsed >= 0 ? parsed : row.listedUnit,
       };
     });
     return out;
@@ -219,21 +241,30 @@ export const EditSaleSheet = ({
   );
 
   /**
-   * What each line gives away against the price the document carried for it — whether
-   * that came from the discount field or from a price cut by hand. The customer and
-   * the reports see only a price, so the approval has to be asked for both alike, or
+   * What each sold line gives away against the price the document carried for it —
+   * whether that came from the discount field or from a price cut by hand. The customer
+   * and the reports see only a price, so the approval has to be asked for both alike, or
    * the rule would have a side door.
+   *
+   * The lines that came back off the invoice are not in this: a concession is money let
+   * on what the customer bought, and measuring one on a unit he handed back would record
+   * a giveaway the shop never made — which every correction would now do.
    */
   const concessions = useMemo(
     () =>
-      rows
-        .map(row => {
-          const quantity = draft[row.id]?.quantity ?? row.originalQty;
-          const unitPrice = edits[row.id]?.unitPrice ?? row.originalUnit;
-          return { row, quantity, ...lineDiscountOf(row.originalUnit, unitPrice, quantity) };
-        })
+      (plan?.items ?? [])
+        .filter(item => item?.product?.id && !item.isReturn)
+        .map(item => ({
+          id: item.product.id,
+          name: item.product.name || item.product.model || unknownItem,
+          ...lineDiscountOf(
+            rows.find(row => row.id === item.product?.id)?.listedUnit ?? item.product.price,
+            lineUnit(item),
+            item.quantity
+          ),
+        }))
         .filter(line => line.granted > 0),
-    [draft, edits, rows]
+    [plan, rows, unknownItem]
   );
 
   const concessionsTotal = concessions.reduce((sum, line) => sum + line.granted, 0);
@@ -284,17 +315,6 @@ export const EditSaleSheet = ({
     const unit = unitPriceAfterDiscount(listUnit, Number.isFinite(parsed) ? parsed : 0, quantity);
     setDraft(prev => ({ ...prev, [id]: { ...prev[id], discount: raw, price: String(unit) } }));
   };
-
-  /** A product on the document is edited on its own row; the picker must not offer it twice. */
-  const onInvoice = useMemo(
-    () =>
-      new Set(
-        (transaction?.items ?? [])
-          .map(item => item.product?.id)
-          .filter((id): id is string => Boolean(id))
-      ),
-    [transaction]
-  );
 
   /**
    * What the counter holds for one product. The parent read the sold lines when the
@@ -527,7 +547,7 @@ export const EditSaleSheet = ({
       lineDiscountAmount: Math.round(concessionsTotal),
       deepestLineDiscountPercent: Number(deepestDiscountPercent.toFixed(1)),
       deepLineDiscounts: deepConcessions.map(line => ({
-        name: line.row.name,
+        name: line.name,
         percent: Number(line.percent.toFixed(1)),
         amount: Math.round(line.granted),
       })),
@@ -537,6 +557,9 @@ export const EditSaleSheet = ({
   };
 
   if (!transaction || !plan) return null;
+
+  const unitsSold = soldUnits(plan.items);
+  const unitsBack = returnedUnits(plan.items);
 
   const saveLabel =
     plan.refundDue > 0
@@ -568,17 +591,22 @@ export const EditSaleSheet = ({
 
           <ScrollView style={styles.body} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.bodyContent}>
             <Text style={styles.hint}>
-              {t('salesHistory.editHint', 'Adjust item unit prices, quantities, or remove returned items. Inventory and transaction totals will recalculate automatically.')}
+              {t(
+                'salesHistory.editHint',
+                'Adjust unit prices, quantities and discounts, or put a product the invoice never carried onto it. The quantity is what the customer LEAVES WITH: bring a line down and the units that come back are added to the receipt as their own − line, at a price deducted from the total — the sold line is never rubbed out, so a fully returned invoice still lists every product. Inventory and totals recalculate automatically, and a line the shelf cannot give is refused before anything is written.'
+              )}
             </Text>
 
-            {rows.map((row, index) => {
+            {rows.map(row => {
               const pid = row.id;
-              const originalQty = row.originalQty;
-              const originalUnit = row.originalUnit;
-              const quantity = draft[pid]?.quantity ?? originalQty;
-              const unitPrice = edits[pid]?.unitPrice ?? originalUnit;
-              const returnedQty = originalQty - quantity;
-              const willRestock = !pid || restock[pid] !== false;
+              const kept = draft[pid]?.quantity ?? row.keptNow;
+              const unitPrice = edits[pid]?.unitPrice ?? row.listedUnit;
+              /** This SKU's lines on the document the save writes, credit lines included. */
+              const skuLines = plan.items.filter(item => item?.product?.id === pid);
+              const backQty = returnedUnits(skuLines);
+              const backMoney = returnedAmount(skuLines);
+              const lineNet = skuLines.reduce((sum, item) => sum + signedLineTotal(item), 0);
+              const willRestock = restock[pid] !== false;
               const name = row.name;
               // Sold units are already committed; anything new has to come off the
               // counter. No count yet (read in flight or failed) means no ceiling,
@@ -588,28 +616,27 @@ export const EditSaleSheet = ({
               const maxQty =
                 onShelf === undefined
                   ? MAX_UNITS
-                  : Math.min(MAX_UNITS, originalQty + Math.max(0, onShelf ?? 0));
-              const atCeiling = quantity >= maxQty;
-              const concession = lineDiscountOf(originalUnit, unitPrice, quantity);
+                  : Math.min(MAX_UNITS, row.sold + Math.max(0, onShelf ?? 0));
+              const atCeiling = kept >= maxQty;
+              // The concession is what the sold lines give away, so it is spread over
+              // the units they print at — the documented ones plus any the control added.
+              const grew = Math.max(0, kept - row.sold);
+              const unitsPriced = row.sold + grew;
+              const concession = lineDiscountOf(row.listedUnit, unitPrice, unitsPriced);
               const overDiscount = requiresLineDiscountApproval(user?.role, concession.percent);
-              // A row of the document reads "what you have now / what was sold";
+              // A row of the document reads "what he leaves with / what was sold";
               // a line nobody bought yet has nothing to be measured against.
-              const stepLabel = row.added ? String(quantity) : `${quantity} / ${originalQty}`;
+              const stepLabel = row.added ? String(kept) : `${kept} / ${row.sold}`;
 
               return (
-                <View
-                  key={pid ? `${pid}::${row.isReturn ? 'return' : 'sale'}-${index}` : `row-${index}`}
-                  style={styles.line}
-                >
+                <View key={pid} style={styles.line}>
                   <View style={styles.lineHead}>
                     <View style={styles.lineHeadText}>
                       <Text style={styles.lineName} numberOfLines={1}>
                         {name}
                       </Text>
                       <Text style={styles.lineSub} numberOfLines={1}>
-                        {row.isReturn
-                          ? t('salesHistory.editLineReturn', 'Taken back · comes off this invoice')
-                          : row.added
+                        {row.added
                           ? typeof onShelf === 'number'
                             ? t('salesHistory.editLineNewShelf', 'New line · {{count}} on the shelf', {
                                 count: onShelf,
@@ -617,93 +644,97 @@ export const EditSaleSheet = ({
                             : t('salesHistory.editLineNew', 'New line')
                           : onShelf === undefined
                             ? t('salesHistory.editLineSold', 'Sold {{qty}} at {{price}} DA', {
-                                qty: originalQty,
-                                price: amount(originalUnit),
+                                qty: row.sold,
+                                price: amount(row.listedUnit),
                               })
                             : onShelf === null
                               ? t('salesHistory.editLineNoRow', 'Sold {{qty}} · {{name}} has no stock row', {
-                                  qty: originalQty,
+                                  qty: row.sold,
                                   name,
                                 })
                               : t('salesHistory.editLineShelf', 'Sold {{qty}} · {{count}} on the shelf', {
-                                  qty: originalQty,
+                                  qty: row.sold,
                                   count: onShelf,
                                 })}
                       </Text>
-                    </View>
-                    <Text style={[styles.lineTotal, row.isReturn && styles.summaryDanger]}>
-                      {row.isReturn ? '-' : ''}
-                      {amount(unitPrice * quantity)} DA
-                    </Text>
-                  </View>
-
-                  {!pid && (
-                    <Text style={styles.lockedNote}>
-                      {t('salesHistory.editLockedLine', 'This row has no inventory link, so it stays as it was sold.')}
-                    </Text>
-                  )}
-
-                  {pid ? (
-                    <View style={styles.controls}>
-                      <TextInput
-                        label={t('salesHistory.unitPriceLabel', 'Unit price (DA)')}
-                        value={draft[pid]?.price ?? String(originalUnit)}
-                        onChangeText={next => setPrice(pid, next)}
-                        mode="outlined"
-                        dense
-                        keyboardType="decimal-pad"
-                        returnKeyType="done"
-                        style={styles.priceInput}
-                        accessibilityLabel={t('salesHistory.unitPriceLabel', 'Unit price (DA)')}
-                      />
-
-                      <View style={styles.stepper}>
-                        <TouchableOpacity
-                          style={[styles.stepBtn, quantity <= 0 && styles.stepBtnOff]}
-                          onPress={() => setQuantity(pid, quantity - 1, maxQty)}
-                          disabled={quantity <= 0}
-                          accessibilityLabel={t('salesHistory.decrease', 'Decrease quantity')}
-                        >
-                          <MaterialCommunityIcons name="minus" size={18} color={quantity <= 0 ? colors.textFaint : colors.brand} />
-                        </TouchableOpacity>
-                        <Text style={styles.stepValue}>{stepLabel}</Text>
-                        <TouchableOpacity
-                          style={[styles.stepBtn, atCeiling && styles.stepBtnOff]}
-                          onPress={() => setQuantity(pid, quantity + 1, maxQty)}
-                          disabled={atCeiling}
-                          accessibilityLabel={t('salesHistory.increase', 'Increase quantity')}
-                        >
-                          <MaterialCommunityIcons name="plus" size={18} color={atCeiling ? colors.textFaint : colors.brand} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ) : null}
-
-                  {pid ? (
-                    <View style={styles.discountRow}>
-                      <TextInput
-                        label={t('salesHistory.editDiscountInput', 'Discount (DA)')}
-                        value={
-                          draft[pid]?.discount ?? (concession.granted > 0 ? String(concession.granted) : '')
-                        }
-                        onChangeText={next => setDiscount(pid, next, originalUnit, quantity)}
-                        mode="outlined"
-                        dense
-                        keyboardType="decimal-pad"
-                        returnKeyType="done"
-                        disabled={quantity <= 0}
-                        style={styles.discountInput}
-                        accessibilityLabel={t('salesHistory.editDiscountA11y', 'Discount on this line (DA)')}
-                      />
-                      {concession.granted > 0 && (
-                        <Text style={[styles.discountPercent, overDiscount && styles.discountOver]}>
-                          −{concession.percent.toFixed(1)}%
+                      {backQty > 0 && (
+                        <Text style={styles.lineReturned}>
+                          {t(
+                            'salesHistory.editLineHandedBack',
+                            '−{{count}} handed back · −{{amount}} DA comes off this invoice',
+                            { count: backQty, amount: amount(backMoney) }
+                          )}
                         </Text>
                       )}
                     </View>
-                  ) : null}
+                    <Text style={[styles.lineTotal, lineNet < 0 && styles.summaryDanger]}>
+                      {lineNet < 0 ? '−' : ''}
+                      {amount(Math.abs(lineNet))} DA
+                    </Text>
+                  </View>
 
-                  {pid && overDiscount ? (
+                  <View style={styles.controls}>
+                    <TextInput
+                      label={t('salesHistory.unitPriceLabel', 'Unit price (DA)')}
+                      value={draft[pid]?.price ?? String(row.listedUnit)}
+                      onChangeText={next => setPrice(pid, next)}
+                      mode="outlined"
+                      dense
+                      keyboardType="decimal-pad"
+                      returnKeyType="done"
+                      style={styles.priceInput}
+                      accessibilityLabel={t('salesHistory.unitPriceLabel', 'Unit price (DA)')}
+                    />
+
+                    <View style={styles.stepper}>
+                      <TouchableOpacity
+                        style={[styles.stepBtn, kept <= 0 && styles.stepBtnOff]}
+                        onPress={() => setQuantity(pid, kept - 1, maxQty)}
+                        disabled={kept <= 0}
+                        accessibilityLabel={t('salesHistory.decrease', 'Decrease quantity')}
+                      >
+                        <MaterialCommunityIcons name="minus" size={18} color={kept <= 0 ? colors.textFaint : colors.brand} />
+                      </TouchableOpacity>
+                      <View>
+                        <Text style={styles.stepValue}>{stepLabel}</Text>
+                        <Text style={styles.stepCaption}>
+                          {t('salesHistory.editKeeps', 'he keeps')}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.stepBtn, atCeiling && styles.stepBtnOff]}
+                        onPress={() => setQuantity(pid, kept + 1, maxQty)}
+                        disabled={atCeiling}
+                        accessibilityLabel={t('salesHistory.increase', 'Increase quantity')}
+                      >
+                        <MaterialCommunityIcons name="plus" size={18} color={atCeiling ? colors.textFaint : colors.brand} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <View style={styles.discountRow}>
+                    <TextInput
+                      label={t('salesHistory.editDiscountInput', 'Discount (DA)')}
+                      value={
+                        draft[pid]?.discount ?? (concession.granted > 0 ? String(concession.granted) : '')
+                      }
+                      onChangeText={next => setDiscount(pid, next, row.listedUnit, unitsPriced)}
+                      mode="outlined"
+                      dense
+                      keyboardType="decimal-pad"
+                      returnKeyType="done"
+                      disabled={unitsPriced <= 0}
+                      style={styles.discountInput}
+                      accessibilityLabel={t('salesHistory.editDiscountA11y', 'Discount on this line (DA)')}
+                    />
+                    {concession.granted > 0 && (
+                      <Text style={[styles.discountPercent, overDiscount && styles.discountOver]}>
+                        −{concession.percent.toFixed(1)}%
+                      </Text>
+                    )}
+                  </View>
+
+                  {overDiscount ? (
                     <Text style={styles.discountNote}>
                       {t(
                         'salesHistory.editDiscountOver',
@@ -726,10 +757,7 @@ export const EditSaleSheet = ({
                     </TouchableOpacity>
                   ) : null}
 
-                  {pid &&
-                  atCeiling &&
-                  onShelf !== undefined &&
-                  (row.added ? quantity > 0 : returnedQty >= 0) ? (
+                  {atCeiling && onShelf !== undefined ? (
                     <Text style={styles.ceilingNote}>
                       {onShelf === null
                         ? t('salesHistory.editCeilingNoRow', 'There is no stock row for this item, so only what was already sold stays on the invoice.')
@@ -742,7 +770,7 @@ export const EditSaleSheet = ({
                     </Text>
                   ) : null}
 
-                  {pid && returnedQty > 0 ? (
+                  {backQty > 0 ? (
                     <TouchableOpacity
                       style={styles.restockRow}
                       onPress={() => setRestock(prev => ({ ...prev, [pid]: !willRestock }))}
@@ -754,16 +782,16 @@ export const EditSaleSheet = ({
                       />
                       <Text style={[styles.restockText, willRestock ? styles.restockYes : styles.restockNo]}>
                         {willRestock
-                          ? t('salesHistory.restockYes', '+{{count}} Stock', { count: returnedQty })
+                          ? t('salesHistory.restockYes', '+{{count}} Stock', { count: backQty })
                           : t('salesHistory.restockNo', 'Do not restock')}
                       </Text>
                     </TouchableOpacity>
                   ) : null}
 
-                  {pid && returnedQty < 0 ? (
+                  {grew > 0 ? (
                     <Text style={styles.addedNote}>
                       {t('salesHistory.unitsAdded', '+{{count}} unit(s) come off the shelf when you save', {
-                        count: -returnedQty,
+                        count: grew,
                       })}
                     </Text>
                   ) : null}
@@ -784,6 +812,16 @@ export const EditSaleSheet = ({
             </TouchableOpacity>
 
             <View style={styles.summary}>
+              <Text style={styles.unitsNote}>
+                {t('salesHistory.editUnitsLine', '{{sold}} unit(s) sold on this receipt', {
+                  sold: unitsSold,
+                })}
+                {unitsBack > 0
+                  ? t('salesHistory.editUnitsHandedBack', ' · −{{returned}} handed back', {
+                      returned: unitsBack,
+                    })
+                  : ''}
+              </Text>
               <SummaryRow
                 label={t('salesHistory.editOriginalTotal', 'Original Total')}
                 value={`${amount(transaction.total)} DA`}
@@ -984,7 +1022,7 @@ export const EditSaleSheet = ({
           ...deepConcessions.slice(0, 3).map(
             line =>
               t('salesHistory.editApprovalLineDiscount', 'Discount on {{name}}: −{{percent}}% ({{dinars}} DA)', {
-                name: line.row.name,
+                name: line.name,
                 percent: line.percent.toFixed(1),
                 dinars: amount(Math.round(line.granted)),
               })
@@ -998,7 +1036,7 @@ export const EditSaleSheet = ({
               });
             }
             return change.kind === 'quantity'
-              ? t('salesHistory.editApprovalLineQty', '{{name}}: {{from}} → {{to}} units', {
+              ? t('salesHistory.editApprovalLineQty', '{{name}}: he leaves with {{from}} → {{to}} units', {
                   name: change.name,
                   from: change.from,
                   to: change.to,
@@ -1071,6 +1109,9 @@ const styles = StyleSheet.create({
   lineHeadText: { flex: 1, gap: 1 },
   lineName: { fontSize: fontSize.bodyStrong, fontWeight: '700', color: colors.textPrimary },
   lineSub: { fontSize: fontSize.caption, color: colors.textMuted },
+  /** The units this SKU's row carries back off the invoice — the same red the receipt
+      draws a `−` line in. */
+  lineReturned: { fontSize: fontSize.caption, color: colors.dangerText, fontWeight: '600' },
   lineTotal: { fontSize: fontSize.bodyStrong, fontWeight: '700', color: colors.textPrimary },
   controls: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   stepper: {
@@ -1085,6 +1126,7 @@ const styles = StyleSheet.create({
   stepBtn: { padding: spacing.xs },
   stepBtnOff: { opacity: 0.4 },
   stepValue: { minWidth: 42, textAlign: 'center', fontSize: fontSize.bodyStrong, fontWeight: '700', color: colors.textPrimary },
+  stepCaption: { minWidth: 42, textAlign: 'center', fontSize: fontSize.micro, color: colors.textMuted },
   priceInput: { flex: 1, minHeight: 44 },
   discountRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   discountInput: { flex: 1, minHeight: 44 },
@@ -1135,7 +1177,7 @@ const styles = StyleSheet.create({
   pickSub: { fontSize: fontSize.caption, color: colors.textMuted },
   pickPrice: { fontSize: fontSize.body, fontWeight: '700', color: colors.textPrimary },
   ceilingNote: { fontSize: fontSize.caption, color: colors.textMuted, fontStyle: 'italic' },
-  lockedNote: { fontSize: fontSize.caption, color: colors.textMuted },
+  unitsNote: { fontSize: fontSize.caption, color: colors.textMuted, fontWeight: '600' },
   summary: { backgroundColor: colors.surfaceMuted, borderRadius: radius.lg, padding: spacing.md, gap: spacing.xs },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   summaryLabel: { fontSize: fontSize.body, color: colors.textSecondary },
