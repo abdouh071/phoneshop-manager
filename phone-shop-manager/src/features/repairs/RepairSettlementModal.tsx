@@ -21,7 +21,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useToast } from '../../components/ui/Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
-import { formatStandardPhone, isPhoneMatch } from '../../utils/phoneUtils';
+import { formatStandardPhone, isPhoneMatch, normalizePhoneDigits } from '../../utils/phoneUtils';
 import { useRepairStore } from '../../store/repairStore';
 import { useCustomerStore } from '../../store/customerStore';
 import { useAuthStore } from '../../store/authStore';
@@ -89,17 +89,15 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
 
   // Proactively find existing customer account by phone or ID
   const matchingCustomer = useMemo(() => {
-    const cleanPhone = customerPhone.replace(/\D/g, '');
-    if (cleanPhone.length >= 8) {
-      const found = customers.find(c => {
-        const cDigits = (c.phone || '').replace(/\D/g, '');
-        return (
-          cDigits &&
-          (cDigits === cleanPhone ||
-            cDigits.endsWith(cleanPhone) ||
-            cleanPhone.endsWith(cDigits))
-        );
-      });
+    // The counter is typing the customer's own line here, and the match must be
+    // the same strict, dummy-guarded rule the rest of the app uses. The loose
+    // suffix scan used to adopt a placeholder number's profile — a debt recorded
+    // on a stranger's account is money the shop cannot chase.
+    if (normalizePhoneDigits(customerPhone).length >= 7) {
+      const found = customers.find(c =>
+        isPhoneMatch(c.phone, customerPhone) ||
+        (c.normalizedPhone && isPhoneMatch(c.normalizedPhone, customerPhone))
+      );
       if (found) return found;
     }
     if (ticket?.customerId) {

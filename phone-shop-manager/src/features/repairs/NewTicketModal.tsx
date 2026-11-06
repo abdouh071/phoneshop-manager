@@ -104,7 +104,7 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
   const { createTicket, updateTicket, activeDraft, saveActiveDraft: storeSaveDraft, clearActiveDraft, holdDraft, isCreatingTicket } = useRepairStore();
   const { storeName } = useSettingsStore();
   const isBusy = isSubmitting || isCreatingTicket || isPrinting;
-  const { findOrCreateCustomer, addCustomer, updateCustomer, enrichCustomer, customers, fetchCustomers } = useCustomerStore();
+  const { addCustomer, updateCustomer, enrichCustomer, customers, fetchCustomers } = useCustomerStore();
   const toast = useToast();
   const [ignoreDuplicatePhone, setIgnoreDuplicatePhone] = useState(false);
   const [isUpdatingCustomer, setIsUpdatingCustomer] = useState(false);
@@ -420,25 +420,13 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
             cust = { ...originalCust, name: newNameTrimmed };
             // Restore the customerId link so the ticket stays connected
             form.customerId = ticketToEdit.customerId;
-          } else if (hasValidPhone && formattedCustPhone) {
-            cust = await findOrCreateCustomer({
-              name: newNameTrimmed,
-              phone: formattedCustPhone,
-              notes: form.remark?.trim() || undefined,
-              device: deviceData,
-            });
           }
-        } else if (hasValidPhone && formattedCustPhone) {
-          // Customer account requires a phone number besides the name
-          cust = await findOrCreateCustomer({
-            name: form.customerName.trim(),
-            phone: formattedCustPhone,
-            notes: form.remark?.trim() || undefined,
-            device: deviceData,
-          });
         } else {
-          // Phone number is missing: do NOT create customer profile
-          // Repair record will still be registered as a walk-in without a customer account
+          // A ticket links to a customer ONLY when the counter picks one — the
+          // suggestion list, "Use existing", or "Save as separate". A name and
+          // phone typed freely stay on the ticket as text; the account is created
+          // or linked at settlement, where the counter actively enters it. Nothing
+          // here reaches out and adopts a profile the counter never chose.
           cust = undefined;
         }
       } catch (err) {

@@ -1073,10 +1073,11 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         );
       }
 
-      // 1B. If no match found by phone (or phone wasn't provided), match by name if provided
-      if (!existing && normalizedInputName) {
-        existing = get().customers.find(c => c.name.trim().toLowerCase() === normalizedInputName);
-      }
+      // A name is never a key to an account on its own: two different people can
+      // share a name, and matching by name used to attach a new client's ticket,
+      // device and number to a stranger's profile. The account is found by its
+      // phone line; anything else is a fresh profile the counter can merge by hand
+      // later if it is a real duplicate.
 
       // Helper to calculate and apply non-destructive customer enrichments
       const applyEnrichments = async (targetCustomer: Customer): Promise<Customer> => {
