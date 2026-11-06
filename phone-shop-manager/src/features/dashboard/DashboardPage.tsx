@@ -22,8 +22,8 @@ import { usePrivacyStore } from '../../store/privacyStore';
 import { usePermissions } from '../../hooks/usePermissions';
 import { EndOfDayButton } from '../endofday/EndOfDayButton';
 import { toDateStr } from '../../store/endOfDayStore';
-import { computeDayFigures, mergeDayInvoices } from '../../utils/dayFigures';
-import { netCogsOf, netUnitsSold } from '../../utils/saleEditLines';
+import { computeDayFigures, hasFinalStatus, mergeDayInvoices } from '../../utils/dayFigures';
+import { netUnitsSold } from '../../utils/saleEditLines';
 import { AdminMobileDashboard } from './AdminMobileDashboard';
 import type { RevenueDataPoint, SaleTransaction } from '../../types';
 import styles from './Dashboard.module.css';
@@ -32,7 +32,6 @@ import { getOverdueDebts } from '../../utils/debtAlerts';
 import {
   isClaimedAndPaidRepair,
   getClaimedRepairRevenue,
-  getClaimedRepairPartsCost,
 } from '../../utils/repairFinancials';
 
 const formatTime = (iso: string) =>
@@ -112,7 +111,7 @@ export const DashboardPage = () => {
   usePrivacyStore((s) => s.isPrivacyActive);
   const { products, fetchProducts, isLoading: productsLoading, error: productsError } = useInventoryStore();
   const { transactions, fetchTransactions, isLoadingTransactions, error: transactionsError } = useCartStore();
-  const { invoices: partsInvoices } = usePartsCartStore();
+  const { invoices: partsInvoices, fetchInvoices: fetchPartsInvoices } = usePartsCartStore();
   const { debts, customers, fetchCustomers, isLoading: customersLoading, error: customersError } = useCustomerStore();
   const { tickets, fetchTickets, isLoading: ticketsLoading, error: ticketsError } = useRepairStore();
   const { user, isHistoryUnlocked } = useAuthStore();
@@ -125,17 +124,19 @@ export const DashboardPage = () => {
   useEffect(() => {
     fetchProducts();
     fetchTransactions();
+    fetchPartsInvoices();
     fetchTickets();
     fetchCustomers();
-  }, [fetchProducts, fetchTransactions, fetchTickets, fetchCustomers]);
+  }, [fetchProducts, fetchTransactions, fetchPartsInvoices, fetchTickets, fetchCustomers]);
 
   const isLoading = productsLoading || ticketsLoading || customersLoading || isLoadingTransactions;
   const loadError = productsError || ticketsError || customersError || transactionsError;
-  const hasData = transactions.length > 0 || tickets.length > 0 || products.length > 0;
+  const hasData = transactions.length > 0 || partsInvoices.length > 0 || tickets.length > 0 || products.length > 0;
 
   const refreshAll = () => {
     fetchProducts();
     fetchTransactions();
+    fetchPartsInvoices();
     fetchTickets();
     fetchCustomers({ force: true });
   };
@@ -153,22 +154,21 @@ export const DashboardPage = () => {
 
   const yesterday = useMemo(() => { const d = new Date(today); d.setDate(d.getDate()-1); return d; }, [today]);
 
-  const activeTx = useMemo(() => transactions.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval'), [transactions]);
+  // The receipt list stays retail-only: its rows open ReceiptModal, which prints a
+  // till receipt, and a parts B2B invoice is a different document with its own page.
+  const retailTx = useMemo(() => transactions.filter(hasFinalStatus), [transactions]);
+  // Money reads both stores merged and deduped by id. The retail store never fetches
+  // parts invoices, so summing it alone hid every B2B sale from the revenue card while
+  // the drawer card below — which already merged them — counted it.
+  const activeInvoices = useMemo(
+    () => mergeDayInvoices(transactions, partsInvoices).filter(hasFinalStatus),
+    [transactions, partsInvoices]
+  );
   // All phones that have been claimed AND marked as paid or partly-paid (recognized revenue)
   const completedRepairs = useMemo(() => tickets.filter(t => isClaimedAndPaidRepair(t)), [tickets]);
 
-  // Today's Sales & Repairs
-  const todayTx = useMemo(() => activeTx.filter(t => isSameDay(t.date, today)), [activeTx, today]);
-  const yesterdayTx = useMemo(() => activeTx.filter(t => isSameDay(t.date, yesterday)), [activeTx, yesterday]);
-  // Use completedAt for the "when revenue was earned" timestamp
-  const todayRepairs = useMemo(
-    () => completedRepairs.filter(r => isSameDay(r.completedAt || r.updatedAt, today)),
-    [completedRepairs, today]
-  );
-  const yesterdayRepairs = useMemo(
-    () => completedRepairs.filter(r => isSameDay(r.completedAt || r.updatedAt, yesterday)),
-    [completedRepairs, yesterday]
-  );
+  const todayTx = useMemo(() => activeInvoices.filter(t => isSameDay(t.date, today)), [activeInvoices, today]);
+  const yesterdayTx = useMemo(() => activeInvoices.filter(t => isSameDay(t.date, yesterday)), [activeInvoices, yesterday]);
 
   const startOfWeek = useMemo(() => { 
     const d = new Date(today); 
@@ -182,75 +182,44 @@ export const DashboardPage = () => {
 
   const startOfMonth = useMemo(() => new Date(today.getFullYear(), today.getMonth(), 1), [today]);
 
-  // Combined Daily Revenue (Retail Sales + Parts B2B + Repairs + Debt Collections on the day paid)
-  const todaySalesRev = useMemo(() => todayTx.reduce((s,t) => s+t.total, 0), [todayTx]);
-  const todayRetailTx = useMemo(() => todayTx.filter(t => t.saleType !== 'parts_b2b'), [todayTx]);
-  const todayPartsTx = useMemo(() => todayTx.filter(t => t.saleType === 'parts_b2b'), [todayTx]);
-  const todayRetailSalesRev = useMemo(() => todayRetailTx.reduce((s,t) => s+t.total, 0), [todayRetailTx]);
-  const todayPartsRev = useMemo(() => todayPartsTx.reduce((s,t) => s+t.total, 0), [todayPartsTx]);
-
-  const todayRepRev = useMemo(
-    () => todayRepairs.reduce((s,r) => s + getClaimedRepairRevenue(r), 0),
-    [todayRepairs]
+  // One formula for the day — the same one the End-of-Day seal freezes. Revenue,
+  // profit and the drawer all come out of it, so the cards cannot disagree with each
+  // other or with the sealed day. Debt collections stay out of revenue: that money
+  // was recognised when the sale was made, and only the drawer sees it again.
+  const daySources = useMemo(
+    () => ({
+      transactions: mergeDayInvoices(transactions, partsInvoices),
+      repairs: tickets,
+      debts,
+    }),
+    [transactions, partsInvoices, tickets, debts]
   );
-  const dailyRevenue = todaySalesRev + todayRepRev;
+  const todayFigures = useMemo(() => computeDayFigures(daySources, toDateStr(today)), [daySources, today]);
+  const yesterdayFigures = useMemo(() => computeDayFigures(daySources, toDateStr(yesterday)), [daySources, yesterday]);
 
-  const yestSalesRev = useMemo(() => yesterdayTx.reduce((s,t) => s+t.total, 0), [yesterdayTx]);
-  const yestRepRev = useMemo(
-    () => yesterdayRepairs.reduce((s,r) => s + getClaimedRepairRevenue(r), 0),
-    [yesterdayRepairs]
-  );
-  useMemo(() => {
-    return debts
-      .flatMap(d => (d.payments || []).filter(p => isSameDay(p.date, yesterday)))
-      .filter(p => String(p.method || '').toLowerCase() === 'cash')
-      .reduce((s, p) => s + (p.amount || 0), 0);
-  }, [debts, yesterday]);
+  const todayRetailSalesRev = todayFigures.salesGrossRevenue;
+  const todayPartsRev = todayFigures.partsRevenue;
+  const todaySalesRev = todayRetailSalesRev + todayPartsRev;
+  const todayRepRev = todayFigures.repairsRevenue;
+  const dailyRevenue = todayFigures.totalRevenue;
+  const yesterdayRev = yesterdayFigures.totalRevenue;
+  const todayNetProfit = todayFigures.totalNetProfit;
+  const todayCash = todayFigures.totalCash;
+  const todayCard = todayFigures.totalCard;
+  const todayMobile = todayFigures.totalMobile;
 
-  const yesterdayRev = yestSalesRev + yestRepRev;
-
-  // Today's Estimated Net Profit (parts cost only for claimed+paid repairs; debt collection is cash inflow, not double-counted revenue)
-  const todaySalesCOGS = useMemo(
-    () => todayTx.reduce((sum, t) => sum + netCogsOf(t.items), 0),
-    [todayTx]
-  );
-  const todayRepairsCOGS = useMemo(
-    () => todayRepairs.reduce((sum, r) => sum + getClaimedRepairPartsCost(r), 0),
-    [todayRepairs]
-  );
-  const todayNetProfit = dailyRevenue - (todaySalesCOGS + todayRepairsCOGS);
-
-  // The drawer, card and mobile-pay cards read the one day-figures formula the
-  // End-of-Day seal uses, over the same merged invoice lists, so the dashboard
-  // and the sealed day can never disagree about the till's money.
-  const todayTender = useMemo(
-    () =>
-      computeDayFigures(
-        {
-          transactions: mergeDayInvoices(transactions, partsInvoices),
-          repairs: tickets,
-          debts,
-        },
-        toDateStr(today)
-      ),
-    [transactions, partsInvoices, tickets, debts, today]
-  );
-  const todayCash = todayTender.totalCash;
-  const todayCard = todayTender.totalCard;
-  const todayMobile = todayTender.totalMobile;
-
-  // Weekly & Monthly Combined Revenues (Sales + Repairs)
+  // Weekly & Monthly Combined Revenues (Sales + Parts B2B + Repairs)
   const weeklyRevenue = useMemo(() => {
-    const sRev = activeTx.filter(t => new Date(t.date) >= startOfWeek).reduce((s,t)=>s+t.total, 0);
+    const sRev = activeInvoices.filter(t => new Date(t.date) >= startOfWeek).reduce((s,t)=>s+t.total, 0);
     const rRev = completedRepairs.filter(r => new Date(r.completedAt || r.updatedAt) >= startOfWeek).reduce((s,r)=>s+getClaimedRepairRevenue(r), 0);
     return sRev + rRev;
-  }, [activeTx, completedRepairs, startOfWeek]);
+  }, [activeInvoices, completedRepairs, startOfWeek]);
 
   const monthlyRevenue = useMemo(() => {
-    const sRev = activeTx.filter(t => new Date(t.date) >= startOfMonth).reduce((s,t)=>s+t.total, 0);
+    const sRev = activeInvoices.filter(t => new Date(t.date) >= startOfMonth).reduce((s,t)=>s+t.total, 0);
     const rRev = completedRepairs.filter(r => new Date(r.completedAt || r.updatedAt) >= startOfMonth).reduce((s,r)=>s+getClaimedRepairRevenue(r), 0);
     return sRev + rRev;
-  }, [activeTx, completedRepairs, startOfMonth]);
+  }, [activeInvoices, completedRepairs, startOfMonth]);
 
   const unitsSoldToday = useMemo(() => Math.max(0, todayTx.reduce((s,t) => s + netUnitsSold(t.items), 0)), [todayTx]);
   const unitsYesterday = useMemo(() => Math.max(0, yesterdayTx.reduce((s,t) => s + netUnitsSold(t.items), 0)), [yesterdayTx]);
@@ -261,29 +230,16 @@ export const DashboardPage = () => {
   const activeRepairs = useMemo(() => tickets.filter(t => t.status === 'pending' || t.status === 'in_progress').length, [tickets]);
   const lowStockCount = useMemo(() => products.filter(p => p.stockStatus !== 'in_stock').length, [products]);
 
-  // Combined 7-Day Chart Data (Sales + Repairs + Debt Collections)
+  // Each bar is the same day formula the cards read, so today's bar and today's
+  // revenue card are one number. A debt repayment is not revenue: it was recognised
+  // on the day the sale was made, and counting it here sold the same phone twice.
   const chartData: RevenueDataPoint[] = useMemo(() => Array.from({ length: 7 }, (_, i) => {
     const day = new Date(today);
     day.setDate(today.getDate() - (6 - i));
-    const dayStart = new Date(day); dayStart.setHours(0,0,0,0);
-    const dayEnd = new Date(day); dayEnd.setHours(23,59,59,999);
+    return { label: DAYS[day.getDay()], revenue: computeDayFigures(daySources, toDateStr(day)).totalRevenue };
+  }), [daySources, today]);
 
-    const sRev = activeTx
-      .filter(t => { const d = new Date(t.date); return d >= dayStart && d <= dayEnd; })
-      .reduce((s,t) => s+t.total, 0);
-
-    const rRev = completedRepairs
-      .filter(r => { const d = new Date(r.completedAt || r.updatedAt); return d >= dayStart && d <= dayEnd; })
-      .reduce((s,r) => s + getClaimedRepairRevenue(r), 0);
-
-    const dRev = debts
-      .flatMap(d => (d.payments || []).filter(p => { const dt = new Date(p.date); return dt >= dayStart && dt <= dayEnd; }))
-      .reduce((s,p) => s + p.amount, 0);
-
-    return { label: DAYS[day.getDay()], revenue: sRev + rRev + dRev };
-  }), [activeTx, completedRepairs, debts, today]);
-
-  const recentTransactions: SaleTransaction[] = useMemo(() => activeTx.slice(0, 8), [activeTx]);
+  const recentTransactions: SaleTransaction[] = useMemo(() => retailTx.slice(0, 8), [retailTx]);
   const isAnalyticsLocked = user?.role !== 'admin' && !isHistoryUnlocked;
 
   // Show mobile admin dashboard on small screens
@@ -457,7 +413,7 @@ export const DashboardPage = () => {
             permissions.pos && permissions.repairs
               ? `Sales: ${formatPrivateCurrency(todayRetailSalesRev)} • Repairs: ${formatPrivateCurrency(todayRepRev)}${todayPartsRev > 0 ? ` • Parts: ${formatPrivateCurrency(todayPartsRev)}` : ''}`
               : permissions.repairs
-                ? `${todayRepairs.length} repairs finished today`
+                ? `${todayFigures.repairsRecognizedCount} repairs finished today`
                 : `${todayTx.length} completed sales`
           }
           icon={<DollarSign size={20} />}
@@ -498,7 +454,7 @@ export const DashboardPage = () => {
           <StatCard
             label={t('dashboard.activeRepairs', 'Active Workshop Repairs')}
             value={String(activeRepairs)}
-            subtext={`${todayRepairs.length} finished today`}
+            subtext={`${todayFigures.repairsRecognizedCount} finished today`}
             icon={<Wrench size={20} />}
             onClick={() => navigate('/repairs')}
             linkLabel="View Board"
@@ -574,7 +530,7 @@ export const DashboardPage = () => {
             <Card>
               <CardHeader
                 title={permissions.repairs ? "Weekly Revenue (Sales + Repairs)" : "Weekly Revenue (Sales)"}
-                subtitle={`Total: ${formatPrivateCurrency(permissions.repairs ? weeklyRevenue : activeTx.filter(t => new Date(t.date) >= startOfWeek).reduce((s, t) => s + t.total, 0))}`}
+                subtitle={`Total: ${formatPrivateCurrency(permissions.repairs ? weeklyRevenue : activeInvoices.filter(t => new Date(t.date) >= startOfWeek).reduce((s, t) => s + t.total, 0))}`}
               />
               <MiniBarChart data={chartData} />
             </Card>

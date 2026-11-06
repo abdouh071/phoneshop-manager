@@ -7,7 +7,7 @@
  * numbers move, every sealed day suddenly disagrees with the same day recomputed.
  */
 import { describe, it, expect } from 'vitest';
-import { computeDayFigures, mergeDayInvoices } from './dayFigures';
+import { computeDayFigures, hasFinalStatus, mergeDayInvoices } from './dayFigures';
 import type { CustomerDebtEntry, PhoneModel, RepairTicket, SaleTransaction } from '../types';
 
 const DAY = '2026-02-10';
@@ -310,5 +310,63 @@ describe('computeDayFigures', () => {
     const notRestocked = computeDayFigures(day(true), DAY);
     expect(notRestocked.salesCOGS).toBe(1000);
     expect(notRestocked.salesNetProfit).toBe(0);
+  });
+});
+
+describe('the day the dashboard shows', () => {
+  it('shares one exclusion rule with the day formula', () => {
+    expect(hasFinalStatus(tx('a', 100, [['cash', 100]]))).toBe(true);
+    expect(hasFinalStatus(tx('b', 100, [['cash', 100]], { status: undefined }))).toBe(true);
+    for (const status of ['refunded', 'voided', 'cancelled', 'pending_approval'] as const) {
+      expect(hasFinalStatus(tx(status, 100, [['cash', 100]], { status }))).toBe(false);
+    }
+  });
+
+  it('counts a parts invoice the retail store never fetched', () => {
+    // The two stores hold different documents: the retail query filters saleType, so a
+    // B2B invoice exists only in the parts list. Reading one list showed no parts money
+    // on the revenue card while the drawer card, which merged them, counted it.
+    const retail = [tx('tx-retail', 1000, [['cash', 1000]])];
+    const parts = [tx('tx-parts', 800, [['cash', 800]], { saleType: 'parts_b2b' })];
+
+    const retailOnly = computeDayFigures({ transactions: retail, repairs: [], debts: [] }, DAY);
+    expect(retailOnly.totalRevenue).toBe(1000);
+
+    const merged = computeDayFigures(
+      { transactions: mergeDayInvoices(retail, parts), repairs: [], debts: [] },
+      DAY
+    );
+    expect(merged.partsRevenue).toBe(800);
+    expect(merged.totalRevenue).toBe(1800);
+    expect(merged.totalCash).toBe(1800);
+  });
+
+  it('splits into exactly the three cards the dashboard prints, and no more', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: mergeDayInvoices(
+          [tx('tx-retail', 1000, [['cash', 1000]])],
+          [tx('tx-parts', 800, [['cash', 800]], { saleType: 'parts_b2b' })]
+        ),
+        repairs: [
+          ticket('r-paid', {
+            status: 'completed',
+            completedAt: at(17),
+            actualCost: 700,
+            paymentStatus: 'paid',
+            handoverAmountPaid: 700,
+          }),
+        ],
+        debts: [debt('d-1', [{ date: at(12), amount: 250, method: 'cash' }])],
+      },
+      DAY
+    );
+
+    expect(figures.salesGrossRevenue + figures.partsRevenue + figures.repairsRevenue).toBe(figures.totalRevenue);
+    // A repayment is money the shop already recognised on the day of the sale: it moves
+    // the drawer, never the revenue line. The 7-day chart used to add it a second time.
+    expect(figures.debtCollectedCash).toBe(250);
+    expect(figures.totalRevenue).toBe(2500);
+    expect(figures.totalCash).toBe(2750);
   });
 });

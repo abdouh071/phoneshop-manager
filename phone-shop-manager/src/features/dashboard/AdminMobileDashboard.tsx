@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import { useCartStore } from '../../store/cartStore';
+import { usePartsCartStore } from '../../store/partsCartStore';
 import { useRepairStore } from '../../store/repairStore';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useAuthStore } from '../../store/authStore';
@@ -17,6 +18,8 @@ import {
 } from '../../utils/repairFinancials';
 import { formatPrivateCurrency } from '../../utils/formatCurrency';
 import { soldUnits } from '../../utils/saleEditLines';
+import { computeDayFigures, hasFinalStatus, mergeDayInvoices } from '../../utils/dayFigures';
+import { toDateStr } from '../../utils/localDate';
 import styles from './AdminMobileDashboard.module.css';
 
 export const AdminMobileDashboard: React.FC = () => {
@@ -25,6 +28,7 @@ export const AdminMobileDashboard: React.FC = () => {
   const haptic = useHaptic();
   const { user } = useAuthStore();
   const { transactions } = useCartStore();
+  const { invoices: partsInvoices } = usePartsCartStore();
   const { tickets } = useRepairStore();
   const { products } = useInventoryStore();
   const { debts } = useCustomerStore();
@@ -39,53 +43,39 @@ export const AdminMobileDashboard: React.FC = () => {
     return d.getTime() === day.getTime();
   };
 
-  const activeTx = useMemo(() => transactions.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval'), [transactions]);
+  // Both stores, one day. The retail store never fetches parts invoices, so reading it
+  // alone left the parts row below permanently at zero while the desktop card counted it.
+  const activeInvoices = useMemo(
+    () => mergeDayInvoices(transactions, partsInvoices).filter(hasFinalStatus),
+    [transactions, partsInvoices]
+  );
   const completedRepairs = useMemo(() => tickets.filter(t => isClaimedAndPaidRepair(t)), [tickets]);
 
-  const todayTx = useMemo(() => activeTx.filter(t => isSameDay(t.date, today)), [activeTx, today]);
-  const yesterdayTx = useMemo(() => activeTx.filter(t => isSameDay(t.date, yesterday)), [activeTx, yesterday]);
+  const todayTx = useMemo(() => activeInvoices.filter(t => isSameDay(t.date, today)), [activeInvoices, today]);
 
-  const todayRetailSalesRev = useMemo(() => todayTx.filter(t => t.saleType !== 'parts_b2b').reduce((s, t) => s + t.total, 0), [todayTx]);
-  const todayPartsRev = useMemo(() => todayTx.filter(t => t.saleType === 'parts_b2b').reduce((s, t) => s + t.total, 0), [todayTx]);
-  const todaySalesRev = todayRetailSalesRev + todayPartsRev;
-  const yesterdaySalesRev = useMemo(() => yesterdayTx.reduce((s, t) => s + t.total, 0), [yesterdayTx]);
-
-  const todayRepairRev = useMemo(() =>
-    completedRepairs
-      .filter(r => isSameDay(r.completedAt || r.updatedAt, today))
-      .reduce((s, r) => s + getClaimedRepairRevenue(r), 0),
-    [completedRepairs, today]
+  // The same day formula the desktop dashboard and the End-of-Day seal read, so the
+  // phone and the counter cannot show two different totals for one day.
+  const daySources = useMemo(
+    () => ({ transactions: mergeDayInvoices(transactions, partsInvoices), repairs: tickets, debts }),
+    [transactions, partsInvoices, tickets, debts]
   );
-  const yesterdayRepairRev = useMemo(() =>
-    completedRepairs
-      .filter(r => isSameDay(r.completedAt || r.updatedAt, yesterday))
-      .reduce((s, r) => s + getClaimedRepairRevenue(r), 0),
-    [completedRepairs, yesterday]
-  );
+  const todayFigures = useMemo(() => computeDayFigures(daySources, toDateStr(today)), [daySources, today]);
+  const yesterdayFigures = useMemo(() => computeDayFigures(daySources, toDateStr(yesterday)), [daySources, yesterday]);
 
-  const todayDebtCollected = useMemo(() => {
-    return debts
-      .flatMap(d => (d.payments || []).filter(p => isSameDay(p.date, today)))
-      .filter(p => String(p.method || '').toLowerCase() === 'cash')
-      .reduce((s, p) => s + p.amount, 0);
-  }, [debts, today]);
-
-  useMemo(() => {
-    return debts
-      .flatMap(d => (d.payments || []).filter(p => isSameDay(p.date, yesterday)))
-      .filter(p => String(p.method || '').toLowerCase() === 'cash')
-      .reduce((s, p) => s + p.amount, 0);
-  }, [debts, yesterday]);
+  const todayRetailSalesRev = todayFigures.salesGrossRevenue;
+  const todayPartsRev = todayFigures.partsRevenue;
+  const todayRepairRev = todayFigures.repairsRevenue;
+  const todayDebtCollected = todayFigures.debtCollectedCash;
 
   const startOfMonth = useMemo(() => new Date(today.getFullYear(), today.getMonth(), 1), [today]);
   const monthlyRev = useMemo(() => {
-    const s = activeTx.filter(t => new Date(t.date) >= startOfMonth).reduce((a, t) => a + t.total, 0);
+    const s = activeInvoices.filter(t => new Date(t.date) >= startOfMonth).reduce((a, t) => a + t.total, 0);
     const r = completedRepairs.filter(r => new Date(r.completedAt || r.updatedAt) >= startOfMonth).reduce((a, r) => a + getClaimedRepairRevenue(r), 0);
     return s + r;
-  }, [activeTx, completedRepairs, startOfMonth]);
+  }, [activeInvoices, completedRepairs, startOfMonth]);
 
-  const todayRevenue = todaySalesRev + todayRepairRev;
-  const yesterdayRevenue = yesterdaySalesRev + yesterdayRepairRev;
+  const todayRevenue = todayFigures.totalRevenue;
+  const yesterdayRevenue = yesterdayFigures.totalRevenue;
   const revenueChange = yesterdayRevenue === 0
     ? (todayRevenue > 0 ? 100 : 0)
     : ((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100;
@@ -103,7 +93,7 @@ export const AdminMobileDashboard: React.FC = () => {
     return lang.startsWith('ar') ? 'ar-DZ' : lang.startsWith('fr') ? 'fr-FR' : 'en-US';
   }, []);
   const recentStaffActivity = useMemo(() =>
-    [...activeTx]
+    [...activeInvoices]
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, 6)
       .map(tx => ({
@@ -114,7 +104,7 @@ export const AdminMobileDashboard: React.FC = () => {
         amount: tx.total,
         time: new Date(tx.date).toLocaleTimeString(timeLocale, { hour: '2-digit', minute: '2-digit' }),
       })),
-    [activeTx, timeLocale, t]
+    [activeInvoices, timeLocale, t]
   );
 
   const nav = (path: string) => { haptic.tap(); navigate(path); };

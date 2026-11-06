@@ -78,7 +78,9 @@ export interface DayFigures {
   totalMobile: number;
 }
 
-const hasFinalStatus = (tx: SaleTransaction): boolean =>
+/** The one exclusion rule for a document that counted as a sale: shared by the day
+ *  formula and by the screens that sum a date range themselves. */
+export const hasFinalStatus = (tx: SaleTransaction): boolean =>
   !EXCLUDED_SALE_STATUSES.includes((tx.status ?? 'completed') as (typeof EXCLUDED_SALE_STATUSES)[number]);
 
 /**
