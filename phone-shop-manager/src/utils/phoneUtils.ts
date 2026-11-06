@@ -179,10 +179,24 @@ export const isValidNameForDeduplication = (name?: string | null): boolean => {
   if (!name) return false;
   const clean = name.trim().toLowerCase();
   if (GENERIC_NAMES.has(clean)) return false;
-  const alphaNum = clean.replace(/[^a-z0-9]/gi, '');
+  // Latin and Arabic letters both count — a name typed in Arabic is a name, and
+  // stripping its letters used to make every Arabic-named client invisible to the
+  // duplicate suggestions and the ticket form's customer list.
+  const alphaNum = clean.replace(/[^a-z0-9\u0600-\u06FF]/gi, '');
   if (alphaNum.length < 3) return false;
   return true;
 };
+
+/**
+ * A profile worth offering in the new-ticket form: a real name on a real phone
+ * line. Walk-ins never live in the customer list, and placeholder rows (a generic
+ * name or a dummy number) must not be suggested as accounts — only a client
+ * registered with both belongs in the dropdown.
+ */
+export const isRegisteredAccount = (c: {
+  name?: string | null;
+  phone?: string | null;
+}): boolean => isValidNameForDeduplication(c.name) && !isDummyPhone(c.phone);
 
 /**
  * The id of a synthesized walk-in profile. A walk-in is never stored as a customer

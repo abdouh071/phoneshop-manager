@@ -16,6 +16,8 @@ import {
   isPhoneMatch,
   isMoreDescriptiveName,
   isValidNameForDeduplication,
+  isRegisteredAccount,
+  walkInCustomerId,
   formatWhatsAppUrl,
 } from './phoneUtils';
 
@@ -212,6 +214,49 @@ describe('isValidNameForDeduplication', () => {
   it('returns true for real customer names', () => {
     expect(isValidNameForDeduplication('Amine Benali')).toBe(true);
     expect(isValidNameForDeduplication('Samir')).toBe(true);
+  });
+
+  it('returns true for names written in Arabic', () => {
+    expect(isValidNameForDeduplication('أحمد')).toBe(true);
+    expect(isValidNameForDeduplication('محمود بن علي')).toBe(true);
+  });
+});
+
+// ─── isRegisteredAccount ──────────────────────────────────────────────────────
+
+describe('isRegisteredAccount', () => {
+  it('accepts a real name on a real phone line', () => {
+    expect(isRegisteredAccount({ name: 'Karim Benali', phone: '0550 12 34 56' })).toBe(true);
+    expect(isRegisteredAccount({ name: 'أحمد', phone: '0770123456' })).toBe(true);
+  });
+
+  it('rejects a dummy or missing phone, whatever the name', () => {
+    expect(isRegisteredAccount({ name: 'Karim Benali', phone: '00000000' })).toBe(false);
+    expect(isRegisteredAccount({ name: 'Karim Benali', phone: '' })).toBe(false);
+    expect(isRegisteredAccount({ name: 'Karim Benali' })).toBe(false);
+  });
+
+  it('rejects a generic or missing name, whatever the phone', () => {
+    expect(isRegisteredAccount({ name: 'Client', phone: '0550 12 34 56' })).toBe(false);
+    expect(isRegisteredAccount({ name: 'passager', phone: '0550 12 34 56' })).toBe(false);
+    expect(isRegisteredAccount({ phone: '0550 12 34 56' })).toBe(false);
+  });
+});
+
+// ─── walkInCustomerId ─────────────────────────────────────────────────────────
+
+describe('walkInCustomerId', () => {
+  it('is unique per ticket even when two passengers share one phone line', () => {
+    const first = walkInCustomerId('0550 12 34 56', 'tkt-a');
+    const second = walkInCustomerId('0550 12 34 56', 'tkt-b');
+
+    expect(first).not.toBe(second);
+    expect(first).toContain('0550123456');
+    expect(second).toContain('tkt-b');
+  });
+
+  it('is stable for the same ticket, so the audit and the profile view agree', () => {
+    expect(walkInCustomerId('+213 550 12 34 56', 'tkt-a')).toBe(walkInCustomerId('0550123456', 'tkt-a'));
   });
 });
 

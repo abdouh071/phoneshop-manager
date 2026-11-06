@@ -13,7 +13,7 @@ import dropStyles from './CustomerDropdown.module.css';
 import styles from './NewTicketModal.module.css';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { usePrivacyStore } from '../../store/privacyStore';
-import { formatStandardPhone, normalizePhoneDigits, isPhoneMatch } from '../../utils/phoneUtils';
+import { formatStandardPhone, normalizePhoneDigits, isPhoneMatch, isRegisteredAccount } from '../../utils/phoneUtils';
 import { CustomerDuplicatePromptCard } from '../../components/customers/CustomerDuplicatePromptCard';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { LockCodeInput } from './LockCodeWidget';
@@ -164,13 +164,16 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Filter customers by search
+  // Only registered accounts are suggested: a real name on a real phone line.
+  // Walk-in tickets never live in the customer list, and placeholder rows must
+  // not be offered — the counter can only pick a client who is actually on file.
   const suggestions = customerQuery.trim()
     ? customers.filter(c =>
-        (c.name ?? '').toLowerCase().includes(customerQuery.toLowerCase()) ||
-        (c.phone ?? '').includes(customerQuery)
+        isRegisteredAccount(c) &&
+        ((c.name ?? '').toLowerCase().includes(customerQuery.toLowerCase()) ||
+          (c.phone ?? '').includes(customerQuery))
       ).slice(0, 6)
-    : customers.slice(0, 6);
+    : customers.filter(c => isRegisteredAccount(c)).slice(0, 6);
 
   const handleSelectCustomer = (c: { id?: string; name: string; phone: string }) => {
     setForm(prev => ({ ...prev, customerId: c.id, customerName: c.name, customerPhone: c.phone }));
