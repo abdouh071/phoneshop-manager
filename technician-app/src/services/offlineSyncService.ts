@@ -28,7 +28,7 @@ import { db } from '../lib/firebase';
 import { addIdempotently } from './idempotentReplay';
 import { allocateTicketNumber } from './ticketCounter';
 import { customerService } from './customerService';
-import { applyPartsDelta, applyStockLines } from './stockService';
+import { commitPartsAllocation, applyStockLines } from './stockService';
 import {
   MAX_ATTEMPTS,
   buildStatusPatch,
@@ -584,44 +584,39 @@ const flushParts = async (map: IdMap, queuedTicketIds: Set<string>): Promise<Flu
 
       const current = snap.data() as Record<string, unknown>;
       const parts = Array.isArray(payload.parts) ? (payload.parts as AllocatedPart[]) : [];
+      const previous = Array.isArray(current.partsUsed)
+        ? (current.partsUsed as AllocatedPart[])
+        : [];
 
-      // The action id stamped on the document is what makes the stock move
-      // exactly once: a retry of an already-applied allocation must not take the
-      // part off the shelf a second time.
-      const alreadyApplied = current.lastPartsActionId === action.id;
-
-      if (!alreadyApplied) {
-        const previous = Array.isArray(current.partsUsed)
-          ? (current.partsUsed as AllocatedPart[])
-          : [];
-        const { failed } = await applyPartsDelta(previous, parts);
-        if (failed.length) {
-          // Park the shelf movement in its own queue; the allocation itself can
-          // still land so the ticket is not blocked behind one unknown SKU.
-          for (const f of failed) {
-            await enqueue({
-              id: newActionId('stock'),
-              kind: 'stock',
-              payload: { productId: f.delta.productId, name: f.delta.name, delta: -f.delta.delta, reason: `Repair ${ticketId} parts` } as StockPayload,
-              createdAt: nowIso(),
-              attempts: 0,
-              nextAttemptAt: 0,
-              ticketRef: ticketId,
-            });
-          }
-        }
-      }
-
-      await updateDoc(ref, {
+      // The shelf moves and the action-id stamp land in ONE transaction, so a
+      // retry after a crash can neither deduct the same parts twice (delta-first
+      // order) nor skip the movement (stamp-first order). A retry whose stamp is
+      // already on the document adopts it and moves nothing.
+      const { failed } = await commitPartsAllocation(ticketId, action.id, previous, {
         partsUsed: parts.map((p) => ({
           name: p.name,
           cost: Number(p.cost) || 0,
           quantity: Math.max(1, Math.trunc(Number(p.quantity) || 1)),
           productId: p.productId || 'custom-mobile-part',
         })),
-        lastPartsActionId: action.id,
         updatedAt: nowIso(),
       });
+
+      if (failed.length) {
+        // Park the shelf movement in its own queue; the allocation itself can
+        // still land so the ticket is not blocked behind one unknown SKU.
+        for (const f of failed) {
+          await enqueue({
+            id: newActionId('stock'),
+            kind: 'stock',
+            payload: { productId: f.delta.productId, name: f.delta.name, delta: -f.delta.delta, reason: `Repair ${ticketId} parts` } as StockPayload,
+            createdAt: nowIso(),
+            attempts: 0,
+            nextAttemptAt: 0,
+            ticketRef: ticketId,
+          });
+        }
+      }
 
       await removeActions('parts', new Set([action.id]));
       out.synced++;

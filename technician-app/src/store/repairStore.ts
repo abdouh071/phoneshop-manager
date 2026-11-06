@@ -17,7 +17,7 @@ import { activityLogService } from '../services/activityLogService';
 import { customerService } from '../services/customerService';
 import { offlineSyncService } from '../services/offlineSyncService';
 import { notificationService } from '../services/notificationService';
-import { applyPartsDelta } from '../services/stockService';
+import { commitPartsAllocation } from '../services/stockService';
 import { allocateTicketNumber } from '../services/ticketCounter';
 import { appendHistory, buildStatusPatch, isSettleAlreadyRecorded, isOfflineCustomerId, type HistoryEntryLike } from '../services/offlineQueuePolicy';
 import { createRefCountedSubscription, type RefCountedSubscription } from '../utils/liveSubscription';
@@ -469,12 +469,14 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         ?? get().tickets.find(t => t.id === id)?.partsUsed
         ?? [];
 
-      await updateDoc(docRef, {
+      // Stock moves and the ticket write land in one transaction; a crash between
+      // them used to leave the ticket updated with the shelf never told, or the
+      // shelf told with the ticket never updated.
+      const actionId = `parts_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      const { failed } = await commitPartsAllocation(id, actionId, previous, {
         partsUsed: normalized,
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       });
-
-      const { failed } = await applyPartsDelta(previous, normalized);
       for (const f of failed) {
         console.warn(`[RepairStore] Parts stock delta failed for ${f.delta.name}, queuing:`, f.error);
         await offlineSyncService.saveOfflineStockDelta({

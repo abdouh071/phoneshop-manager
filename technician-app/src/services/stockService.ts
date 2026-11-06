@@ -282,3 +282,83 @@ export const readStock = async (id: string): Promise<number | null> => {
   const found = await readCurrentStock(id);
   return found ? clampStock(found.data.stock) : null;
 };
+
+/** The fields a parts commit writes on the ticket, alongside the stock moves. */
+export interface TicketPartsFields {
+  partsUsed: { productId: string; name: string; cost: number; quantity: number }[];
+  updatedAt: string;
+}
+
+export interface PartsCommitOutcome {
+  applied: PartsDelta[];
+  failed: { delta: PartsDelta; error: string }[];
+  /** The ticket already carried this action's stamp, so nothing moved again. */
+  adopted: boolean;
+}
+
+/**
+ * One transaction moves the shelf AND stamps the ticket with the action id that
+ * moved it. A crash between the stock write and the stamp used to leave the retry
+ * free to deduct the same parts twice (delta-first order) or to skip the movement
+ * entirely (stamp-first order); with both writes in one transaction, either the
+ * whole allocation lands or none of it does, and a retry that finds its own stamp
+ * adopts the document and moves nothing.
+ */
+export const commitPartsAllocation = async (
+  ticketId: string,
+  actionId: string,
+  previous: { productId?: string | null; name?: string; quantity?: number }[],
+  fields: TicketPartsFields
+): Promise<PartsCommitOutcome> => {
+  const deltas = diffParts(previous, fields.partsUsed);
+  const applied: PartsDelta[] = [];
+  const failed: { delta: PartsDelta; error: string }[] = [];
+  let adopted = false;
+
+  await withTimeout(
+    runTransaction(db, async (tx) => {
+      const ticketRef = doc(db, 'repairs', ticketId);
+      const ticketSnap = await tx.get(ticketRef);
+      if (!ticketSnap.exists()) throw new Error(`Ticket ${ticketId} no longer exists`);
+      const current = ticketSnap.data() as Record<string, unknown>;
+
+      if (current.lastPartsActionId === actionId) {
+        adopted = true;
+        return;
+      }
+
+      // diffParts keys by product, so every delta touches a different counter and
+      // the writes inside this transaction cannot contend with each other.
+      for (const delta of deltas) {
+        let ref = doc(db, 'inventory', delta.productId);
+        let snap = await tx.get(ref);
+        if (!snap.exists()) {
+          ref = doc(db, 'products', delta.productId);
+          snap = await tx.get(ref);
+          if (!snap.exists()) {
+            failed.push({ delta, error: `Product ${delta.productId} not found in inventory or products` });
+            continue;
+          }
+        }
+        const data = snap.data() as Record<string, unknown>;
+        const currentStock = clampStock(data.stock);
+        const threshold = data.lowStockThreshold ?? 1;
+        // A part added to the ticket leaves the shelf; a removed one returns to it.
+        const nextStock = Math.max(0, currentStock - delta.delta);
+        const stockStatus = deriveStockStatus(nextStock, threshold) as StockStatus;
+        tx.update(ref, { stock: nextStock, stockStatus });
+        applied.push(delta);
+      }
+
+      tx.update(ticketRef, {
+        partsUsed: fields.partsUsed,
+        lastPartsActionId: actionId,
+        updatedAt: fields.updatedAt,
+      });
+    }),
+    STOCK_TX_TIMEOUT_MS,
+    'partsAllocation'
+  );
+
+  return { applied, failed, adopted };
+};
