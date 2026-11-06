@@ -59,6 +59,16 @@ export interface PhoneLifecycleAnalysis {
 export const isTicketActiveReturnPending = (ticket: RepairTicket, allTickets: RepairTicket[]): boolean => {
   if (ticket.status !== 'returned') return false;
 
+  // A return is only settled when its LATEST return child is settled. An older
+  // child completed while a newer one is still in the shop must not close the
+  // parent — the device is still out with the customer, and the auto-heal would
+  // write `completed` over a live return. Check the open children before any
+  // "resolved" short-circuit below.
+  const openChild = allTickets.find(
+    t => t.parentTicketId === ticket.id && t.isReturn && t.status !== 'completed' && t.status !== 'cancelled'
+  );
+  if (openChild) return true;
+
   // 1. If ticket explicitly points to an active child return ticket, check that child ticket's status
   if (ticket.activeReturnTicketId) {
     const child = allTickets.find(t => t.id === ticket.activeReturnTicketId);
