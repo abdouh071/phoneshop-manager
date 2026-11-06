@@ -230,11 +230,26 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
 
   const saveCost = async () => {
     const est = Number(costForm.estimatedCost);
-    const act = costForm.actualCost ? Number(costForm.actualCost) : undefined;
-    const dep = costForm.depositAmount ? Number(costForm.depositAmount) : 0;
+    // A settled ticket keeps its money even when the counter clears the box: the
+    // blank used to delete the final price from the record — vault revenue fell
+    // back to the estimate — and zero the deposit while the linked debt kept the
+    // old total. The numbers can be edited; they cannot be erased.
+    const settledAct = ticket.status === 'completed' ? (ticket.actualCost ?? ticket.estimatedCost ?? 0) : undefined;
+    const act = costForm.actualCost ? Number(costForm.actualCost) : settledAct;
+    const settledDep = ticket.status === 'completed' ? (ticket.depositAmount || 0) : 0;
+    const dep = costForm.depositAmount ? Number(costForm.depositAmount) : settledDep;
     if (isNaN(est) || (costForm.actualCost && isNaN(act!)) || (costForm.depositAmount && isNaN(dep))) {
       toast.error(t('error.invalidInput'), t('error.invalidNumbers'));
       return;
+    }
+
+    if (ticket.status === 'completed') {
+      if (!costForm.actualCost && ticket.actualCost) {
+        toast.info('Final price kept', 'The final price of a settled ticket cannot be cleared — edit the number instead.');
+      }
+      if (!costForm.depositAmount && ticket.depositAmount) {
+        toast.info('Deposit kept', 'The deposit of a settled ticket cannot be cleared.');
+      }
     }
 
     const updates: Partial<RepairTicket> = {
