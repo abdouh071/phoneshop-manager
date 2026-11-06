@@ -45,7 +45,7 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
 }) => {
   const toast = useToast();
   const { updateTicket } = useRepairStore();
-  const { customers, findOrCreateCustomer, addDebt, updateCustomer, updateDebtAmount, recalculateCustomer } = useCustomerStore();
+  const { customers, findOrCreateCustomer, addDebt, updateCustomer, updateDebtAmount, recordDebtPayment, recalculateCustomer } = useCustomerStore();
   const actor = useAuthStore(state => state.user);
 
   // Form State
@@ -66,11 +66,16 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
     if (ticket && isOpen) {
       const price = ticket.actualCost ?? ticket.estimatedCost ?? 0;
       const deposit = ticket.depositAmount || 0;
-      const remainingDue = Math.max(0, price - deposit);
+      // Money taken at an earlier handover is already on the ticket. A re-settle
+      // collects whatever comes NOW, so the field must not arrive pre-filled with a
+      // balance the till may already have been handed — saving that would inflate
+      // paidAmount past what the shop ever collected.
+      const previouslyCollected = ticket.status === 'completed' ? (ticket.handoverAmountPaid || 0) : 0;
+      const remainingDue = Math.max(0, price - deposit - previouslyCollected);
 
       setFinalPrice(price);
       setIsEditingPrice(false);
-      setAmountPaidNow(remainingDue.toString());
+      setAmountPaidNow(ticket.status === 'completed' ? '0' : remainingDue.toString());
       setCustomerPhone(ticket.customerPhone || '');
       setIsEditingPhone(!ticket.customerPhone);
       setPaymentMethod('cash');
@@ -107,9 +112,16 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
 
   // Derived financial calculations
   const depositAlreadyPaid = ticket.depositAmount || 0;
-  const balanceDueBeforeHandover = Math.max(0, finalPrice - depositAlreadyPaid);
+  // What the ticket already says the shop collected. A completed ticket carries the
+  // whole story in paidAmount (deposit plus every earlier handover); a re-settle adds
+  // the money taken NOW on top instead of rewriting it, or the ledger claims the
+  // shop took money it never saw.
+  const alreadyCollected = ticket.status === 'completed'
+    ? Math.max(ticket.paidAmount ?? 0, depositAlreadyPaid + (ticket.handoverAmountPaid || 0))
+    : depositAlreadyPaid;
+  const balanceDueBeforeHandover = Math.max(0, finalPrice - alreadyCollected);
   const paidNowNum = isNaN(Number(amountPaidNow)) ? 0 : Math.max(0, Number(amountPaidNow));
-  const totalPaid = depositAlreadyPaid + paidNowNum;
+  const totalPaid = alreadyCollected + paidNowNum;
   const remainingDebt = Math.max(0, finalPrice - totalPaid);
 
   const isFullyPaid = remainingDebt <= 0 && finalPrice > 0;
@@ -144,7 +156,7 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
     // Use overrides if provided (e.g. from quick-cash button)
     const effectivePaidNow = overrides?.paidNow !== undefined ? overrides.paidNow : paidNowNum;
     const effectiveMethod = overrides?.method || paymentMethod;
-    const effectiveTotalPaid = depositAlreadyPaid + effectivePaidNow;
+    const effectiveTotalPaid = alreadyCollected + effectivePaidNow;
     const effectiveRemainingDebt = Math.max(0, finalPrice - effectiveTotalPaid);
     const effectiveIsFullyPaid = effectiveRemainingDebt <= 0 && finalPrice > 0;
     const effectiveIsDebt = effectiveRemainingDebt > 0;
@@ -208,20 +220,31 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
         }
       }
 
-      // 4. Create or update debt record if there is an unpaid balance
+      // 4. Record the money and the balance on the customer's account. A row that
+      // already exists is synced to the new total AND told about the payment taken
+      // NOW — updating only the total used to leave the ledger holding the old
+      // balance while the ticket claimed more was paid, and a re-settle that pays the
+      // row off must close it, not stand beside it.
       let createdDebtId: string | undefined = ticket.debtEntryId;
-      if (effectiveIsDebt && (matchedCustomer || customerId)) {
-        if (ticket.debtEntryId) {
-          try {
-            await updateDebtAmount(
-              ticket.debtEntryId,
-              finalPrice,
-              `Repair #${ticket.ticketNumber} re-settled: total adjusted to ${formatCurrency(finalPrice)}`
-            );
-          } catch (debtErr) {
-            console.error('Failed to update existing debt entry:', debtErr);
+      if (ticket.debtEntryId) {
+        try {
+          await updateDebtAmount(
+            ticket.debtEntryId,
+            finalPrice,
+            `Repair #${ticket.ticketNumber} re-settled: total adjusted to ${formatCurrency(finalPrice)}`
+          );
+          if (effectivePaidNow > 0) {
+            await recordDebtPayment(ticket.debtEntryId, {
+              amount: effectivePaidNow,
+              method: effectiveMethod,
+              note: `Handover payment for Repair #${ticket.ticketNumber}`,
+              receivedByName: actor?.name || 'Staff',
+            });
           }
-        } else {
+        } catch (debtErr) {
+          console.error('Failed to update existing debt entry:', debtErr);
+        }
+      } else if (effectiveIsDebt && (matchedCustomer || customerId)) {
           const targetCustId = matchedCustomer?.id || customerId!;
           const custName = matchedCustomer?.name || ticket.customerName || 'Client';
           const custPhone = trimmedPhone || matchedCustomer?.phone || ticket.customerPhone || '';
@@ -268,7 +291,6 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
 
           const newDebt = await addDebt(debtPayload);
           createdDebtId = newDebt.id;
-        }
       }
 
       // 5. Append status history entry
@@ -288,7 +310,8 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
         status: 'completed',
         actualCost: finalPrice,
         paidAmount: effectiveTotalPaid,
-        handoverAmountPaid: effectivePaidNow,
+        handoverAmountPaid:
+          (ticket.status === 'completed' ? (ticket.handoverAmountPaid || 0) : 0) + effectivePaidNow,
         paymentStatus,
         completedAt: new Date().toISOString(),
         debtEntryId: createdDebtId,
