@@ -4,6 +4,7 @@ import i18n from '../i18n';
 import type { Customer } from '../types';
 import type { LedgerEvent } from '../features/customers/AccountStatementModal';
 import { errorMessage } from './errorUtils';
+import { creditUnit, isReturnLine } from './saleEditLines';
 
 const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
 
@@ -22,14 +23,20 @@ const PRINT_SERVER_URL = (() => {
 export interface OperationReceiptItem {
   name: string;
   detail?: string;
+  /** Units handed back off the invoice, as a positive number the surface draws with a −. */
   quantity: number;
   price: number;
   total: number;
+  isReturn?: boolean;
 }
 
 export interface ReceiptPrintItem {
   product: { name?: string; model?: string; price?: number };
   quantity: number;
+  unitPrice?: number;
+  totalPrice?: number;
+  customReturnPrice?: number;
+  isReturn?: boolean;
 }
 
 export interface ReceiptPrintTransaction {
@@ -236,15 +243,17 @@ export function buildOperationReceiptData({
         : 'CASH';
 
       tx.items.forEach(it => {
+        const returned = isReturnLine(it);
         // A stored line carries `unitPrice` only once the receipt was corrected, so the
         // price the customer actually paid is the written one or the price on the goods.
-        const unit = it.unitPrice ?? it.product?.price ?? 0;
+        const unit = returned ? creditUnit(it) : (it.unitPrice ?? it.product?.price ?? 0);
         items.push({
           name: it.product?.name || i18n.t('statementModal.item', 'Item'),
           detail: it.product?.model || '',
-          quantity: it.quantity,
+          quantity: Math.abs(it.quantity),
           price: unit,
-          total: it.totalPrice ?? unit * it.quantity,
+          total: Math.abs(it.totalPrice ?? unit * it.quantity),
+          ...(returned ? { isReturn: true } : {}),
         });
       });
 
@@ -522,7 +531,8 @@ export function buildReceiptWhatsAppText(data: OperationReceiptPreviewData): str
 
   lines.push(`*${i18n.t('statementModal.serviceDetails', 'Service Details:')}*`);
   data.items.forEach(it => {
-    lines.push(`• ${it.name}${it.detail ? ` (${it.detail})` : ''} x${it.quantity} — ${formatCurrency(it.total, !!data.currency)}`);
+    const sign = it.isReturn ? '−' : '';
+    lines.push(`• ${sign}${it.name}${it.detail ? ` (${it.detail})` : ''} x${sign}${it.quantity} — ${sign}${formatCurrency(it.total, !!data.currency)}${it.isReturn ? ` (${i18n.t('statementModal.returnedLine', 'returned')})` : ''}`);
   });
 
   lines.push(`────────────────────────`);

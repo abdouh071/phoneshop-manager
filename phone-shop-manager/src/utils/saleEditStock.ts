@@ -37,11 +37,11 @@ interface StockGroup {
   productId: string;
   name: string;
   isReturn: boolean;
-  /** How many rows carry this SKU, and how many of them were written off instead of restocked. */
-  rows: number;
-  writtenOff: number;
   sold: number;
   now: number;
+  /** Of those handed-back units, how many actually reached the shelf on each side. */
+  restockedSold: number;
+  restockedNow: number;
 }
 
 const wholeUnits = (value: number): number => {
@@ -90,28 +90,33 @@ export const planSaleEditStock = (
           productId,
           name: labelOf(item),
           isReturn,
-          rows: 0,
-          writtenOff: 0,
           sold: 0,
           now: 0,
+          restockedSold: 0,
+          restockedNow: 0,
         };
         totals.set(key, group);
       }
-      group[side] += wholeUnits(item.quantity);
-      group.rows += 1;
-      if (item.restock === false) group.writtenOff += 1;
+      const units = wholeUnits(item.quantity);
+      group[side] += units;
+      if (item.restock !== false) group[side === 'sold' ? 'restockedSold' : 'restockedNow'] += units;
     });
   };
   collect(originalItems, 'sold');
   collect(newItems, 'now');
 
   totals.forEach(group => {
-    const moved = group.now - group.sold;
+    /**
+     * A line the customer handed back moves the shelf only by the units that actually
+     * went on it. Counting the rows instead of their flags was the old gap: a document
+     * whose earlier correction wrote a faulty phone off could have that flag flipped
+     * and the shelf would never hear about it — while this editor now offers the
+     * checkbox on every credit line, because every correction writes one.
+     */
+    const moved = group.isReturn
+      ? group.restockedNow - group.restockedSold
+      : group.now - group.sold;
     if (moved === 0) return;
-
-    // Goods the customer handed back that were never put on the shelf cannot move it
-    // in either direction.
-    if (group.isReturn && group.writtenOff === group.rows) return;
 
     const delta = group.isReturn ? moved : -moved;
     if (delta > 0 && returnToStockOptions[group.productId] === false) return;

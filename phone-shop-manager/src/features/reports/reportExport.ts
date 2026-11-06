@@ -44,7 +44,9 @@ export const buildSalesLedgerCsv = (filteredSalesLedger: SaleTransaction[]): Csv
     new Date(t.date).toLocaleString(),
     t.id,
     t.customerName || 'Walk-in Customer',
-    t.items.map(i => `${i.quantity}x ${i.product.name} ${i.product.model}`).join('; '),
+    // A typed `-` at the head of a cell is read as a formula by spreadsheet apps, so the
+    // credit lines carry the same typographic minus the invoices draw.
+    t.items.map(i => `${i.isReturn ? '−' : ''}${i.quantity}x ${i.product.name} ${i.product.model}`).join('; '),
     t.processedByName || 'Store Cashier',
     t.payments.map(p => p.method).join('+'),
     discountsGivenOf(t),

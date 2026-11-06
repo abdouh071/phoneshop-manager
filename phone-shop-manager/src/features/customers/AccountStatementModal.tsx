@@ -236,7 +236,9 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
         tx.saleType === 'parts_b2b' ||
         (!tx.saleType && /^INV-PARTS-/.test(tx.invoiceNumber || ''));
       const refNumber = tx.invoiceNumber || `TX-${tx.id.slice(0, 8)}`;
-      const itemsDesc = tx.items.map(i => `${i.quantity}× ${i.product.name} ${i.product.model}`).join(', ');
+      const itemsDesc = tx.items
+        .map(i => `${i.isReturn ? '−' : ''}${i.quantity}× ${i.product.name} ${i.product.model}`)
+        .join(', ');
 
       const totalBilled = tx.total;
 
@@ -894,15 +896,28 @@ ${settings.storeName ? `${settings.storeName}\n` : ''}`;
                                         </thead>
                                         <tbody>
                                           {item.rawTransaction.items.map((it, iIdx) => {
+                                            const returned = it.isReturn === true;
                                             // `unitPrice` exists only on a corrected line; otherwise the price paid
                                             // is the one carried on the goods themselves.
-                                            const unit = it.unitPrice ?? it.product?.price ?? 0;
+                                            const unit = returned
+                                              ? (it.customReturnPrice ?? it.unitPrice ?? it.product?.price ?? 0)
+                                              : (it.unitPrice ?? it.product?.price ?? 0);
+                                            const money = Math.abs(it.totalPrice ?? unit * it.quantity);
                                             return (
-                                              <tr key={iIdx}>
-                                                <td><strong>{it.product.name}</strong> {it.product.model || ''}</td>
-                                                <td style={{ textAlign: 'center' }}>{it.quantity}</td>
+                                              <tr key={iIdx} style={returned ? { background: '#fef2f2' } : undefined}>
+                                                <td>
+                                                  <strong style={returned ? { color: '#b91c1c' } : undefined}>
+                                                    {returned ? '− ' : ''}{it.product.name}
+                                                  </strong> {it.product.model || ''}
+                                                  {returned && (
+                                                    <span style={{ fontSize: '11px', color: '#b91c1c', display: 'block' }}>
+                                                      {t('statementModal.returnedLineDesc', 'Handed back — this amount comes off the invoice')}
+                                                    </span>
+                                                  )}
+                                                </td>
+                                                <td style={{ textAlign: 'center', color: returned ? '#b91c1c' : undefined }}>{returned ? '−' : ''}{it.quantity}</td>
                                                 <td style={{ textAlign: 'right' }}>{formatPrivateCurrency(unit)}</td>
-                                                <td style={{ textAlign: 'right' }}>{formatPrivateCurrency(it.totalPrice ?? unit * it.quantity)}</td>
+                                                <td style={{ textAlign: 'right', color: returned ? '#b91c1c' : undefined }}>{returned ? '−' : ''}{formatPrivateCurrency(money)}</td>
                                               </tr>
                                             );
                                           })}

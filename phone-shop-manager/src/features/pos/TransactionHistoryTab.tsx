@@ -8,12 +8,40 @@ import { ReceiptModal } from './ReceiptModal';
 
 import { EditTransactionModal } from './EditTransactionModal';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
-import type { SaleTransaction } from '../../types';
+import type { CartItem, SaleTransaction } from '../../types';
 import s from './TransactionHistory.module.css';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { isReturnLine, returnedUnits, soldUnits } from '../../utils/saleEditLines';
 import { usePermissions } from '../../hooks/usePermissions';
 
 type UnlockPurpose = 'refund' | 'edit';
+
+/**
+ * One line of a receipt, as the history draws it. A unit the shop took back is a line
+ * of its own on the document, so it gets a chip of its own here — with the minus the
+ * reprint shows, and not the plain quantity of a purchase.
+ */
+const ArticleChip: React.FC<{ item: CartItem }> = ({ item }) => {
+  const returned = isReturnLine(item);
+  return (
+    <span
+      className={s.txArticleChip}
+      title={returned ? 'Handed back — this amount comes off the invoice' : undefined}
+      style={returned ? { background: 'var(--color-error-container, #fee2e2)' } : undefined}
+    >
+      <span
+        className={s.txArticleQty}
+        style={returned ? { color: 'var(--color-danger-text, #b91c1c)' } : undefined}
+      >
+        {returned ? '−' : ''}
+        {Math.trunc(Number(item.quantity) || 0)}×
+      </span>
+      <span className={s.txArticleName}>
+        {item.product?.name} {item.product?.model}
+      </span>
+    </span>
+  );
+};
 
 export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFocusId?: string }> = ({ initialSearch = '', initialFocusId = '' }) => {
   const [searchQuery, setSearchQuery] = useState(initialSearch);
@@ -158,6 +186,15 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
               );
               const isRefunded = t.status === 'refunded';
               const isPartial = t.status === 'partially_refunded';
+              /** What came back is drawn after what was bought, and never hidden behind
+               *  the "+N more" chip: on a corrected invoice it is the fact the counter
+               *  is looking for. */
+              const boughtLines = t.items.filter(item => !isReturnLine(item));
+              const backLines = t.items.filter(isReturnLine);
+              const backCount = returnedUnits(t.items);
+              const keptUnits = soldUnits(t.items) - backCount;
+              const hiddenLines =
+                Math.max(0, boughtLines.length - 2) + Math.max(0, backLines.length - 2);
 
 
               return (
@@ -191,14 +228,14 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
 
                   {/* Middle: Articles */}
                   <div className={s.txArticlesRow}>
-                    {t.items.slice(0, 2).map((item, idx) => (
-                      <span key={idx} className={s.txArticleChip}>
-                        <span className={s.txArticleQty}>{item.quantity}×</span>
-                        <span className={s.txArticleName}>{item.product.name} {item.product.model}</span>
-                      </span>
+                    {boughtLines.slice(0, 2).map((item, idx) => (
+                      <ArticleChip key={`sold-${idx}`} item={item} />
                     ))}
-                    {t.items.length > 2 && (
-                      <span className={s.txMoreChip}>+{t.items.length - 2} more</span>
+                    {backLines.slice(0, 2).map((item, idx) => (
+                      <ArticleChip key={`back-${idx}`} item={item} />
+                    ))}
+                    {hiddenLines > 0 && (
+                      <span className={s.txMoreChip}>+{hiddenLines} more</span>
                     )}
                     {t.saleType === 'parts_b2b' && (
                       <span style={{ backgroundColor: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>
@@ -234,7 +271,12 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
                       )}
                       <span className={s.txMetaPill}>
                         <span className={s.txMetaIcon}>📦</span>
-                        {t.items.reduce((acc, i) => acc + i.quantity, 0)} item{t.items.reduce((a, i) => a + i.quantity, 0) !== 1 ? 's' : ''}
+                        {keptUnits} item{keptUnits !== 1 ? 's' : ''}
+                        {backCount > 0 && (
+                          <span style={{ color: 'var(--color-danger-text, #b91c1c)', fontWeight: 700 }}>
+                            {' '}· −{backCount} back
+                          </span>
+                        )}
                       </span>
                     </div>
 

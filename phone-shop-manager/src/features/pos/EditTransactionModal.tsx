@@ -5,6 +5,13 @@
  * technician phone mirrors this screen (`technician-app/src/components/EditSaleSheet.tsx`),
  * so a rule that changes here has to change there.
  *
+ * The control holds **what the customer leaves with**, not the quantity written on the
+ * sold line. Lowering it does not rub the line out: the invoice keeps what was sold and
+ * gains its own negative line for the units that came back, so a corrected document
+ * reads `2× phone` and `−1× phone` and a whole invoice handed back still lists every
+ * product at a total of zero. `buildCorrectedLines` owns that shape, and the preview
+ * below is the same call the save makes — what the counter sees is what gets written.
+ *
  * A line may also be discounted. The concession is written into the line's own unit
  * price rather than stored beside it, because the receipt, the ledger, the customer
  * statement and the reports all price that line from its unit price and add those
@@ -32,6 +39,18 @@ import {
   requiresLineDiscountApproval,
   unitPriceAfterDiscount,
 } from '../../utils/discountPolicy';
+import {
+  buildCorrectedLines,
+  groupDocumentLines,
+  isReturnLine,
+  lineUnit,
+  linesDiffer,
+  returnedAmount,
+  returnedUnits,
+  signedLineTotal,
+  soldUnits,
+} from '../../utils/saleEditLines';
+import type { KeptLines } from '../../utils/saleEditLines';
 
 interface EditTransactionModalProps {
   isOpen: boolean;
@@ -39,18 +58,21 @@ interface EditTransactionModalProps {
   transaction: SaleTransaction | null;
 }
 
-/** A row of the editor: a line the document carries, or one the counter is putting on it. */
+/**
+ * A row of the editor: one SKU on the document, or one the counter is putting on it.
+ * A SKU can sit on an invoice twice — the phone sold and the same phone taken back in
+ * trade — and both rows share this one control, because that is the till's rule.
+ */
 interface EditRow {
   id: string;
-  /** One SKU can sit on a document twice — the phone sold and the same phone taken
-   *  back in trade. They share one edit control, as the till's rule says, but they
-   *  are two rows, so they need two React keys. */
-  rowKey: string;
   product: PhoneModel;
-  originalQty: number;
+  /** Units the document sold. The control starts from what he keeps, not this. */
+  sold: number;
+  /** What he leaves with on the document as it stands. */
+  keptNow: number;
+  /** The price the line carries today, and the base a new concession is measured from. */
+  listedUnit: number;
   added: boolean;
-  /** A line the customer handed over rather than bought: its money comes off. */
-  isReturn: boolean;
 }
 
 /** The ceiling only ever clamps; a product this till does not list is left unbounded. */
@@ -80,7 +102,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   const [approvedKey, setApprovedKey] = useState<string | null>(null);
   const [isAskingDiscount, setIsAskingDiscount] = useState(false);
 
-  // Editable items state: productId -> quantity
+  // Editable items state: productId -> units the customer keeps
   const [editedQuantities, setEditedQuantities] = useState<Record<string, number>>({});
   // Editable prices state: productId -> unit price
   const [editedPrices, setEditedPrices] = useState<Record<string, number>>({});
@@ -91,7 +113,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
    * something else moves the line, and then the field reads the truth again.
    */
   const [discountInputs, setDiscountInputs] = useState<Record<string, string>>({});
-  // Return to stock options: productId -> boolean (true = return to stock)
+  /** Whether the units a line hands back go on the shelf, per product. */
   const [returnToStock, setReturnToStock] = useState<Record<string, boolean>>({});
   // Products the counter puts on an invoice that never carried them
   const [addedIds, setAddedIds] = useState<string[]>([]);
@@ -101,13 +123,24 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
 
   useEffect(() => {
     if (transaction) {
+      /** One control per SKU, started at what the document says he leaves with — which
+       *  on an invoice that has already been corrected is its sold units less whatever
+       *  it already carries back. */
       const initialQtys: Record<string, number> = {};
       const initialPrices: Record<string, number> = {};
       const initialStockOpts: Record<string, boolean> = {};
-      transaction.items.forEach(item => {
-        initialQtys[item.product.id] = item.quantity;
-        initialPrices[item.product.id] = item.product.price;
-        initialStockOpts[item.product.id] = true; // Default to returning to stock
+      groupDocumentLines(transaction.items).forEach(view => {
+        initialQtys[view.productId] = view.kept;
+        initialPrices[view.productId] = view.listedUnit;
+        // A unit the document already took back without putting it on the shelf stays
+        // off it. The flag defaults to restocking, so without this the counter would
+        // silently send a faulty phone back onto the shelf it never left.
+        initialStockOpts[view.productId] = !transaction.items.some(
+          item =>
+            item?.product?.id === view.productId &&
+            isReturnLine(item) &&
+            item.restock === false
+        );
       });
       setEditedQuantities(initialQtys);
       setEditedPrices(initialPrices);
@@ -129,32 +162,38 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   const shelfOf = (productId: string): number | undefined =>
     shelfLevels.find(p => p.id === productId)?.stock;
 
+  const onInvoice = new Set(transaction.items.map(item => item?.product?.id).filter(Boolean));
+
   const rows: EditRow[] = [
-    ...transaction.items.map(item => ({
-      id: item.product.id,
-      rowKey: `${item.product.id}::${item.isReturn ? 'return' : 'sale'}`,
-      product: item.product,
-      originalQty: item.quantity,
+    ...groupDocumentLines(transaction.items).map(view => ({
+      id: view.productId,
+      product: view.product,
+      sold: view.sold,
+      keptNow: view.kept,
+      listedUnit: view.listedUnit,
       added: false,
-      isReturn: Boolean(item.isReturn),
     })),
     ...addedIds
-      .filter(id => addedProducts[id])
+      .filter(id => addedProducts[id] && !onInvoice.has(id))
       .map(id => ({
         id,
-        rowKey: `${id}::sale`,
         product: addedProducts[id],
-        originalQty: 0,
+        sold: 0,
+        keptNow: 0,
+        listedUnit: addedProducts[id].price,
         added: true,
-        isReturn: false,
       })),
   ];
 
-  // Sold units are already committed; anything new has to come off the counter.
+  /**
+   * Sold units are already committed, so the control may reach them without the shelf
+   * giving anything — restoring a unit an earlier correction took back is one of those.
+   * Past them, every unit has to come off the counter.
+   */
   const ceilingOf = (row: EditRow): number => {
     const onShelf = shelfOf(row.id);
     if (onShelf === undefined) return UNBOUNDED_QTY;
-    return Math.min(UNBOUNDED_QTY, row.originalQty + Math.max(0, onShelf));
+    return Math.min(UNBOUNDED_QTY, row.sold + Math.max(0, onShelf));
   };
 
   // The till's own list is the authority for what may join the document — the same
@@ -187,14 +226,14 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   /**
    * The discount and the unit price are one number seen from two sides, so typing in
    * one moves the other rather than fighting it: the concession is measured from the
-   * price the document carried and spread over the units it holds.
+   * price the document carried and spread over the units the line prints at.
    */
-  const handleDiscountChange = (row: EditRow, quantity: number, raw: string) => {
+  const handleDiscountChange = (row: EditRow, unitsPriced: number, raw: string) => {
     const parsed = parseFloat(raw);
     setDiscountInputs(prev => ({ ...prev, [row.id]: raw }));
     setEditedPrices(prev => ({
       ...prev,
-      [row.id]: unitPriceAfterDiscount(row.product.price, Number.isFinite(parsed) ? parsed : 0, quantity),
+      [row.id]: unitPriceAfterDiscount(row.listedUnit, Number.isFinite(parsed) ? parsed : 0, unitsPriced),
     }));
   };
 
@@ -202,33 +241,27 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
     setReturnToStock(prev => ({ ...prev, [productId]: !prev[productId] }));
   };
 
-  // Compute subtotal and total based on edited quantities & prices
-  const newItems: CartItem[] = rows
-    .map<CartItem>(row => {
-      const priced: PhoneModel = { ...row.product, price: editedPrices[row.id] ?? row.product.price };
-      const quantity = editedQuantities[row.id] ?? row.originalQty;
-      // A trade-in of the same model already on the document is found by its kind as
-      // well as its product id. Matching on the id alone hands the return row the
-      // sale row's shape, and the shop then bills the customer for a phone he brought
-      // back.
-      const original = row.added
-        ? undefined
-        : transaction.items.find(
-            item => item.product.id === row.id && Boolean(item.isReturn) === row.isReturn
-          );
-      return original
-        ? {
-            ...original,
-            quantity,
-            product: priced,
-            // The till prices a taken-back line by what it agreed to pay for it, so a
-            // corrected price moves that number too — otherwise the basket below and
-            // the line the printer draws disagree.
-            ...(row.isReturn ? { customReturnPrice: priced.price } : {}),
-          }
-        : { product: priced, quantity };
-    })
-    .filter(item => item.quantity > 0);
+  const keptOf = (row: EditRow): number => editedQuantities[row.id] ?? row.keptNow;
+  const unitOf = (row: EditRow): number => editedPrices[row.id] ?? row.listedUnit;
+
+  /**
+   * The lines the store will write, and the lines the preview draws — one call, so a
+   * hand that lowers a control to zero cannot leave the document blank: the sold line
+   * stays and a `−` line for what came back is added beside it.
+   */
+  const edits: KeptLines = Object.fromEntries(
+    rows.map(row => [row.id, { quantity: keptOf(row), unitPrice: unitOf(row) }])
+  );
+
+  const addedItems: CartItem[] = rows
+    .filter(row => row.added && keptOf(row) > 0)
+    .map(row => ({
+      product: { ...row.product, price: unitOf(row) },
+      quantity: keptOf(row),
+      unitPrice: unitOf(row),
+    }));
+
+  const newItems = buildCorrectedLines(transaction.items, edits, returnToStock, addedItems);
 
   // What the store will write, not what a hand-added column says: one basket, the
   // returns taken off it, and the discount measured on the purchases — the till's own
@@ -245,14 +278,26 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   const additionalDue = diff < 0 ? Math.abs(diff) : 0;
   /** A basket whose returns outweigh its purchases: the store refuses to write it. */
   const owesCustomer = newTotal < 0;
+  const keptUnits = soldUnits(newItems);
+  const backUnits = returnedUnits(newItems);
 
-  /** What each line gives away against the price the document carried for it. */
-  const concessions = rows
-    .map(row => {
-      const quantity = editedQuantities[row.id] ?? row.originalQty;
-      const unitPrice = editedPrices[row.id] ?? row.product.price;
-      return { row, quantity, ...lineDiscountOf(row.product.price, unitPrice, quantity) };
-    })
+  /**
+   * What each sold line gives away against the price the document carried for it. The
+   * lines that came back are not in this: a concession is money let on what the
+   * customer bought, and measuring one on a unit he handed back would record a
+   * giveaway the shop never made — which every correction would now do.
+   */
+  const concessions = newItems
+    .filter(item => item?.product?.id && !isReturnLine(item))
+    .map(item => ({
+      id: item.product.id,
+      name: item.product.name,
+      ...lineDiscountOf(
+        rows.find(row => row.id === item.product?.id)?.listedUnit ?? item.product.price,
+        lineUnit(item),
+        item.quantity
+      ),
+    }))
     .filter(line => line.granted > 0);
 
   const concessionsTotal = concessions.reduce((sum, line) => sum + line.granted, 0);
@@ -264,16 +309,14 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
    */
   const deepConcessions = concessions.filter(line => requiresLineDiscountApproval(role, line.percent));
   const concessionKey = deepConcessions
-    .map(line => `${line.row.id}:${Math.round(line.percent * 10) / 10}`)
+    .map(line => `${line.id}:${Math.round(line.percent * 10) / 10}`)
     .sort()
     .join('|');
   const needsDiscountApproval = deepConcessions.length > 0 && approvedKey !== concessionKey;
   const deepestPercent = deepConcessions.reduce((worst, line) => Math.max(worst, line.percent), 0);
   const discountSummary = deepConcessions
-    .map(line => `${line.row.product.name} −${line.percent.toFixed(1)}% (${formatCurrency(line.granted)})`)
+    .map(line => `${line.name} −${line.percent.toFixed(1)}% (${formatCurrency(line.granted)})`)
     .join(', ');
-
-  const onInvoice = new Set(transaction.items.map(item => item.product.id));
 
   const pickProduct = (product: PhoneModel) => {
     const id = product?.id;
@@ -294,15 +337,11 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
     setDiscountInputs(prev => withoutKey(prev, productId));
   };
 
-  const addedLineCount = rows.filter(row => row.added && (editedQuantities[row.id] ?? 0) > 0).length;
+  const addedLineCount = addedItems.length;
 
-  const hasChanges =
-    addedLineCount > 0 ||
-    transaction.items.some(
-      item =>
-        (editedQuantities[item.product.id] ?? item.quantity) !== item.quantity ||
-        (editedPrices[item.product.id] !== undefined && editedPrices[item.product.id] !== item.product.price)
-    );
+  /** The shape the store is about to write, not the money it nets to: a price cut and a
+   *  unit handed back can land on the same total and still be a document to write. */
+  const hasChanges = linesDiffer(transaction.items, newItems);
 
   const commitEdit = async () => {
     setIsProcessing(true);
@@ -364,8 +403,10 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
         <p style={{ fontSize: '13px', color: 'var(--color-on-surface-variant)', margin: 0 }}>
-          Adjust item unit prices, quantities and discounts, put a product the invoice never carried onto it, or
-          drop a line back to zero. A line the customer handed back comes off the receipt rather than onto it.
+          Adjust item unit prices, quantities and discounts, or put a product the invoice never carried onto it.
+          The quantity is what the customer <strong>leaves with</strong>: bring a line down and the units that
+          come back are added to the receipt as their own <strong>−</strong> line, at a price deducted from the
+          total — the sold line is never rubbed out, so a fully returned invoice still lists every product.
           Inventory and transaction totals recalculate automatically, a line the shelf
           cannot give is refused before anything is written, and a discount deeper than{' '}
           {DISCOUNT_APPROVAL_PERCENT}% of what that line was listed at needs an admin to authorize it.
@@ -377,8 +418,8 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
             <thead>
               <tr style={{ background: 'var(--color-surface-variant)', borderBottom: '1px solid var(--color-outline-variant)' }}>
                 <th style={{ padding: '10px 14px' }}>Item</th>
-                <th style={{ padding: '10px 14px' }}>Unit Price & Discount ({currencySymbol})</th>
-                <th style={{ padding: '10px 14px', textAlign: 'center' }}>Quantity</th>
+                <th style={{ padding: '10px 14px' }}>Unit Price &amp; Discount ({currencySymbol})</th>
+                <th style={{ padding: '10px 14px', textAlign: 'center' }}>He keeps</th>
                 <th style={{ padding: '10px 14px', textAlign: 'right' }}>Line Total</th>
                 <th style={{ padding: '10px 14px', textAlign: 'center' }}>Return Stock?</th>
               </tr>
@@ -386,27 +427,39 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
             <tbody>
               {rows.map(row => {
                 const pid = row.id;
-                const origQty = row.originalQty;
-                const currentQty = editedQuantities[pid] ?? origQty;
-                const currentPrice = editedPrices[pid] ?? row.product.price;
-                const returnedQty = origQty - currentQty;
+                const currentQty = keptOf(row);
+                const currentPrice = unitOf(row);
+                /** This SKU's lines on the document the save writes, credit lines included. */
+                const skuLines = newItems.filter(item => item?.product?.id === pid);
+                const backQty = returnedUnits(skuLines);
+                const backMoney = returnedAmount(skuLines);
+                const lineNet = skuLines.reduce((sum, item) => sum + signedLineTotal(item), 0);
                 const isStockChecked = returnToStock[pid] !== false;
                 const maxQty = ceilingOf(row);
                 const atCeiling = currentQty >= maxQty;
                 const onShelf = shelfOf(pid);
-                const concession = lineDiscountOf(row.product.price, currentPrice, currentQty);
+                const grew = Math.max(0, currentQty - row.sold);
+                // The concession is what the sold lines give away, so it is spread over the
+                // units they print at — the documented ones plus any the control added.
+                const unitsPriced = row.sold + grew;
+                const concession = lineDiscountOf(row.listedUnit, currentPrice, unitsPriced);
                 const gatedDiscount = requiresLineDiscountApproval(role, concession.percent);
 
                 return (
-                  <tr key={row.rowKey} style={{ borderBottom: '1px solid var(--color-outline-variant)' }}>
+                  <tr key={row.id} style={{ borderBottom: '1px solid var(--color-outline-variant)' }}>
                     <td style={{ padding: '12px 14px' }}>
                       <div style={{ fontWeight: 600 }}>{row.product.name}</div>
                       <div style={{ fontSize: '11px', color: 'var(--color-on-surface-variant)' }}>
                         {row.added
                           ? `New line · ${onShelf === undefined ? 'stock unknown' : `${onShelf} on the shelf`}`
-                          : row.isReturn
-                          ? 'Taken back · comes off this invoice'
-                          : row.product.category}
+                          : [
+                              `${row.sold}× sold`,
+                              grew > 0 ? `+${grew}× added` : '',
+                              backQty > 0 ? `−${backQty}× returned` : '',
+                              row.product.category || '',
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
                       </div>
                     </td>
                     <td style={{ padding: '12px 14px' }}>
@@ -441,8 +494,8 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                             placeholder={`Disc. ${currencySymbol}`}
                             aria-label={`Discount in dinars on ${row.product.name}`}
                             value={discountInputs[pid] ?? (concession.granted > 0 ? String(concession.granted) : '')}
-                            onChange={e => handleDiscountChange(row, currentQty, e.target.value)}
-                            disabled={currentQty <= 0}
+                            onChange={e => handleDiscountChange(row, unitsPriced, e.target.value)}
+                            disabled={unitsPriced <= 0}
                             style={{
                               width: '95px',
                               padding: '4px 8px',
@@ -452,7 +505,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                               background: 'var(--color-surface-container-lowest, #ffffff)',
                               color: concession.granted > 0 ? 'var(--color-danger-text, #dc2626)' : 'var(--color-on-surface, #0f172a)',
                               outline: 'none',
-                              opacity: currentQty > 0 ? 1 : 0.4,
+                              opacity: unitsPriced > 0 ? 1 : 0.4,
                             }}
                           />
                           {concession.granted > 0 && (
@@ -479,8 +532,8 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'var(--color-surface-variant)', padding: '4px 8px', borderRadius: '8px' }}>
                         <button
                           type="button"
-                          aria-label={`Decrease quantity of ${row.product.name}`}
-                          title="Decrease quantity"
+                          aria-label={`Take back a unit of ${row.product.name}`}
+                          title="Hand a unit back — it stays on the invoice as a − line"
                           onClick={() => handleQuantityChange(pid, currentQty - 1, maxQty)}
                           disabled={currentQty <= 0}
                           style={{
@@ -496,12 +549,12 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                           <Minus size={14} />
                         </button>
                         <span style={{ fontWeight: 700, minWidth: '44px', textAlign: 'center' }}>
-                          {row.added ? currentQty : `${currentQty} / ${origQty}`}
+                          {row.added ? currentQty : `${currentQty} / ${row.sold}`}
                         </span>
                         <button
                           type="button"
-                          aria-label={`Increase quantity of ${row.product.name}`}
-                          title="Increase quantity"
+                          aria-label={`Give ${row.product.name} another unit`}
+                          title="Increase what the customer keeps"
                           onClick={() => handleQuantityChange(pid, currentQty + 1, maxQty)}
                           disabled={atCeiling}
                           style={{
@@ -527,14 +580,22 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                     </td>
                     <td style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <div
-                        style={{ fontWeight: 600, color: row.isReturn ? 'var(--color-danger-text, #dc2626)' : undefined }}
+                        style={{
+                          fontWeight: 600,
+                          color: lineNet < 0 ? 'var(--color-danger-text, #dc2626)' : undefined,
+                        }}
                       >
-                        {row.isReturn ? '−' : ''}
-                        {formatCurrency(currentPrice * currentQty)}
+                        {lineNet < 0 ? '−' : ''}
+                        {formatCurrency(Math.abs(lineNet))}
                       </div>
+                      {backQty > 0 && (
+                        <div style={{ fontSize: '11px', color: 'var(--color-danger-text, #dc2626)' }}>
+                          −{backQty}× printed · −{formatCurrency(backMoney)}
+                        </div>
+                      )}
                       {concession.granted > 0 && (
                         <div style={{ fontSize: '11px', color: 'var(--color-danger-text, #dc2626)' }}>
-                          was {formatCurrency(row.product.price * currentQty)}
+                          was {formatCurrency(row.listedUnit * unitsPriced)}
                         </div>
                       )}
                     </td>
@@ -559,7 +620,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                           <Trash2 size={14} />
                           Remove line
                         </button>
-                      ) : returnedQty > 0 ? (
+                      ) : backQty > 0 ? (
                         <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px' }}>
                           <input
                             type="checkbox"
@@ -568,7 +629,7 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
                             style={{ accentColor: 'var(--color-primary)', width: '16px', height: '16px' }}
                           />
                           <span style={{ color: isStockChecked ? 'var(--color-success-text)' : 'var(--color-danger-text)', fontWeight: 600 }}>
-                            {isStockChecked ? `+${returnedQty} Stock` : 'Do not restock'}
+                            {isStockChecked ? `+${backQty} Stock` : 'Do not restock'}
                           </span>
                         </label>
                       ) : (
@@ -608,6 +669,12 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
             <span style={{ color: 'var(--color-on-surface-variant)' }}>Bought on this receipt:</span>
             <span>{formatCurrency(newPurchases)}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--color-on-surface-variant)' }}>
+            <span>Units on it after the correction:</span>
+            <span>
+              {keptUnits} sold{backUnits > 0 ? ` · ${backUnits} handed back` : ''}
+            </span>
           </div>
           {newReturns > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--color-danger-text)' }}>
@@ -679,7 +746,8 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
         {hasChanges && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--color-warning-text)', background: 'var(--color-warning-container)', padding: '10px 14px', borderRadius: '8px' }}>
             <AlertTriangle size={16} />
-            <span>Saving will adjust the transaction prices, totals, and modify inventory stock as selected above.</span>
+            <span>Saving re-prices the lines, writes the units that came back onto the receipt as − lines,
+              and adjusts the transaction totals and inventory stock as selected above.</span>
           </div>
         )}
       </div>

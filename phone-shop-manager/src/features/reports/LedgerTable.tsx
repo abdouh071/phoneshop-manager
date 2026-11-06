@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/Button';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { discountsGivenOf } from '../../utils/discountPolicy';
 import { getClaimedRepairFullPrice, getClaimedRepairRevenue, getClaimedRepairDebt } from '../../utils/repairFinancials';
+import { lineDisplayOf } from '../../utils/saleEditLines';
 import type { SaleTransaction, RepairTicket } from '../../types';
 import type { ReportData } from '../../services/reportsService';
 import type { LedgerTab } from './reportTypes';
@@ -115,12 +116,17 @@ export const LedgerTable: React.FC<LedgerTableProps> = ({
                     </td>
                     <td className={styles.td}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '12px' }}>
-                        {tx.items.map((i, idx) => (
-                          <span key={idx}>
-                            <strong>{i.quantity}x</strong> {i.product.name} {i.product.model}
-                            <span style={{ color: 'var(--color-on-surface-variant)' }}> ({formatCurrency(i.product.price * i.quantity)})</span>
-                          </span>
-                        ))}
+                        {tx.items.map((i, idx) => {
+                          const line = lineDisplayOf(i);
+                          return (
+                            <span key={idx} style={line.returned ? { color: '#b91c1c' } : undefined}>
+                              <strong>{line.returned ? '−' : ''}{line.units}x</strong> {i.product.name} {i.product.model}
+                              <span style={{ color: line.returned ? '#b91c1c' : 'var(--color-on-surface-variant)' }}>
+                                {' '}({line.returned ? '−' : ''}{formatCurrency(line.money)})
+                              </span>
+                            </span>
+                          );
+                        })}
                         {discountsGivenOf(tx) > 0 && (
                           <span style={{ color: 'var(--color-warning)', fontSize: '11px' }}>
                             Discount: -{formatCurrency(discountsGivenOf(tx))}

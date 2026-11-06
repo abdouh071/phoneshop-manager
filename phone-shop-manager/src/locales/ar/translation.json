@@ -1600,6 +1600,8 @@
     "invoice": "فاتورة قطع",
     "payment": "دفعة / سداد",
     "refund": "استرداد",
+    "returnedLine": "مُسترجع",
+    "returnedLineDesc": "مُسترجع — هذا المبلغ يُخصم من إجمالي الفاتورة",
     "creditTab": "دين بالحساب",
     "authStamp": "ختم وتوقيع المحل المعتمد",
     "clientSignature": "إقرار وتوقيع الزبون",

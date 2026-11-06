@@ -1600,6 +1600,8 @@
     "invoice": "Vente Pièce",
     "payment": "Règlement",
     "refund": "Remboursement",
+    "returnedLine": "remboursé",
+    "returnedLineDesc": "Remboursé — ce montant est déduit de la facture",
     "creditTab": "Carnet Dette",
     "authStamp": "Signature & Cachet Magasin",
     "clientSignature": "Signature & Accord Client",

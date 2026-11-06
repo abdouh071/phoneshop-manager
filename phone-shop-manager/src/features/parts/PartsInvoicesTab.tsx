@@ -330,21 +330,26 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
                 {/* Items List & Actions Row */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {tx.items.map((item, idx) => (
-                      <span
-                        key={idx}
-                        style={{
-                          fontSize: '11.5px',
-                          background: '#f1f5f9',
-                          color: '#334155',
-                          padding: '3px 8px',
-                          borderRadius: '6px',
-                          fontWeight: 600,
-                        }}
-                      >
-                        {item.quantity}× {item.product.name} {item.product.model}
-                      </span>
-                    ))}
+                    {tx.items.map((item, idx) => {
+                      const returned = Boolean(item.isReturn);
+                      return (
+                        <span
+                          key={idx}
+                          title={returned ? 'Handed back — this amount comes off the invoice' : undefined}
+                          style={{
+                            fontSize: '11.5px',
+                            background: returned ? '#fee2e2' : '#f1f5f9',
+                            color: returned ? '#b91c1c' : '#334155',
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {returned ? '−' : ''}
+                          {Math.trunc(Number(item.quantity) || 0)}× {item.product?.name} {item.product?.model}
+                        </span>
+                      );
+                    })}
                   </div>
 
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>

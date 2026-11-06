@@ -126,21 +126,47 @@ export const PartsInvoiceModal: React.FC<PartsInvoiceModalProps> = ({ transactio
             </tr>
           </thead>
           <tbody>
-            {transaction.items.map(item => (
-              <tr key={item.product.id}>
-                <td>
-                  <strong>{item.product.name} {item.product.model}</strong>
-                  {item.product.sku && (
-                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>
-                      SKU: {item.product.sku}
-                    </span>
-                  )}
-                </td>
-                <td style={{ textAlign: 'center' }}>{item.quantity}</td>
-                <td style={{ textAlign: 'right' }}>{formatCurrency(item.product.price)}</td>
-                <td>{formatCurrency(item.product.price * item.quantity)}</td>
-              </tr>
-            ))}
+            {transaction.items.map((item, idx) => {
+              /** A line the shop took back is its own row, priced at what it pays for the
+               *  part, and drawn with the minus the invoice foots to. One SKU can sit twice
+               *  on this document, so the row is keyed by more than its product. */
+              const returned = Boolean(item.isReturn);
+              const units = Math.trunc(Number(item.quantity) || 0);
+              const unit = returned
+                ? (item.customReturnPrice ?? item.unitPrice ?? item.product?.price ?? 0)
+                : (item.unitPrice ?? item.product?.price ?? 0);
+              const red = returned ? '#b91c1c' : undefined;
+
+              return (
+                <tr
+                  key={`${item.product?.id || 'line'}-${returned ? 'return' : 'sale'}-${idx}`}
+                  style={returned ? { background: '#fef2f2' } : undefined}
+                >
+                  <td>
+                    <strong style={returned ? { color: red } : undefined}>
+                      {returned ? '− ' : ''}
+                      {item.product?.name} {item.product?.model}
+                    </strong>
+                    {returned && (
+                      <span style={{ fontSize: '11px', color: red, display: 'block', fontWeight: 600 }}>
+                        Handed back — this amount comes off the invoice
+                      </span>
+                    )}
+                    {item.product?.sku && (
+                      <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>
+                        SKU: {item.product.sku}
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'center', color: red }}>{returned ? '−' : ''}{units}</td>
+                  <td style={{ textAlign: 'right' }}>{formatCurrency(unit)}</td>
+                  <td style={{ color: red }}>
+                    {returned ? '−' : ''}
+                    {formatCurrency(Math.abs(unit * units))}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
 

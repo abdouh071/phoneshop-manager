@@ -7,6 +7,7 @@ import {
   getClaimedRepairRevenue,
 } from './repairFinancials';
 import { isSameLocalDate } from './localDate';
+import { netCogsOf } from './saleEditLines';
 
 /**
  * The one formula the shop uses to turn raw documents into a day's figures.
@@ -120,10 +121,7 @@ const sumPayment = (txList: SaleTransaction[], method: string): number =>
   txList.reduce((sum, tx) => sum + tenderOf(tx, method), 0);
 
 const sumCogs = (txList: SaleTransaction[]): number =>
-  txList.reduce(
-    (sum, tx) => sum + (tx.items || []).reduce((a, i) => a + (i.product.costPrice || 0) * i.quantity, 0),
-    0
-  );
+  txList.reduce((sum, tx) => sum + netCogsOf(tx.items || []), 0);
 
 export function computeDayFigures(sources: DayFigureSources, dateStr: string): DayFigures {
   const dayTx = sources.transactions.filter(t => isSameLocalDate(t.date, dateStr));

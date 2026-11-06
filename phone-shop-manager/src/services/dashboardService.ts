@@ -2,6 +2,7 @@ import type { DashboardStats, RevenueDataPoint, SaleTransaction } from '../types
 import { useInventoryStore } from '../store/inventoryStore';
 import { useCartStore } from '../store/cartStore';
 import { useRepairStore } from '../store/repairStore';
+import { netUnitsSold } from '../utils/saleEditLines';
 
 export const dashboardService = {
   getStats: async (): Promise<DashboardStats> => {
@@ -38,8 +39,10 @@ export const dashboardService = {
     const monthlyTx = transactions.filter(t => isEffectiveTx(t) && new Date(t.date) >= startOfMonth);
     const monthlyRevenue = monthlyTx.reduce((s, t) => s + t.total, 0);
 
-    const unitsSoldToday = todayTx.reduce((s, t) => s + t.items.reduce((a, i) => a + i.quantity, 0), 0);
-    const unitsYesterday = yesterdayTx.reduce((s, t) => s + t.items.reduce((a, i) => a + i.quantity, 0), 0);
+    // A corrected invoice carries its handed-back units as their own line; counting that
+    // quantity as a sale would sell the same phone twice on the card below it.
+    const unitsSoldToday = Math.max(0, todayTx.reduce((s, t) => s + netUnitsSold(t.items), 0));
+    const unitsYesterday = Math.max(0, yesterdayTx.reduce((s, t) => s + netUnitsSold(t.items), 0));
 
     const revenueChange = yesterdayRevenue === 0
       ? (dailyRevenue > 0 ? 100 : 0)

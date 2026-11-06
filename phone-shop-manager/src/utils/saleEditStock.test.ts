@@ -81,6 +81,47 @@ describe('planSaleEditStock', () => {
     expect(plan.shortages).toHaveLength(0);
   });
 
+  it('gives the shelf a unit an earlier correction had written off', () => {
+    // The faulty phone comes back from the repair bench, and the counter says it is
+    // saleable after all. The units did not change, only the flag did — and the flag is
+    // what decides whether the shelf holds it.
+    const writtenOff = line(phone('p1'), 1, { isReturn: true, restock: false });
+    const plan = planSaleEditStock([writtenOff], [line(phone('p1'), 1, { isReturn: true, restock: true })], {}, shelf);
+
+    expect(plan.deltas).toEqual([{ productId: 'p1', name: 'Phone', delta: 1 }]);
+  });
+
+  it('takes a unit off the shelf when the counter writes it off instead', () => {
+    const restocked = line(phone('p1'), 1, { isReturn: true, restock: true });
+    const plan = planSaleEditStock([restocked], [line(phone('p1'), 1, { isReturn: true, restock: false })], {}, shelf);
+
+    expect(plan.deltas).toEqual([{ productId: 'p1', name: 'Phone', delta: -1 }]);
+  });
+
+  it('refuses to write off a unit the shelf does not hold', () => {
+    const restocked = line(phone('p1'), 3, { isReturn: true, restock: true });
+    const plan = planSaleEditStock([restocked], [line(phone('p1'), 3, { isReturn: true, restock: false })], {}, [
+      phone('p1', { stock: 2 }),
+    ]);
+
+    expect(plan.deltas).toHaveLength(0);
+    expect(plan.shortages).toEqual([{ productId: 'p1', name: 'Phone', wanted: 3, available: 2 }]);
+  });
+
+  it('counts the two credit rows of one SKU by the units each reached the shelf with', () => {
+    const twin = phone('p1');
+    const plan = planSaleEditStock(
+      [line(twin, 1, { isReturn: true, restock: true }), line(twin, 1, { isReturn: true, restock: false })],
+      [line(twin, 2, { isReturn: true, restock: true })],
+      {},
+      shelf
+    );
+
+    // Two units were handed back and only one of them ever went on the shelf; the rebuilt
+    // document puts both there, so the shelf gains one — not two.
+    expect(plan.deltas).toEqual([{ productId: 'p1', name: 'Phone', delta: 1 }]);
+  });
+
   it('reports a line the shelf cannot give and plans no delta for it', () => {
     const thinShelf = [phone('p1', { stock: 4 }), cable('p9', { stock: 1 })];
     const plan = planSaleEditStock([sold], [sold, line(cable(), 3)], {}, thinShelf);

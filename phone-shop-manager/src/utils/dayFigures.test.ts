@@ -285,4 +285,30 @@ describe('computeDayFigures', () => {
     );
     expect(figures.salesCount).toBe(0);
   });
+
+  it('hands the cost of a restocked unit back to the day and keeps a written-off one', () => {
+    // Two units at 1 000 sold, one handed back: the document nets the 1 000 it charged.
+    // What the day owes for cost turns on where the goods went — back on the shelf the
+    // cost comes with them, written off the shop ate it and the day must show the loss.
+    const day = (writtenOff: boolean) => ({
+      transactions: [
+        tx('tx-credit-note', 1000, [['cash', 1000]], {
+          items: [
+            item(500, 2),
+            { ...item(500, 1), isReturn: true, customReturnPrice: 1000, ...(writtenOff ? { restock: false } : {}) },
+          ],
+        }),
+      ],
+      repairs: [],
+      debts: [],
+    });
+
+    const restocked = computeDayFigures(day(false), DAY);
+    expect(restocked.salesCOGS).toBe(500);
+    expect(restocked.salesNetProfit).toBe(500);
+
+    const notRestocked = computeDayFigures(day(true), DAY);
+    expect(notRestocked.salesCOGS).toBe(1000);
+    expect(notRestocked.salesNetProfit).toBe(0);
+  });
 });

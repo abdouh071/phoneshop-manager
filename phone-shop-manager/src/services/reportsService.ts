@@ -6,6 +6,7 @@ import { debtService } from './debtService';
 import { toDateStr } from '../store/endOfDayStore';
 import { computeDayFigures } from '../utils/dayFigures';
 import { discountsGivenOf } from '../utils/discountPolicy';
+import { netCogsOf, netLineCost, netUnitsSold, signedLineTotal } from '../utils/saleEditLines';
 import { reconcileEodDay, type EodReconciliation } from '../utils/eodReconcile';
 import {
   isClaimedAndPaidRepair,
@@ -626,10 +627,7 @@ export const reportsService = {
     let totalUnitsSold = 0;
     let discountsTotal = 0;
     inRangeTx.filter(t => t.status !== 'refunded' && t.status !== 'voided' && t.status !== 'cancelled' && t.status !== 'pending_approval').forEach(t => {
-      t.items.forEach(i => {
-        if (i.isReturn) totalUnitsSold -= i.quantity;
-        else totalUnitsSold += i.quantity;
-      });
+      totalUnitsSold += netUnitsSold(t.items);
       // Both sides of the giveaway: the basket promise, and what each line was
       // knocked down to — a concession folded into a line's price never shows up
       // in the discount field, and the till was handing the money out anyway.
@@ -676,7 +674,7 @@ export const reportsService = {
         });
 
         const rev = txs.reduce((sum, t) => sum + t.total, 0);
-        const cost = txs.reduce((sum, t) => sum + t.items.reduce((s, i) => s + (i.product.costPrice || 0) * i.quantity, 0), 0);
+        const cost = txs.reduce((sum, t) => sum + netCogsOf(t.items), 0);
 
         chartPoints.push({
           label: `${String(hr).padStart(2, '0')}:00`,
@@ -736,19 +734,16 @@ export const reportsService = {
             marginPercent: 0
           };
         }
-        const itemRevenue = item.product.price * item.quantity;
-        const itemCost = (item.product.costPrice || 0) * item.quantity;
-        if (item.isReturn) {
-          productSalesMap[pId].units -= item.quantity;
-          productSalesMap[pId].revenue -= itemRevenue;
-          productSalesMap[pId].cost -= itemCost;
-          productSalesMap[pId].profit -= (itemRevenue - itemCost);
-        } else {
-          productSalesMap[pId].units += item.quantity;
-          productSalesMap[pId].revenue += itemRevenue;
-          productSalesMap[pId].cost += itemCost;
-          productSalesMap[pId].profit += (itemRevenue - itemCost);
-        }
+        // One rule with the day figures below: the line's money is read off the line
+        // (a corrected price lives there), and its cost follows what the shelf kept —
+        // a unit written off rather than restocked leaves its cost on the day.
+        const signedUnits = (item.isReturn ? -1 : 1) * (Number(item.quantity) || 0);
+        const itemRevenue = signedLineTotal(item);
+        const itemCost = netLineCost(item);
+        productSalesMap[pId].units += signedUnits;
+        productSalesMap[pId].revenue += itemRevenue;
+        productSalesMap[pId].cost += itemCost;
+        productSalesMap[pId].profit += itemRevenue - itemCost;
       });
     });
 
@@ -778,14 +773,9 @@ export const reportsService = {
         if (!categoryMap[cat]) {
           categoryMap[cat] = { units: 0, revenue: 0 };
         }
-        const itemRevenue = item.product.price * item.quantity;
-        if (item.isReturn) {
-          categoryMap[cat].units -= item.quantity;
-          categoryMap[cat].revenue -= itemRevenue;
-        } else {
-          categoryMap[cat].units += item.quantity;
-          categoryMap[cat].revenue += itemRevenue;
-        }
+        // Read the line's own money and sign, as the product table and the day figures do.
+        categoryMap[cat].units += (item.isReturn ? -1 : 1) * (Number(item.quantity) || 0);
+        categoryMap[cat].revenue += signedLineTotal(item);
       });
     });
 

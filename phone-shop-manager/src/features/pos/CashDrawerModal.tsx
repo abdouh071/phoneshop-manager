@@ -15,6 +15,7 @@ import { EndOfDayButton } from '../endofday/EndOfDayButton';
 import { isSameLocalDate, toDateStr } from '../../store/endOfDayStore';
 import { isClaimedAndPaidRepair } from '../../utils/repairFinancials';
 import { computeDayFigures, mergeDayInvoices } from '../../utils/dayFigures';
+import { netUnitsSold } from '../../utils/saleEditLines';
 import styles from './CashDrawer.module.css';
 import { errorMessage } from '../../utils/errorUtils';
 
@@ -105,11 +106,9 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
     const repairDepositsCount = createdRepairs.filter(t => (t.depositAmount || 0) > 0).length;
     const debtCollectionsCount = todayDebtPayments.filter(p => String(p.method || '').toLowerCase() === 'cash').length;
 
-    const unitsSold = completed.reduce((sum, t) => {
-      return sum + t.items
-        .filter(i => !i.isReturn)
-        .reduce((s, i) => s + i.quantity, 0);
-    }, 0);
+    // Net of what the day's corrections handed back, which is how the reports and the
+    // sealed day count the same units.
+    const unitsSold = completed.reduce((sum, t) => sum + netUnitsSold(t.items), 0);
 
     const discountsTotal = completed.reduce((sum, t) => sum + discountsGivenOf(t), 0);
 
@@ -555,8 +554,8 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
                     <span className={styles.txFeedId}>
                       {new Date(t.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                     </span>
-                    <span className={styles.txFeedItems} title={t.items.map(i => `${i.quantity}x ${i.product.name}`).join(', ')}>
-                      {t.items.slice(0, 2).map(i => `${i.quantity}× ${i.product.name} ${i.product.model || ''}`).join(', ')}
+                    <span className={styles.txFeedItems} title={t.items.map(i => `${i.isReturn ? '−' : ''}${i.quantity}x ${i.product.name}`).join(', ')}>
+                      {t.items.slice(0, 2).map(i => `${i.isReturn ? '−' : ''}${i.quantity}× ${i.product.name} ${i.product.model || ''}`).join(', ')}
                       {t.items.length > 2 ? ` (+${t.items.length - 2} more)` : ''}
                     </span>
                     <span className={styles.txFeedCustomer}>

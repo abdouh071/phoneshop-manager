@@ -23,6 +23,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { EndOfDayButton } from '../endofday/EndOfDayButton';
 import { toDateStr } from '../../store/endOfDayStore';
 import { computeDayFigures, mergeDayInvoices } from '../../utils/dayFigures';
+import { netCogsOf, netUnitsSold } from '../../utils/saleEditLines';
 import { AdminMobileDashboard } from './AdminMobileDashboard';
 import type { RevenueDataPoint, SaleTransaction } from '../../types';
 import styles from './Dashboard.module.css';
@@ -210,7 +211,7 @@ export const DashboardPage = () => {
 
   // Today's Estimated Net Profit (parts cost only for claimed+paid repairs; debt collection is cash inflow, not double-counted revenue)
   const todaySalesCOGS = useMemo(
-    () => todayTx.reduce((sum, t) => sum + t.items.reduce((s, i) => s + (i.product.costPrice || 0) * i.quantity, 0), 0),
+    () => todayTx.reduce((sum, t) => sum + netCogsOf(t.items), 0),
     [todayTx]
   );
   const todayRepairsCOGS = useMemo(
@@ -251,8 +252,8 @@ export const DashboardPage = () => {
     return sRev + rRev;
   }, [activeTx, completedRepairs, startOfMonth]);
 
-  const unitsSoldToday = useMemo(() => todayTx.reduce((s,t) => s+t.items.reduce((a,i)=>a+i.quantity,0), 0), [todayTx]);
-  const unitsYesterday = useMemo(() => yesterdayTx.reduce((s,t) => s+t.items.reduce((a,i)=>a+i.quantity,0), 0), [yesterdayTx]);
+  const unitsSoldToday = useMemo(() => Math.max(0, todayTx.reduce((s,t) => s + netUnitsSold(t.items), 0)), [todayTx]);
+  const unitsYesterday = useMemo(() => Math.max(0, yesterdayTx.reduce((s,t) => s + netUnitsSold(t.items), 0)), [yesterdayTx]);
 
   const revenueChange = yesterdayRev === 0 ? (dailyRevenue > 0 ? 100 : 0) : ((dailyRevenue-yesterdayRev)/yesterdayRev)*100;
   const unitsSoldChange = unitsYesterday === 0 ? (unitsSoldToday > 0 ? 100 : 0) : ((unitsSoldToday-unitsYesterday)/unitsYesterday)*100;

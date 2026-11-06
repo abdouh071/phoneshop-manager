@@ -56,9 +56,24 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
   const buildReceiptText = () => {
     const store = settings.storeName || 'PhoneShop Pro';
     const curr = settings.currency || 'USD';
-    const itemsText = transaction.items
-      .map(i => `• ${i.productName} x${i.quantity} — ${formatCurrency((i.price ?? 0) * i.quantity, !!curr)}`)
-      .join('\n');
+    /**
+     * One line of the share text. A line the shop took back is written with its minus
+     * and its money off, because this text is what the customer receives when there is
+     * no printer at the counter — and a corrected invoice that lists only what was sold
+     * would hand him a receipt that does not foot to its own total.
+     */
+    const itemLine = (i: (typeof transaction.items)[number]) => {
+      const units = Math.trunc(Number(i.quantity) || 0);
+      const unit = i.isReturn
+        ? (i.customReturnPrice ?? i.unitPrice ?? i.price ?? i.product?.price ?? 0)
+        : (i.unitPrice ?? i.price ?? i.product?.price ?? 0);
+      const name = i.product?.name
+        ? `${i.product.name} ${i.product.model || ''}`.trim()
+        : i.productName || 'Item';
+      const money = formatCurrency(Math.abs(unit * units), !!curr);
+      return `• ${i.isReturn ? '−' : ''}${units}× ${name} — ${i.isReturn ? '−' : ''}${money}`;
+    };
+    const itemsText = transaction.items.map(itemLine).join('\n');
     return [
       `🧾 *${store}*`,
       `Receipt #${transaction.id.slice(-6)}`,

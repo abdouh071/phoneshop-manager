@@ -8,6 +8,7 @@ import { RepairStatusBadge } from '../../components/ui/Badge';
 import type { SaleTransaction, CustomerDebtEntry, RepairTicket } from '../../types';
 import { formatPrivateCurrency } from '../../utils/formatCurrency';
 import { discountsGivenOf } from '../../utils/discountPolicy';
+import { isReturnLine, signedLineTotal } from '../../utils/saleEditLines';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { isDebtOverdue, getDaysOverdue } from '../../utils/debtAlerts';
 import styles from './Timeline.module.css';
@@ -91,12 +92,19 @@ const SaleCard: React.FC<{ event: SaleEvent; onViewReceipt?: (tx: SaleTransactio
       {open && (
         <div className={styles.cardBody}>
           <div className={styles.itemList}>
-            {tx.items.map((item, i: number) => (
-              <div key={i} className={styles.itemRow}>
-                <span>{item.quantity}× {item.product.name} {item.product.model}</span>
-                <span>{formatPrivateCurrency(item.product.price * item.quantity)}</span>
-              </div>
-            ))}
+            {tx.items.map((item, i: number) => {
+              const returned = isReturnLine(item);
+              return (
+                <div key={i} className={styles.itemRow}>
+                  <span style={returned ? { color: '#b91c1c' } : undefined}>
+                    {returned ? '−' : ''}{item.quantity}× {item.product.name} {item.product.model}
+                  </span>
+                  <span style={returned ? { color: '#b91c1c' } : undefined}>
+                    {returned ? '−' : ''}{formatPrivateCurrency(Math.abs(signedLineTotal(item)))}
+                  </span>
+                </div>
+              );
+            })}
           </div>
           {discountsGiven > 0 && (
             <div className={styles.debtRow} style={{ color: '#15803d', fontWeight: 600 }}>

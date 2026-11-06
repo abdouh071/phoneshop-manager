@@ -12,10 +12,19 @@ import { cartService } from '../services/cartService';
 import { formatCurrency } from '../utils/formatCurrency';
 import { discountAmountOf, lineDiscountOf } from '../utils/discountPolicy';
 import { planSaleEditStock } from '../utils/saleEditStock';
+import { returnedUnits, soldUnits } from '../utils/saleEditLines';
 import { foldStockDeltas } from '../utils/stockDeltas';
 
 const getInventoryProducts = () =>
   useInventoryStore.getState().products;
+
+/**
+ * A line as the shop writes it into a log or a debt note. The units a correction
+ * hands back print with their minus, because a note that reads `2x Phone, 1x Phone`
+ * does not tell the counter what happened to the invoice.
+ */
+const lineNote = (item: CartItem): string =>
+  `${item.isReturn ? '−' : ''}${item.quantity}x ${item.product?.name ?? 'Item'} ${item.product?.model ?? ''}`.trim();
 
 const STORAGE_KEY_ACTIVE = 'pos_active_cart';
 const STORAGE_KEY_SUSPENDED = 'pos_suspended_carts';
@@ -1053,14 +1062,16 @@ export const useCartStore = create<CartState>((set, get) => ({
     if (newItems.length === 0 || total === 0) {
       status = 'refunded';
     } else {
-      // Compare by product ID instead of array index to handle item removal/reordering
-      const isPartiallyRefunded = tx.items.some(origItem => {
-        const matchingNewItem = newItems.find(ni => ni.product.id === origItem.product.id && Boolean(ni.isReturn) === Boolean(origItem.isReturn));
-        return !matchingNewItem || matchingNewItem.quantity < origItem.quantity;
-      });
-      if (isPartiallyRefunded) {
-        status = 'partially_refunded';
-      }
+      /**
+       * A correction no longer shrinks the sold line — the units that come back join the
+       * invoice as their own `−` line — so the quantity written on a row can fall and yet
+       * leave the customer holding the same goods. What decides the stamp is what he
+       * leaves with: units bought less units handed back, on the document before and
+       * after. A price-only correction moves money and no goods, and keeps its stamp.
+       */
+      const keptBefore = soldUnits(tx.items) - returnedUnits(tx.items);
+      const keptAfter = soldUnits(newItems) - returnedUnits(newItems);
+      if (keptAfter < keptBefore) status = 'partially_refunded';
     }
 
     // Split payments adjustment: preserve proportional ratio so payments sum strictly equals total
@@ -1114,8 +1125,14 @@ export const useCartStore = create<CartState>((set, get) => ({
      * up the discount field, so the shop writes it down where its totals can see
      * it. A later correction that gives a price back leaves the record standing:
      * a till that over-counts money walked out of is the safer way to be wrong.
+     *
+     * The lines that came back off the invoice are not in it. A concession is money
+     * let on what the customer BOUGHT; measured on a unit he handed back it would
+     * record a giveaway the shop never made — and now that every correction writes
+     * `−` lines, it would do that on every one.
      */
     const lineConcessions = pricedItems
+      .filter(item => !item.isReturn && item.product?.id)
       .map(item => {
         const charged = item.unitPrice ?? item.product.price;
         const before = tx.items.find(orig =>
@@ -1141,15 +1158,14 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
 
     // If this transaction was linked to a debt entry, update the debt balance accordingly (Problem 8 fix)
-    const customerStore = useCustomerStore.getState();
-    const linkedDebt = customerStore.debts.find(d =>
+    const customerStore = useCustomerStore.getState();    const linkedDebt = customerStore.debts.find(d =>
       d.id === tx.accountSettlement?.debtEntryId ||
       d.transactionId === txId ||
       (tx.invoiceNumber && d.invoiceNumber === tx.invoiceNumber) ||
       (d.notes && d.notes.includes(txId))
     );
     if (linkedDebt) {
-      const itemsSummary = newItems.map(i => `${i.quantity}x ${i.product.name} ${i.product.model}`).join(', ');
+      const itemsSummary = newItems.map(lineNote).join(', ');
       // Money the customer already handed over is a fact; correcting the invoice
       // cannot un-pay it. What the account held before this edit and what it holds
       // after is the difference between the two over-collections, and the shop's
@@ -1206,7 +1222,9 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
 
     const actor = useAuthStore.getState().user;
-    const itemsDetail = newItems.map(i => `${i.quantity}x ${i.product.name} @ ${formatCurrency(i.product.price)}`).join(', ');
+    const itemsDetail = newItems
+      .map(i => `${i.isReturn ? '−' : ''}${i.quantity}x ${i.product.name} @ ${formatCurrency(i.product.price)}`)
+      .join(', ');
     activityLogService.log(
       'sales',
       `Transaction #${tx.invoiceNumber || txId} edited: ${formatCurrency(tx.total)} → ${formatCurrency(total)}`,

@@ -16,6 +16,7 @@ import {
   getClaimedRepairRevenue,
 } from '../../utils/repairFinancials';
 import { formatPrivateCurrency } from '../../utils/formatCurrency';
+import { soldUnits } from '../../utils/saleEditLines';
 import styles from './AdminMobileDashboard.module.css';
 
 export const AdminMobileDashboard: React.FC = () => {
@@ -108,7 +109,8 @@ export const AdminMobileDashboard: React.FC = () => {
       .map(tx => ({
         id: tx.id,
         staff: tx.processedByName || t('mobile.staff'),
-        action: t('mobile.saleAction', { count: tx.items.length }),
+        // A unit the customer handed back is not another sale in this feed.
+        action: t('mobile.saleAction', { count: soldUnits(tx.items) }),
         amount: tx.total,
         time: new Date(tx.date).toLocaleTimeString(timeLocale, { hour: '2-digit', minute: '2-digit' }),
       })),

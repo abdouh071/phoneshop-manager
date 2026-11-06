@@ -4,6 +4,7 @@ import { Receipt, FileText, FileEdit, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { formatPrivateCurrency } from '../../utils/formatCurrency';
 import { discountsGivenOf } from '../../utils/discountPolicy';
+import { isReturnLine, returnedUnits, signedLineTotal, soldUnits } from '../../utils/saleEditLines';
 import styles from './CustomerProfile.module.css';
 
 interface CustomerPurchasesTabProps {
@@ -38,8 +39,13 @@ export const CustomerPurchasesTab: React.FC<CustomerPurchasesTabProps> = ({
                     <div className={styles.saleCardHeader}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span className={styles.saleTitle}>
-                          {t('customers.itemsPurchased', '{{count}} Item(s) Purchased', { count: tx.items.length })}
+                          {t('customers.itemsPurchased', '{{count}} Item(s) Purchased', { count: Math.max(0, soldUnits(tx.items) - returnedUnits(tx.items)) })}
                         </span>
+                        {returnedUnits(tx.items) > 0 && (
+                          <span style={{ fontSize: '10.5px', fontWeight: 700, background: '#fee2e2', color: '#b91c1c', padding: '2px 6px', borderRadius: '4px' }}>
+                            −{returnedUnits(tx.items)} {t('statementModal.returnedLine', 'handed back')}
+                          </span>
+                        )}
                         {tx.saleType === 'parts_b2b' && (
                           <span style={{ fontSize: '10.5px', fontWeight: 700, background: '#eff6ff', color: '#1d4ed8', padding: '2px 6px', borderRadius: '4px' }}>
                             B2B Parts #{tx.invoiceNumber?.slice(-6) || ''}
@@ -66,12 +72,19 @@ export const CustomerPurchasesTab: React.FC<CustomerPurchasesTabProps> = ({
                       )}
                     </div>
                     <div className={styles.saleItemsList}>
-                      {tx.items.map((item, idx) => (
-                        <div key={idx} className={styles.saleItemRow}>
-                          <span>{item.quantity}x {item.product.name} {item.product.model}</span>
-                          <span>{formatPrivateCurrency(item.product.price * item.quantity)}</span>
-                        </div>
-                      ))}
+                      {tx.items.map((item, idx) => {
+                        const returned = isReturnLine(item);
+                        return (
+                          <div key={idx} className={styles.saleItemRow}>
+                            <span style={returned ? { color: '#b91c1c' } : undefined}>
+                              {returned ? '−' : ''}{item.quantity}x {item.product.name} {item.product.model}
+                            </span>
+                            <span style={returned ? { color: '#b91c1c' } : undefined}>
+                              {returned ? '−' : ''}{formatPrivateCurrency(Math.abs(signedLineTotal(item)))}
+                            </span>
+                          </div>
+                        );
+                      })}
                       {discountsGivenOf(tx) > 0 && (
                         <div className={styles.saleItemRow} style={{ color: '#15803d', fontWeight: 600 }}>
                           <span>{t('customers.discountApplied', '🏷️ Discount Applied')}</span>

@@ -1600,6 +1600,8 @@
     "invoice": "Invoice",
     "payment": "Payment",
     "refund": "Refund",
+    "returnedLine": "handed back",
+    "returnedLineDesc": "Handed back — this amount comes off the invoice",
     "creditTab": "Credit Tab",
     "authStamp": "Authorized Store Signature & Stamp",
     "clientSignature": "Client Acknowledgment & Signature",

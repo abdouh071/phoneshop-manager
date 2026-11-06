@@ -174,17 +174,27 @@ export const OperationReceiptModal: React.FC<OperationReceiptModalProps> = ({
           {receiptData.items.map((it, idx) => (
             <div key={idx} className={styles.itemRow}>
               <div className={styles.itemLeft}>
-                <div className={styles.itemName}>{it.name}</div>
+                <div className={styles.itemName} style={it.isReturn ? { color: '#b91c1c' } : undefined}>
+                  {it.isReturn ? '−' : ''}{it.name}
+                  {it.isReturn && (
+                    <span style={{ fontSize: 11, fontWeight: 600, color: '#b91c1c' }}>
+                      {' '}({t('statementModal.returnedLine', 'handed back')})
+                    </span>
+                  )}
+                </div>
                 {it.detail && <div className={styles.itemDetail}>{it.detail}</div>}
-                {it.quantity > 1 && (
+                {(it.quantity > 1 || it.isReturn) && (
                   <div className={styles.itemQty}>
-                    {it.quantity} × {formatCurrency(it.price, !!receiptData.currency)}
+                    {it.isReturn ? '−' : ''}{it.quantity} × {formatCurrency(it.price, !!receiptData.currency)}
                   </div>
                 )}
               </div>
               <div className={styles.itemRight}>
-                <div className={styles.itemPrice}>
-                  {formatCurrency(it.total, !!receiptData.currency)}
+                <div
+                  className={styles.itemPrice}
+                  style={it.isReturn ? { color: '#b91c1c' } : undefined}
+                >
+                  {it.isReturn ? '−' : ''}{formatCurrency(it.total, !!receiptData.currency)}
                 </div>
               </div>
             </div>

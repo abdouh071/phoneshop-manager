@@ -11,6 +11,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { CartItem, PhoneModel, SaleTransaction } from '../types';
+import { buildCorrectedLines } from '../utils/saleEditLines';
 
 const captured = vi.hoisted(() => ({
   transactions: [] as Record<string, unknown>[],
@@ -481,5 +482,142 @@ describe('a corrected invoice that carries a line back off the basket', () => {
     await expect(edit([basket(20000)[1]])).rejects.toThrow(/leaves the receipt owing/);
     expect(captured.updates).toEqual([]);
     expect(captured.stock).toEqual([]);
+  });
+});
+
+/**
+ * A correction is a credit note, not an eraser.
+ *
+ * Lowering a line used to delete it, and the shop lost the product from the document:
+ * a refunded invoice printed blank, a partial one lost the unit's row, and nothing in
+ * the sales history said what had left the counter. The editor now hands the store the
+ * sold line plus a `−` line for what came back, so these cases pin what the store
+ * writes and stamps when the lines arrive that way — including the one thing a
+ * quantity-based stamp could no longer see, which is that the goods, not the row, are
+ * what a refund takes away.
+ */
+describe('a corrected invoice that hands units back', () => {
+  const sold = (price: number, quantity = 2): CartItem[] => [
+    { product: { ...phone, price }, quantity, unitPrice: price },
+  ];
+
+  const back = (price: number, quantity: number, restock = true): CartItem => ({
+    product: { ...phone, price },
+    quantity,
+    unitPrice: price,
+    customReturnPrice: price,
+    isReturn: true,
+    restock,
+  });
+
+  const park = (items: CartItem[], total: number) => {
+    useCartStore.setState({
+      transactions: [
+        {
+          id: 'tx_credit_note',
+          date: '2026-11-02T10:00:00.000Z',
+          items,
+          subtotal: total,
+          total,
+          payments: [{ method: 'cash', amount: total }],
+          status: 'completed',
+          invoiceNumber: 'INV-999999',
+        } as unknown as SaleTransaction,
+      ],
+    });
+  };
+
+  /** The same call the editor's preview makes, so the store is tested on the basket it
+   *  is actually handed rather than on one written by hand. */
+  const correct = (items: CartItem[], quantity: number, unitPrice?: number, restockChoices = {}) => {
+    const edited = buildCorrectedLines(
+      items,
+      { sku_phone: { quantity, unitPrice: unitPrice ?? items[0].product.price } },
+      restockChoices
+    );
+    return useCartStore.getState().editTransaction('tx_credit_note', edited, restockChoices);
+  };
+
+  const writtenLines = () => captured.updates[0]?.updates.items as CartItem[];
+  const shape = (items: CartItem[]) =>
+    items.map(item => `${item.isReturn ? '−' : ''}${item.quantity}× ${item.product.name}`);
+
+  it('keeps every line when the whole invoice comes back, and stamps it refunded', async () => {
+    park(sold(20000), 40000);
+    await correct(sold(20000), 0);
+
+    const written = captured.updates[0]?.updates as Record<string, unknown>;
+    expect(written.total).toBe(0);
+    expect(written.status).toBe('refunded');
+    expect(shape(writtenLines())).toEqual(['2× Samsung A55', '−2× Samsung A55']);
+    expect(captured.stock).toEqual([2]);
+  });
+
+  it('stamps one unit handed back as a partial refund and puts it on the shelf', async () => {
+    park(sold(20000), 40000);
+    await correct(sold(20000), 1);
+
+    const written = captured.updates[0]?.updates as Record<string, unknown>;
+    expect(written.total).toBe(20000);
+    expect(written.status).toBe('partially_refunded');
+    expect(shape(writtenLines())).toEqual(['2× Samsung A55', '−1× Samsung A55']);
+    expect(captured.stock).toEqual([1]);
+  });
+
+  it('prices the giveaway on the sold line alone, not on the unit handed back', async () => {
+    // An earlier correction already wrote the credit; this one only moves the price, so
+    // the shop gave 1 000 DA on two units it sold — not 500 more on the one it took.
+    const items = [...sold(20000), back(20000, 1)];
+    park(items, 20000);
+    await correct(items, 1, 19000);
+
+    const written = captured.updates[0]?.updates as Record<string, unknown>;
+    expect(written.total).toBe(19000);
+    const discounts = written.lineDiscounts as { productId: string; granted: number }[];
+    expect(discounts).toHaveLength(1);
+    expect(discounts[0]).toMatchObject({ productId: 'sku_phone', granted: 2000 });
+  });
+
+  it('moves the shelf when the counter changes his mind about a written-off unit', async () => {
+    const items = [...sold(20000), back(20000, 1, false)];
+    park(items, 20000);
+    await correct(items, 1, 20000, { sku_phone: true });
+
+    expect(captured.stock).toEqual([1]);
+    expect(writtenLines()[1].restock).toBe(true);
+  });
+
+  it('takes the unit back off the shelf when he writes it off instead', async () => {
+    const items = [...sold(20000), back(20000, 1, true)];
+    park(items, 20000);
+    await correct(items, 1, 20000, { sku_phone: false });
+
+    expect(captured.stock).toEqual([-1]);
+    expect(writtenLines()[1].restock).toBe(false);
+  });
+
+  it('leaves the shelf alone when a correction touches only the price', async () => {
+    park(sold(20000), 40000);
+    await correct(sold(20000), 2, 19000);
+
+    expect(captured.stock).toEqual([]);
+    expect(captured.updates[0]?.updates.status).toBe('completed');
+  });
+
+  it('prints what was put on the invoice and what came off it, each with its sign', async () => {
+    park(sold(20000, 1), 20000);
+    const edited = buildCorrectedLines(
+      sold(20000, 1),
+      { sku_phone: { quantity: 0, unitPrice: 20000 } },
+      {},
+      [{ product: { ...cable, price: 300 }, quantity: 2, unitPrice: 300 }]
+    );
+    await useCartStore.getState().editTransaction('tx_credit_note', edited, {});
+
+    const written = captured.updates[0]?.updates as Record<string, unknown>;
+    // The phone left and came back, and two cables joined: 600 DA of goods on a
+    // document that still names every unit the counter moved.
+    expect(written.total).toBe(600);
+    expect(shape(writtenLines())).toEqual(['1× Samsung A55', '−1× Samsung A55', '2× Type-C cable']);
   });
 });
