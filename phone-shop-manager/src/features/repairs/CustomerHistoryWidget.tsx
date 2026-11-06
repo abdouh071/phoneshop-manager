@@ -76,7 +76,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
 
     // D. Match by exact full name if cleanName has at least 3 chars and no phone provided
     if (cleanName.length >= 3 && (!cleanPhone || cleanPhone.length < 4)) {
-      const found = customers.find(c => c.name.trim().toLowerCase() === cleanName);
+      const found = customers.find(c => (c.name ?? '').trim().toLowerCase() === cleanName);
       if (found) return found;
     }
 
@@ -91,7 +91,7 @@ export const CustomerHistoryWidget: React.FC<CustomerHistoryWidgetProps> = ({
       .filter(d => {
         if (matchedCustomer && d.customerId === matchedCustomer.id) return true;
         if (cleanPhone.length >= 7 && isPhoneMatch(d.customerPhone, customerPhone)) return true;
-        if (cleanName.length >= 3 && d.customerName.trim().toLowerCase() === cleanName) return true;
+        if (cleanName.length >= 3 && (d.customerName ?? '').trim().toLowerCase() === cleanName) return true;
         return false;
       })
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

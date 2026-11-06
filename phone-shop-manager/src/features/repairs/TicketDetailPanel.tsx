@@ -165,8 +165,8 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
     }
     const cleanTicketPhone = ticket.customerPhone?.replace(/\D/g, '');
     return customers.find(c =>
-      (cleanTicketPhone && c.phone.replace(/\D/g, '') === cleanTicketPhone) ||
-      (c.name.toLowerCase().trim() === ticket.customerName.toLowerCase().trim())
+      (cleanTicketPhone && (c.phone ?? '').replace(/\D/g, '') === cleanTicketPhone) ||
+      ((c.name ?? '').toLowerCase().trim() === (ticket.customerName ?? '').toLowerCase().trim())
     ) || null;
   }, [ticket, customers]);
 

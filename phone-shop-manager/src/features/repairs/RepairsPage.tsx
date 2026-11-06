@@ -394,7 +394,7 @@ export const RepairsPage = () => {
       found = customers.find(c =>
         isPhoneMatch(c.phone, ticket.customerPhone) ||
         (c.normalizedPhone && isPhoneMatch(c.normalizedPhone, ticket.customerPhone)) ||
-        (c.name.toLowerCase().trim() === ticket.customerName.toLowerCase().trim())
+        ((c.name ?? '').toLowerCase().trim() === (ticket.customerName ?? '').toLowerCase().trim())
       );
     }
     if (found) {
@@ -443,7 +443,7 @@ export const RepairsPage = () => {
     const match = tickets.find(t =>
       t.ticketNumber === focusId ||
       t.id === focusId ||
-      t.ticketNumber.toLowerCase().includes(focusId.toLowerCase())
+      (t.ticketNumber ?? '').toLowerCase().includes(focusId.toLowerCase())
     );
     if (match) {
       const timer = setTimeout(() => setSelectedTicket(match), 400);

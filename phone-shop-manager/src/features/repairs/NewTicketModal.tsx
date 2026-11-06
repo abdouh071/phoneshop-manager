@@ -162,8 +162,8 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
   // Filter customers by search
   const suggestions = customerQuery.trim()
     ? customers.filter(c =>
-        c.name.toLowerCase().includes(customerQuery.toLowerCase()) ||
-        c.phone.includes(customerQuery)
+        (c.name ?? '').toLowerCase().includes(customerQuery.toLowerCase()) ||
+        (c.phone ?? '').includes(customerQuery)
       ).slice(0, 6)
     : customers.slice(0, 6);
 
@@ -388,7 +388,7 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
           if (ticketToEdit && cust) {
             const existingCust = customers.find(c => c.id === form.customerId);
             const newNameTrimmed = form.customerName.trim();
-            if (existingCust && existingCust.name.trim().toLowerCase() !== newNameTrimmed.toLowerCase() && newNameTrimmed) {
+            if (existingCust && (existingCust.name ?? '').trim().toLowerCase() !== newNameTrimmed.toLowerCase() && newNameTrimmed) {
               await updateCustomer(form.customerId, { name: newNameTrimmed });
               cust = { ...cust, name: newNameTrimmed };
             }
@@ -907,8 +907,8 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
                 </div>
                 <div className={styles.vaultChips}>
                   {activeCustomerDevices.map(d => {
-                    const isActive = form.deviceBrand.toLowerCase() === d.brand.toLowerCase() &&
-                      form.deviceModel.toLowerCase() === d.model.toLowerCase();
+                    const isActive = (form.deviceBrand ?? '').toLowerCase() === (d.brand ?? '').toLowerCase() &&
+                      (form.deviceModel ?? '').toLowerCase() === (d.model ?? '').toLowerCase();
                     return (
                       <button
                         key={d.id}

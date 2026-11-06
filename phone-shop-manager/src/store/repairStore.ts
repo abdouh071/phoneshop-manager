@@ -768,11 +768,13 @@ export const useRepairStore = create<RepairState>((set, get) => ({
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
+      // Every field can be missing on a legacy ticket; an unguarded toLowerCase()
+      // here used to crash the whole search box on the first keystroke.
       filtered = filtered.filter(t =>
-        t.customerName.toLowerCase().includes(q) ||
-        t.ticketNumber.toLowerCase().includes(q) ||
-        t.deviceModel.toLowerCase().includes(q) ||
-        t.deviceBrand.toLowerCase().includes(q) ||
+        (t.customerName ?? '').toLowerCase().includes(q) ||
+        (t.ticketNumber ?? '').toLowerCase().includes(q) ||
+        (t.deviceModel ?? '').toLowerCase().includes(q) ||
+        (t.deviceBrand ?? '').toLowerCase().includes(q) ||
         (t.customerPhone ?? '').toLowerCase().includes(q) ||
         (t.issueDescription ?? '').toLowerCase().includes(q)
       );
