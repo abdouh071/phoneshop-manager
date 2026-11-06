@@ -6,6 +6,7 @@ import { useRepairStore } from '../store/repairStore';
 import { useAuthStore } from '../store/authStore';
 import { usePermissions } from '../hooks/usePermissions';
 import { customerService } from '../services/customerService';
+import { isValidClientName } from '../utils/clientNames';
 import { useTranslation } from 'react-i18next';
 import type { Customer } from '../types';
 
@@ -40,13 +41,15 @@ export const NewTicketScreen = ({ navigation }: any) => {
 
   // Look up customer when phone number reaches 8+ digits. The lookup only feeds the
   // "Known client" banner — the ticket is NOT linked by it; the technician has to
-  // tap Link on the banner, and a different number clears that choice.
+  // tap Link on the banner, and a different number clears that choice. Only a
+  // registered account is offered: a placeholder row (generic name) must never be
+  // suggested as the client standing at the desk.
   useEffect(() => {
     const cleanPhone = customerPhone.replace(/\D/g, '');
     if (cleanPhone.length >= 8) {
       const timer = setTimeout(async () => {
         const found = await customerService.findByPhone(customerPhone);
-        if (found) {
+        if (found && isValidClientName(found.name)) {
           setMatchedCustomer(found);
           setLinkedCustomerId(prev => (prev === found.id ? prev : null));
           if (!customerName) {
