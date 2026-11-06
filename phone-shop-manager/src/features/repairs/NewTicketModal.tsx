@@ -15,6 +15,7 @@ import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrenc
 import { usePrivacyStore } from '../../store/privacyStore';
 import { formatStandardPhone, normalizePhoneDigits, isPhoneMatch } from '../../utils/phoneUtils';
 import { CustomerDuplicatePromptCard } from '../../components/customers/CustomerDuplicatePromptCard';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { LockCodeInput } from './LockCodeWidget';
 import { CustomerHistoryWidget } from './CustomerHistoryWidget';
 import { Smartphone, User, Wrench, Calculator, ShieldCheck, Calendar, Sparkles, PauseCircle, Printer } from 'lucide-react';
@@ -108,6 +109,10 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
   const toast = useToast();
   const [ignoreDuplicatePhone, setIgnoreDuplicatePhone] = useState(false);
   const [isUpdatingCustomer, setIsUpdatingCustomer] = useState(false);
+  /** A number on file with a different name: the counter must say who is at the desk. */
+  const [sameClientQuestion, setSameClientQuestion] = useState<Customer | null>(null);
+  /** Whether the interrupted save asked for a label print; the dialog resumes it. */
+  const resumePrintRef = useRef(false);
 
   // Real-time matched customer by canonical phone
   const matchedCustomerByPhone = useMemo(() => {
@@ -336,7 +341,10 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = async (shouldPrint: boolean = false) => {
+  const handleSubmit = async (
+    shouldPrint: boolean = false,
+    resolve?: { useExisting?: Customer; newClient?: boolean }
+  ) => {
     if (isSubmitting || isSubmittingRef.current || isCreatingTicket || isPrinting) return;
 
     if (!validate()) {
@@ -374,7 +382,30 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
             }
           : undefined;
 
-        if (form.customerId) {
+        // The "same client?" dialog answers here, as an explicit choice that never
+        // depends on the form state the interrupted save was reading.
+        if (resolve?.useExisting) {
+          cust = await enrichCustomer(resolve.useExisting.id, {
+            name: form.customerName.trim(),
+            phone: formattedCustPhone,
+            notes: form.remark?.trim() || undefined,
+            device: deviceData,
+          });
+        } else if (resolve?.newClient && hasValidPhone && formattedCustPhone) {
+          cust = await addCustomer({
+            name: form.customerName.trim(),
+            phone: formattedCustPhone,
+            accountType: 'retail',
+            notes: form.remark?.trim() || undefined,
+            registeredDevices: deviceData ? [{
+              id: `dev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+              brand: deviceData.brand,
+              model: deviceData.model,
+              notes: deviceData.notes,
+              createdAt: new Date().toISOString(),
+            }] : undefined,
+          });
+        } else if (form.customerId) {
           // Existing customer selected: auto-enrich their device vault and notes non-destructively
           cust = await enrichCustomer(form.customerId, {
             name: form.customerName.trim(),
@@ -421,12 +452,48 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
             // Restore the customerId link so the ticket stays connected
             form.customerId = ticketToEdit.customerId;
           }
+        } else if (matchedCustomerByPhone) {
+          // The number already belongs to a profile. The one auto-link the shop
+          // allows is an exact phone AND name match; a name that differs stops the
+          // save and asks the counter who is standing at the desk, because two
+          // people can share a line and only the counter can tell them apart.
+          const typedName = form.customerName.trim().toLowerCase();
+          const profileName = (matchedCustomerByPhone.name ?? '').trim().toLowerCase();
+          if (profileName && typedName === profileName) {
+            cust = await enrichCustomer(matchedCustomerByPhone.id, {
+              name: form.customerName.trim(),
+              phone: formattedCustPhone,
+              notes: form.remark?.trim() || undefined,
+              device: deviceData,
+            });
+          } else {
+            resumePrintRef.current = shouldPrint;
+            isSubmittingRef.current = false;
+            setIsSubmitting(false);
+            setIsPrinting(false);
+            setSameClientQuestion(matchedCustomerByPhone);
+            return;
+          }
+        } else if (hasValidPhone && formattedCustPhone) {
+          // Nobody was picked and the number belongs to nobody: a NEW client, with
+          // its own id. The profile is created fresh — never looked up by name — so
+          // two clients sharing a name stay two records, and the id is a database
+          // key that never reaches the screen.
+          cust = await addCustomer({
+            name: form.customerName.trim(),
+            phone: formattedCustPhone,
+            accountType: 'retail',
+            notes: form.remark?.trim() || undefined,
+            registeredDevices: deviceData ? [{
+              id: `dev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+              brand: deviceData.brand,
+              model: deviceData.model,
+              notes: deviceData.notes,
+              createdAt: new Date().toISOString(),
+            }] : undefined,
+          });
         } else {
-          // A ticket links to a customer ONLY when the counter picks one — the
-          // suggestion list, "Use existing", or "Save as separate". A name and
-          // phone typed freely stay on the ticket as text; the account is created
-          // or linked at settlement, where the counter actively enters it. Nothing
-          // here reaches out and adopts a profile the counter never chose.
+          // No phone: the ticket stays a walk-in record without an account.
           cust = undefined;
         }
       } catch (err) {
@@ -643,6 +710,7 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
   const balanceNum = Math.max(0, costNum - depositNum);
 
   return (
+    <>
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
@@ -1128,5 +1196,35 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
         </div>
       </div>
     </Modal>
+
+    <ConfirmDialog
+      isOpen={sameClientQuestion !== null}
+      title="This number is already on file"
+      variant="warning"
+      message={
+        sameClientQuestion
+          ? (
+            <>
+              The number <strong>{formatStandardPhone(sameClientQuestion.phone || '') || form.customerPhone}</strong> belongs
+              to <strong>{sameClientQuestion.name}</strong>. Is this the same client?
+            </>
+          )
+          : null
+      }
+      confirmLabel="Yes — same client"
+      cancelLabel="No — new client"
+      onConfirm={() => {
+        const matched = sameClientQuestion;
+        setSameClientQuestion(null);
+        if (matched) {
+          handleSubmit(resumePrintRef.current, { useExisting: matched });
+        }
+      }}
+      onCancel={() => {
+        setSameClientQuestion(null);
+        handleSubmit(resumePrintRef.current, { newClient: true });
+      }}
+    />
+    </>
   );
 };
