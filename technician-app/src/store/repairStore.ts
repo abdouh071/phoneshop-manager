@@ -327,6 +327,16 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       const targetName = customerName || ticket.customerName || 'Client';
       let customerId = ticket.customerId;
 
+      // A customer that only exists in this phone's cache must not be referenced by
+      // the ticket or its debt row: upload it now when the network allows. When the
+      // cached row is gone (reinstall, another phone created it), fall back to the
+      // phone number — a settle used to write the debt against an offline_cust_ id
+      // that does not exist on the server, and the money owed vanished with it.
+      if (customerId && isOfflineCustomerId(customerId)) {
+        const resolved = await customerService.resolveOfflineCustomer(customerId);
+        customerId = resolved ?? undefined;
+      }
+
       if (!customerId && targetPhone) {
         try {
           const cust = await customerService.findOrCreate(targetName, targetPhone);
@@ -336,11 +346,18 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         }
       }
 
-      // A customer that only exists in this phone's cache must not be referenced by
-      // the ticket or its debt row: upload it now when the network allows.
+      // findOrCreate itself falls back to a phantom id when the network drops
+      // mid-settle; nothing may be written against it.
       if (customerId && isOfflineCustomerId(customerId)) {
-        const resolved = await customerService.resolveOfflineCustomer(customerId);
-        if (resolved) customerId = resolved;
+        customerId = undefined;
+      }
+
+      // An owed balance must land on a real account. Completing the ticket without
+      // the debt row used to be the silent outcome, and the money owed left the
+      // ledger; failing cleanly lets the technician settle again when the network
+      // allows.
+      if (remainingDebt > 0 && !customerId) {
+        throw new Error('A customer account is required to record the remaining debt');
       }
 
       // A retried settle must not count the money twice. When the document already
