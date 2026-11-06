@@ -161,7 +161,7 @@ export const customerService = {
           }
         }
         console.warn('[CustomerService] Device is offline. Storing customer locally and enqueuing for background sync.');
-        const offlineId = `offline_cust_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const offlineId = `offline_cust_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
         const now = new Date().toISOString();
         const formattedPhone = customer.phone ? formatStandardPhone(customer.phone) : '';
         const created: Customer = {
@@ -265,7 +265,7 @@ export const customerService = {
         return created;
       } catch (err) {
         console.warn('Failed to add customer to Firestore, saving locally & enqueuing for sync:', err);
-        const offlineId = `offline_cust_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const offlineId = `offline_cust_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
         const created = { ...newCustomer, id: offlineId };
         saveLocalCustomers([...local, created]);
         offlineCustomerSyncService.enqueue(created);

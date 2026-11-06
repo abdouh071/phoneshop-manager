@@ -25,7 +25,7 @@ import { MobileRepairsView } from './MobileRepairsView';
 import { EndOfDayButton } from '../endofday/EndOfDayButton';
 import { TechnicianSettlementsTab } from './TechnicianSettlementsTab';
 import { detectIssueTag, getBrandIcon, nextStatusMap, nextActionLabels } from './repairConstants';
-import { isPhoneMatch, normalizePhoneDigits } from '../../utils/phoneUtils';
+import { isPhoneMatch, normalizePhoneDigits, walkInCustomerId } from '../../utils/phoneUtils';
 import { isTicketActiveReturnPending, isTicketOverdue } from '../../utils/phoneLifecycle';
 
 export type RepairViewMode = 'tables' | 'board' | 'completed' | 'history' | 'cancelled' | 'settlements';
@@ -401,12 +401,11 @@ export const RepairsPage = () => {
       setProfileCustomer(found);
     } else {
       // Synthesize a walk-in Customer profile so staff can inspect all records for this walk-in customer
-      const cleanDigits = normalizePhoneDigits(ticket.customerPhone);
       const walkInCustomer: Customer = {
-        id: `walkin_${cleanDigits || ticket.id}`,
+        id: walkInCustomerId(ticket.customerPhone, ticket.id),
         name: ticket.customerName || 'Walk-in Client',
         phone: ticket.customerPhone || 'Walk-in',
-        normalizedPhone: cleanDigits || undefined,
+        normalizedPhone: normalizePhoneDigits(ticket.customerPhone) || undefined,
         accountType: 'retail',
         totalPurchases: 0,
         totalSpent: 0,

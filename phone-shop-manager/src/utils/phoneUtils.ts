@@ -185,6 +185,19 @@ export const isValidNameForDeduplication = (name?: string | null): boolean => {
 };
 
 /**
+ * The id of a synthesized walk-in profile. A walk-in is never stored as a customer
+ * document, but the profile view and the audit trail still need a key for it — and
+ * that key must be unique per ticket, because two passengers sharing one phone line
+ * are two clients. The old phone-only id made their histories share one key, and a
+ * key derived from anything but the ticket could collide under normal shop life.
+ */
+export const walkInCustomerId = (phone?: string | null, ticketId?: string): string => {
+  const digits = normalizePhoneDigits(phone);
+  const unique = ticketId || `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  return `walkin_${digits || 'nophone'}_${unique}`;
+};
+
+/**
  * Determines whether a newly provided name is more complete or descriptive
  * than the existing saved name (e.g. "Amine Benali" vs "Amine", or replacing "Client" with "Amine").
  */

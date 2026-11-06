@@ -21,7 +21,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useToast } from '../../components/ui/Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
-import { formatStandardPhone, isPhoneMatch, normalizePhoneDigits } from '../../utils/phoneUtils';
+import { formatStandardPhone, isPhoneMatch, normalizePhoneDigits, walkInCustomerId } from '../../utils/phoneUtils';
 import { useRepairStore } from '../../store/repairStore';
 import { useCustomerStore } from '../../store/customerStore';
 import { useAuthStore } from '../../store/authStore';
@@ -376,7 +376,10 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
       ).catch(console.error);
 
       // Customer audit log (for registered and walk-in customers)
-      const auditCustomerId = matchedCustomer?.id || ticket.customerId || (trimmedPhone ? `walkin_${trimmedPhone.replace(/\D/g, '')}` : undefined);
+      // The walk-in key matches the one the repair page synthesizes for this ticket,
+      // so the settlement log lands in exactly that ticket's walk-in history — and
+      // it is unique per ticket, never per phone.
+      const auditCustomerId = matchedCustomer?.id || ticket.customerId || walkInCustomerId(ticket.customerPhone, ticket.id);
       if (auditCustomerId) {
         customerLogService.log({
           customerId: auditCustomerId,
