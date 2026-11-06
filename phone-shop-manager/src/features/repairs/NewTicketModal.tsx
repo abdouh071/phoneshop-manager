@@ -554,12 +554,25 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
         toast.success('Ticket updated!', `Repair #${ticketToEdit.ticketNumber} details saved.`);
       } else {
         resultingTicket = await createTicket(ticketPayload as Parameters<typeof createTicket>[0]);
-        toast.success('Ticket created!', `New repair ticket generated for ${form.customerName}.`);
-        onTicketCreated?.(resultingTicket);
+        const duplicateOf = useRepairStore.getState().lastCreateDuplicate;
+        if (duplicateOf) {
+          // The store refused the write and returned the ticket it matched instead of
+          // creating one. Say so — a customer holding a number for somebody else's
+          // repair is worse than asking the counter to look twice.
+          toast.warning(
+            'Ticket not created — possible duplicate',
+            `Ticket #${duplicateOf} with the same customer, device and issue was just opened. If this is a second device, change the issue note and try again.`
+          );
+        } else {
+          toast.success('Ticket created!', `New repair ticket generated for ${form.customerName}.`);
+          onTicketCreated?.(resultingTicket);
+        }
       }
 
+      const duplicateOf = !ticketToEdit ? useRepairStore.getState().lastCreateDuplicate : null;
+
       // Handle Direct Thermal Printing if requested
-      if (shouldPrint && resultingTicket) {
+      if (shouldPrint && resultingTicket && !duplicateOf) {
         try {
           const printRes = await printRepairLabelDirect(resultingTicket, storeName, 1);
           if (printRes.method === 'direct') {

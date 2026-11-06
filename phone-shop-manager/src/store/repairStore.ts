@@ -50,6 +50,8 @@ interface RepairState {
   error: string | null;
   searchQuery: string;
   statusFilter: RepairTicket['status'] | 'all' | 'overdue';
+  /** Ticket number of the existing ticket the last createTicket call refused to duplicate. */
+  lastCreateDuplicate: string | null;
   // Actions
   fetchTickets: () => Promise<void>;
   subscribeLiveRepairs: () => () => void;
@@ -91,6 +93,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
   error: null,
   searchQuery: '',
   statusFilter: 'all',
+  lastCreateDuplicate: null,
   activeDraft: loadActiveDraft(),
   heldDrafts: loadHeldDrafts(),
 
@@ -320,6 +323,9 @@ export const useRepairStore = create<RepairState>((set, get) => ({
     const matchingExisting = currentTickets.find(t => isSameTicketContent(t, tempCheckTicket));
     if (matchingExisting) {
       console.warn('Ticket with identical content already exists, preventing duplicate:', matchingExisting.ticketNumber);
+      // The caller reads this to tell the counter the ticket was NOT created — the
+      // board must never show a second device as "Ticket created!".
+      set({ lastCreateDuplicate: matchingExisting.ticketNumber });
       return matchingExisting;
     }
 
@@ -346,6 +352,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       set(state => ({
         tickets: deduplicateTickets([newTicket, ...state.tickets]),
         searchQuery: '', // Clear search filter so newly added ticket is visible immediately
+        lastCreateDuplicate: null,
       }));
       activityLogService.log(
         'repairs',

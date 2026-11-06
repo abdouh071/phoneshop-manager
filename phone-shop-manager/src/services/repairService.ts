@@ -466,7 +466,8 @@ export const repairService = {
     const runCreation = async (): Promise<RepairTicket> => {
       const local = getLocalRepairs();
 
-      // De-duplication check: if an identical ticket was submitted within the last 30s, return existing
+      // De-duplication check: an identical same-phone ticket submitted in the same
+      // breath is a double-submit; everything else is a real device and is created.
       const existingRecent = local.find(t => isSameTicketContent(t, {
         ...ticket,
         id: 'temp',

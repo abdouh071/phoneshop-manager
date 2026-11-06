@@ -14,21 +14,24 @@ export const isSameTicketContent = (a: RepairTicket, b: RepairTicket): boolean =
     return true;
   }
 
-  // Near-simultaneous duplicate creation (within 180 seconds with identical core attributes)
+  // Near-simultaneous duplicate creation: a double-submit lands within seconds, so
+  // the window is deliberately tiny. Two customers without a phone number are never
+  // each other's duplicate — the old rule treated an empty phone as a wildcard, and a
+  // shop that takes walk-ins silently swallowed one phone in every matching pair.
   if (a.createdAt && b.createdAt) {
     const timeA = new Date(a.createdAt).getTime();
     const timeB = new Date(b.createdAt).getTime();
-    if (!isNaN(timeA) && !isNaN(timeB) && Math.abs(timeA - timeB) < 180_000) {
+    if (!isNaN(timeA) && !isNaN(timeB) && Math.abs(timeA - timeB) < 10_000) {
       const norm = (s?: string) => (s || '').trim().toLowerCase();
       const sameCust = norm(a.customerName) === norm(b.customerName);
       const sameBrand = norm(a.deviceBrand) === norm(b.deviceBrand);
       const sameModel = norm(a.deviceModel) === norm(b.deviceModel);
       const sameIssue = norm(a.issueDescription) === norm(b.issueDescription);
 
-      if (sameCust && sameBrand && sameModel && (sameIssue || norm(a.issueDescription).includes(norm(b.issueDescription)) || norm(b.issueDescription).includes(norm(a.issueDescription)))) {
+      if (sameCust && sameBrand && sameModel && sameIssue) {
         const phoneA = (a.customerPhone || '').replace(/\D/g, '');
         const phoneB = (b.customerPhone || '').replace(/\D/g, '');
-        if (!phoneA || !phoneB || phoneA === phoneB) {
+        if (phoneA && phoneB && phoneA === phoneB) {
           return true;
         }
       }
@@ -115,9 +118,12 @@ const fuseTicketData = (preferred: RepairTicket, absorbed: RepairTicket): Repair
  * 1. Filter out tickets that were archived/merged into another ticket.
  * 2. No duplicate `id` can exist.
  * 3. No duplicate `ticketNumber` can exist.
- * 4. No accidental duplicate tickets created at the same time can exist.
- * When a collision occurs, server-persisted, active, and paid tickets take precedence,
- * and extra details (parts, notes) are fused without losing data.
+ * Content similarity is deliberately NOT a merge rule here: the board must show every
+ * real ticket, and two walk-ins with the same name and device are two tickets. The
+ * double-submit guard lives in `createTicket`, and `findDuplicateTickets` offers the
+ * review list for anything the shop wants to merge by hand.
+ * When an id/ticketNumber collision occurs, server-persisted, active, and paid tickets
+ * take precedence, and extra details (parts, notes) are fused without losing data.
  */
 export const deduplicateTickets = (tickets: RepairTicket[]): RepairTicket[] => {
   if (!Array.isArray(tickets) || tickets.length <= 1) {
@@ -152,23 +158,6 @@ export const deduplicateTickets = (tickets: RepairTicket[]): RepairTicket[] => {
         seenIds.add(preferred.id);
         result[existingIdx] = fuseTicketData(preferred, absorbed);
       }
-      continue;
-    }
-
-    // 3. Check for near-simultaneous duplicate content
-    const duplicateContentIdx = result.findIndex(t => isSameTicketContent(t, ticket));
-    if (duplicateContentIdx !== -1) {
-      const existing = result[duplicateContentIdx];
-      const { preferred, absorbed } = pickPreferredTicket(existing, ticket);
-      seenIds.delete(existing.id);
-      if (existing.ticketNumber) {
-        seenTicketNumbers.delete(existing.ticketNumber.trim().toUpperCase());
-      }
-      seenIds.add(preferred.id);
-      if (preferred.ticketNumber) {
-        seenTicketNumbers.add(preferred.ticketNumber.trim().toUpperCase());
-      }
-      result[duplicateContentIdx] = fuseTicketData(preferred, absorbed);
       continue;
     }
 
