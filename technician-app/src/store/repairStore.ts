@@ -381,6 +381,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
               customerName: targetName,
               customerPhone: targetPhone,
               ticketNumber: ticket.ticketNumber,
+              ticketId: ticket.id,
               deviceDescription: `${ticket.deviceBrand} ${ticket.deviceModel}`,
               totalAmount: finalPrice,
               amountPaid: effectiveTotalPaid,

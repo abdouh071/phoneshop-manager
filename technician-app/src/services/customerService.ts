@@ -216,6 +216,7 @@ export const customerService = {
     customerName: string;
     customerPhone: string;
     ticketNumber: string;
+    ticketId?: string;
     deviceDescription: string;
     totalAmount: number;
     amountPaid: number;
@@ -225,11 +226,14 @@ export const customerService = {
   }): Promise<string> => {
     // One debt row per ticket: a settle that is retried after a crash between the
     // ticket write and this write must adopt the row the first attempt left behind
-    // instead of opening the account a second time.
-    if (params.ticketNumber) {
+    // instead of opening the account a second time. The row is found by the
+    // ticket's own id — the number alone is not safe, because every ticket that
+    // has not claimed its number yet carries TKT-PENDING, and two of them settling
+    // in a row would "find" the same debt.
+    if (params.ticketId) {
       try {
         const existingSnap = await getDocs(
-          query(collection(db, 'customer_debts'), where('ticketNumber', '==', params.ticketNumber), limit(1))
+          query(collection(db, 'customer_debts'), where('linkedTicketId', '==', params.ticketId), limit(1))
         );
         if (!existingSnap.empty) return existingSnap.docs[0].id;
       } catch (lookupErr) {
@@ -269,6 +273,7 @@ export const customerService = {
       status,
       date: now,
       type: 'repair',
+      linkedTicketId: params.ticketId ?? null,
       notes: params.notes || `Repair #${params.ticketNumber} handed over with ${remainingBalance} DA remaining debt.`,
       payments,
       createdAt: now,
