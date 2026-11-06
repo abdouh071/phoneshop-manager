@@ -963,7 +963,7 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     // 5. Deduct from customer's totalSpent & totalPurchases
     // 6. Process refund in Firebase
-    await transactionService.refund(txId);
+    const refundedAt = await transactionService.refund(txId);
 
     // 5. Authoritative recalculation of customer financials on refund
     if (tx.customerId) {
@@ -974,13 +974,13 @@ export const useCartStore = create<CartState>((set, get) => ({
       const { usePartsCartStore } = await import('./partsCartStore');
       usePartsCartStore.setState(state => ({
         invoices: state.invoices.map(t =>
-          t.id === txId ? { ...t, status: 'refunded' as const } : t
+          t.id === txId ? { ...t, status: 'refunded' as const, refundedAt } : t
         )
       }));
     } else {
       set(state => ({
         transactions: state.transactions.map(t =>
-          t.id === txId ? { ...t, status: 'refunded' as const } : t
+          t.id === txId ? { ...t, status: 'refunded' as const, refundedAt } : t
         )
       }));
     }

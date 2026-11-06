@@ -7,7 +7,7 @@
  * numbers move, every sealed day suddenly disagrees with the same day recomputed.
  */
 import { describe, it, expect } from 'vitest';
-import { computeDayFigures, hasFinalStatus, mergeDayInvoices } from './dayFigures';
+import { closedAtOf, computeDayFigures, hasFinalStatus, mergeDayInvoices } from './dayFigures';
 import type { CustomerDebtEntry, PhoneModel, RepairTicket, SaleTransaction } from '../types';
 
 const DAY = '2026-02-10';
@@ -137,8 +137,14 @@ describe('computeDayFigures', () => {
 
   it('reports cash paid out for refunds without letting them touch the drawer total', () => {
     const figures = computeDayFigures(sources(), DAY);
-    expect(figures.refundsCash).toBe(300);
+    // The phone closes a sale as `voided` and hands the money back exactly as the
+    // counter's `refunded` does, so both are payouts. Counting only one of them left
+    // every phone-voided sale out of the drawer's refunds line altogether.
+    expect(figures.refundsCash).toBe(1299);
     expect(figures.salesCash).toBe(600);
+    // Both were rung up and handed back on the same day, so excluding them from the
+    // sales sums has already netted the payout: taking it off again would double it.
+    expect(figures.totalCash).toBe(2500);
   });
 
   it('recognises claimed repairs by what was actually paid, and keeps deposits separate', () => {
@@ -368,5 +374,99 @@ describe('the day the dashboard shows', () => {
     expect(figures.debtCollectedCash).toBe(250);
     expect(figures.totalRevenue).toBe(2500);
     expect(figures.totalCash).toBe(2750);
+  });
+});
+
+describe('the day the money was handed back', () => {
+  const MONDAY = '2026-02-09';
+  const empty = { repairs: [], debts: [] };
+
+  it('puts the payout on the day it was given, not the day of the sale', () => {
+    // The counter took 1000 on Monday and handed it back on Tuesday. Reading the refund
+    // against the sale date showed the payout on Monday, whose drawer had already been
+    // sealed, and left Tuesday claiming a thousand dinars it no longer held.
+    const transactions = [
+      tx('tx-monday', 1000, [['cash', 1000]], {
+        date: at(10, MONDAY),
+        status: 'refunded',
+        refundedAt: at(15, DAY),
+      }),
+    ];
+
+    const monday = computeDayFigures({ transactions, ...empty }, MONDAY);
+    expect(monday.refundsCash).toBe(0);
+
+    const tuesday = computeDayFigures({ transactions, ...empty }, DAY);
+    expect(tuesday.refundsCash).toBe(1000);
+    expect(tuesday.salesCash).toBe(0);
+    expect(tuesday.totalCash).toBe(0);
+  });
+
+  it('takes the payout off the drawer of the day that actually paid it', () => {
+    const transactions = [
+      tx('tx-monday', 1000, [['cash', 1000]], {
+        date: at(10, MONDAY),
+        status: 'refunded',
+        refundedAt: at(15, DAY),
+      }),
+      tx('tx-tuesday', 5000, [['cash', 5000]]),
+    ];
+
+    const tuesday = computeDayFigures({ transactions, ...empty }, DAY);
+    expect(tuesday.salesCash).toBe(5000);
+    expect(tuesday.refundsCash).toBe(1000);
+    expect(tuesday.totalCash).toBe(4000);
+  });
+
+  it('reads the phone\'s void the same as the counter\'s refund', () => {
+    // One shop, two terminals: the phone writes `voided` + `voidedAt` for the act the
+    // counter writes as `refunded` + `refundedAt`. Both hand the cash back.
+    const transactions = [
+      tx('tx-phoned', 1000, [['cash', 1000]], {
+        date: at(10, MONDAY),
+        status: 'voided',
+        voidedAt: at(15, DAY),
+      }),
+    ];
+
+    expect(closedAtOf(transactions[0])).toBe(at(15, DAY));
+    const tuesday = computeDayFigures({ transactions, ...empty }, DAY);
+    expect(tuesday.refundsCash).toBe(1000);
+    expect(computeDayFigures({ transactions, ...empty }, MONDAY).refundsCash).toBe(0);
+  });
+
+  it('nets a same-day refund once, not twice', () => {
+    const transactions = [
+      tx('tx-today', 1000, [['cash', 1000]], { status: 'refunded', refundedAt: at(15) }),
+      tx('tx-kept', 5000, [['cash', 5000]]),
+    ];
+
+    const figures = computeDayFigures({ transactions, ...empty }, DAY);
+    // Excluding the refunded sale already removed its 1000 from the intake.
+    expect(figures.salesCash).toBe(5000);
+    expect(figures.refundsCash).toBe(1000);
+    expect(figures.totalCash).toBe(5000);
+  });
+
+  it('leaves a closed sale with no recorded moment on its own day', () => {
+    // Documents closed before either stamp existed have no refund day to read. Guessing
+    // one would move money on days the shop has already sealed and counted.
+    const transactions = [
+      tx('tx-legacy', 1000, [['cash', 1000]], { date: at(10, MONDAY), status: 'refunded' }),
+    ];
+
+    expect(closedAtOf(transactions[0])).toBe(at(10, MONDAY));
+    expect(computeDayFigures({ transactions, ...empty }, MONDAY).refundsCash).toBe(1000);
+    expect(computeDayFigures({ transactions, ...empty }, DAY).refundsCash).toBe(0);
+  });
+
+  it('never calls a sale that took no money a payout', () => {
+    for (const status of ['cancelled', 'pending_approval'] as const) {
+      const transactions = [
+        tx(`tx-${status}`, 1000, [['cash', 1000]], { date: at(10, MONDAY), status }),
+      ];
+      expect(computeDayFigures({ transactions, ...empty }, DAY).refundsCash).toBe(0);
+      expect(computeDayFigures({ transactions, ...empty }, MONDAY).refundsCash).toBe(0);
+    }
   });
 });

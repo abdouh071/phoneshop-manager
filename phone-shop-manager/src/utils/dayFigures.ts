@@ -84,6 +84,17 @@ export const hasFinalStatus = (tx: SaleTransaction): boolean =>
   !EXCLUDED_SALE_STATUSES.includes((tx.status ?? 'completed') as (typeof EXCLUDED_SALE_STATUSES)[number]);
 
 /**
+ * The day the money was handed back, which is not the day it was taken.
+ *
+ * The counter closes a sale as `refunded` and stamps `refundedAt`; the phone closes the
+ * same sale as `voided` and stamps `voidedAt`. Reading both is what lets one drawer
+ * figure describe a shop where both terminals hand money back. A document closed before
+ * either stamp existed has no recorded refund day at all, so its sale day is the only
+ * reading that does not invent one.
+ */
+export const closedAtOf = (tx: SaleTransaction): string => tx.refundedAt || tx.voidedAt || tx.date;
+
+/**
  * The one rule for what a document put in the till, for any tender.
  *
  * The recorded `payments` array is the truth — including an empty one: an invoice
@@ -128,8 +139,13 @@ const sumCogs = (txList: SaleTransaction[]): number =>
 export function computeDayFigures(sources: DayFigureSources, dateStr: string): DayFigures {
   const dayTx = sources.transactions.filter(t => isSameLocalDate(t.date, dateStr));
   const salesTx = dayTx.filter(t => hasFinalStatus(t) && t.saleType !== 'parts_b2b');
-  const refundedTx = dayTx.filter(t => t.status === 'refunded');
   const partsTx = dayTx.filter(t => hasFinalStatus(t) && t.saleType === 'parts_b2b');
+  // Money handed back belongs to the day it left the drawer, so these are read against
+  // the closing stamp rather than the sale date. A cancelled or pending-approval sale
+  // never took the money, so there is nothing to hand back.
+  const refundedTx = sources.transactions.filter(
+    t => (t.status === 'refunded' || t.status === 'voided') && isSameLocalDate(closedAtOf(t), dateStr)
+  );
 
   const salesCash = sumPayment(salesTx, 'cash');
   const salesCard = sumPayment(salesTx, 'card');
@@ -139,6 +155,16 @@ export function computeDayFigures(sources: DayFigureSources, dateStr: string): D
   const salesDebt = sumPayment(salesTx, 'debt');
   const salesGrossRevenue = salesTx.reduce((s, t) => s + (t.total || 0), 0);
   const salesCOGS = sumCogs(salesTx);
+
+  const refundsCash = sumPayment(refundedTx, 'cash');
+  // A sale handed back on the day it was rung up is already out of the payment sums
+  // above, so its payout is netted and must not be taken off twice. One rung up on an
+  // earlier day had its money counted then: the cash leaving today comes off today's
+  // drawer, or the till goes on claiming money it has already given back.
+  const earlierDayRefundsCash = sumPayment(
+    refundedTx.filter(t => !isSameLocalDate(t.date, dateStr)),
+    'cash'
+  );
 
   const allTickets = sources.repairs || [];
   const completedRepairs = allTickets.filter(
@@ -186,7 +212,7 @@ export function computeDayFigures(sources: DayFigureSources, dateStr: string): D
     salesCOGS,
     salesNetProfit: salesGrossRevenue - salesCOGS,
 
-    refundsCash: sumPayment(refundedTx, 'cash'),
+    refundsCash,
 
     repairsCompletedCount: completedRepairs.length,
     repairsRecognizedCount: recognizedRepairs.length,
@@ -216,9 +242,9 @@ export function computeDayFigures(sources: DayFigureSources, dateStr: string): D
     totalRevenue,
     totalCOGS,
     totalNetProfit: totalRevenue - totalCOGS,
-    // Physical drawer money: refunded sales contribute nothing here because their status
-    // already excluded them from the payment sums above.
-    totalCash: Math.max(0, salesCash + sumPayment(partsTx, 'cash') + repairsCash + debtCollectedCash),
+    // Physical drawer money. A sale handed back the same day is already out of the sums
+    // above; one handed back today after being sold earlier is cash that left today.
+    totalCash: Math.max(0, salesCash + sumPayment(partsTx, 'cash') + repairsCash + debtCollectedCash - earlierDayRefundsCash),
     totalCard: salesCard + sumPayment(partsTx, 'card'),
     totalMobile: salesMobile + sumPayment(partsTx, 'mobile'),
   };

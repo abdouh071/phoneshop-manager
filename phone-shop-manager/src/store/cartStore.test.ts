@@ -52,7 +52,7 @@ vi.mock('../services/transactionService', () => ({
       return true;
     },
     getRetailTransactions: async () => [],
-    refund: async () => undefined,
+    refund: async () => new Date().toISOString(),
   },
 }));
 

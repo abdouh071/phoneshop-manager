@@ -198,16 +198,22 @@ export const transactionService = {
     }
   },
 
-  refund: async (id: string): Promise<void> => {
+  /** Closes the sale and returns the moment it stamped, so the caller's in-memory copy
+   *  carries the identical day rather than a second clock reading. */
+  refund: async (id: string): Promise<string> => {
+    // Without the moment, the day's figures can only put the money handed back on the
+    // day the sale was rung up: Tuesday's drawer pays out and Monday's report shows it.
+    // One patch for both writes, so the mirror and the server cannot name two moments.
+    const patch = { status: 'refunded' as const, refundedAt: new Date().toISOString() };
     const local = getLocalTransactions();
-    saveLocalTransactions(local.map(t => t.id === id ? { ...t, status: 'refunded' } : t));
+    saveLocalTransactions(local.map(t => t.id === id ? { ...t, ...patch } : t));
 
     if (id.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-      return;
+      return patch.refundedAt;
     }
 
     try {
-      const updatePromise = updateDoc(doc(db, COLLECTION, id), { status: 'refunded' });
+      const updatePromise = updateDoc(doc(db, COLLECTION, id), patch);
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Firestore refund timeout')), 1200)
       );
@@ -215,6 +221,7 @@ export const transactionService = {
     } catch (err) {
       console.warn('Failed to update refund in Firestore, updated locally:', err);
     }
+    return patch.refundedAt;
   },
 
   updateTransaction: async (id: string, updates: Partial<SaleTransaction>): Promise<void> => {

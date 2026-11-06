@@ -104,6 +104,11 @@ export interface SaleTransaction {
     storeCreditUsed?: number;
   };
   status?: 'completed' | 'refunded' | 'partially_refunded' | 'voided' | 'cancelled' | 'pending_approval';
+  /** When the counter took the goods back and handed the money over — not the day the
+   *  sale was rung up. Absent on documents closed before the moment was recorded. */
+  refundedAt?: string;
+  /** The phone's stamp for the same act: it closes a sale as `voided`, not `refunded`. */
+  voidedAt?: string;
   notes?: string;
   paymentStatus?: 'paid' | 'partial' | 'debt';
   // Legacy flat fields read by receipt builders (WhatsApp text etc.)
