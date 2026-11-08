@@ -350,7 +350,12 @@ export async function printRepairBothDirect(
   ticket: RepairTicket,
   storeName: string,
   currency: string = 'DZD'
-): Promise<{ ticketResult: 'direct' | 'browser'; labelResult: 'direct' | 'browser' }> {
+): Promise<{
+  ticketResult: 'direct' | 'browser';
+  labelResult: 'direct' | 'browser';
+  ticketError?: string;
+  labelError?: string;
+}> {
   const [ticketRes, labelRes] = await Promise.all([
     printRepairIntakeTicketDirect(ticket, storeName, currency),
     printRepairLabelDirect(ticket, storeName, 1),
@@ -359,6 +364,10 @@ export async function printRepairBothDirect(
   return {
     ticketResult: ticketRes.method,
     labelResult: labelRes.method,
+    // A `direct` result carrying an error is a refusal by the print server (for
+    // example, the printer is offline), not a success — callers must surface it.
+    ticketError: ticketRes.error,
+    labelError: labelRes.error,
   };
 }
 

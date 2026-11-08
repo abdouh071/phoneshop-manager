@@ -52,11 +52,23 @@ export const PrintRepairTicketModal: React.FC<PrintRepairTicketModalProps> = ({
   const handlePrintBoth = async () => {
     setIsPrinting(true);
     try {
-      const { ticketResult, labelResult } = await printRepairBothDirect(
+      const { ticketResult, labelResult, ticketError, labelError } = await printRepairBothDirect(
         ticket,
         storeName,
         currency
       );
+
+      // A refusal by the print server is not a fallback: a browser window aimed at
+      // the same offline printer would not help. Say exactly what failed and keep
+      // the modal open so the counter can retry the failed half with one button.
+      if (ticketError || labelError) {
+        const parts = [
+          ticketError ? `ticket — ${ticketError}` : null,
+          labelError ? `sticker — ${labelError}` : null,
+        ].filter((p): p is string => p !== null);
+        toast.error('Print Failed', parts.join(' · '));
+        return;
+      }
 
       if (ticketResult === 'direct' && labelResult === 'direct') {
         toast.success(
@@ -117,6 +129,12 @@ export const PrintRepairTicketModal: React.FC<PrintRepairTicketModalProps> = ({
     try {
       const result = await printRepairLabelDirect(ticket, storeName, 1);
       if (result.method === 'direct') {
+        // A direct path that carries an error was refused by the server; keep the
+        // modal open so the printer can be fixed and the sticker retried.
+        if (result.error) {
+          toast.error('Print Failed', result.error);
+          return;
+        }
         toast.success('Label Printed', 'Phone back sticker sent to label printer.');
         onClose();
         return;
@@ -136,6 +154,12 @@ export const PrintRepairTicketModal: React.FC<PrintRepairTicketModalProps> = ({
     try {
       const result = await printRepairIntakeTicketDirect(ticket, storeName, currency);
       if (result.method === 'direct') {
+        // A direct path that carries an error was refused by the server; keep the
+        // modal open so the printer can be fixed and the ticket retried.
+        if (result.error) {
+          toast.error('Print Failed', result.error);
+          return;
+        }
         toast.success('Ticket Printed', 'Customer intake ticket sent to 80mm printer.');
         onClose();
         return;
