@@ -23,10 +23,22 @@ const docToTx = (id: string, data: Record<string, unknown>): SaleTransaction => 
   payments: Array.isArray(data.payments) ? (data.payments as SaleTransaction['payments']) : [],
 });
 
+/**
+ * The mirror is shaped like the server read, because it is read by the same surfaces.
+ * A row written by an older build can arrive without its lines; defaulting them here
+ * lets one old receipt render empty instead of taking the whole history tab down.
+ */
 const getLocalTransactions = (): SaleTransaction[] => {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    // Every caller keys on `id` — `id.startsWith('offline_')` decides what still needs
+    // replaying — so a row without one has no identity to print, replay or reference.
+    return parsed
+      .filter((tx): tx is Record<string, unknown> =>
+        Boolean(tx) && typeof tx === 'object' && typeof (tx as { id?: unknown }).id === 'string')
+      .map(tx => docToTx(tx.id as string, tx));
   } catch {
     return [];
   }

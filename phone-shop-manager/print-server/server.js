@@ -1055,8 +1055,15 @@ async function handlePrintReceipt(body) {
     const { storeName, currency, transaction, headerMessage, footerMessage, logo, translations = {} } = body || {};
     const t = (key, defaultText) => translations[key] || defaultText;
 
-    if (!transaction || !transaction.items) {
+    if (!transaction || !Array.isArray(transaction.items)) {
       return { ok: false, status: 400, error: 'Missing transaction data' };
+    }
+    // A receipt with no lines is a document that lost its items, not a sale of nothing.
+    // Printing it hands the customer a total for goods the paper never names, so the
+    // caller hears about it instead. Every real flow sends at least one line: a repair
+    // with no parts still prints the device and its labour.
+    if (transaction.items.length === 0) {
+      return { ok: false, status: 400, error: 'Receipt has no item lines' };
     }
 
     const printer = createPrinter();

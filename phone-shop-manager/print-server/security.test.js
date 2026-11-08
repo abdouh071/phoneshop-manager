@@ -207,6 +207,24 @@ test('an allowed Origin gets to the handler, and so does the token', async () =>
   assert.equal((await fromScript.json()).error, 'Missing transaction data');
 });
 
+test('a receipt whose lines never arrived is refused instead of printed blank', async () => {
+  const empty = await postJson(
+    '/print-receipt',
+    { storeName: 'Test', transaction: { id: 'INV-1', date: '2026-11-08', items: [], total: 1500 } },
+    TEST_ORIGIN
+  );
+  assert.equal(empty.status, 400);
+  assert.equal((await empty.json()).error, 'Receipt has no item lines');
+
+  const notLines = await postJson(
+    '/print-receipt',
+    { storeName: 'Test', transaction: { id: 'INV-2', date: '2026-11-08', items: 'corrupted', total: 1500 } },
+    TEST_ORIGIN
+  );
+  assert.equal(notLines.status, 400);
+  assert.equal((await notLines.json()).error, 'Missing transaction data');
+});
+
 test('calibration refuses a printer that is not a label printer', async () => {
   const res = await postJson('/calibrate-labels', {}, TEST_ORIGIN);
   assert.equal(res.status, 400);

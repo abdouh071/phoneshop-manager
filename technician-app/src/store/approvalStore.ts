@@ -17,7 +17,8 @@ import { createRefCountedSubscription, type RefCountedSubscription } from '../ut
 import { notificationService } from '../services/notificationService';
 import { activityLogService } from '../services/activityLogService';
 import { voidSale, type SaleVoidOutcome } from '../services/saleVoidService';
-import type { ApprovalRequest, SaleTransaction } from '../types';
+import { docToSale } from '../utils/saleDocument';
+import type { ApprovalRequest } from '../types';
 
 /**
  * Actions whose `targetId` names an invoice. Every other action points at a product,
@@ -216,7 +217,7 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
         const txSnap = await getDoc(doc(db, 'transactions', reqData.targetId));
         if (txSnap.exists()) {
           voidOutcome = await voidSale(
-            { ...(txSnap.data() as SaleTransaction), id: txSnap.id },
+            docToSale(txSnap.id, txSnap.data() as Record<string, unknown>),
             `Void approved by ${user.name}${reqData.reason ? ` — ${reqData.reason}` : ''}`
           );
         } else {

@@ -41,6 +41,7 @@ import { useTranslation } from 'react-i18next';
 import { buildSearch, matchesSearch, normalizePhone } from '../utils/search';
 import { discountsGivenOf } from '../utils/discountPolicy';
 import { lineDisplayOf, netUnitsSold } from '../utils/saleEditLines';
+import { docToSale } from '../utils/saleDocument';
 import {
   colors,
   fontSize,
@@ -105,7 +106,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
       (snapshot) => {
         const list: SaleTransaction[] = [];
         snapshot.forEach((d) => {
-          list.push({ id: d.id, ...d.data() } as SaleTransaction);
+          list.push(docToSale(d.id, d.data()));
         });
 
         // Sort descending by date
@@ -208,7 +209,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
       t('salesHistory.voidTitle', "Void Today's Sale"),
       t('salesHistory.voidBody', 'Are you sure you want to void and refund Invoice #{{invoice}} ({{total}} DA)? All items will be returned to inventory.', {
         invoice: tx.invoiceNumber || tx.id.slice(-6),
-        total: tx.total.toLocaleString(),
+        total: (tx.total || 0).toLocaleString(),
       }),
       [
         { text: t('common.cancel', 'Cancel'), style: 'cancel' },
@@ -272,13 +273,13 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
         actionData: {
           saleId: targetTxForApproval.id,
           invoiceNumber: invNum,
-          originalTotal: targetTxForApproval.total,
+          originalTotal: targetTxForApproval.total || 0,
           originalDate: targetTxForApproval.date,
           customerName: targetTxForApproval.customerName || 'Walk-in',
           items: targetTxForApproval.items.map((i) => ({
             name: i.product?.name ?? '',
             qty: i.quantity,
-            price: i.product.price,
+            price: i.product?.price ?? 0,
           })),
           details: requestDetails.trim() || undefined,
         },
@@ -319,7 +320,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
       t('salesHistory.receiptMessage', 'Hello {{name}}, here is your receipt #{{invoice}} from PhoneShop Pro: Total: {{total}} DA. Thank you!', {
         name: tx.customerName || t('salesHistory.valuedCustomer', 'valued customer'),
         invoice: tx.invoiceNumber || tx.id.slice(-6),
-        total: tx.total.toLocaleString(),
+        total: (tx.total || 0).toLocaleString(),
       }),
     ];
     Linking.openURL(`https://wa.me/${phone}?text=${encodeURIComponent(lines.join('\n'))}`).catch(

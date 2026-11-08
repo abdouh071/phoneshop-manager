@@ -26,6 +26,7 @@ import { useApprovalStore } from '../store/approvalStore';
 import { usePosStore } from '../store/posStore';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import type { ActivityLog, SaleTransaction, RepairTicket } from '../types';
+import { docToSale } from '../utils/saleDocument';
 import {
   isClaimedAndPaidRepair,
   getClaimedRepairRevenue,
@@ -82,7 +83,7 @@ export const AdminDashboardScreen = ({ navigation }: any) => {
       const snapTx = await getDocs(qTx);
       const txList: SaleTransaction[] = [];
       snapTx.forEach(docSnap => {
-        txList.push({ id: docSnap.id, ...docSnap.data() } as SaleTransaction);
+        txList.push(docToSale(docSnap.id, docSnap.data()));
       });
       setTransactions(txList);
 

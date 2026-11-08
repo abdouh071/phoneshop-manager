@@ -245,13 +245,16 @@ export const unifiedOfflineSyncService = {
       const txs = getLocalList<SaleTransaction>(TRANSACTIONS_LOCAL_KEY);
       let txsModified = false;
       const updatedTxs = txs.map(tx => {
-        const touched = tx.items.some(item => remapped.has(item.product.id));
+        // One row too old to carry its lines must not abort the remap for every other
+        // offline sale: those would keep pointing at product ids that no longer exist.
+        const lines = Array.isArray(tx.items) ? tx.items : [];
+        const touched = lines.some(item => remapped.has(item?.product?.id ?? ''));
         if (!touched) return tx;
         txsModified = true;
         return {
           ...tx,
-          items: tx.items.map(item => {
-            const realId = remapped.get(item.product.id);
+          items: lines.map(item => {
+            const realId = remapped.get(item?.product?.id ?? '');
             return realId
               ? { ...item, product: { ...item.product, id: realId } }
               : item;
