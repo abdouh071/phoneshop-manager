@@ -12,6 +12,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import type { PurchaseOrder, POStatus } from '../../types';
 import styles from './Purchasing.module.css';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { normalizeArabic } from '../../utils/normalizeText';
 
 
 import { useLocation } from 'react-router-dom';
@@ -67,10 +68,11 @@ export const PurchasingPage = () => {
     const tab = params.get('tab');
     const focusId = params.get('focusId') || params.get('po');
 
+    const focus = normalizeArabic(focusId);
     if (tab === 'suppliers') {
       setActiveTab('suppliers');
       if (focusId && suppliers.length > 0) {
-        const sup = suppliers.find(s => s.id === focusId || s.name.toLowerCase().includes(focusId.toLowerCase()));
+        const sup = suppliers.find(s => s.id === focusId || normalizeArabic(s.name).includes(focus));
         if (sup) {
           setEditingSupplierId(sup.id);
           setIsSupplierModalOpen(true);
@@ -79,7 +81,7 @@ export const PurchasingPage = () => {
     } else if (tab === 'orders' || focusId) {
       setActiveTab('pos');
       if (focusId && purchaseOrders.length > 0) {
-        const po = purchaseOrders.find(p => p.id === focusId || p.poNumber.toLowerCase().includes(focusId.toLowerCase()));
+        const po = purchaseOrders.find(p => p.id === focusId || normalizeArabic(p.poNumber).includes(focus));
         if (po) {
           setViewingPO(po);
         }

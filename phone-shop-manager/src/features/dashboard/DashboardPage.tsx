@@ -561,7 +561,7 @@ export const DashboardPage = () => {
                         const matchedCust = tx.customerId
                           ? customers.find(c => c.id === tx.customerId)
                           : tx.customerName
-                            ? customers.find(c => c.name.toLowerCase().trim() === (tx.customerName || '').toLowerCase().trim())
+                            ? customers.find(c => (c.name ?? '').toLowerCase().trim() === (tx.customerName || '').toLowerCase().trim())
                             : undefined;
                         return matchedCust ? (
                           <button

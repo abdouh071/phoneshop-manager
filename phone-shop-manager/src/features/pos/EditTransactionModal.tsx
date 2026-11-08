@@ -33,6 +33,7 @@ import type { SaleTransaction, CartItem, PhoneModel } from '../../types';
 import { formatCurrency, getCurrencySymbol } from '../../utils/formatCurrency';
 import { useSettingsStore } from '../../store/settingsStore';
 import { errorMessage } from '../../utils/errorUtils';
+import { normalizeArabic } from '../../utils/normalizeText';
 import {
   DISCOUNT_APPROVAL_PERCENT,
   lineDiscountOf,
@@ -199,14 +200,13 @@ export const EditTransactionModal: React.FC<EditTransactionModalProps> = ({
   // The till's own list is the authority for what may join the document — the same
   // list that refuses an out-of-stock product when a new cart is built.
   const pickSource = transaction.saleType === 'parts_b2b' ? parts : inventory;
+  const pickQuery = normalizeArabic(pickSearch);
   const pickList = pickSource.filter(product => {
-    const q = pickSearch.trim().toLowerCase();
-    if (!q) return true;
-    return [product.name, product.model, product.category, product.sku, product.storage, product.color]
+    if (!pickQuery) return true;
+    return normalizeArabic([product.name, product.model, product.category, product.sku, product.storage, product.color]
       .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
-      .includes(q);
+      .join(' '))
+      .includes(pickQuery);
   });
 
   const handleQuantityChange = (productId: string, newQty: number, maxQty: number) => {

@@ -7,7 +7,7 @@ import { isShopCustomer, isRetailCustomer } from '../../types';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { isPhoneMatch, formatStandardPhone, normalizePhoneDigits } from '../../utils/phoneUtils';
 import { CustomerDuplicatePromptCard } from '../../components/customers/CustomerDuplicatePromptCard';
-import { normalizeArabic } from '../../utils/normalizeText';
+import { normalizeArabic, phoneQueryDigits } from '../../utils/normalizeText';
 import styles from './CustomerAutocomplete.module.css';
 
 interface CustomerAutocompleteInputProps {
@@ -66,7 +66,7 @@ const QuickCreateCustomerModal: React.FC<QuickCreateModalProps> = ({
     const cleanName = name.trim().toLowerCase();
     if (!phone.trim() || !cleanName) return null;
     return customers.find(c => {
-      const cName = c.name.trim().toLowerCase();
+      const cName = (c.name ?? '').trim().toLowerCase();
       const phoneMatches = isPhoneMatch(c.phone, phone) || (c.normalizedPhone && isPhoneMatch(c.normalizedPhone, phone));
       return phoneMatches && cName === cleanName;
     }) || null;
@@ -527,23 +527,24 @@ export const CustomerAutocompleteInput: React.FC<CustomerAutocompleteInputProps>
         .sort((a, b) => new Date(b.lastVisitDate).getTime() - new Date(a.lastVisitDate).getTime())
         .slice(0, 8);
     }
-    const q = normalizeArabic(value).trim();
-    const cleanDigits = normalizePhoneDigits(value);
-    const rawDigits = value.replace(/\D/g, '');
+    const q = normalizeArabic(value);
+    const queryDigits = phoneQueryDigits(value);
+    const cleanDigits = queryDigits ? normalizePhoneDigits(queryDigits) : '';
 
-    return pool.filter(c =>
-      normalizeArabic(c.name ?? '').includes(q) ||
-      (c.shopName && normalizeArabic(c.shopName).includes(q)) ||
-      (c.email && normalizeArabic(c.email).includes(q)) ||
-      c.phone.toLowerCase().includes(q) ||
-      (c.normalizedPhone && c.normalizedPhone.includes(q)) ||
-      (cleanDigits.length >= 2 && (
-        (c.normalizedPhone && c.normalizedPhone.includes(cleanDigits)) ||
-        normalizePhoneDigits(c.phone).includes(cleanDigits) ||
-        isPhoneMatch(c.phone, value)
-      )) ||
-      (rawDigits.length >= 2 && c.phone.replace(/\D/g, '').includes(rawDigits))
-    ).slice(0, 10);
+    return pool.filter(c => {
+      if (normalizeArabic(c.name).includes(q)) return true;
+      if (normalizeArabic(c.shopName).includes(q)) return true;
+      if (normalizeArabic(c.email).includes(q)) return true;
+      if (queryDigits.length < 2) return false;
+      const rawPhoneDigits = normalizeArabic(c.phone).replace(/\s/g, '');
+      return rawPhoneDigits.includes(queryDigits) ||
+        (c.normalizedPhone && c.normalizedPhone.includes(queryDigits)) ||
+        (cleanDigits.length >= 2 && (
+          (c.normalizedPhone && c.normalizedPhone.includes(cleanDigits)) ||
+          normalizePhoneDigits(c.phone).includes(cleanDigits) ||
+          isPhoneMatch(c.phone, queryDigits)
+        ));
+    }).slice(0, 10);
   }, [customers, value, accountType]);
 
   const hasValue = value.trim().length > 0;

@@ -271,18 +271,18 @@ export const PartsPage = () => {
 
     if (!target || parts.length === 0) return;
 
-    const q = target.toLowerCase().trim();
+    const q = normalizeArabic(target);
     const match = parts.find(p => {
-      const full = (p.name + ' ' + p.model).toLowerCase().trim();
-      const name = p.name.toLowerCase().trim();
-      const sku = (p.sku || '').toLowerCase().trim();
+      const full = normalizeArabic([p.name, p.model].filter(Boolean).join(' '));
+      const name = normalizeArabic(p.name);
+      const sku = normalizeArabic(p.sku);
       return (
         p.id === target ||
-        sku === q ||
-        full.includes(q) ||
-        q.includes(full) ||
-        name.includes(q) ||
-        q.includes(name)
+        (sku !== '' && sku === q) ||
+        (full !== '' && full.includes(q)) ||
+        (full !== '' && q.includes(full)) ||
+        (name !== '' && name.includes(q)) ||
+        (name !== '' && q.includes(name))
       );
     });
 

@@ -639,9 +639,9 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
     const color = isNoStorage ? '' : form.color.trim();
 
     if (!force) {
-      const duplicate = products.find(p => 
-        p.name.toLowerCase().trim() === form.name.toLowerCase().trim() &&
-        p.model.toLowerCase().trim() === form.model.toLowerCase().trim() &&
+      const duplicate = products.find(p =>
+        (p.name ?? '').toLowerCase().trim() === form.name.toLowerCase().trim() &&
+        (p.model ?? '').toLowerCase().trim() === form.model.toLowerCase().trim() &&
         (isNoStorage || p.storage === storage) &&
         (isNoStorage || (p.color || '').toLowerCase().trim() === color.toLowerCase().trim())
       );
@@ -722,8 +722,8 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
         const storage = isNoStorage ? 'N/A' : v.storage;
         const color = isNoStorage ? '' : v.color.trim();
         const duplicate = products.find(p =>
-          p.name.toLowerCase().trim() === form.name.toLowerCase().trim() &&
-          p.model.toLowerCase().trim() === v.model.toLowerCase().trim() &&
+          (p.name ?? '').toLowerCase().trim() === form.name.toLowerCase().trim() &&
+          (p.model ?? '').toLowerCase().trim() === v.model.toLowerCase().trim() &&
           (isNoStorage || p.storage === storage) &&
           (isNoStorage || (p.color || '').toLowerCase().trim() === color.toLowerCase().trim())
         );

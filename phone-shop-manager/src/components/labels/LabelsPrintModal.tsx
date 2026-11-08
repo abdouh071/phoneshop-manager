@@ -6,6 +6,7 @@ import { useToast } from '../ui/Toast';
 import { useSettingsStore } from '../../store/settingsStore';
 import { buildLabelsHTML, openPrintWindow, printBarcodeDirect } from '../../utils/printWindow';
 import type { PhoneModel } from '../../types';
+import { normalizeArabic } from '../../utils/normalizeText';
 
 export interface LabelQtyConfig {
   totalQty: number;
@@ -93,11 +94,11 @@ export const LabelsPrintModal: React.FC<LabelsPrintModalProps> = ({
   }, [isOpen]);
 
   const searchResults = useMemo(() => {
-    const query = searchQuery.toLowerCase().trim();
+    const query = normalizeArabic(searchQuery);
     return items.filter(p => {
       if (config[p.id]) return false;
       if (!query) return true;
-      return searchFields(p).some(field => !!field && field.toLowerCase().includes(query));
+      return searchFields(p).some(field => normalizeArabic(field).includes(query));
     }).slice(0, 20);
   }, [searchQuery, items, config, searchFields]);
 

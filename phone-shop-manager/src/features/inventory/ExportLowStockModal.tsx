@@ -11,6 +11,7 @@ import { useToast } from '../../components/ui/Toast';
 import type { PhoneModel } from '../../types';
 import styles from './ExportLowStockModal.module.css';
 import { errorMessage } from '../../utils/errorUtils';
+import { normalizeArabic } from '../../utils/normalizeText';
 
 interface ExportLowStockModalProps {
   isOpen: boolean;
@@ -130,8 +131,8 @@ export const ExportLowStockModal: React.FC<ExportLowStockModalProps> = ({
 
       let matchSearch = true;
       if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const full = `${p.name} ${p.model} ${p.sku || ''} ${p.color || ''}`.toLowerCase();
+        const q = normalizeArabic(searchQuery);
+        const full = normalizeArabic([p.name, p.model, p.sku, p.color].filter(Boolean).join(' '));
         matchSearch = full.includes(q);
       }
 

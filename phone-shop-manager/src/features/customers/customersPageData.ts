@@ -4,7 +4,7 @@ import { getCustomerOverdueInfo, getOverdueDebts } from '../../utils/debtAlerts'
 import { normalizePhoneDigits, isPhoneMatch } from '../../utils/phoneUtils';
 import { matchesCustomer } from '../../utils/customerFinancials';
 import { formatDate } from './customersPageUtils';
-import { normalizeArabic } from '../../utils/normalizeText';
+import { normalizeArabic, phoneQueryDigits } from '../../utils/normalizeText';
 import type { CustomerFilter, SortKey, WalkInStatusFilter } from './customersPageTypes';
 
 // Fast lookup of tickets per customer (indexed across ALL active customers)
@@ -160,7 +160,7 @@ export const filterWalkInTickets = (
   walkInSearch: string,
   walkInStatusFilter: WalkInStatusFilter,
 ) => {
-  const q = walkInSearch.trim().toLowerCase();
+  const q = normalizeArabic(walkInSearch);
   return walkInTickets.filter((t) => {
     if (walkInStatusFilter === 'active') {
       if (t.status === 'completed' || t.status === 'cancelled') return false;
@@ -171,13 +171,13 @@ export const filterWalkInTickets = (
     }
 
     if (!q) return true;
-    const matchName = t.customerName?.toLowerCase().includes(q);
-    const matchDevice = (t.deviceModel || t.deviceName || '')?.toLowerCase().includes(q);
-    const matchIssue = (t.issueDescription || t.problem || '')?.toLowerCase().includes(q);
-    const matchTech = t.assignedTechnician?.toLowerCase().includes(q);
-    const matchTicket = t.ticketNumber?.toLowerCase().includes(q);
-    const matchSerial = (t.serialNumber || t.imei || '')?.toLowerCase().includes(q);
-    return Boolean(matchName || matchDevice || matchIssue || matchTech || matchTicket || matchSerial);
+    const matchName = normalizeArabic(t.customerName).includes(q);
+    const matchDevice = normalizeArabic(t.deviceModel || t.deviceName).includes(q);
+    const matchIssue = normalizeArabic(t.issueDescription || t.problem).includes(q);
+    const matchTech = normalizeArabic(t.assignedTechnician).includes(q);
+    const matchTicket = normalizeArabic(t.ticketNumber).includes(q);
+    const matchSerial = normalizeArabic(t.serialNumber || t.imei).includes(q);
+    return matchName || matchDevice || matchIssue || matchTech || matchTicket || matchSerial;
   });
 };
 
@@ -212,24 +212,27 @@ export const filterCustomersDirectory = ({
 
     // Text search (matches name, phone, email, shop, address, notes, registered devices, and linked repair tickets)
     if (searchQuery.trim()) {
-      const q = normalizeArabic(searchQuery).trim();
-      const cleanQueryDigits = normalizePhoneDigits(searchQuery);
-      const rawQueryDigits = searchQuery.replace(/\D/g, '');
+      const q = normalizeArabic(searchQuery);
+      const queryDigits = phoneQueryDigits(searchQuery);
+      const cleanQueryDigits = queryDigits ? normalizePhoneDigits(queryDigits) : '';
 
       const matchCustomer = (c: Customer): boolean => {
         // 1. Name & Shop Name
-        if (c.name && normalizeArabic(c.name).includes(q)) return true;
-        if (c.shopName && normalizeArabic(c.shopName).includes(q)) return true;
+        if (normalizeArabic(c.name).includes(q)) return true;
+        if (normalizeArabic(c.shopName).includes(q)) return true;
 
-        // 2. Phone matches (exact, normalized, partial digits)
-        if (c.phone && c.phone.toLowerCase().includes(q)) return true;
-        if (c.normalizedPhone && c.normalizedPhone.includes(q)) return true;
-        if (cleanQueryDigits.length >= 2) {
-          if (c.normalizedPhone && c.normalizedPhone.includes(cleanQueryDigits)) return true;
-          if (normalizePhoneDigits(c.phone).includes(cleanQueryDigits)) return true;
-          if (isPhoneMatch(c.phone, searchQuery)) return true;
+        // 2. Phone matches — only when the query is a number, so the digits in a
+        //    model name ("A54") stop matching every phone that contains them.
+        if (queryDigits.length >= 2) {
+          const rawPhoneDigits = normalizeArabic(c.phone).replace(/\s/g, '');
+          if (rawPhoneDigits.includes(queryDigits)) return true;
+          if (c.normalizedPhone && c.normalizedPhone.includes(queryDigits)) return true;
+          if (cleanQueryDigits.length >= 2) {
+            if (c.normalizedPhone && c.normalizedPhone.includes(cleanQueryDigits)) return true;
+            if (normalizePhoneDigits(c.phone).includes(cleanQueryDigits)) return true;
+            if (isPhoneMatch(c.phone, queryDigits)) return true;
+          }
         }
-        if (rawQueryDigits.length >= 2 && c.phone && c.phone.replace(/\D/g, '').includes(rawQueryDigits)) return true;
 
         // 3. Email, Address, Notes
         if (c.email && normalizeArabic(c.email).includes(q)) return true;
@@ -242,7 +245,7 @@ export const filterCustomersDirectory = ({
             (d.brand && normalizeArabic(d.brand).includes(q)) ||
             (d.model && normalizeArabic(d.model).includes(q)) ||
             (normalizeArabic(`${d.brand || ''} ${d.model || ''}`).includes(q)) ||
-            (d.imei && d.imei.toLowerCase().includes(q)) ||
+            (d.imei && normalizeArabic(d.imei).includes(q)) ||
             (d.notes && normalizeArabic(d.notes).includes(q))
           );
           if (devMatch) return true;
@@ -252,11 +255,11 @@ export const filterCustomersDirectory = ({
         const cTickets = customerTicketsMap.get(c.id) || [];
         if (cTickets.length > 0) {
           const tktMatch = cTickets.some(t =>
-            (t.ticketNumber && t.ticketNumber.toLowerCase().includes(q)) ||
+            (t.ticketNumber && normalizeArabic(t.ticketNumber).includes(q)) ||
             (t.deviceBrand && normalizeArabic(t.deviceBrand).includes(q)) ||
             (t.deviceModel && normalizeArabic(t.deviceModel).includes(q)) ||
             (normalizeArabic(`${t.deviceBrand || ''} ${t.deviceModel || ''}`).includes(q)) ||
-            (t.deviceImei && t.deviceImei.toLowerCase().includes(q)) ||
+            (t.deviceImei && normalizeArabic(t.deviceImei).includes(q)) ||
             (t.issueDescription && normalizeArabic(t.issueDescription).includes(q)) ||
             (t.assignedTechnician && normalizeArabic(t.assignedTechnician).includes(q))
           );

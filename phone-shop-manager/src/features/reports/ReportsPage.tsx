@@ -20,6 +20,7 @@ import { exportToCSV, printFormattedReport } from '../../utils/exportUtils';
 import { printZReportDirect } from '../../utils/printWindow';
 import styles from './Reports.module.css';
 import { errorMessage } from '../../utils/errorUtils';
+import { normalizeArabic } from '../../utils/normalizeText';
 import type { DailyCategoryFilter, LedgerTab, MainTab } from './reportTypes';
 import { DAY_NAMES, buildYearOptions } from './reportUtils';
 import { buildExecutiveReportHtml } from './execReportHtml';
@@ -70,27 +71,27 @@ export const ReportsPage = () => {
   const filteredSalesLedger = useMemo(() => {
     if (!data) return [];
     if (!ledgerSearch.trim()) return data.salesLedger;
-    const q = ledgerSearch.toLowerCase().trim();
-    return data.salesLedger.filter(t => 
-      (t.customerName && t.customerName.toLowerCase().includes(q)) ||
-      (t.processedByName && t.processedByName.toLowerCase().includes(q)) ||
-      (t.id && t.id.toLowerCase().includes(q)) ||
-      t.items.some(i => i.product.name.toLowerCase().includes(q) || i.product.model.toLowerCase().includes(q))
+    const q = normalizeArabic(ledgerSearch);
+    return data.salesLedger.filter(t =>
+      normalizeArabic(t.customerName).includes(q) ||
+      normalizeArabic(t.processedByName).includes(q) ||
+      normalizeArabic(t.id).includes(q) ||
+      t.items.some(i => normalizeArabic(i?.product?.name).includes(q) || normalizeArabic(i?.product?.model).includes(q))
     );
   }, [data, ledgerSearch]);
 
   const filteredRepairsLedger = useMemo(() => {
     if (!data) return [];
     if (!ledgerSearch.trim()) return data.repairsLedger;
-    const q = ledgerSearch.toLowerCase().trim();
-    return data.repairsLedger.filter(r => 
-      (r.customerName && r.customerName.toLowerCase().includes(q)) ||
-      (r.customerPhone && r.customerPhone.includes(q)) ||
-      (r.ticketNumber && r.ticketNumber.toLowerCase().includes(q)) ||
-      (r.deviceBrand && r.deviceBrand.toLowerCase().includes(q)) ||
-      (r.deviceModel && r.deviceModel.toLowerCase().includes(q)) ||
-      (r.issueDescription && r.issueDescription.toLowerCase().includes(q)) ||
-      (r.assignedTechnician && r.assignedTechnician.toLowerCase().includes(q))
+    const q = normalizeArabic(ledgerSearch);
+    return data.repairsLedger.filter(r =>
+      normalizeArabic(r.customerName).includes(q) ||
+      normalizeArabic(r.customerPhone).includes(q) ||
+      normalizeArabic(r.ticketNumber).includes(q) ||
+      normalizeArabic(r.deviceBrand).includes(q) ||
+      normalizeArabic(r.deviceModel).includes(q) ||
+      normalizeArabic(r.issueDescription).includes(q) ||
+      normalizeArabic(r.assignedTechnician).includes(q)
     );
   }, [data, ledgerSearch]);
 

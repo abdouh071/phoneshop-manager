@@ -20,6 +20,7 @@ import type { CustomTicketData, TicketPrintMode } from './customTicketTypes';
 import type { PhoneModel } from '../../types';
 import styles from './CustomTicket.module.css';
 import { errorMessage } from '../../utils/errorUtils';
+import { normalizeArabic } from '../../utils/normalizeText';
 import { PRESET_TEMPLATES } from './presetTemplates';
 import type { UserTemplate } from './ticketPrintTypes';
 import { DeviceDetailsCard } from './DeviceDetailsCard';
@@ -273,14 +274,14 @@ export const CustomTicketPage: React.FC = () => {
   // Filter inventory items for modal
   const filteredProducts = useMemo(() => {
     if (!inventorySearch.trim()) return products.slice(0, 25);
-    const q = inventorySearch.toLowerCase().trim();
+    const q = normalizeArabic(inventorySearch);
     return products.filter(
       p =>
-        p.name.toLowerCase().includes(q) ||
-        p.model.toLowerCase().includes(q) ||
-        (p.sku && p.sku.toLowerCase().includes(q)) ||
-        (p.storage && p.storage.toLowerCase().includes(q)) ||
-        (p.color && p.color.toLowerCase().includes(q))
+        normalizeArabic(p.name).includes(q) ||
+        normalizeArabic(p.model).includes(q) ||
+        normalizeArabic(p.sku).includes(q) ||
+        normalizeArabic(p.storage).includes(q) ||
+        normalizeArabic(p.color).includes(q)
     ).slice(0, 30);
   }, [products, inventorySearch]);
 

@@ -116,9 +116,9 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
 
     if (!force) {
       // Server already isolated parts — no need for category filter
-      const duplicate = parts.find(p => 
-        p.name.toLowerCase().trim() === form.name.toLowerCase().trim() &&
-        p.model.toLowerCase().trim() === form.model.toLowerCase().trim()
+      const duplicate = parts.find(p =>
+        (p.name ?? '').toLowerCase().trim() === form.name.toLowerCase().trim() &&
+        (p.model ?? '').toLowerCase().trim() === form.model.toLowerCase().trim()
       );
       if (duplicate) {
         setDuplicateWarning({ product: duplicate, printBarcode });

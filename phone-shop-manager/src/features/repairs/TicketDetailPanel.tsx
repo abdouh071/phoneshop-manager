@@ -28,6 +28,7 @@ import { PrintRepairTicketModal } from './PrintRepairTicketModal';
 import { PhoneLifecycleHistoryCard } from './PhoneLifecycleHistoryCard';
 import '../../utils/phoneLifecycle';
 import { formatWhatsAppUrl } from '../../utils/phoneUtils';
+import { normalizeArabic } from '../../utils/normalizeText';
 
 interface TicketDetailPanelProps {
   ticket: RepairTicket | null;
@@ -170,9 +171,10 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
     ) || null;
   }, [ticket, customers]);
 
+  const partQuery = normalizeArabic(partSearch);
   const filteredParts = partSearch.trim().length > 1
     ? inventoryParts.filter(p =>
-        (p.name + ' ' + p.model).toLowerCase().includes(partSearch.toLowerCase()) &&
+        normalizeArabic([p.name, p.model].filter(Boolean).join(' ')).includes(partQuery) &&
         p.stock > 0 &&
         !parts.find(pt => pt.product.id === p.id)
       ).slice(0, 5)

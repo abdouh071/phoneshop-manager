@@ -5,6 +5,7 @@ import { usePartsCartStore } from '../../store/partsCartStore';
 import { useAuthStore } from '../../store/authStore';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { discountsGivenOf } from '../../utils/discountPolicy';
+import { normalizeArabic } from '../../utils/normalizeText';
 import type { SaleTransaction, Customer } from '../../types';
 import { PartsInvoiceModal } from './PartsInvoiceModal';
 import { EditTransactionModal } from '../pos/EditTransactionModal';
@@ -105,13 +106,13 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
 
       // Search query
       if (!searchQuery.trim()) return true;
-      const q = searchQuery.toLowerCase().trim();
+      const q = normalizeArabic(searchQuery);
 
-      const numMatch = (tx.invoiceNumber || tx.id).toLowerCase().includes(q);
-      const custMatch = (tx.customerName || '').toLowerCase().includes(q);
-      const shopMatch = (tx.shopName || '').toLowerCase().includes(q);
+      const numMatch = normalizeArabic(tx.invoiceNumber || tx.id).includes(q);
+      const custMatch = normalizeArabic(tx.customerName).includes(q);
+      const shopMatch = normalizeArabic(tx.shopName).includes(q);
       const itemMatch = tx.items.some(i =>
-        (i.product.name + ' ' + i.product.model + ' ' + (i.product.sku || '')).toLowerCase().includes(q)
+        normalizeArabic([i?.product?.name, i?.product?.model, i?.product?.sku].filter(Boolean).join(' ')).includes(q)
       );
 
       return numMatch || custMatch || shopMatch || itemMatch;
@@ -203,7 +204,7 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
             const settlement = tx.accountSettlement;
             const buyerName = tx.shopName || tx.customerName || 'Walk-in Client';
             const isB2B = Boolean(tx.shopName || (tx.accountSettlement && tx.accountSettlement.type !== 'paid_full'));
-            const matchedCust = customers.find(c => c.id === tx.customerId || c.name.toLowerCase().trim() === (tx.customerName || '').toLowerCase().trim());
+            const matchedCust = customers.find(c => c.id === tx.customerId || (c.name ?? '').toLowerCase().trim() === (tx.customerName || '').toLowerCase().trim());
 
             return (
               <div

@@ -26,6 +26,7 @@ import { EndOfDayButton } from '../endofday/EndOfDayButton';
 import { TechnicianSettlementsTab } from './TechnicianSettlementsTab';
 import { detectIssueTag, getBrandIcon, nextStatusMap, nextActionLabels } from './repairConstants';
 import { isPhoneMatch, normalizePhoneDigits, walkInCustomerId } from '../../utils/phoneUtils';
+import { normalizeArabic, phoneQueryDigits } from '../../utils/normalizeText';
 import { isTicketActiveReturnPending, isTicketOverdue } from '../../utils/phoneLifecycle';
 
 export type RepairViewMode = 'tables' | 'board' | 'completed' | 'history' | 'cancelled' | 'settlements';
@@ -439,10 +440,11 @@ export const RepairsPage = () => {
     const params = new URLSearchParams(location.search);
     const focusId = params.get('focusId');
     if (!focusId || tickets.length === 0) return;
+    const focus = normalizeArabic(focusId);
     const match = tickets.find(t =>
       t.ticketNumber === focusId ||
       t.id === focusId ||
-      (t.ticketNumber ?? '').toLowerCase().includes(focusId.toLowerCase())
+      normalizeArabic(t.ticketNumber).includes(focus)
     );
     if (match) {
       const timer = setTimeout(() => setSelectedTicket(match), 400);
@@ -452,18 +454,18 @@ export const RepairsPage = () => {
 
   // Autocomplete search results (top 8 matches) — child return tickets excluded
   const searchResults = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-    const q = searchQuery.toLowerCase().trim();
+    const q = normalizeArabic(searchQuery);
+    if (!q) return [];
     return tickets
       .filter(t => !t.isReturn)  // never surface child return tickets in search
       .filter(t =>
-        (t.ticketNumber || '').toLowerCase().includes(q) ||
-        (t.customerName || '').toLowerCase().includes(q) ||
-        (t.deviceModel || '').toLowerCase().includes(q) ||
-        (t.deviceBrand || '').toLowerCase().includes(q) ||
-        (t.customerPhone || '').toLowerCase().includes(q) ||
-        (t.issueDescription || '').toLowerCase().includes(q) ||
-        (t.assignedTechnician || '').toLowerCase().includes(q)
+        normalizeArabic(t.ticketNumber).includes(q) ||
+        normalizeArabic(t.customerName).includes(q) ||
+        normalizeArabic(t.deviceModel).includes(q) ||
+        normalizeArabic(t.deviceBrand).includes(q) ||
+        normalizeArabic(t.customerPhone).includes(q) ||
+        normalizeArabic(t.issueDescription).includes(q) ||
+        normalizeArabic(t.assignedTechnician).includes(q)
       ).slice(0, 8);
   }, [tickets, searchQuery]);
 
@@ -577,21 +579,21 @@ export const RepairsPage = () => {
 
     // 1. Text Search Filter
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      const cleanQueryDigits = normalizePhoneDigits(searchQuery);
-      const rawQueryDigits = searchQuery.replace(/\D/g, '');
+      const q = normalizeArabic(searchQuery);
+      const queryDigits = phoneQueryDigits(searchQuery);
+      const cleanQueryDigits = queryDigits ? normalizePhoneDigits(queryDigits) : '';
 
       list = list.filter(t =>
-        (t.customerName || '').toLowerCase().includes(q) ||
-        (t.ticketNumber || '').toLowerCase().includes(q) ||
-        (t.deviceModel || '').toLowerCase().includes(q) ||
-        (t.deviceBrand || '').toLowerCase().includes(q) ||
-        `${t.deviceBrand || ''} ${t.deviceModel || ''}`.toLowerCase().includes(q) ||
-        (t.customerPhone || '').toLowerCase().includes(q) ||
-        (t.assignedTechnician || '').toLowerCase().includes(q) ||
-        (cleanQueryDigits.length >= 2 && isPhoneMatch(t.customerPhone, searchQuery)) ||
-        (rawQueryDigits.length >= 2 && (t.customerPhone || '').replace(/\D/g, '').includes(rawQueryDigits)) ||
-        (t.issueDescription || '').toLowerCase().includes(q)
+        normalizeArabic(t.customerName).includes(q) ||
+        normalizeArabic(t.ticketNumber).includes(q) ||
+        normalizeArabic(t.deviceModel).includes(q) ||
+        normalizeArabic(t.deviceBrand).includes(q) ||
+        normalizeArabic([t.deviceBrand, t.deviceModel].filter(Boolean).join(' ')).includes(q) ||
+        normalizeArabic(t.customerPhone).includes(q) ||
+        normalizeArabic(t.assignedTechnician).includes(q) ||
+        (cleanQueryDigits.length >= 2 && isPhoneMatch(t.customerPhone, queryDigits)) ||
+        (queryDigits.length >= 2 && normalizeArabic(t.customerPhone).replace(/\s/g, '').includes(queryDigits)) ||
+        normalizeArabic(t.issueDescription).includes(q)
       );
     }
 
@@ -676,21 +678,21 @@ export const RepairsPage = () => {
     }
 
     if (completedSearchQuery.trim()) {
-      const q = completedSearchQuery.toLowerCase().trim();
-      const rawDigits = completedSearchQuery.replace(/\D/g, '');
-      const cleanDigits = normalizePhoneDigits(completedSearchQuery);
+      const q = normalizeArabic(completedSearchQuery);
+      const queryDigits = phoneQueryDigits(completedSearchQuery);
+      const cleanDigits = queryDigits ? normalizePhoneDigits(queryDigits) : '';
 
       list = list.filter(t =>
-        (t.customerName || '').toLowerCase().includes(q) ||
-        (t.deviceModel || '').toLowerCase().includes(q) ||
-        (t.deviceBrand || '').toLowerCase().includes(q) ||
-        `${t.deviceBrand || ''} ${t.deviceModel || ''}`.toLowerCase().includes(q) ||
-        (t.issueDescription || '').toLowerCase().includes(q) ||
-        (t.assignedTechnician || '').toLowerCase().includes(q) ||
-        (t.ticketNumber || '').toLowerCase().includes(q) ||
-        (t.customerPhone || '').toLowerCase().includes(q) ||
-        (cleanDigits.length >= 2 && isPhoneMatch(t.customerPhone, completedSearchQuery)) ||
-        (rawDigits.length >= 2 && (t.customerPhone || '').replace(/\D/g, '').includes(rawDigits))
+        normalizeArabic(t.customerName).includes(q) ||
+        normalizeArabic(t.deviceModel).includes(q) ||
+        normalizeArabic(t.deviceBrand).includes(q) ||
+        normalizeArabic([t.deviceBrand, t.deviceModel].filter(Boolean).join(' ')).includes(q) ||
+        normalizeArabic(t.issueDescription).includes(q) ||
+        normalizeArabic(t.assignedTechnician).includes(q) ||
+        normalizeArabic(t.ticketNumber).includes(q) ||
+        normalizeArabic(t.customerPhone).includes(q) ||
+        (cleanDigits.length >= 2 && isPhoneMatch(t.customerPhone, queryDigits)) ||
+        (queryDigits.length >= 2 && normalizeArabic(t.customerPhone).replace(/\s/g, '').includes(queryDigits))
       );
     }
 

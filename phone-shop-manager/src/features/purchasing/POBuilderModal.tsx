@@ -9,6 +9,7 @@ import { useInventoryStore } from '../../store/inventoryStore';
 import { useToast } from '../../components/ui/Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { extractSuppliersFromInventory } from '../../utils/supplierUtils';
+import { normalizeArabic } from '../../utils/normalizeText';
 import type { PurchaseOrder, POItem, PhoneModel } from '../../types';
 import styles from './POBuilderModal.module.css';
 
@@ -67,7 +68,7 @@ export const POBuilderModal: React.FC<POBuilderModalProps> = ({ isOpen, onClose,
       if (po) {
         // Match existing supplier by ID or case-insensitive name
         const match = allSuppliers.find(
-          s => s.id === po.supplierId || s.name.toLowerCase() === po.supplierName?.toLowerCase()
+          s => s.id === po.supplierId || (s.name ?? '').toLowerCase() === po.supplierName?.toLowerCase()
         );
         setSupplierId(match ? match.id : po.supplierId);
         setNotes(po.notes || '');
@@ -177,10 +178,11 @@ export const POBuilderModal: React.FC<POBuilderModalProps> = ({ isOpen, onClose,
   };
 
   const allInventory = [...products, ...parts];
-  const searchResults = search.trim() === '' ? [] : allInventory.filter(p => 
-    p.name.toLowerCase().includes(search.toLowerCase()) || 
-    (p.sku && p.sku.toLowerCase().includes(search.toLowerCase())) ||
-    (p.model && p.model.toLowerCase().includes(search.toLowerCase()))
+  const searchNeedle = normalizeArabic(search);
+  const searchResults = searchNeedle === '' ? [] : allInventory.filter(p =>
+    normalizeArabic(p.name).includes(searchNeedle) ||
+    normalizeArabic(p.sku).includes(searchNeedle) ||
+    normalizeArabic(p.model).includes(searchNeedle)
   ).slice(0, 8);
 
   return (

@@ -4,6 +4,7 @@ import { restockService } from '../../services/restockService';
 import type { RestockEntry } from '../../types';
 import styles from './RestockHistory.module.css';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { normalizeArabic } from '../../utils/normalizeText';
 
 import { useInventoryStore } from '../../store/inventoryStore';
 
@@ -48,13 +49,13 @@ export const RestockHistoryPanel: React.FC<RestockHistoryPanelProps> = ({ isOpen
   }, [isOpen, parts]);
 
   const filtered = useMemo(() => {
-    const q = search.toLowerCase();
+    const q = normalizeArabic(search);
     if (!q) return entries;
     return entries.filter(e =>
-      e.productName.toLowerCase().includes(q) ||
-      e.productSku.toLowerCase().includes(q) ||
-      (e.supplier ?? '').toLowerCase().includes(q) ||
-      (e.performedByName ?? '').toLowerCase().includes(q)
+      normalizeArabic(e.productName).includes(q) ||
+      normalizeArabic(e.productSku).includes(q) ||
+      normalizeArabic(e.supplier).includes(q) ||
+      normalizeArabic(e.performedByName).includes(q)
     );
   }, [entries, search]);
 

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { PhoneModel, WriteOffReason } from '../types';
 import { computeStockStatus } from '../utils/stockStatus';
+import { normalizeArabic } from '../utils/normalizeText';
 import { inventoryService } from '../services/inventoryService';
 import type { ProductWriteOutcome } from '../services/inventoryService';
 import { restockService } from '../services/restockService';
@@ -389,11 +390,12 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
       filtered = filtered.filter(p => p.category !== excludeCategory);
     }
     
-    if (!searchQuery.trim()) return filtered;
-    
-    const words = searchQuery.toLowerCase().trim().split(/\s+/);
+    const query = normalizeArabic(searchQuery);
+    if (!query) return filtered;
+
+    const words = query.split(' ');
     return filtered.filter(p => {
-      const full = [p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier].filter(Boolean).join(' ').toLowerCase();
+      const full = normalizeArabic([p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier].filter(Boolean).join(' '));
       return words.every(word => full.includes(word));
     });
   },

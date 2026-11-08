@@ -14,6 +14,7 @@ import styles from './NewTicketModal.module.css';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { formatStandardPhone, normalizePhoneDigits, isPhoneMatch, isRegisteredAccount } from '../../utils/phoneUtils';
+import { normalizeArabic, phoneQueryDigits } from '../../utils/normalizeText';
 import { CustomerDuplicatePromptCard } from '../../components/customers/CustomerDuplicatePromptCard';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { LockCodeInput } from './LockCodeWidget';
@@ -167,11 +168,14 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
   // Only registered accounts are suggested: a real name on a real phone line.
   // Walk-in tickets never live in the customer list, and placeholder rows must
   // not be offered — the counter can only pick a client who is actually on file.
+  const customerNeedle = normalizeArabic(customerQuery);
+  const customerDigits = phoneQueryDigits(customerQuery);
   const suggestions = customerQuery.trim()
     ? customers.filter(c =>
         isRegisteredAccount(c) &&
-        ((c.name ?? '').toLowerCase().includes(customerQuery.toLowerCase()) ||
-          (c.phone ?? '').includes(customerQuery))
+        (normalizeArabic(c.name).includes(customerNeedle) ||
+          normalizeArabic(c.phone).includes(customerNeedle) ||
+          (customerDigits.length >= 2 && normalizeArabic(c.phone).replace(/\s/g, '').includes(customerDigits)))
       ).slice(0, 6)
     : customers.filter(c => isRegisteredAccount(c)).slice(0, 6);
 

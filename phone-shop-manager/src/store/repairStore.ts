@@ -10,6 +10,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { deduplicateTickets, isSameTicketContent, findDuplicateTickets, type DuplicateTicketPair } from '../utils/ticketDeduplication';
 import { mergeRepairPatch } from '../utils/repairPatchMerge';
 import { isTicketActiveReturnPending, isTicketOverdue } from '../utils/phoneLifecycle';
+import { normalizeArabic } from '../utils/normalizeText';
 
 // --- Persistent Draft Storage (survives reload & logout) ---
 const STORAGE_KEY_ACTIVE_DRAFT = 'repair_active_draft';
@@ -250,7 +251,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       if (ticket.customerName) {
         const customer = useCustomerStore.getState().customers.find(
           c => (ticket.customerPhone && c.phone === ticket.customerPhone) ||
-               c.name.toLowerCase().trim() === ticket.customerName.toLowerCase().trim()
+               (c.name ?? '').toLowerCase().trim() === ticket.customerName.toLowerCase().trim()
         );
         if (customer) {
           customerLogService.log({
@@ -364,7 +365,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       if (ticket.customerName) {
         const customer = useCustomerStore.getState().customers.find(
           c => (ticket.customerPhone && c.phone === ticket.customerPhone) ||
-               c.name.toLowerCase().trim() === ticket.customerName.toLowerCase().trim()
+               (c.name ?? '').toLowerCase().trim() === ticket.customerName.toLowerCase().trim()
         );
         if (customer) {
           customerLogService.log({
@@ -760,16 +761,16 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       filtered = filtered.filter(t => t.status === statusFilter);
     }
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+      const q = normalizeArabic(searchQuery);
       // Every field can be missing on a legacy ticket; an unguarded toLowerCase()
       // here used to crash the whole search box on the first keystroke.
       filtered = filtered.filter(t =>
-        (t.customerName ?? '').toLowerCase().includes(q) ||
-        (t.ticketNumber ?? '').toLowerCase().includes(q) ||
-        (t.deviceModel ?? '').toLowerCase().includes(q) ||
-        (t.deviceBrand ?? '').toLowerCase().includes(q) ||
-        (t.customerPhone ?? '').toLowerCase().includes(q) ||
-        (t.issueDescription ?? '').toLowerCase().includes(q)
+        normalizeArabic(t.customerName).includes(q) ||
+        normalizeArabic(t.ticketNumber).includes(q) ||
+        normalizeArabic(t.deviceModel).includes(q) ||
+        normalizeArabic(t.deviceBrand).includes(q) ||
+        normalizeArabic(t.customerPhone).includes(q) ||
+        normalizeArabic(t.issueDescription).includes(q)
       );
     }
     return filtered;

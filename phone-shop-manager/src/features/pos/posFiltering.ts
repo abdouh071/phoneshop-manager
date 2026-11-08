@@ -1,6 +1,7 @@
 import type { CartItem, PhoneModel, SuspendedCart } from '../../types';
 import type { ProductGroup } from '../../utils/productGrouping';
 import { computeStockStatus } from '../../utils/stockStatus';
+import { normalizeArabic } from '../../utils/normalizeText';
 
 // Pure POS catalog/cart computations extracted verbatim from POSPage.
 // Every function takes all inputs as arguments and is side-effect free;
@@ -8,15 +9,13 @@ import { computeStockStatus } from '../../utils/stockStatus';
 
 // Filter sales catalog using local POS search query (server excluded repair parts from the beginning)
 export const filterProductsBySearch = (allProducts: PhoneModel[], searchQuery: string): PhoneModel[] => {
-  let filtered = allProducts;
-  if (searchQuery.trim()) {
-    const words = searchQuery.toLowerCase().trim().split(/\s+/);
-    filtered = filtered.filter(p => {
-      const full = [p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier, p.accessorySubCategory].filter(Boolean).join(' ').toLowerCase();
-      return words.every(word => full.includes(word));
-    });
-  }
-  return filtered;
+  const query = normalizeArabic(searchQuery);
+  if (!query) return allProducts;
+  const words = query.split(' ');
+  return allProducts.filter(p => {
+    const full = normalizeArabic([p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier, p.accessorySubCategory].filter(Boolean).join(' '));
+    return words.every(word => full.includes(word));
+  });
 };
 
 // Build a map of productId → quantity already in cart
@@ -63,18 +62,18 @@ export const filterGroupsByCategory = (groups: ProductGroup[], categoryFilter: s
 };
 
 export const filterSuspendedCarts = (suspendedCarts: SuspendedCart[], heldSearchQuery: string): SuspendedCart[] => {
+  const q = normalizeArabic(heldSearchQuery);
   return suspendedCarts.filter(cart => {
-    if (!heldSearchQuery.trim()) return true;
-    const q = heldSearchQuery.toLowerCase().trim();
-    const customerMatch = (cart.customerName || 'walk-in customer').toLowerCase().includes(q);
-    const itemsMatch = cart.items.some(i =>
-      i.product.name.toLowerCase().includes(q) ||
-      i.product.model.toLowerCase().includes(q) ||
-      (i.product.color && i.product.color.toLowerCase().includes(q)) ||
-      (i.product.storage && i.product.storage.toLowerCase().includes(q)) ||
-      (i.product.sku && i.product.sku.toLowerCase().includes(q))
+    if (!q) return true;
+    if (normalizeArabic(cart.customerName || 'walk-in customer').includes(q)) return true;
+    const items = Array.isArray(cart.items) ? cart.items : [];
+    return items.some(i =>
+      normalizeArabic(i?.product?.name).includes(q) ||
+      normalizeArabic(i?.product?.model).includes(q) ||
+      normalizeArabic(i?.product?.color).includes(q) ||
+      normalizeArabic(i?.product?.storage).includes(q) ||
+      normalizeArabic(i?.product?.sku).includes(q)
     );
-    return customerMatch || itemsMatch;
   });
 };
 

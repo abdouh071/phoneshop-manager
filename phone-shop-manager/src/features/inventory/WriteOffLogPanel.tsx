@@ -4,6 +4,7 @@ import { writeOffService } from '../../services/writeOffService';
 import type { StockWriteOff } from '../../types';
 import styles from './RestockHistory.module.css'; // reuse same styles
 import { useInventoryStore } from '../../store/inventoryStore';
+import { normalizeArabic } from '../../utils/normalizeText';
 
 interface WriteOffLogPanelProps {
   isOpen: boolean;
@@ -63,13 +64,13 @@ export const WriteOffLogPanel: React.FC<WriteOffLogPanelProps> = ({ isOpen, onCl
   }, [isOpen, parts]);
 
   const filtered = useMemo(() => {
-    const q = search.toLowerCase();
+    const q = normalizeArabic(search);
     if (!q) return entries;
     return entries.filter(e =>
-      e.productName.toLowerCase().includes(q) ||
-      e.productSku.toLowerCase().includes(q) ||
-      e.reason.toLowerCase().includes(q) ||
-      (e.performedByName ?? '').toLowerCase().includes(q)
+      normalizeArabic(e.productName).includes(q) ||
+      normalizeArabic(e.productSku).includes(q) ||
+      normalizeArabic(e.reason).includes(q) ||
+      normalizeArabic(e.performedByName).includes(q)
     );
   }, [entries, search]);
 

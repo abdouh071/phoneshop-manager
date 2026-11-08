@@ -8,6 +8,7 @@ import { useAuthStore } from '../../store/authStore';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import type { PhoneModel } from '../../types';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { normalizeArabic } from '../../utils/normalizeText';
 import styles from './ReturnExchangeModal.module.css';
 
 interface ReturnExchangeModalProps {
@@ -65,11 +66,11 @@ export const ReturnExchangeModal: React.FC<ReturnExchangeModalProps> = ({ isOpen
         ? customerPastPurchasedProducts
         : products.slice(0, 10);
     }
-    const q = searchQuery.toLowerCase().trim();
+    const q = normalizeArabic(searchQuery);
     return products.filter(p =>
-      p.name.toLowerCase().includes(q) ||
-      p.model.toLowerCase().includes(q) ||
-      p.sku.toLowerCase().includes(q)
+      normalizeArabic(p.name).includes(q) ||
+      normalizeArabic(p.model).includes(q) ||
+      normalizeArabic(p.sku).includes(q)
     ).slice(0, 15);
   }, [searchQuery, products, customerPastPurchasedProducts]);
 

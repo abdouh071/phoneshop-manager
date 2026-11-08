@@ -11,7 +11,7 @@ import { useAuthStore } from './authStore';
 import { formatCurrency } from '../utils/formatCurrency';
 import { isPhoneMatch, normalizePhoneDigits, isMoreDescriptiveName, formatStandardPhone, isValidNameForDeduplication, isDummyPhone } from '../utils/phoneUtils';
 import { calculateCustomerFinancials, matchesCustomer, isGenericCustomerName } from '../utils/customerFinancials';
-import { normalizeArabic } from '../utils/normalizeText';
+import { normalizeArabic, phoneQueryDigits } from '../utils/normalizeText';
 
 interface CustomerState {
   customers: Customer[];
@@ -1912,13 +1912,18 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
     const active = customers.filter(c => !c.mergedIntoId);
     if (!searchQuery.trim()) return active;
     const q = normalizeArabic(searchQuery);
-    const cleanDigits = searchQuery.replace(/\D/g, '');
-    return active.filter(c =>
-      normalizeArabic(c.name ?? '').includes(q) ||
-      (c.shopName && normalizeArabic(c.shopName).includes(q)) ||
-      (cleanDigits && c.phone.replace(/\D/g, '').includes(cleanDigits)) ||
-      (c.email && normalizeArabic(c.email).includes(q))
-    );
+    const queryDigits = phoneQueryDigits(searchQuery);
+    const localDigits = queryDigits ? normalizePhoneDigits(queryDigits) : '';
+    return active.filter(c => {
+      if (normalizeArabic(c.name).includes(q)) return true;
+      if (normalizeArabic(c.shopName).includes(q)) return true;
+      if (normalizeArabic(c.email).includes(q)) return true;
+      if (queryDigits.length < 2) return false;
+      // Accountless customers carry no phone at all.
+      const rawPhone = normalizeArabic(c.phone).replace(/\s/g, '');
+      return rawPhone.includes(queryDigits) ||
+        (localDigits.length >= 2 && normalizePhoneDigits(rawPhone).includes(localDigits));
+    });
   },
 
   getRetailCustomers: () => {

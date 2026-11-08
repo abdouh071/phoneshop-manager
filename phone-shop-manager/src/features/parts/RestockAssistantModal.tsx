@@ -17,6 +17,7 @@ import { formatWhatsAppUrl } from '../../utils/phoneUtils';
 import type { PhoneModel, POItem } from '../../types';
 import styles from './RestockAssistant.module.css';
 import { errorMessage } from '../../utils/errorUtils';
+import { normalizeArabic } from '../../utils/normalizeText';
 
 interface RestockAssistantModalProps {
   isOpen: boolean;
@@ -150,8 +151,8 @@ export const RestockAssistantModal: React.FC<RestockAssistantModalProps> = ({
 
       // Search query
       if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const matchName = (p.name + ' ' + p.model + ' ' + (p.sku || '')).toLowerCase().includes(q);
+        const q = normalizeArabic(searchQuery);
+        const matchName = normalizeArabic([p.name, p.model, p.sku].filter(Boolean).join(' ')).includes(q);
         if (!matchName) return false;
       }
 
@@ -208,7 +209,7 @@ export const RestockAssistantModal: React.FC<RestockAssistantModalProps> = ({
     setIsProcessing(true);
     try {
       const supplierDisplayName = selectedSupplierName.trim() || 'General Parts Supplier';
-      const supplierObj = suppliers.find(s => s.name.toLowerCase() === supplierDisplayName.toLowerCase());
+      const supplierObj = suppliers.find(s => (s.name ?? '').toLowerCase() === supplierDisplayName.toLowerCase());
 
       const poItems: POItem[] = selectedItems.map(r => ({
         productId: r.product.id,

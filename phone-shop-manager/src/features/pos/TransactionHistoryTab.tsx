@@ -12,6 +12,7 @@ import type { CartItem, SaleTransaction } from '../../types';
 import s from './TransactionHistory.module.css';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { isReturnLine, returnedUnits, soldUnits } from '../../utils/saleEditLines';
+import { normalizeArabic } from '../../utils/normalizeText';
 import { usePermissions } from '../../hooks/usePermissions';
 
 type UnlockPurpose = 'refund' | 'edit';
@@ -62,9 +63,10 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
 
   useEffect(() => {
     if (!initialFocusId || transactions.length === 0) return;
+    const focus = normalizeArabic(initialFocusId);
     const match = transactions.find(t =>
       t.id === initialFocusId ||
-      t.id.toLowerCase().includes(initialFocusId.toLowerCase())
+      normalizeArabic(t.id).includes(focus)
     );
     if (match) {
       const timer = setTimeout(() => setTxToView(match), 400);
@@ -117,13 +119,14 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
     else setTxToEdit(tx);
   };
 
+  const searchNeedle = normalizeArabic(searchQuery);
+  const highlightNeedle = normalizeArabic(initialSearch);
   const filtered = transactions.filter(t => {
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return true;
-    const matchesId = t.id.toLowerCase().includes(q) || (t.invoiceNumber || '').toLowerCase().includes(q);
-    const matchesCustomer = (t.customerName || '').toLowerCase().includes(q) || (t.shopName || '').toLowerCase().includes(q);
+    if (!searchNeedle) return true;
+    const matchesId = normalizeArabic(t.id).includes(searchNeedle) || normalizeArabic(t.invoiceNumber).includes(searchNeedle);
+    const matchesCustomer = normalizeArabic(t.customerName).includes(searchNeedle) || normalizeArabic(t.shopName).includes(searchNeedle);
     const matchesArticle = t.items.some(item =>
-      (item.product.name + ' ' + item.product.model + ' ' + (item.product.sku || '')).toLowerCase().includes(q)
+      normalizeArabic([item?.product?.name, item?.product?.model, item?.product?.sku].filter(Boolean).join(' ')).includes(searchNeedle)
     );
     return matchesId || matchesCustomer || matchesArticle;
   });
@@ -180,9 +183,9 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
             {dayTxs.map(t => {
               const isPastAndLocked = !canEditDirectly(t) && t.status !== 'refunded';
               const isHighlighted = !!initialSearch && (
-                t.id.toLowerCase().includes(initialSearch.toLowerCase()) ||
-                (t.customerName || '').toLowerCase().includes(initialSearch.toLowerCase()) ||
-                (t.invoiceNumber || '').toLowerCase().includes(initialSearch.toLowerCase())
+                normalizeArabic(t.id).includes(highlightNeedle) ||
+                normalizeArabic(t.customerName).includes(highlightNeedle) ||
+                normalizeArabic(t.invoiceNumber).includes(highlightNeedle)
               );
               const isRefunded = t.status === 'refunded';
               const isPartial = t.status === 'partially_refunded';

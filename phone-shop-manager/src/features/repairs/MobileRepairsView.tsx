@@ -7,6 +7,7 @@ import { RepairTicketSwipeCard } from './RepairTicketSwipeCard';
 import { PullToRefresh } from '../../components/ui/PullToRefresh';
 import styles from './MobileRepairsView.module.css';
 import type { RepairTicket } from '../../types';
+import { normalizeArabic } from '../../utils/normalizeText';
 
 type FilterStatus = 'all' | 'today' | 'pending' | 'in_progress' | 'ready';
 
@@ -48,9 +49,9 @@ export const MobileRepairsView: React.FC<MobileRepairsViewProps> = ({
     }
 
     if (search.trim()) {
-      const q = search.toLowerCase();
+      const q = normalizeArabic(search);
       list = list.filter(t =>
-        `${t.ticketNumber} ${t.customerName} ${t.deviceBrand} ${t.deviceModel} ${t.issue}`.toLowerCase().includes(q)
+        normalizeArabic([t.ticketNumber, t.customerName, t.deviceBrand, t.deviceModel, t.issue].filter(Boolean).join(' ')).includes(q)
       );
     }
 

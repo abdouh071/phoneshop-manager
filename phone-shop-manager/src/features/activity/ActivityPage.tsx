@@ -9,6 +9,7 @@ import type { Activity, ActivityCategory, ActivitySeverity } from '../../store/a
 import { useAuthStore } from '../../store/authStore';
 import styles from './Activity.module.css';
 import { errorMessage } from '../../utils/errorUtils';
+import { normalizeArabic } from '../../utils/normalizeText';
 
 // ─── Helpers ─────────────────────────────────────────────────
 const getCategoryIcon = (category: ActivityCategory) => {
@@ -257,11 +258,11 @@ export const ActivityPage: React.FC = () => {
 
       // 5. Search Query
       if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase().trim();
-        const inMsg = (a.message || '').toLowerCase().includes(query);
-        const inDetail = (a.detail || '').toLowerCase().includes(query);
-        const inId = (a.entityId || '').toLowerCase().includes(query);
-        const inUser = (a.userName || '').toLowerCase().includes(query);
+        const query = normalizeArabic(searchQuery);
+        const inMsg = normalizeArabic(a.message).includes(query);
+        const inDetail = normalizeArabic(a.detail).includes(query);
+        const inId = normalizeArabic(a.entityId).includes(query);
+        const inUser = normalizeArabic(a.userName).includes(query);
         if (!inMsg && !inDetail && !inId && !inUser) return false;
       }
 

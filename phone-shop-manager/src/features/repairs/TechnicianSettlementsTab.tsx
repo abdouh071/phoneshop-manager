@@ -19,6 +19,7 @@ import {
   Filter,
 } from 'lucide-react';
 import { useFormatCurrency } from '../../utils/formatCurrency';
+import { normalizeArabic } from '../../utils/normalizeText';
 import type { RepairTicket } from '../../types';
 import styles from './TechnicianSettlements.module.css';
 
@@ -308,14 +309,14 @@ export const TechnicianSettlementsTab: React.FC = () => {
       list = list.filter(t => (t.assignedTechnician?.trim() || 'Unassigned') === selectedTech);
     }
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
+      const q = normalizeArabic(searchQuery);
       list = list.filter(t =>
-        t.ticketNumber?.toLowerCase().includes(q) ||
-        t.customerName?.toLowerCase().includes(q) ||
-        t.customerPhone?.toLowerCase().includes(q) ||
-        t.deviceBrand?.toLowerCase().includes(q) ||
-        t.deviceModel?.toLowerCase().includes(q) ||
-        (t.assignedTechnician && t.assignedTechnician.toLowerCase().includes(q))
+        normalizeArabic(t.ticketNumber).includes(q) ||
+        normalizeArabic(t.customerName).includes(q) ||
+        normalizeArabic(t.customerPhone).includes(q) ||
+        normalizeArabic(t.deviceBrand).includes(q) ||
+        normalizeArabic(t.deviceModel).includes(q) ||
+        normalizeArabic(t.assignedTechnician).includes(q)
       );
     }
     return list;
