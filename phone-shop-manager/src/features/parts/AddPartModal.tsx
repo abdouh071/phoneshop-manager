@@ -157,7 +157,11 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
       if (printBarcode) {
         const tempProduct = { ...product, id: 'temp-' + Date.now(), hidePrice: true };
         const result = await printBarcodeDirect([tempProduct as PhoneModel], storeName, currency);
-        if (result.method === 'browser') {
+        if (result.method === 'direct' && result.error) {
+          // The part is saved; only the label is missing. Say so instead of
+          // letting a part reach the shelf with no barcode on it.
+          toast.error('Label not printed', result.error);
+        } else if (result.method === 'browser') {
           const html = buildLabelsHTML([tempProduct], storeName);
           openPrintWindow(html, 'Part Label');
         }

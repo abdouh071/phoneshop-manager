@@ -688,8 +688,12 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
       if (printBarcode) {
         const printProduct = { ...product, id: 'temp' } as PhoneModel;
         const result = await printBarcodeDirect([printProduct], storeName, currency);
-        
-        if (result.method === 'browser') {
+
+        if (result.method === 'direct' && result.error) {
+          // The product is saved; only the label is missing. Say so instead of
+          // letting a product reach the shelf with no barcode on it.
+          toast.error('Label not printed', result.error);
+        } else if (result.method === 'browser') {
           const html = buildLabelsHTML([printProduct], storeName);
           openPrintWindow(html, 'Product Label');
         }
@@ -781,7 +785,11 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
         const printProducts = productsToAdd.map((p, i) => ({ ...p, id: `temp-${i}` } as PhoneModel));
         const result = await printBarcodeDirect(printProducts, storeName, currency);
 
-        if (result.method === 'browser') {
+        if (result.method === 'direct' && result.error) {
+          // The products are saved; only the labels are missing. Say so instead
+          // of letting variants reach the shelf with no barcode on them.
+          toast.error('Labels not printed', result.error);
+        } else if (result.method === 'browser') {
           const html = buildLabelsHTML(printProducts, storeName);
           openPrintWindow(html, 'Product Labels');
         }

@@ -172,6 +172,12 @@ export const ReceiptTab = () => {
       );
 
       if (result.method === 'direct') {
+        // A direct path carrying an error was refused by the server (for example,
+        // the printer is offline). The test receipt never printed — say so.
+        if (result.error) {
+          toast.error('Print Error', result.error);
+          return;
+        }
         toast.success('Test Receipt Printed! 🖨️', 'Sent test receipt directly to thermal printer with logo.');
       } else {
         toast.info('Browser Print', 'Local print server offline — opened browser print fallback.');

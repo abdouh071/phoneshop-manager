@@ -156,6 +156,13 @@ export const ReportsPage = () => {
       );
 
       if (result.method === 'direct') {
+        // A direct path carrying an error was refused by the server (for example,
+        // the printer is offline). The report never printed — say so instead of
+        // filing it as done.
+        if (result.error) {
+          toast.error(t('error.printFailed', 'Print Failed'), result.error);
+          return;
+        }
         toast.success(t('reports.printThermalZ', 'Print Thermal Z-Report'), t('reports.thermalPrintOk', 'Report printed to thermal printer.'));
       } else {
         toast.info(t('reports.printThermalZ', 'Print Thermal Z-Report'), t('reports.thermalPrintFallback', 'Thermal server offline; browser print opened.'));

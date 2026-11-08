@@ -177,6 +177,14 @@ export const LabelsPrintModal: React.FC<LabelsPrintModalProps> = ({
       // Try to print directly to the thermal printer
       const result = await printBarcodeDirect(labelsToPrint, storeName, currency);
 
+      // A refusal is not paper: keep the modal open so the printer can be fixed
+      // and the labels retried, instead of sending the counter away thinking the
+      // shelf is labelled.
+      if (result.method === 'direct' && result.error) {
+        toast.error('Labels not printed', result.error);
+        return;
+      }
+
       if (result.method === 'browser') {
         openPrintWindow(previewHtml, copy.printWindowTitle);
       }

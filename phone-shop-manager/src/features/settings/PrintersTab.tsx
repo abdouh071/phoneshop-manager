@@ -77,6 +77,12 @@ export const PrintersTab: React.FC = () => {
       );
 
       if (result.method === 'direct') {
+        // A direct path carrying an error was refused by the server (for example,
+        // the printer is offline). The test receipt never printed — say so.
+        if (result.error) {
+          toast.error('Print Error', result.error);
+          return;
+        }
         toast.success('Receipt Printed', 'Test receipt sent directly to thermal printer.');
       } else {
         toast.info('Browser Print Opened', 'Direct print server offline; browser print dialog opened as fallback.');
@@ -107,9 +113,17 @@ export const PrintersTab: React.FC = () => {
       );
 
       if (result.method === 'direct') {
+        // A direct path carrying an error was refused by the server (for example,
+        // the printer is offline). The test label never printed — say so.
+        if (result.error) {
+          toast.error('Label Print Error', result.error);
+          return;
+        }
         toast.success('Label Printed', 'Test barcode label sent to TSPL label printer.');
       } else {
-        toast.info('Browser Print Triggered', 'Print server not reachable for direct TSPL printing.');
+        // The barcode fallback opens no window, so nothing was "triggered" —
+        // just say the direct path is unavailable.
+        toast.info('Direct Print Unavailable', 'Print server not reachable for direct TSPL printing.');
       }
     } catch (err: unknown) {
       toast.error('Label Print Error', errorMessage(err) || 'Failed to print test label.');

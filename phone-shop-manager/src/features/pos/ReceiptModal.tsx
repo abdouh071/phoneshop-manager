@@ -117,6 +117,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
     try {
       const result = await printReceiptDirect(transaction, settings.storeName, settings.currency);
       if (result.method === 'direct') {
+        // A direct path carrying an error was refused by the server (for example,
+        // the printer is offline). The receipt never printed — keep the modal
+        // open for a retry instead of sending the customer away with nothing.
+        if (result.error) {
+          toast.error('Print Failed', result.error);
+          return;
+        }
         toast.success('Receipt Printed', 'Receipt sent to thermal printer.');
       } else {
         toast.info('Browser Print', 'Print server unavailable — opened browser print dialog.');
