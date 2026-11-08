@@ -26,15 +26,21 @@ export function usePrintQueue() {
             try {
               // Immediately mark as processing to prevent duplicate prints
               await updateDoc(doc(db, 'printQueue', requestId), { status: 'processing' });
-              
+
               toast.info('Remote Print Job Received', `Printing sticker for ticket #${request.ticket.ticketNumber}...`);
-              
-              // Print via existing print utils
-              await printRepairLabelDirect(request.ticket, storeName || 'PhoneShop Pro', 1);
-              
-              // Mark as completed
-              await updateDoc(doc(db, 'printQueue', requestId), { status: 'completed' });
-              toast.success('Remote Print Complete', 'Sticker sent to printer.');
+
+              const result = await printRepairLabelDirect(request.ticket, storeName || 'PhoneShop Pro', 1);
+              if (result.method === 'direct' && !result.error) {
+                await updateDoc(doc(db, 'printQueue', requestId), { status: 'completed' });
+                toast.success('Remote Print Complete', 'Sticker sent to printer.');
+              } else {
+                // A refusal is not paper, and the label's browser fallback prints
+                // nothing: the sticker never left the PC. Record the real outcome
+                // in the queue and on screen instead of blessing a bare job.
+                const reason = result.error ?? 'Print server unreachable — no sticker was printed.';
+                await updateDoc(doc(db, 'printQueue', requestId), { status: 'failed', error: reason });
+                toast.error('Remote Print Failed', reason);
+              }
             } catch (err) {
               console.error('Remote print failed', err);
               await updateDoc(doc(db, 'printQueue', requestId), { status: 'failed', error: err?.toString() });

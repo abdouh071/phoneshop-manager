@@ -637,11 +637,17 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
       if (shouldPrint && resultingTicket && !duplicateOf) {
         try {
           const printRes = await printRepairLabelDirect(resultingTicket, storeName, 1);
-          if (printRes.method === 'direct') {
+          if (printRes.method === 'direct' && !printRes.error) {
             toast.success(
               'Sticker Printed! 🖨️',
               `Phone label for ${resultingTicket.ticketNumber} (${resultingTicket.deviceBrand} ${resultingTicket.deviceModel}) printed on thermal label printer.`
             );
+          } else if (printRes.error) {
+            // The server refused the label (for example, the printer is offline).
+            // The ticket itself is created — only the sticker is missing, and it
+            // can be reprinted from the repairs page. Never claim paper that
+            // never left the printer.
+            toast.error('Sticker Not Printed', printRes.error);
           } else {
             // Browser print fallback
             if (onPrintTicket) {
