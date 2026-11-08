@@ -382,6 +382,9 @@
       "quick": "Quick Adjust Quantity (+ / -):",
       "newCount": "New Exact Stock Count",
       "reason": "Adjustment Reason:",
+      "movedTitle": "Stock moved while this sheet was open",
+      "movedBody": "The server held {{previous}} units, not the {{shown}} shown here. Stock is now {{count}}. Re-count the shelf if a sale happened after you counted.",
+      "unconfirmed": "The server did not answer in time. The count may already be saved — check the product before entering it again.",
       "submit": "Update Stock ({{units}} units)"
     },
     "reasons": {

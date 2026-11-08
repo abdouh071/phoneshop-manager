@@ -10,7 +10,7 @@
  * Reads happen INSIDE the transaction, so the delta is always applied to the
  * server's current value rather than to anything the device remembered.
  */
-import { doc, getDoc, runTransaction } from 'firebase/firestore';
+import { doc, getDoc, runTransaction, type DocumentReference, type Transaction } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { clampStock, deriveStockStatus, profileTotalsAfter, saleProfileDeltas } from './offlineQueuePolicy';
 import type { StockStatus } from '../types';
@@ -80,6 +80,26 @@ const mapWithConcurrency = async <T, R>(
 };
 
 /**
+ * Which collection holds this product, read inside the caller's transaction so the
+ * write that follows is serialized against a concurrent sale. The desktop app keeps
+ * its catalogue in `inventory`; `products` is the older shape some rows still use.
+ */
+const stockRefInTransaction = async (
+  tx: Transaction,
+  id: string
+): Promise<{ ref: DocumentReference; collection: StockCollection; data: Record<string, unknown> }> => {
+  const invRef = doc(db, 'inventory', id);
+  const invSnap = await tx.get(invRef);
+  if (invSnap.exists()) {
+    return { ref: invRef, collection: 'inventory', data: invSnap.data() as Record<string, unknown> };
+  }
+  const prodRef = doc(db, 'products', id);
+  const prodSnap = await tx.get(prodRef);
+  if (!prodSnap.exists()) throw new Error(`Product ${id} not found in inventory or products`);
+  return { ref: prodRef, collection: 'products', data: prodSnap.data() as Record<string, unknown> };
+};
+
+/**
  * Applies `delta` (+ for returns, - for sales) to the server's current value.
  * Throws when the product exists in neither collection, so the caller can record
  * the failure instead of pretending stock moved.
@@ -90,28 +110,44 @@ export const commitStockDelta = async (id: string, delta: number): Promise<Stock
 
   return withTimeout(
     runTransaction(db, async (tx) => {
-      // Try the collection the desktop app actually uses first.
-      const invRef = doc(db, 'inventory', id);
-      const invSnap = await tx.get(invRef);
-      let ref = invRef;
-      let data: Record<string, unknown> = invSnap.exists() ? (invSnap.data() as Record<string, unknown>) : {};
-      let collection: StockCollection = 'inventory';
-
-      if (!invSnap.exists()) {
-        ref = doc(db, 'products', id);
-        const prodSnap = await tx.get(ref);
-        if (!prodSnap.exists()) throw new Error(`Product ${id} not found in inventory or products`);
-        data = prodSnap.data() as Record<string, unknown>;
-        collection = 'products';
-      }
-
+      const { ref, collection, data } = await stockRefInTransaction(tx, id);
       const currentStock = clampStock(data.stock);
-      const threshold = data.lowStockThreshold ?? 1;
       // Never below zero: an oversold line reads as 0, not as -3.
       const nextStock = Math.max(0, currentStock + amount);
-      const stockStatus = deriveStockStatus(nextStock, threshold) as StockStatus;
+      const stockStatus = deriveStockStatus(nextStock, data.lowStockThreshold ?? 1) as StockStatus;
       tx.update(ref, { stock: nextStock, stockStatus });
       return { collection, previousStock: currentStock, stock: nextStock, stockStatus };
+    }),
+    STOCK_TX_TIMEOUT_MS,
+    'stockTransaction'
+  );
+};
+
+/**
+ * Sets the shelf to a counted total.
+ *
+ * A stocktake is not a movement: the technician counted what is physically there,
+ * so that number is the answer, and applying it as a delta against the count the
+ * sheet was opened with would subtract a sale that already happened and land on a
+ * third number nobody asked for. The server value is still read inside the
+ * transaction — to report honestly what the count replaced, and to serialize
+ * against a till writing the same row. Status and timestamp ride in the same
+ * commit so a dropped second write cannot leave the row half-updated.
+ */
+export const commitStockCount = async (id: string, count: number): Promise<StockResult> => {
+  if (!id) throw new Error('commitStockCount: missing product id');
+  const counted = Number(count);
+  // Clamping a bad count to zero would empty a shelf the technician never counted.
+  if (!Number.isFinite(counted) || counted < 0) throw new Error('commitStockCount: invalid count');
+  const nextStock = Math.floor(counted);
+
+  return withTimeout(
+    runTransaction(db, async (tx) => {
+      const { ref, collection, data } = await stockRefInTransaction(tx, id);
+      const previousStock = clampStock(data.stock);
+      const stockStatus = deriveStockStatus(nextStock, data.lowStockThreshold ?? 1) as StockStatus;
+      tx.update(ref, { stock: nextStock, stockStatus, updatedAt: new Date().toISOString() });
+      return { collection, previousStock, stock: nextStock, stockStatus };
     }),
     STOCK_TX_TIMEOUT_MS,
     'stockTransaction'

@@ -382,6 +382,9 @@
       "quick": "Ajustement rapide (+ / -) :",
       "newCount": "Nouveau stock exact",
       "reason": "Motif de l’ajustement :",
+      "movedTitle": "Le stock a changé pendant l’ouverture de cette fiche",
+      "movedBody": "Le serveur contenait {{previous}} unités, pas les {{shown}} affichées ici. Le stock est maintenant de {{count}}. Recomptez le rayon si une vente a eu lieu après votre comptage.",
+      "unconfirmed": "Le serveur n’a pas répondu à temps. Le comptage est peut-être déjà enregistré — vérifiez le produit avant de le saisir à nouveau.",
       "submit": "Mettre à jour le stock ({{units}} unités)"
     },
     "reasons": {

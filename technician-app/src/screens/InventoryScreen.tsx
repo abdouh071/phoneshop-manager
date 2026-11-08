@@ -30,7 +30,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { commitStockDelta } from '../services/stockService';
+import { commitStockCount } from '../services/stockService';
 import { useAuthStore } from '../store/authStore';
 import { usePosStore } from '../store/posStore';
 import { activityLogService } from '../services/activityLogService';
@@ -39,6 +39,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { useTranslation } from 'react-i18next';
 import type { PhoneModel, ProductCategory, StockStatus } from '../types';
 import { buildSearch, matchesSearch } from '../utils/search';
+import { parseStockCount } from '../utils/stockCount';
 import { alertCartStockRefusal } from '../utils/cartStockPrompt';
 import { findCodeCollisions, resolveProductByCode, codesToShow } from '../utils/productCode';
 import { askWhichProduct } from '../utils/productCodePrompt';
@@ -200,7 +201,6 @@ export const InventoryScreen = ({ navigation }: any) => {
   // Stock Adjustment Modal
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
   const [targetProduct, setTargetProduct] = useState<PhoneModel | null>(null);
-  const [stockDelta, setStockDelta] = useState<number>(0);
   const [exactStockInput, setExactStockInput] = useState<string>('');
   const [adjustReason, setAdjustReason] = useState<string>(DEFAULT_ADJUST_REASON);
   const [isUpdatingStock, setIsUpdatingStock] = useState(false);
@@ -346,10 +346,11 @@ export const InventoryScreen = ({ navigation }: any) => {
     });
   };
 
+  const countedStock = useMemo(() => parseStockCount(exactStockInput), [exactStockInput]);
+
   // Open Quick Stock Adjust Modal
   const openStockAdjustModal = (product: PhoneModel) => {
     setTargetProduct(product);
-    setStockDelta(0);
     setExactStockInput(product.stock.toString());
     setAdjustReason(DEFAULT_ADJUST_REASON);
     setIsAdjustModalOpen(true);
@@ -357,42 +358,17 @@ export const InventoryScreen = ({ navigation }: any) => {
 
   // Submit Stock Adjustment
   const handleConfirmStockAdjust = async () => {
-    if (!targetProduct) return;
+    if (!targetProduct || countedStock === null) return;
+
     setIsUpdatingStock(true);
     try {
-      let newStock = targetProduct.stock + stockDelta;
-      if (exactStockInput.trim() !== '') {
-        const parsed = parseInt(exactStockInput, 10);
-        if (!isNaN(parsed) && parsed >= 0) {
-          newStock = parsed;
-        }
-      }
-      newStock = Math.max(0, newStock);
+      // The field says "New Exact Stock Count", so the counted total is what lands.
+      // The transaction reads the server first and reports what it replaced.
+      const result = await commitStockCount(targetProduct.id, countedStock);
 
-      const threshold = targetProduct.lowStockThreshold ?? 1;
-      const stockStatus: StockStatus =
-        newStock === 0
-          ? 'out_of_stock'
-          : newStock <= threshold
-          ? 'low_stock'
-          : 'in_stock';
-
-      // Use an atomic delta so a concurrent sale or desktop edit is composed, not
-      // overwritten. commitStockDelta reads the server value inside a transaction and
-      // applies the signed delta — the same primitive the POS uses at checkout.
-      const delta = newStock - targetProduct.stock;
-      if (delta !== 0) {
-        await commitStockDelta(targetProduct.id, delta);
-      }
-      // Stamp the timestamp (stockStatus is handled by commitStockDelta).
-      await updateDoc(doc(db, 'inventory', targetProduct.id), {
-        updatedAt: new Date().toISOString(),
-      });
-
-      // Log activity
       await activityLogService.log(
         'inventory',
-        `Adjusted stock for ${targetProduct.name} (${targetProduct.stock} -> ${newStock}): ${adjustReason}`,
+        `Counted stock for ${targetProduct.name} (${result.previousStock} -> ${result.stock}): ${adjustReason}`,
         {
           entityId: targetProduct.id,
           entityType: 'product',
@@ -402,10 +378,39 @@ export const InventoryScreen = ({ navigation }: any) => {
       );
 
       Vibration.vibrate(40);
-      setIsAdjustModalOpen(false);
-      setTargetProduct(null);
-    } catch (err: any) {
-      Alert.alert(t('inventory.adjustFailedTitle', 'Adjustment Failed'), err.message || t('inventory.adjustFailed', 'Could not update stock.'));
+      const closeSheet = () => {
+        setIsAdjustModalOpen(false);
+        setTargetProduct(null);
+      };
+
+      // A sale or a desktop edit landed while this sheet was open. The count still
+      // wins — it is what the technician saw on the shelf — but they are told the
+      // shelf moved so they can re-count if the sale came after they counted.
+      // The sheet closes on acknowledgement: an alert raised while a modal is still
+      // dismissing is the one iOS drops.
+      if (result.previousStock !== targetProduct.stock) {
+        Alert.alert(
+          t('inventory.adjust.movedTitle', 'Stock moved while this sheet was open'),
+          t('inventory.adjust.movedBody', 'The server held {{previous}} units, not the {{shown}} shown here. Stock is now {{count}}. Re-count the shelf if a sale happened after you counted.', {
+            previous: result.previousStock,
+            shown: targetProduct.stock,
+            count: result.stock,
+          }),
+          [{ text: t('common.close', 'Close'), onPress: closeSheet }]
+        );
+      } else {
+        closeSheet();
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      // A timeout is not a refusal: the transaction can commit after the phone
+      // stops waiting, and "failed" would invite a second count of the same shelf.
+      Alert.alert(
+        t('inventory.adjustFailedTitle', 'Adjustment Failed'),
+        message.includes('timed out')
+          ? t('inventory.adjust.unconfirmed', 'The server did not answer in time. The count may already be saved — check the product before entering it again.')
+          : message || t('inventory.adjustFailed', 'Could not update stock.')
+      );
     } finally {
       setIsUpdatingStock(false);
     }
@@ -854,9 +859,8 @@ export const InventoryScreen = ({ navigation }: any) => {
                   key={delta}
                   style={[styles.deltaBtn, delta > 0 ? styles.deltaBtnPlus : styles.deltaBtnMinus]}
                   onPress={() => {
-                    const current = parseInt(exactStockInput, 10) || targetProduct?.stock || 0;
-                    const next = Math.max(0, current + delta);
-                    setExactStockInput(next.toString());
+                    const base = countedStock ?? targetProduct?.stock ?? 0;
+                    setExactStockInput(Math.max(0, base + delta).toString());
                   }}
                 >
                   <Text
@@ -904,14 +908,14 @@ export const InventoryScreen = ({ navigation }: any) => {
               buttonColor={colors.brand}
               textColor={colors.onBrand}
               loading={isUpdatingStock}
-              disabled={isUpdatingStock}
+              disabled={isUpdatingStock || countedStock === null}
               onPress={handleConfirmStockAdjust}
               style={styles.sheetButton}
             >
               {t(
                 'inventory.adjust.submit',
                 'Update Stock ({{units}} units)',
-                { units: exactStockInput || targetProduct?.stock || 0 }
+                { units: countedStock ?? 0 }
               )}
             </Button>
           </View>
