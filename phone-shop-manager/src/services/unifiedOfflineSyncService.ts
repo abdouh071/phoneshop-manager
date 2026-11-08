@@ -287,7 +287,9 @@ export const unifiedOfflineSyncService = {
           if (adj.mode === 'relative') {
             // A queued delta must be added to the server's stock at commit time — replaying the
             // locally-computed absolute value would overwrite sales made from other devices.
-            await commitStockDelta(adj.productId, adj.delta);
+            // The entry's id is the key the first attempt stamped, so a write the server took
+            // while this device heard a timeout is recognised instead of applied twice.
+            await commitStockDelta(adj.productId, adj.delta, adj.id);
           } else {
             const currentStock = snap.data()?.stock ?? 0;
             const threshold = snap.data()?.lowStockThreshold ?? 1;

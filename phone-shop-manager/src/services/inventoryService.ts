@@ -28,7 +28,20 @@ const PENDING_STOCK_ADJUSTMENTS_KEY = 'offline_pending_stock_adjustments';
 /** Stock writes are read-modify-write; the transaction budget is wider than a plain write's. */
 const STOCK_TX_TIMEOUT_MS = 2000;
 
+/**
+ * How many replay keys a product document carries. The list rides along in the write that
+ * moves the shelf, so it costs no extra read — but it cannot grow without bound on a model
+ * the shop sells all day. A replay follows its own write within one sync pass, so the keys
+ * that matter are always the newest ones.
+ */
+const STOCK_REPLAY_KEYS_KEPT = 40;
+
 export interface PendingStockAdjustment {
+  /**
+   * Also the replay key: minted before the first attempt and stamped on the product by the
+   * transaction that applies the delta, so a write the server took while this device heard
+   * a timeout is recognised on replay instead of moving the shelf a second time.
+   */
   id: string;
   productId: string;
   delta: number;
@@ -120,10 +133,15 @@ const isLocalOnlyTarget = (id: string): boolean =>
  * Read the SERVER document and write `current + delta` inside one Firestore transaction.
  * Concurrent tills selling the same model therefore serialize instead of last-write-wins.
  * Throws on timeout or contention — callers fall back to the pending queue.
+ *
+ * `replayKey` names this movement. It is stamped in the same transaction that applies it,
+ * so a write the server committed while the caller heard a timeout is recognised when the
+ * queue replays it: the shelf moves once, not once per attempt.
  */
 export const commitStockDelta = async (
   id: string,
-  delta: number
+  delta: number,
+  replayKey?: string
 ): Promise<{ previousStock: number; stock: number; stockStatus: StockStatus }> =>
   withTimeout(
     runTransaction(db, async (tx) => {
@@ -132,9 +150,27 @@ export const commitStockDelta = async (
       const data = snap.exists() ? (snap.data() as Record<string, unknown>) : {};
       const currentStock = typeof data.stock === 'number' ? data.stock : 0;
       const threshold = typeof data.lowStockThreshold === 'number' ? data.lowStockThreshold : 1;
+      // Read fresh on every attempt: Firestore re-runs this callback when the document
+      // moves underneath it, and a list carried over from the last attempt would be stale.
+      const stamped = Array.isArray(data.appliedStockKeys) ? (data.appliedStockKeys as unknown[]) : [];
+
+      if (replayKey && stamped.includes(replayKey)) {
+        return {
+          previousStock: currentStock,
+          stock: currentStock,
+          stockStatus: computeStockStatus(currentStock, threshold),
+        };
+      }
+
       const nextStock = Math.max(0, currentStock + delta);
       const stockStatus = computeStockStatus(nextStock, threshold);
-      tx.update(ref, { stock: nextStock, stockStatus });
+      tx.update(ref, {
+        stock: nextStock,
+        stockStatus,
+        ...(replayKey
+          ? { appliedStockKeys: [...stamped, replayKey].slice(-STOCK_REPLAY_KEYS_KEPT) }
+          : {}),
+      });
       return { previousStock: currentStock, stock: nextStock, stockStatus };
     }),
     STOCK_TX_TIMEOUT_MS,
@@ -335,21 +371,18 @@ export const inventoryService = {
     // Update local storage mirror immediately
     saveLocalInventory(local.map(p => p.id === id ? updatedLocal : p));
 
+    // Minted before the attempt, not at the replay: the transaction stamps this key on the
+    // product, so a commit the till never heard about is recognised when the queue resends it.
+    const replayKey = newIdempotencyKey('tx');
+
+    // One entry per movement. Folding two deltas for the same product into one entry leaves
+    // a single key naming both, and the replay cannot tell the one the server already took
+    // from the one it never saw.
     const queueRelativeAdjustment = (): void => {
-      const pendingAdj = getPendingStockAdjustments();
-      const existingAdj = pendingAdj.find(a => a.productId === id);
-      if (existingAdj) {
-        existingAdj.delta += delta;
-        existingAdj.newStock = newStock;
-        existingAdj.mode = 'relative';
-        existingAdj.timestamp = new Date().toISOString();
-        savePendingStockAdjustments([...pendingAdj]);
-      } else {
-        savePendingStockAdjustments([
-          ...pendingAdj,
-          { id: newIdempotencyKey('tx'), productId: id, delta, newStock, mode: 'relative', timestamp: new Date().toISOString() }
-        ]);
-      }
+      savePendingStockAdjustments([
+        ...getPendingStockAdjustments(),
+        { id: replayKey, productId: id, delta, newStock, mode: 'relative', timestamp: new Date().toISOString() }
+      ]);
     };
 
     if (isLocalOnlyTarget(id)) {
@@ -358,7 +391,7 @@ export const inventoryService = {
     }
 
     try {
-      const authoritative = await commitStockDelta(id, delta);
+      const authoritative = await commitStockDelta(id, delta, replayKey);
       const reconciled: PhoneModel = { ...updatedLocal, stock: authoritative.stock, stockStatus: authoritative.stockStatus };
       saveLocalInventory(getLocalInventory().map(p => (p.id === id ? reconciled : p)));
       return { updated: reconciled, previousStock: authoritative.previousStock, atomic: true };

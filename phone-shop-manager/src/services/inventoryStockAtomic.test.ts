@@ -18,7 +18,9 @@ const fake = vi.hoisted(() => {
   const docs = new Map<string, FakeDoc>();
   const versions = new Map<string, number>();
   const stats = { commits: 0, aborts: 0 };
-  const flags = { failWrites: false };
+  // lostAck: the write lands on the server, then the caller hears a failure. This is the
+  // shape of a timeout on a commit that actually happened — the case a replay must not repeat.
+  const flags = { failWrites: false, lostAck: false };
 
   const versionOf = (key: string): number => versions.get(key) ?? 0;
 
@@ -46,6 +48,7 @@ const fake = vi.hoisted(() => {
     stockOf(id: string): number | undefined {
       return docs.get(`inventory/${id}`)?.stock as number | undefined;
     },
+    versionOf,
     exists(id: string): boolean {
       return docs.has(`inventory/${id}`);
     },
@@ -55,6 +58,7 @@ const fake = vi.hoisted(() => {
       stats.commits = 0;
       stats.aborts = 0;
       flags.failWrites = false;
+      flags.lostAck = false;
     },
     doc: (_db: unknown, collectionName: string, id: string): FakeRef => ({ id, key: `${collectionName}/${id}` }),
     getDoc: async (ref: FakeRef) => snapshotOf(ref.key),
@@ -99,6 +103,7 @@ const fake = vi.hoisted(() => {
       }
       for (const w of writes) writeOf(w.key, w.data);
       stats.commits++;
+      if (flags.lostAck) throw new Error('Fake: committed, but the acknowledgement never arrived');
       return result;
     },
   };
@@ -180,6 +185,49 @@ describe('Atomic stock writes', () => {
       expect(result.stockStatus).toBe('out_of_stock');
       expect(fake.stockOf('prod_1')).toBe(0);
     });
+
+    it('writes nothing when the movement is already stamped on the document', async () => {
+      seedProduct(10, 10);
+      await commitStockDelta('prod_1', -3, 'mv_1');
+      const versionAfterFirst = fake.versionOf('inventory/prod_1');
+
+      const replay = await commitStockDelta('prod_1', -3, 'mv_1');
+
+      // Reported as the shelf stands, so the caller reconciles to 7 rather than to 4.
+      expect(replay).toEqual({ previousStock: 7, stock: 7, stockStatus: 'in_stock' });
+      expect(fake.stockOf('prod_1')).toBe(7);
+      expect(fake.versionOf('inventory/prod_1')).toBe(versionAfterFirst);
+    });
+
+    it('stamps a different movement even when the delta is identical', async () => {
+      seedProduct(10, 10);
+
+      await commitStockDelta('prod_1', -3, 'mv_1');
+      await commitStockDelta('prod_1', -3, 'mv_2');
+
+      expect(fake.stockOf('prod_1')).toBe(4);
+    });
+
+    it('leaves the stamp list off the document when the caller names no movement', async () => {
+      seedProduct(10, 10);
+
+      await commitStockDelta('prod_1', -3);
+
+      expect(fake.stockOf('prod_1')).toBe(7);
+      expect(fake.docs.get('inventory/prod_1')?.appliedStockKeys).toBeUndefined();
+    });
+
+    it('keeps the stamp list bounded on a model the shop sells all day', async () => {
+      seedProduct(100, 100);
+
+      for (let i = 0; i < 45; i++) await commitStockDelta('prod_1', 0, `mv_${i}`);
+
+      const keys = fake.docs.get('inventory/prod_1')?.appliedStockKeys as string[];
+      expect(keys).toHaveLength(40);
+      expect(keys).not.toContain('mv_0');
+      expect(keys[0]).toBe('mv_5');
+      expect(keys[39]).toBe('mv_44');
+    });
   });
 
   describe('inventoryService.applyStockDelta', () => {
@@ -239,6 +287,50 @@ describe('Atomic stock writes', () => {
       expect(pending).toHaveLength(1);
       expect(pending[0].mode).toBe('relative');
       expect(pending[0].delta).toBe(-2);
+    });
+
+    it('does not sell the units twice when the server committed but the till never heard', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(10, 10);
+      fake.flags.lostAck = true;
+
+      const result = await inventoryService.applyStockDelta('prod_1', -3);
+
+      // The write landed; only the answer was lost. The queue cannot tell that apart from
+      // a rejection, so it keeps the movement — under the key the commit already stamped.
+      expect(result.atomic).toBe(false);
+      expect(fake.stockOf('prod_1')).toBe(7);
+      const pending = inventoryService.getPendingStockAdjustments();
+      expect(pending).toHaveLength(1);
+      expect(pending[0].delta).toBe(-3);
+      expect(fake.docs.get('inventory/prod_1')?.appliedStockKeys).toContain(pending[0].id);
+
+      fake.flags.lostAck = false;
+      expect(await unifiedOfflineSyncService.syncOfflineStockAdjustments()).toBe(1);
+
+      expect(fake.stockOf('prod_1')).toBe(7);
+      expect(inventoryService.getPendingStockAdjustments()).toHaveLength(0);
+    });
+
+    it('keeps one entry per movement so a lost acknowledgement cannot swallow the next sale', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(10, 10);
+      fake.flags.lostAck = true;
+      await inventoryService.applyStockDelta('prod_1', -3);
+
+      fake.flags.lostAck = false;
+      vi.stubGlobal('navigator', { onLine: false });
+      await inventoryService.applyStockDelta('prod_1', -2);
+
+      // Folding both into one −5 entry would leave a single key standing for two movements:
+      // the replay would either drop the sale the server never saw or repeat the one it took.
+      const pending = inventoryService.getPendingStockAdjustments();
+      expect(pending.map(a => a.delta)).toEqual([-3, -2]);
+      expect(new Set(pending.map(a => a.id)).size).toBe(2);
+
+      vi.stubGlobal('navigator', { onLine: true });
+      expect(await unifiedOfflineSyncService.syncOfflineStockAdjustments()).toBe(2);
+      expect(fake.stockOf('prod_1')).toBe(5);
     });
   });
 
@@ -301,6 +393,24 @@ describe('Atomic stock writes', () => {
 
       expect(fake.stockOf('prod_1')).toBe(3);
       expect(fake.docs.get('inventory/prod_1')?.stockStatus).toBe('low_stock');
+    });
+
+    it('moves nothing on a second pass over an entry the first pass already committed', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(5, 5);
+      queue({ id: 'adj_6', delta: -2, newStock: 3, mode: 'relative' });
+      fake.flags.lostAck = true;
+
+      // The pass fails after the write landed, so the entry survives unpruned.
+      expect(await unifiedOfflineSyncService.syncOfflineStockAdjustments()).toBe(0);
+      expect(fake.stockOf('prod_1')).toBe(3);
+      expect(inventoryService.getPendingStockAdjustments()).toHaveLength(1);
+
+      fake.flags.lostAck = false;
+      expect(await unifiedOfflineSyncService.syncOfflineStockAdjustments()).toBe(1);
+
+      expect(fake.stockOf('prod_1')).toBe(3);
+      expect(inventoryService.getPendingStockAdjustments()).toHaveLength(0);
     });
   });
 
