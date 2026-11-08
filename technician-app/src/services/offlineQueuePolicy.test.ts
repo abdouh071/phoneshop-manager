@@ -28,6 +28,8 @@ import {
   isSettleAlreadyRecorded,
   isOfflineCustomerId,
   replaceCachedCustomer,
+  saleProfileDeltas,
+  profileTotalsAfter,
   type QueueAction,
 } from './offlineQueuePolicy.ts';
 
@@ -309,4 +311,42 @@ test('a cached customer row is re-pointed at its server id, and only that row', 
   assert.deepEqual(rebased.map(c => c.id), ['srv_abc', 'srv_real']);
   assert.equal(rebased[0].name, 'A', 'the row keeps its data, only the id changes');
   assert.deepEqual(cached.map(c => c.id), ['offline_cust_1', 'srv_real'], 'the input list is not mutated');
+});
+
+test('one sale is one visit, and the money splits into taken in and owed', () => {
+  assert.deepEqual(saleProfileDeltas(3000, 2000), { visits: 1, spent: 3000, debt: 2000 });
+  assert.deepEqual(saleProfileDeltas(5000, 0), { visits: 1, spent: 5000, debt: 0 }, 'a cash sale owes nothing');
+  assert.deepEqual(saleProfileDeltas(0, 4500), { visits: 1, spent: 0, debt: 4500 }, 'an account sale took no money');
+});
+
+test('a profile never gains a negative or a fraction of a cent from a sale', () => {
+  assert.deepEqual(saleProfileDeltas(-100, -50), { visits: 1, spent: 0, debt: 0 }, 'a return is its own document');
+  assert.deepEqual(saleProfileDeltas(10.005, 1_234.567), { visits: 1, spent: 10.01, debt: 1234.57 });
+  assert.deepEqual(saleProfileDeltas(undefined, null), { visits: 1, spent: 0, debt: 0 });
+  assert.deepEqual(saleProfileDeltas('abc', NaN), { visits: 1, spent: 0, debt: 0 }, 'a lost figure adds nothing, not NaN');
+});
+
+test('the totals a transaction writes add the sale to what the server already holds', () => {
+  assert.deepEqual(
+    profileTotalsAfter({ totalPurchases: 4, totalSpent: 12000, totalDebt: 3000 }, saleProfileDeltas(2000, 500)),
+    { totalPurchases: 5, totalSpent: 14000, totalDebt: 3500 }
+  );
+});
+
+test('a legacy profile with no totals still gains the sale', () => {
+  assert.deepEqual(
+    profileTotalsAfter({}, saleProfileDeltas(4500, 0)),
+    { totalPurchases: 1, totalSpent: 4500, totalDebt: 0 }
+  );
+  assert.deepEqual(
+    profileTotalsAfter({ totalPurchases: null, totalSpent: 'abc', totalDebt: undefined }, saleProfileDeltas(100, 200)),
+    { totalPurchases: 1, totalSpent: 100, totalDebt: 200 },
+    'a corrupt field counts as zero rather than poisoning the sum'
+  );
+});
+
+test('two sales to the same customer add up instead of overwriting each other', () => {
+  const first = profileTotalsAfter({ totalPurchases: 2, totalSpent: 900.5, totalDebt: 0 }, saleProfileDeltas(100.25, 0));
+  const second = profileTotalsAfter(first, saleProfileDeltas(0, 300));
+  assert.deepEqual(second, { totalPurchases: 4, totalSpent: 1000.75, totalDebt: 300 });
 });

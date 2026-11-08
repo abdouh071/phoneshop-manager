@@ -28,7 +28,7 @@ import { db } from '../lib/firebase';
 import { addIdempotently } from './idempotentReplay';
 import { allocateTicketNumber } from './ticketCounter';
 import { customerService } from './customerService';
-import { commitPartsAllocation, applyStockLines } from './stockService';
+import { commitPartsAllocation, commitSaleEffects, applyStockLines } from './stockService';
 import {
   MAX_ATTEMPTS,
   buildStatusPatch,
@@ -739,24 +739,40 @@ const flushSales = async (): Promise<FlushResult> => {
       }
       // Replayed under the key the sale was written with, not a fresh one: the
       // document this attempt is looking for is the one the till believes failed.
-      const { id, created } = await addIdempotently('transactions', replayKeyOf(payload, action.id), {
+      const { id } = await addIdempotently('transactions', replayKeyOf(payload, action.id), {
         ...dataToSave,
         saleType: dataToSave.saleType || 'retail',
       });
       const settlement = dataToSave.accountSettlement as SaleTransaction['accountSettlement'];
+      const customerId = String(dataToSave.customerId || '');
+      const charged = Math.max(0, Number(settlement?.chargedAmount) || 0);
 
-      // Stock moves only for a sale this pass actually created; adopting an
-      // existing document must not deduct the same units twice.
-      if (created && items.length) {
-        const lines = items
-          .map((item) => ({
-            productId: String(item?.product?.id || ''),
-            name: String(item?.product?.name || ''),
-            quantity: Math.max(1, Math.trunc(Number(item?.quantity) || 1)),
-          }))
-          .filter((l) => l.productId);
+      const lines = items
+        .map((item) => ({
+          productId: String(item?.product?.id || ''),
+          name: String(item?.product?.name || ''),
+          quantity: Math.max(1, Math.trunc(Number(item?.quantity) || 1)),
+        }))
+        .filter((l) => l.productId);
 
-        const { failed } = await applyStockLines(lines, -1);
+      // The shelf and the customer's own numbers move for an adopted invoice too. The
+      // till can write the sale and never hear the answer, in which case the document
+      // exists and nothing was ever deducted for it — gating this on `created` left
+      // exactly those sales off the shelf and off the ledger for good. One transaction
+      // reads the stamps it writes, so a pass that already did the work adopts and moves
+      // nothing, and a second device cannot deduct the same units again.
+      if (lines.length || customerId) {
+        const { failed } = await commitSaleEffects(
+          id,
+          lines,
+          customerId
+            ? {
+                customerId,
+                paid: Math.max(0, (Number(dataToSave.total) || 0) - charged),
+                charged,
+              }
+            : undefined
+        );
         for (const f of failed) {
           await enqueue({
             id: newActionId('stock'),
@@ -767,19 +783,6 @@ const flushSales = async (): Promise<FlushResult> => {
             nextAttemptAt: 0,
           });
         }
-      }
-
-      // And the same rule for the customer's own numbers: the till left them alone for
-      // a sale it could not write, so this pass adds them once — from the settlement the
-      // invoice carries, which is what the counter reads too.
-      const customerId = String(dataToSave.customerId || '');
-      if (created && customerId) {
-        const charged = Math.max(0, Number(settlement?.chargedAmount) || 0);
-        await customerService.recordSaleOnProfile(
-          customerId,
-          Math.max(0, (Number(dataToSave.total) || 0) - charged),
-          charged
-        );
       }
 
       await removeActions('sale', new Set([action.id]));

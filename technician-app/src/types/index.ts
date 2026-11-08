@@ -227,6 +227,14 @@ export interface SaleTransaction {
    * nothing can recognise — so the next sync posts it a second time.
    */
   idempotencyKey?: string;
+  /**
+   * The sold units have already left the shelf for this invoice, and the customer's own
+   * totals have already gained it. Stamped in the same transaction that moves them, so a
+   * sync pass finding the document already on the server can tell work that is finished
+   * from an invoice nobody ever moved the shelf for.
+   */
+  stockApplied?: boolean;
+  profileApplied?: boolean;
   accountSettlement?: {
     type: 'paid_full' | 'charged_to_account' | 'partial_payment';
     paidAmount: number;

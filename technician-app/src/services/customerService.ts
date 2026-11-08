@@ -12,7 +12,7 @@ import {
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../lib/firebase';
-import { isOfflineCustomerId, replaceCachedCustomer } from './offlineQueuePolicy';
+import { isOfflineCustomerId, replaceCachedCustomer, saleProfileDeltas } from './offlineQueuePolicy';
 import { isRealPhone, isSamePhone } from '../utils/phone';
 import type { Customer, CustomerDebtEntry } from '../types';
 
@@ -346,14 +346,14 @@ export const customerService = {
    */
   recordSaleOnProfile: async (customerId: string, paid: number, charged: number): Promise<void> => {
     if (!customerId) return;
-    const cents = (n: number) => Math.round(Math.max(0, n) * 100) / 100;
+    const { visits, spent, debt } = saleProfileDeltas(paid, charged);
 
     const updates: Record<string, unknown> = {
       lastVisitDate: new Date().toISOString(),
-      totalPurchases: increment(1),
+      totalPurchases: increment(visits),
     };
-    if (paid > 0) updates.totalSpent = increment(cents(paid));
-    if (charged > 0) updates.totalDebt = increment(cents(charged));
+    if (spent > 0) updates.totalSpent = increment(spent);
+    if (debt > 0) updates.totalDebt = increment(debt);
 
     try {
       await updateDoc(doc(db, 'customers', customerId), updates);

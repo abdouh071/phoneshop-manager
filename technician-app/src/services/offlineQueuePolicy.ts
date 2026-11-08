@@ -394,3 +394,43 @@ export const deriveStockStatus = (stock: number, thresholdRaw: unknown): 'out_of
   if (stock <= Math.max(1, threshold)) return 'low_stock';
   return 'in_stock';
 };
+
+/**
+ * What one sale adds to the customer's own record: a visit, the money that changed
+ * hands, and the money the shop is now owed. Both writers of those numbers use this —
+ * the till that sold online and the sync pass that uploads a sale made offline — so a
+ * profile cannot gain two different answers depending on which device reached the
+ * server first. Whole cents, never negative: a return is its own document.
+ */
+export const saleProfileDeltas = (
+  paid: unknown,
+  charged: unknown
+): { visits: number; spent: number; debt: number } => {
+  const money = (value: unknown): number => {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.round(Math.max(0, n) * 100) / 100 : 0;
+  };
+  return { visits: 1, spent: money(paid), debt: money(charged) };
+};
+
+/**
+ * The profile's totals after one sale, for a writer that holds the document inside a
+ * transaction and so must write the value rather than ask the server to add to it.
+ * A field the profile never had counts as zero, not as NaN — a legacy customer with no
+ * `totalSpent` must still gain what this sale took in.
+ */
+export const profileTotalsAfter = (
+  current: { totalPurchases?: unknown; totalSpent?: unknown; totalDebt?: unknown },
+  deltas: { visits: number; spent: number; debt: number }
+): { totalPurchases: number; totalSpent: number; totalDebt: number } => {
+  const count = (value: unknown): number => Math.max(0, Math.trunc(Number(value) || 0));
+  const money = (value: unknown): number => {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.round(Math.max(0, n) * 100) / 100 : 0;
+  };
+  return {
+    totalPurchases: count(current?.totalPurchases) + deltas.visits,
+    totalSpent: money(money(current?.totalSpent) + deltas.spent),
+    totalDebt: money(money(current?.totalDebt) + deltas.debt),
+  };
+};

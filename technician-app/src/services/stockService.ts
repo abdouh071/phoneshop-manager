@@ -12,7 +12,7 @@
  */
 import { doc, getDoc, runTransaction } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { clampStock, deriveStockStatus } from './offlineQueuePolicy';
+import { clampStock, deriveStockStatus, profileTotalsAfter, saleProfileDeltas } from './offlineQueuePolicy';
 import type { StockStatus } from '../types';
 
 /** A till must not hang on a locked counter; the queue retries the delta later. */
@@ -361,4 +361,132 @@ export const commitPartsAllocation = async (
   );
 
   return { applied, failed, adopted };
+};
+
+/** The customer's own numbers this sale moves, when it was written on a profile. */
+export interface SaleProfileEffect {
+  customerId: string;
+  paid: number;
+  charged: number;
+}
+
+export interface SaleEffectsOutcome {
+  applied: AppliedStockLine[];
+  failed: { line: StockLine; error: string }[];
+  /** The invoice already carried both stamps, so nothing moved a second time. */
+  adopted: boolean;
+}
+
+/**
+ * One transaction takes the sold units off the shelf, adds the sale to the customer's
+ * own record, and stamps the invoice as having done both — the same shape as
+ * `commitPartsAllocation`, with the invoice as the anchor.
+ *
+ * The stamps are what make an upload safe to retry. A sale rung up without signal can
+ * reach the server while the phone believes it failed, so the sync pass finds the
+ * document already there. "Already there" cannot tell a replay whose work is finished
+ * from an invoice the server saved and nobody ever moved the shelf for, and gating the
+ * side effects on `created` skipped the shelf and the ledger for exactly the sales that
+ * needed them. Reading the stamps inside the transaction that writes them answers both:
+ * a crash after the commit adopts and moves nothing, a half-committed sale is finished
+ * once, and two devices racing to upload the same sale cannot both deduct it.
+ */
+export const commitSaleEffects = async (
+  saleId: string,
+  lines: StockLine[],
+  profile?: SaleProfileEffect
+): Promise<SaleEffectsOutcome> => {
+  // A line with no SKU never reached the shelf, so it is reported before the transaction
+  // rather than inside it — a retry of the transaction must not report it twice.
+  const invalid: { line: StockLine; error: string }[] = [];
+  const grouped = new Map<string, { name: string; quantity: number }>();
+  for (const line of lines) {
+    const quantity = Math.trunc(Number(line.quantity) || 0);
+    if (!line.productId) {
+      invalid.push({ line, error: 'missing product id' });
+      continue;
+    }
+    if (quantity <= 0) continue;
+    const existing = grouped.get(line.productId);
+    grouped.set(line.productId, {
+      name: existing?.name || line.name,
+      quantity: (existing?.quantity || 0) + quantity,
+    });
+  }
+
+  let applied: AppliedStockLine[] = [];
+  let missed: { line: StockLine; error: string }[] = [];
+  let adopted = false;
+
+  await withTimeout(
+    runTransaction(db, async (tx) => {
+      // Firestore re-runs this function when a document it read moves underneath it, so
+      // every attempt starts from an empty report rather than appending to the last one.
+      applied = [];
+      missed = [];
+      adopted = false;
+
+      const saleRef = doc(db, 'transactions', saleId);
+      const saleSnap = await tx.get(saleRef);
+      if (!saleSnap.exists()) throw new Error(`Sale ${saleId} no longer exists`);
+      const sale = saleSnap.data() as Record<string, unknown>;
+
+      const moveStock = sale.stockApplied !== true;
+      const moveProfile = !!profile?.customerId && sale.profileApplied !== true;
+      if (!moveStock && !moveProfile) {
+        adopted = true;
+        return;
+      }
+
+      if (moveStock) {
+        for (const [productId, group] of grouped) {
+          const line: StockLine = { productId, name: group.name, quantity: group.quantity };
+          let ref = doc(db, 'inventory', productId);
+          let snap = await tx.get(ref);
+          let collection: StockCollection = 'inventory';
+          if (!snap.exists()) {
+            ref = doc(db, 'products', productId);
+            snap = await tx.get(ref);
+            collection = 'products';
+            if (!snap.exists()) {
+              missed.push({ line, error: `Product ${productId} not found in inventory or products` });
+              continue;
+            }
+          }
+          const data = snap.data() as Record<string, unknown>;
+          const previousStock = clampStock(data.stock);
+          const threshold = data.lowStockThreshold ?? 1;
+          const stock = Math.max(0, previousStock - group.quantity);
+          const stockStatus = deriveStockStatus(stock, threshold) as StockStatus;
+          tx.update(ref, { stock, stockStatus });
+          applied.push({ line, result: { collection, previousStock, stock, stockStatus } });
+        }
+      }
+
+      const stamp: Record<string, unknown> = {};
+      if (moveStock) stamp.stockApplied = true;
+
+      if (moveProfile && profile) {
+        const customerRef = doc(db, 'customers', profile.customerId);
+        const customerSnap = await tx.get(customerRef);
+        // A profile that has gone missing must not hold the shelf movement hostage: the
+        // till's own writer warns and moves on, and the stamp records the same answer so
+        // the next pass does not spend the sale on a customer who is no longer there.
+        if (customerSnap.exists()) {
+          const deltas = saleProfileDeltas(profile.paid, profile.charged);
+          tx.update(customerRef, {
+            ...profileTotalsAfter(customerSnap.data() as Record<string, unknown>, deltas),
+            lastVisitDate: new Date().toISOString(),
+          });
+        }
+        stamp.profileApplied = true;
+      }
+
+      tx.update(saleRef, stamp);
+    }),
+    STOCK_TX_TIMEOUT_MS,
+    'saleEffects'
+  );
+
+  return { applied, failed: [...invalid, ...missed], adopted };
 };
