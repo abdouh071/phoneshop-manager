@@ -221,6 +221,12 @@ export interface SaleTransaction {
    */
   invoiceNumberProvisional?: boolean;
   /**
+   * The clock's guess, kept once the counter has replaced it. It is the reference
+   * printed on the paper the customer left with, and the one a debt raised before
+   * the rename still names.
+   */
+  provisionalInvoiceNumber?: string;
+  /**
    * Minted before the first attempt to write this sale and stamped on the document,
    * so a replay can find what it already wrote. Without it the queue's own id is the
    * only key, and a sale the server saved while the phone saw a timeout is a sale

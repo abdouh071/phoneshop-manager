@@ -434,3 +434,70 @@ export const profileTotalsAfter = (
     totalDebt: money(money(current?.totalDebt) + deltas.debt),
   };
 };
+
+/** The shape a queued sale carries when the counter could not be reached at the till. */
+export interface NumberedInvoice {
+  invoiceNumber?: unknown;
+  invoiceNumberProvisional?: unknown;
+  provisionalInvoiceNumber?: unknown;
+}
+
+/**
+ * True when this queued sale still owes the counter a number. Once a claim has been
+ * remembered on the action the answer is no, so a sale the server took while the
+ * phone saw a timeout is replayed under the number already claimed for it instead
+ * of spending a second one and leaving the first unheld by any document.
+ */
+export const needsInvoiceNumber = (sale: NumberedInvoice): boolean =>
+  sale.invoiceNumberProvisional === true && !sale.provisionalInvoiceNumber;
+
+/**
+ * The fields a sale carries once the counter has replaced the clock's guess. The
+ * guess is kept rather than overwritten: it is the reference printed on the paper
+ * the customer left with, and the only one a debt written before the rename can be
+ * found by.
+ */
+export const renumberedInvoice = (
+  guess: unknown,
+  real: string
+): { invoiceNumber: string; invoiceNumberProvisional: false; provisionalInvoiceNumber: string } => ({
+  invoiceNumber: real,
+  invoiceNumberProvisional: false,
+  provisionalInvoiceNumber: String(guess ?? ''),
+});
+
+/**
+ * The day a replayed sale joins the sequence for. An invoice sold on Tuesday and
+ * uploaded on Friday belongs in Tuesday's book — claiming against the upload day
+ * files it under a date the receipt does not carry and spends a number from a
+ * sequence the shop is still writing into.
+ */
+export const invoiceClaimDate = (dateValue: unknown, uploadDay: Date): Date => {
+  // Only the ISO string the queue stores is trusted: `new Date('42')` reads as a year,
+  // so a corrupt figure would file the invoice decades from the day it was sold.
+  if (typeof dateValue !== 'string' || !dateValue.trim()) return uploadDay;
+  const parsed = new Date(dateValue);
+  return Number.isNaN(parsed.getTime()) ? uploadDay : parsed;
+};
+
+/**
+ * A debt raised against the guess follows its invoice to the real number, and gains
+ * the transaction id the offline till could not know yet — the strongest of the keys
+ * both apps match a sale to its debt on.
+ *
+ * Only an entry naming that exact guess is touched, and one already pointing at a
+ * different invoice is left alone: a clock guess can repeat, and re-pointing a debt
+ * that belongs to another sale would move money onto the wrong account.
+ */
+export const debtFollowsInvoice = (
+  debt: Record<string, unknown>,
+  guess: string,
+  real: string,
+  saleId: string
+): Record<string, unknown> | null => {
+  if (!guess || !real || guess === real) return null;
+  if (String(debt.invoiceNumber ?? '') !== guess) return null;
+  const linked = String(debt.transactionId ?? '');
+  if (linked && linked !== saleId) return null;
+  return { ...debt, invoiceNumber: real, transactionId: saleId };
+};

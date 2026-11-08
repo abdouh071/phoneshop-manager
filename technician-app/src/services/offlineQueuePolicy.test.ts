@@ -30,6 +30,10 @@ import {
   replaceCachedCustomer,
   saleProfileDeltas,
   profileTotalsAfter,
+  needsInvoiceNumber,
+  renumberedInvoice,
+  invoiceClaimDate,
+  debtFollowsInvoice,
   type QueueAction,
 } from './offlineQueuePolicy.ts';
 
@@ -349,4 +353,100 @@ test('two sales to the same customer add up instead of overwriting each other', 
   const first = profileTotalsAfter({ totalPurchases: 2, totalSpent: 900.5, totalDebt: 0 }, saleProfileDeltas(100.25, 0));
   const second = profileTotalsAfter(first, saleProfileDeltas(0, 300));
   assert.deepEqual(second, { totalPurchases: 4, totalSpent: 1000.75, totalDebt: 300 });
+});
+
+test('only a sale still carrying an unclaimed guess owes the counter a number', () => {
+  assert.equal(needsInvoiceNumber({ invoiceNumber: 'INV-482913', invoiceNumberProvisional: true }), true);
+  assert.equal(needsInvoiceNumber({ invoiceNumber: 'INV-261108-0007' }), false, 'a number from the counter is final');
+  assert.equal(needsInvoiceNumber({ invoiceNumberProvisional: 'true' }), false, 'the flag is a boolean, not a string');
+  assert.equal(needsInvoiceNumber({}), false);
+});
+
+test('a claim remembered on the action is not claimed a second time', () => {
+  // The server can take the sale while the phone sees a timeout. The retry must reuse
+  // the number already held for it, or the counter spends one no document carries.
+  const renamed = renumberedInvoice('INV-482913', 'INV-261103-0012');
+  assert.equal(needsInvoiceNumber(renamed), false);
+});
+
+test('the rename keeps the number printed on the paper the customer left with', () => {
+  assert.deepEqual(renumberedInvoice('INV-482913', 'INV-261103-0012'), {
+    invoiceNumber: 'INV-261103-0012',
+    invoiceNumberProvisional: false,
+    provisionalInvoiceNumber: 'INV-482913',
+  });
+  assert.equal(renumberedInvoice(undefined, 'INV-261103-0012').provisionalInvoiceNumber, '');
+});
+
+test('a replayed invoice joins the sequence of the day it was sold, not the day it uploaded', () => {
+  const uploadDay = new Date('2026-11-08T09:00:00.000Z');
+  assert.equal(
+    invoiceClaimDate('2026-11-03T18:40:00.000Z', uploadDay).toISOString(),
+    '2026-11-03T18:40:00.000Z'
+  );
+});
+
+test('a sale with no readable date falls back to the day the counter is reached', () => {
+  const uploadDay = new Date('2026-11-08T09:00:00.000Z');
+  // 42 is the trap: Date() reads a bare number as a year and would file this in 2042.
+  for (const lost of [undefined, null, '', '   ', 'not a date', 42]) {
+    assert.equal(invoiceClaimDate(lost, uploadDay), uploadDay);
+  }
+});
+
+const debtOn = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  id: 'debt_1',
+  customerId: 'cust_1',
+  totalAmount: 9000,
+  remainingBalance: 9000,
+  invoiceNumber: 'INV-482913',
+  notes: 'Receipt #INV-482913',
+  ...over,
+});
+
+test('a debt raised against the guess follows its invoice and gains the sale id', () => {
+  const moved = debtFollowsInvoice(debtOn(), 'INV-482913', 'INV-261103-0012', 'tx_real');
+  assert.equal(moved?.invoiceNumber, 'INV-261103-0012');
+  assert.equal(moved?.transactionId, 'tx_real', 'the strongest of the keys both apps match on');
+  assert.equal(moved?.remainingBalance, 9000, 'the money owed does not move with the number');
+  assert.equal(moved?.notes, 'Receipt #INV-482913', 'the paper reference stays as printed');
+});
+
+test('the re-point does not mutate the entry it was handed', () => {
+  const original = debtOn();
+  debtFollowsInvoice(original, 'INV-482913', 'INV-261103-0012', 'tx_real');
+  assert.equal(original.invoiceNumber, 'INV-482913');
+  assert.equal(original.transactionId, undefined);
+});
+
+test('a clock guess that repeats cannot move another sale\'s debt', () => {
+  // Two offline sessions can mint the same six digits. An entry already pointing at a
+  // different transaction belongs to that one, whatever number it names.
+  assert.equal(
+    debtFollowsInvoice(debtOn({ transactionId: 'tx_other' }), 'INV-482913', 'INV-261103-0012', 'tx_real'),
+    null
+  );
+  assert.equal(debtFollowsInvoice(debtOn({ invoiceNumber: 'INV-999999' }), 'INV-482913', 'INV-261103-0012', 'tx_real'), null);
+  assert.equal(debtFollowsInvoice(debtOn({ invoiceNumber: undefined }), 'INV-482913', 'INV-261103-0012', 'tx_real'), null);
+});
+
+test('an entry already linked to this sale still follows the rename', () => {
+  const moved = debtFollowsInvoice(debtOn({ transactionId: 'tx_real' }), 'INV-482913', 'INV-261103-0012', 'tx_real');
+  assert.equal(moved?.invoiceNumber, 'INV-261103-0012');
+});
+
+test('a re-point that already happened is not attempted again', () => {
+  const moved = debtFollowsInvoice(debtOn(), 'INV-482913', 'INV-261103-0012', 'tx_real');
+  assert.ok(moved);
+  assert.equal(
+    debtFollowsInvoice(moved, 'INV-482913', 'INV-261103-0012', 'tx_real'),
+    null,
+    'the entry now names the real number, so a replay finds nothing to do'
+  );
+});
+
+test('nothing is re-pointed when there is no rename to carry out', () => {
+  assert.equal(debtFollowsInvoice(debtOn(), '', 'INV-261103-0012', 'tx_real'), null);
+  assert.equal(debtFollowsInvoice(debtOn(), 'INV-482913', '', 'tx_real'), null);
+  assert.equal(debtFollowsInvoice(debtOn(), 'INV-482913', 'INV-482913', 'tx_real'), null);
 });

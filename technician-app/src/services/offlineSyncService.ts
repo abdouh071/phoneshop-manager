@@ -23,7 +23,7 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, type AppStateStatus } from 'react-native';
-import { collection, doc, getDoc, getDocs, limit, query, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { addIdempotently } from './idempotentReplay';
 import { allocateTicketNumber } from './ticketCounter';
@@ -33,15 +33,19 @@ import { commitPartsAllocation, commitSaleEffects, applyStockLines } from './sto
 import {
   MAX_ATTEMPTS,
   buildStatusPatch,
+  debtFollowsInvoice,
   dedupeById,
+  invoiceClaimDate,
   isDue,
   isOfflineCustomerId,
   isOwnerKey,
+  needsInvoiceNumber,
   needsTicketNumber,
   queueKey,
   recordDeferral,
   recordFailure,
   rebaseActions,
+  renumberedInvoice,
   replayKeyOf,
   resolveRef,
   shouldDeadLetter,
@@ -714,6 +718,40 @@ const flushStock = async (): Promise<FlushResult> => {
   return out;
 };
 
+/**
+ * Carries a renamed invoice's debts with it. A credit sale written offline raises its
+ * debt against the clock's guess, and that guess is the only reference either app has
+ * to find the pair — renumbering the invoice on its own leaves the balance open on a
+ * debt nothing can reach from the receipt. The entry is either still in this phone's
+ * queue or already on the server, so both are told.
+ */
+const repointDebtsToInvoice = async (guess: string, real: string, saleId: string): Promise<void> => {
+  const queued = await loadQueue('debt');
+  let touched = false;
+  const next = queued.map((action) => {
+    const updated = debtFollowsInvoice(record(action), guess, real, saleId);
+    if (!updated) return action;
+    touched = true;
+    return { ...action, payload: updated };
+  });
+  if (touched) await saveQueue('debt', next);
+
+  const found = await getDocs(query(
+    collection(db, 'customer_debts'),
+    where('invoiceNumber', '==', guess),
+    limit(10)
+  ));
+  for (const row of found.docs) {
+    const updated = debtFollowsInvoice(row.data() as Record<string, unknown>, guess, real, saleId);
+    if (updated) {
+      await updateDoc(row.ref, {
+        invoiceNumber: updated.invoiceNumber,
+        transactionId: updated.transactionId,
+      });
+    }
+  }
+};
+
 const flushSales = async (): Promise<FlushResult> => {
   const out = emptyResult();
 
@@ -724,6 +762,10 @@ const flushSales = async (): Promise<FlushResult> => {
     }
     const payload = record(action) as Record<string, unknown>;
     const items = Array.isArray(payload.items) ? (payload.items as CartItem[]) : [];
+    // The failure path parks the action it is handed, overwriting what is stored. A
+    // number claimed below has to travel on that copy too, or a later step failing
+    // would put the pre-claim payload back and the retry would spend a second one.
+    let pending = action;
 
     try {
       const { id: _localId, ...dataToSave } = payload;
@@ -738,28 +780,50 @@ const flushSales = async (): Promise<FlushResult> => {
         if (!resolved) throw new Error(`Customer ${rawCustomerId} not on the server yet`);
         dataToSave.customerId = resolved;
       }
-      // Replayed under the key the sale was written with, not a fresh one: the
-      // document this attempt is looking for is the one the till believes failed.
-      // An invoice number minted while offline is a clock-based placeholder. The
-      // real counter must claim a permanent number before the document lands on
-      // the server, or two overlapping offline sessions can produce the same
-      // receipt number. Failure is non-fatal — the provisional number stays and
-      // the receipt remains usable, just potentially non-sequential.
-      if (dataToSave.invoiceNumberProvisional) {
-        try {
-          const { invoiceNumber: realNumber, provisional } = await claimInvoiceNumber();
-          if (!provisional) {
-            dataToSave.invoiceNumber = realNumber;
-            dataToSave.invoiceNumberProvisional = false;
-          }
-        } catch {
-          // Keep the provisional number; non-fatal.
+      // An invoice number minted while offline is a clock-based placeholder, and two
+      // overlapping offline sessions can produce the same one. The claim is made
+      // against the sale's own day and remembered on the queued action, so a replay of
+      // a sale the server already took reuses the number claimed for it instead of
+      // spending a second one. An unreachable counter is not a reason to lose the sale:
+      // the guess stays on the document, flagged as guessed.
+      const guess = String(dataToSave.invoiceNumber || '');
+      let claimedNow = false;
+      if (needsInvoiceNumber(dataToSave)) {
+        const { invoiceNumber: realNumber, provisional } = await claimInvoiceNumber(
+          invoiceClaimDate(dataToSave.date, new Date())
+        );
+        if (!provisional && realNumber !== guess) {
+          Object.assign(dataToSave, renumberedInvoice(guess, realNumber));
+          claimedNow = true;
+          pending = { ...action, payload: { ...payload, ...dataToSave } };
+          const queue = await loadQueue('sale');
+          await saveQueue('sale', queue.map((queued) => (queued.id === action.id ? pending : queued)));
         }
       }
-      const { id } = await addIdempotently('transactions', replayKeyOf(payload, action.id), {
+      // Replayed under the key the sale was written with, not a fresh one: the
+      // document this attempt is looking for is the one the till believes failed.
+      const { id, created } = await addIdempotently('transactions', replayKeyOf(payload, action.id), {
         ...dataToSave,
         saleType: dataToSave.saleType || 'retail',
       });
+
+      // An adopted document was written by an attempt that never heard back and still
+      // carries the guess. Renumber it too, or the number just claimed is held by nothing.
+      if (!created && claimedNow) {
+        await updateDoc(doc(db, 'transactions', id), {
+          invoiceNumber: dataToSave.invoiceNumber,
+          invoiceNumberProvisional: false,
+          provisionalInvoiceNumber: dataToSave.provisionalInvoiceNumber,
+        });
+      }
+
+      // The debt follows the receipt it was raised against. This runs on a replay as
+      // well as a first claim: an earlier attempt may have renamed the invoice and then
+      // failed before the debt was told.
+      const renamedFrom = String(dataToSave.provisionalInvoiceNumber || '');
+      if (renamedFrom) {
+        await repointDebtsToInvoice(renamedFrom, String(dataToSave.invoiceNumber || ''), id);
+      }
       const settlement = dataToSave.accountSettlement as SaleTransaction['accountSettlement'];
       const customerId = String(dataToSave.customerId || '');
       const charged = Math.max(0, Number(settlement?.chargedAmount) || 0);
@@ -805,7 +869,7 @@ const flushSales = async (): Promise<FlushResult> => {
       await removeActions('sale', new Set([action.id]));
       out.synced++;
     } catch (err) {
-      const { result } = await parkOrFail('sale', action, err);
+      const { result } = await parkOrFail('sale', pending, err);
       if (result === 'dropped') out.dropped.push(action.id);
       else out.failed++;
     }
