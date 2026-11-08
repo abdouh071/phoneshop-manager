@@ -25,6 +25,8 @@ import {
   collection,
   query,
   where,
+  orderBy,
+  limit,
   doc,
   updateDoc,
   onSnapshot,
@@ -65,6 +67,14 @@ const FILTER_TABS = [
   { id: 'pending', labelKey: 'salesHistory.tabPending', fallback: 'Approvals', icon: 'clock-outline' },
 ] as const;
 
+/**
+ * One page of the till's history. This screen used to listen to every retail sale
+ * ever written, so the read bill grew with the shop's age and the phone held years
+ * of receipts to draw one day. Older invoices are still reachable — asking for
+ * them is an explicit act, and the window keeps every row it holds live.
+ */
+const HISTORY_PAGE = 200;
+
 export const SalesHistoryScreen = ({ navigation }: any) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -73,6 +83,8 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
 
   const [transactions, setTransactions] = useState<SaleTransaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [windowSize, setWindowSize] = useState(HISTORY_PAGE);
+  const [hasMore, setHasMore] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'today' | 'past' | 'pending'>('today');
 
@@ -96,26 +108,21 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
       return;
     }
 
-    // Subscribe to transactions in real-time
+    // Newest first, one page deep. Both keys ride the (saleType, date) composite
+    // index already deployed for the desktop's history reads.
     const q = query(
       collection(db, 'transactions'),
-      where('saleType', '==', 'retail')
+      where('saleType', '==', 'retail'),
+      orderBy('date', 'desc'),
+      limit(windowSize)
     );
 
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const list: SaleTransaction[] = [];
-        snapshot.forEach((d) => {
-          list.push(docToSale(d.id, d.data()));
-        });
-
-        // Sort descending by date
-        list.sort(
-          (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
-        );
-
-        setTransactions(list);
+        setTransactions(snapshot.docs.map((d) => docToSale(d.id, d.data())));
+        // A full page means the window stopped somewhere, not that the shop did.
+        setHasMore(snapshot.docs.length === windowSize);
         setIsLoading(false);
       },
       (err) => {
@@ -125,7 +132,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
     );
 
     return () => unsubscribe();
-  }, [can.pos]);
+  }, [can.pos, windowSize]);
 
   // Check if a sale date is Today
   const isSaleToday = (dateStr: string): boolean => {
@@ -171,6 +178,14 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
 
     return result.filter(({ doc }) => matchesSearch(doc, searchQuery)).map(({ tx }) => tx);
   }, [txIndex, filterTab, searchQuery]);
+
+  // The window is newest-first, so if its oldest row is still today and the page
+  // is full, the day continues past what was read. Revenue summed from that page
+  // would be a figure the shop never reported.
+  const todayTruncated =
+    hasMore &&
+    transactions.length > 0 &&
+    isSaleToday(transactions[transactions.length - 1].date);
 
   // Today's verified financial stats (strictly excluding voided/refunded)
   const { todayValidTotal, todayValidCount, todayVoidedCount } = useMemo(() => {
@@ -447,6 +462,18 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
               )}
             </Text>
           </View>
+
+          {todayTruncated && (
+            <View style={[styles.infoBanner, styles.infoBannerWarning]}>
+              <MaterialCommunityIcons name="alert-outline" size={18} color={colors.warningText} />
+              <Text style={[styles.infoBannerText, { color: colors.warningInk }]}>
+                {t(
+                  'salesHistory.todayTruncated',
+                  'Today alone fills this page, so the totals above are missing sales. Load older invoices until the day is complete.'
+                )}
+              </Text>
+            </View>
+          )}
         </>
       )}
 
@@ -475,6 +502,23 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           keyboardShouldPersistTaps="handled"
+          ListFooterComponent={
+            hasMore ? (
+              <View style={styles.historyFooter}>
+                <Text style={styles.historyFooterNote}>
+                  {t('salesHistory.windowNote', 'The {{n}} most recent invoices are loaded. Search covers these only.', { n: transactions.length })}
+                </Text>
+                <Button
+                  mode="outlined"
+                  textColor={colors.brand}
+                  style={styles.loadOlderBtn}
+                  onPress={() => setWindowSize((n) => n + HISTORY_PAGE)}
+                >
+                  {t('salesHistory.loadOlder', 'Load {{n}} older invoices', { n: HISTORY_PAGE })}
+                </Button>
+              </View>
+            ) : null
+          }
           renderItem={({ item }) => {
             const isToday = isSaleToday(item.date);
             const isVoided = item.status === 'voided' || item.status === 'refunded';
@@ -674,7 +718,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
               <Text style={styles.emptyTitle}>{t('salesHistory.noSales', 'No Sales Found')}</Text>
               <Text style={styles.emptySub}>
                 {searchQuery
-                  ? t('salesHistory.noSalesSearch', 'No transactions matched your search criteria.')
+                  ? t('salesHistory.noSalesSearch', 'No loaded invoice matched your search. Load older invoices to look further back.')
                   : filterTab === 'today'
                   ? t('salesHistory.noSalesToday', 'No sales completed today yet. Start one from Quick POS!')
                   : t('salesHistory.noSalesPast', 'No past transactions found.')}
@@ -1127,6 +1171,21 @@ const styles = StyleSheet.create({
   },
   emptyCta: {
     marginTop: spacing.lg,
+  },
+  historyFooter: {
+    alignItems: 'center',
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+    gap: spacing.sm,
+  },
+  historyFooterNote: {
+    fontSize: fontSize.label,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  loadOlderBtn: {
+    borderColor: colors.brand,
+    borderRadius: radius.md,
   },
   restrictedContainer: {
     flex: 1,
