@@ -39,6 +39,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { useTranslation } from 'react-i18next';
 import type { PhoneModel, ProductCategory, StockStatus } from '../types';
 import { buildSearch, matchesSearch } from '../utils/search';
+import { alertCartStockRefusal } from '../utils/cartStockPrompt';
 import { findCodeCollisions, resolveProductByCode, codesToShow } from '../utils/productCode';
 import { askWhichProduct } from '../utils/productCodePrompt';
 import { AdminApprovalSheet, type ApprovalPayload } from '../components/AdminApprovalSheet';
@@ -412,11 +413,11 @@ export const InventoryScreen = ({ navigation }: any) => {
 
   // Quick Add Product to POS Cart
   const handleAddToCart = (product: PhoneModel) => {
-    if (product.stock <= 0) {
-      Alert.alert(t('common.outOfStock', 'Out of Stock'), t('inventory.zeroUnits', 'This product has 0 units available.'));
+    const result = addToCart(product, 1);
+    if (!result.success) {
+      alertCartStockRefusal(result, product.name);
       return;
     }
-    addToCart(product, 1);
     Vibration.vibrate(30);
     Alert.alert(
       t('inventory.addedToCart', 'Added to Cart'),

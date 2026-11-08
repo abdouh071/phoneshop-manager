@@ -29,6 +29,7 @@ import { buildSearch, matchesSearch } from '../utils/search';
 import { phoneDigits } from '../utils/phone';
 import { resolveProductByCode, codesToShow } from '../utils/productCode';
 import { askWhichProduct } from '../utils/productCodePrompt';
+import { alertCartStockRefusal } from '../utils/cartStockPrompt';
 import { discountAmountOf, discountPercentOf, requiresDiscountApproval, DISCOUNT_APPROVAL_PERCENT } from '../utils/discountPolicy';
 import { AdminApprovalSheet, type ApprovalPayload } from '../components/AdminApprovalSheet';
 import { colors, fontSize, radius, ramp, spacing, stockStatusColors } from '../theme/tokens';
@@ -183,23 +184,23 @@ export const POSScreen = ({ navigation }: any) => {
   );
 
   const handleProductPress = (product: PhoneModel) => {
-    if (product.stock <= 0) {
-      Alert.alert(t('common.outOfStock', 'Out of Stock'), t('pos.outOfStockBody', '{{name}} has 0 available units.', { name: product.name }));
+    const result = addToCart(product, 1);
+    if (!result.success) {
+      alertCartStockRefusal(result, product.name);
       return;
     }
     Vibration.vibrate(30);
-    addToCart(product, 1);
   };
 
   const addScannedToCart = (product: PhoneModel) => {
-    if (product.stock <= 0) {
-      // A scan used to bypass the guard every tappable row enforced, so an
-      // out-of-stock item could be rung up without anyone touching it.
-      Alert.alert(t('common.outOfStock', 'Out of Stock'), t('pos.outOfStockBody', '{{name}} has 0 available units.', { name: product.name }));
+    // A scan used to bypass the guard every tappable row enforced, so an
+    // out-of-stock item could be rung up without anyone touching it.
+    const result = addToCart(product, 1);
+    if (!result.success) {
+      alertCartStockRefusal(result, product.name);
       return;
     }
     Vibration.vibrate(60);
-    addToCart(product, 1);
     // The code is named back to the technician because two products sharing a
     // prefix used to look like one successful scan while the wrong row landed.
     Alert.alert(
@@ -517,11 +518,8 @@ export const POSScreen = ({ navigation }: any) => {
                       <TouchableOpacity
                         style={styles.stepperBtn}
                         onPress={() => {
-                          if (inCart.quantity >= item.stock) {
-                            Alert.alert(t('pos.maxStockTitle', 'Max Stock'), t('pos.maxStockBody', 'Only {{n}} unit(s) available.', { n: item.stock }));
-                            return;
-                          }
-                          updateQuantity(item.id, inCart.quantity + 1);
+                          const result = updateQuantity(item.id, inCart.quantity + 1);
+                          alertCartStockRefusal(result, item.name);
                         }}
                       >
                         <MaterialCommunityIcons name="plus" size={15} color={colors.onBrand} />
@@ -614,7 +612,10 @@ export const POSScreen = ({ navigation }: any) => {
                     <Text style={styles.qtyVal}>{item.quantity}</Text>
                     <TouchableOpacity
                       style={styles.qtyBtn}
-                      onPress={() => updateQuantity(item.product.id, Math.min(item.quantity + 1, item.product.stock))}
+                      onPress={() => {
+                        const result = updateQuantity(item.product.id, item.quantity + 1);
+                        alertCartStockRefusal(result, item.product.name);
+                      }}
                     >
                       <MaterialCommunityIcons name="plus" size={16} color={colors.textPrimary} />
                     </TouchableOpacity>

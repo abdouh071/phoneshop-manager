@@ -17,6 +17,7 @@ import { notificationService } from '../services/notificationService';
 import { claimInvoiceNumber } from '../services/invoiceCounter';
 import { applyStockLines, type StockLine } from '../services/stockService';
 import { discountAmountOf } from '../utils/discountPolicy';
+import { checkCartStock, type CartStockResult } from '../utils/cartStock';
 import { salePayments } from '../utils/salePayments';
 import type { PhoneModel, CartItem, SaleTransaction, Customer, PaymentMethod, CustomerDebtEntry, StockStatus } from '../types';
 
@@ -41,9 +42,9 @@ interface PosState {
   fetchCustomers: () => Promise<void>;
   setSelectedCustomer: (customer: Customer | null) => void;
   addCustomer: (name: string, phone: string) => Promise<Customer>;
-  addToCart: (product: PhoneModel, quantity?: number) => void;
+  addToCart: (product: PhoneModel, quantity?: number) => CartStockResult;
   removeFromCart: (productId: string) => void;
-  updateQuantity: (productId: string, quantity: number) => void;
+  updateQuantity: (productId: string, quantity: number) => CartStockResult;
   clearCart: () => void;
   getCartTotal: () => { subtotal: number; totalItems: number };
   checkout: (params: CheckoutParams) => Promise<SaleTransaction>;
@@ -111,17 +112,25 @@ export const usePosStore = create<PosState>((set, get) => ({
   },
 
   addToCart: (product: PhoneModel, quantity: number = 1) => {
+    const { cart, products } = get();
+    // The shelf count is read from the live catalogue, not from the row the caller
+    // was holding: a screen opened before the last sale still shows the old number.
+    const live = products.find(p => p.id === product.id) || product;
+    const existing = cart.find(item => item.product.id === product.id);
+    const currentQty = existing?.quantity ?? 0;
     const safeQty = Math.max(1, Math.floor(quantity || 1));
-    const { cart } = get();
-    const existingIndex = cart.findIndex(item => item.product.id === product.id);
 
-    if (existingIndex >= 0) {
-      const updated = [...cart];
-      updated[existingIndex].quantity += safeQty;
-      set({ cart: updated });
-    } else {
-      set({ cart: [...cart, { product, quantity: safeQty }] });
-    }
+    const check = checkCartStock(live.stock, currentQty + safeQty);
+    if (!check.success) return check;
+
+    // A new line takes the live row; an existing one keeps the price it was added
+    // at, so a price edit elsewhere cannot reprice a basket mid-sale.
+    set({
+      cart: existing
+        ? cart.map(item => item.product.id === product.id ? { ...item, quantity: currentQty + safeQty } : item)
+        : [...cart, { product: live, quantity: safeQty }],
+    });
+    return check;
   },
 
   removeFromCart: (productId: string) => {
@@ -129,16 +138,26 @@ export const usePosStore = create<PosState>((set, get) => ({
   },
 
   updateQuantity: (productId: string, quantity: number) => {
+    const { cart, products } = get();
+    const existing = cart.find(item => item.product.id === productId);
+    if (!existing) return { success: false };
+
     const safeQty = Math.floor(quantity || 0);
     if (safeQty <= 0) {
       get().removeFromCart(productId);
-      return;
+      return { success: true };
     }
+
+    const live = products.find(p => p.id === productId) || existing.product;
+    const check = checkCartStock(live.stock, safeQty);
+    if (!check.success) return check;
+
     set({
-      cart: get().cart.map(item =>
+      cart: cart.map(item =>
         item.product.id === productId ? { ...item, quantity: safeQty } : item
       ),
     });
+    return check;
   },
 
   clearCart: () => set({ cart: [], selectedCustomer: null }),
