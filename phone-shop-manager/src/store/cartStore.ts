@@ -1214,31 +1214,35 @@ export const useCartStore = create<CartState>((set, get) => ({
           .catch(console.error);
       }
 
-      // The debt portion is whatever the adjusted payments declare as 'account'; everything
-      // else is cash/card/mobile that the customer already handed over.
-      const newDebtCharged = adjustedPayments
-        .filter(p => p.method === 'account')
-        .reduce((sum, p) => sum + p.amount, 0);
-      customerStore.updateDebtAmount(linkedDebt.id, total, itemsSummary, newDebtCharged).catch(console.error);
+      // What the account owes is what the corrected tender lines declare as `debt`.
+      // A parts invoice carries no such line — its charge lives in `accountSettlement`
+      // alone — so silence in the payments is not evidence that a standing balance was
+      // paid; there the account's own paid figure decides, as it does on the phone.
+      const accountLines = adjustedPayments.filter(p => p.method === 'debt');
+      const newCharged = accountLines.length > 0
+        ? Math.round(accountLines.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) * 100) / 100
+        : Math.max(0, total - (linkedDebt.amountPaid || 0));
+      customerStore.updateDebtAmount(linkedDebt.id, total, itemsSummary, newCharged).catch(console.error);
 
-      // Keep the account-settlement stamp in sync with what the debt entry now records.
-      // Without this the printed invoice still shows the pre-edit paidAmount/chargedAmount.
-      if (tx.accountSettlement) {
-        const newPaid = linkedDebt.amountPaid || 0;
-        const newCharged = Math.max(0, total - newPaid);
-        const newSettlementType: 'paid_full' | 'charged_to_account' | 'partial_payment' =
-          newCharged === 0
-            ? 'paid_full'
-            : newPaid === 0
-              ? 'charged_to_account'
-              : 'partial_payment';
-        updates.accountSettlement = {
-          ...tx.accountSettlement,
-          paidAmount: newPaid,
-          chargedAmount: newCharged,
-          type: newSettlementType,
-        };
-      }
+      // The stamp describes this invoice's own split: `paidAmount` is what changed hands
+      // at the till, which is what the account statement prints as paid upfront. The
+      // account's running collections are a different figure and belong to the debt
+      // entry alone. Both documents are told the same charged number so they cannot
+      // disagree about what the customer still owes.
+      const newPaid = Math.max(0, total - newCharged);
+      const newSettlementType: 'paid_full' | 'charged_to_account' | 'partial_payment' =
+        newCharged === 0
+          ? 'paid_full'
+          : newPaid === 0
+            ? 'charged_to_account'
+            : 'partial_payment';
+      updates.accountSettlement = {
+        ...tx.accountSettlement,
+        type: newSettlementType,
+        paidAmount: newPaid,
+        chargedAmount: newCharged,
+        debtEntryId: tx.accountSettlement?.debtEntryId ?? linkedDebt.id,
+      };
     }
 
     await transactionService.updateTransaction(txId, updates);

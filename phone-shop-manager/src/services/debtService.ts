@@ -299,6 +299,14 @@ export const debtService = {
   ): Promise<CustomerDebtEntry> => {
     const now = new Date().toISOString();
 
+    // A caller that knows the account portion of the corrected invoice hands it over;
+    // one that does not leaves the account's own paid figure to decide the balance.
+    // A non-finite override is not knowledge — treating it as zero would close a debt
+    // the customer still owes.
+    const chargedOverride = typeof newChargedAmount === 'number' && Number.isFinite(newChargedAmount)
+      ? Math.max(0, Math.round(newChargedAmount * 100) / 100)
+      : null;
+
     // Fast-path: Offline or offline-generated ID
     if (debtId.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
       const local = getLocalDebts();
@@ -306,9 +314,7 @@ export const debtService = {
       if (!debt) throw new Error('Debt entry not found');
 
       const amountPaid = debt.amountPaid || 0;
-      const newRemainingBalance = typeof newChargedAmount === 'number'
-        ? Math.max(0, newChargedAmount)
-        : Math.max(0, newTotalAmount - amountPaid);
+      const newRemainingBalance = chargedOverride ?? Math.max(0, newTotalAmount - amountPaid);
       const newStatus: CustomerDebtEntry['status'] =
         newRemainingBalance <= 0
           ? 'paid'
@@ -332,9 +338,7 @@ export const debtService = {
     try {
       const updatedDebt = await commitDebtChange(debtId, debt => {
         const amountPaid = debt.amountPaid || 0;
-        const newRemainingBalance = typeof newChargedAmount === 'number'
-        ? Math.max(0, newChargedAmount)
-        : Math.max(0, newTotalAmount - amountPaid);
+        const newRemainingBalance = chargedOverride ?? Math.max(0, newTotalAmount - amountPaid);
         const newStatus: CustomerDebtEntry['status'] =
           newRemainingBalance <= 0
             ? 'paid'
@@ -362,9 +366,7 @@ export const debtService = {
       if (!debt) throw new Error('Debt entry not found');
 
       const amountPaid = debt.amountPaid || 0;
-      const newRemainingBalance = typeof newChargedAmount === 'number'
-        ? Math.max(0, newChargedAmount)
-        : Math.max(0, newTotalAmount - amountPaid);
+      const newRemainingBalance = chargedOverride ?? Math.max(0, newTotalAmount - amountPaid);
       const newStatus: CustomerDebtEntry['status'] =
         newRemainingBalance <= 0
           ? 'paid'

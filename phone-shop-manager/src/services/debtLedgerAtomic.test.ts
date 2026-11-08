@@ -251,4 +251,68 @@ describe('an invoice total corrected on the credit entry', () => {
     expect(updated.remainingBalance).toBe(0);
     expect(updated.status).toBe('paid');
   });
+
+  it('holds the account portion the corrected invoice declares, not total minus collections', async () => {
+    // A mixed-tender invoice: 12 000 total, 3 600 handed over at the till, 8 400 on the
+    // account. The customer has since paid 2 000 against that account, so `amountPaid`
+    // reads 5 600 — deriving the balance from it would put 6 400 on the ledger while
+    // the corrected invoice says 8 400.
+    fake.seed('debt_1', entry({ totalAmount: 10000, amountPaid: 5600, remainingBalance: 4400 }));
+    mirror([entry()]);
+
+    const updated = await debtService.updateDebtAmount('debt_1', 12000, 'Samsung A55 + case', 8400);
+
+    expect(updated.totalAmount).toBe(12000);
+    expect(updated.remainingBalance).toBe(8400);
+    expect(updated.status).toBe('partially_paid');
+    expect(fake.entry('debt_1')?.remainingBalance).toBe(8400);
+  });
+
+  it('does not read a non-finite portion as a debt the customer has settled', async () => {
+    // NaN used to sail through `Math.max(0, …)` and land on the ledger as the balance.
+    // An override that is not a number is not knowledge: the account's own paid figure
+    // decides, exactly as it does when no portion is supplied at all.
+    fake.seed('debt_1', entry({ amountPaid: 2000, remainingBalance: 8000 }));
+    mirror([entry()]);
+
+    const updated = await debtService.updateDebtAmount('debt_1', 10000, undefined, Number.NaN);
+
+    expect(updated.remainingBalance).toBe(8000);
+    expect(updated.status).toBe('partially_paid');
+  });
+
+  it('closes the entry when the caller declares the account portion is genuinely nil', async () => {
+    fake.seed('debt_1', entry({ amountPaid: 2000, remainingBalance: 8000 }));
+    mirror([entry()]);
+
+    const updated = await debtService.updateDebtAmount('debt_1', 10000, undefined, 0);
+
+    expect(updated.remainingBalance).toBe(0);
+    expect(updated.status).toBe('paid');
+  });
+
+  it('honours the same portion on the offline mirror, where no server row exists', async () => {
+    mirror([entry({ id: 'offline_debt_9', amountPaid: 2000, remainingBalance: 8000 })]);
+
+    const updated = await debtService.updateDebtAmount('offline_debt_9', 12000, undefined, 8400);
+
+    expect(updated.remainingBalance).toBe(8400);
+    expect(readMirror()[0].remainingBalance).toBe(8400);
+    expect(fake.stats.reads).toBe(0);
+  });
+
+  it('honours the same portion when the commit falls back to this device', async () => {
+    // Another terminal moves the entry mid-transaction, so the commit aborts and the
+    // catch path writes the mirror. The portion must survive that route too — it is
+    // the same corrected invoice either way.
+    fake.seed('debt_1', entry({ amountPaid: 2000, remainingBalance: 8000 }));
+    mirror([entry({ amountPaid: 2000, remainingBalance: 8000 })]);
+    fake.interleave = () => fake.serverWrite('debt_1', { amountPaid: 3000 });
+
+    const updated = await debtService.updateDebtAmount('debt_1', 12000, undefined, 8400);
+
+    expect(fake.stats.aborts).toBe(1);
+    expect(updated.remainingBalance).toBe(8400);
+    expect(readMirror()[0].remainingBalance).toBe(8400);
+  });
 });

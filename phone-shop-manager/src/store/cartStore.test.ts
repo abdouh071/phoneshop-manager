@@ -29,6 +29,8 @@ const captured = vi.hoisted(() => ({
   debtDeductions: [] as Array<{ customerId: string; amount: number; note: string }>,
   /** Every account entry the till asked for, so a sale and its debt can be compared. */
   newDebts: [] as Record<string, unknown>[],
+  /** Every balance the corrected invoice asked the account to hold, in order. */
+  debtAmounts: [] as Array<{ debtId: string; total: number; charged: number | undefined }>,
   /** What the till is handed when it asks for a reference. Real Firestore is not involved. */
   counter: { invoiceNumber: 'INV-261104-0007', provisional: false } as {
     invoiceNumber: string;
@@ -102,7 +104,10 @@ vi.mock('./customerStore', () => ({
         captured.newDebts.push(entry);
         return { id: 'debt_1' };
       },
-      updateDebtAmount: async () => undefined,
+      updateDebtAmount: async (debtId: string, total: number, _summary?: string, charged?: number) => {
+        captured.debtAmounts.push({ debtId, total, charged });
+        return undefined;
+      },
       getCustomerDebtTotal: () => 0,
       addStoreCredit: async (customerId: string, amount: number, note = '') => {
         captured.credit.push({ kind: 'add', customerId, amount, note });
@@ -181,6 +186,7 @@ beforeEach(() => {
   captured.credit.length = 0;
   captured.debtDeductions.length = 0;
   captured.newDebts.length = 0;
+  captured.debtAmounts.length = 0;
   captured.counter = { invoiceNumber: 'INV-261104-0007', provisional: false };
   emptyCart();
   (phone as { price: number }).price = 10005;
@@ -700,5 +706,132 @@ describe('a corrected invoice that hands units back', () => {
     // document that still names every unit the counter moved.
     expect(written.total).toBe(600);
     expect(shape(writtenLines())).toEqual(['1× Samsung A55', '−1× Samsung A55', '2× Type-C cable']);
+  });
+});
+
+/**
+ * The account split a corrected invoice leaves behind.
+ *
+ * Two documents describe the same money: the credit entry's `remainingBalance` and
+ * the invoice's `accountSettlement`, which is what the account statement prints.
+ * The edit used to filter the tender lines on a method this till does not have
+ * (`'account'` — the union calls it `'debt'`), so the sum was always nil and every
+ * correction closed a debt the customer still owed. It then read the printed
+ * "paid" figure from the account's running collections, which put money taken
+ * weeks later onto the receipt as though it had changed hands at the till.
+ *
+ * A parts invoice carries no account line at all — its charge lives only in the
+ * settlement stamp — so silence in the payments must never be read as "settled".
+ */
+describe('the account split a corrected invoice leaves behind', () => {
+  const INVOICE = 'INV-261108-0011';
+  const line = (price: number): CartItem[] => [{ product: { ...phone, price }, quantity: 1 }];
+
+  const park = (
+    invoiceTotal: number,
+    payments: Array<{ method: string; amount: number }>,
+    collected: number,
+    settlement?: Record<string, unknown>
+  ) => {
+    useCartStore.setState({
+      transactions: [
+        {
+          id: 'tx_split',
+          date: '2026-11-02T10:00:00.000Z',
+          items: line(invoiceTotal),
+          subtotal: invoiceTotal,
+          total: invoiceTotal,
+          payments,
+          status: 'completed',
+          invoiceNumber: INVOICE,
+          customerId: 'cust_1',
+          ...(settlement ? { accountSettlement: settlement } : {}),
+        } as unknown as SaleTransaction,
+      ],
+    });
+    captured.debts.push({
+      id: 'debt_1',
+      customerId: 'cust_1',
+      amountPaid: collected,
+      totalAmount: invoiceTotal,
+      invoiceNumber: INVOICE,
+    });
+  };
+
+  const edit = (newTotal: number) =>
+    useCartStore.getState().editTransaction('tx_split', line(newTotal), {});
+
+  const stamp = () => {
+    const written = captured.updates[0];
+    if (!written) throw new Error('the correction wrote no invoice update');
+    return written.updates.accountSettlement as Record<string, unknown>;
+  };
+
+  it('keeps a mixed-tender balance open at the account portion the invoice declares', async () => {
+    // 10 000 sold: 3 000 at the till, 7 000 on the account. Corrected to 12 000, the
+    // tender lines rescale to 3 600 / 8 400 and that 8 400 is what the customer owes.
+    park(10000, [{ method: 'cash', amount: 3000 }, { method: 'debt', amount: 7000 }], 5000, {
+      type: 'partial_payment', paidAmount: 3000, chargedAmount: 7000, debtEntryId: 'debt_1',
+    });
+
+    await edit(12000);
+
+    expect(captured.debtAmounts).toEqual([{ debtId: 'debt_1', total: 12000, charged: 8400 }]);
+    expect(stamp()).toMatchObject({ type: 'partial_payment', paidAmount: 3600, chargedAmount: 8400 });
+  });
+
+  it('does not close a standing balance because the tender lines name no account', async () => {
+    // The parts shape: nothing in `payments`, the whole charge in the stamp. Reading
+    // a missing account line as zero is what erased these debts.
+    park(10000, [], 0, {
+      type: 'charged_to_account', paidAmount: 0, chargedAmount: 10000, debtEntryId: 'debt_1',
+    });
+
+    await edit(12000);
+
+    expect(captured.debtAmounts).toEqual([{ debtId: 'debt_1', total: 12000, charged: 12000 }]);
+    expect(stamp()).toMatchObject({ type: 'charged_to_account', paidAmount: 0, chargedAmount: 12000 });
+  });
+
+  it('prints what changed hands at the till, not what the account has since collected', async () => {
+    // 9 000 of a 10 000 invoice has been collected, but only 3 000 of that was upfront.
+    park(10000, [{ method: 'cash', amount: 3000 }, { method: 'debt', amount: 7000 }], 9000, {
+      type: 'partial_payment', paidAmount: 3000, chargedAmount: 7000, debtEntryId: 'debt_1',
+    });
+
+    await edit(11000);
+
+    expect(stamp()).toMatchObject({ paidAmount: 3300, chargedAmount: 7700 });
+    expect(captured.debtAmounts[0].charged).toBe(7700);
+  });
+
+  it('tells the ledger and the printed stamp the same number', async () => {
+    park(10000, [{ method: 'cash', amount: 2500 }, { method: 'debt', amount: 7500 }], 2500, {
+      type: 'partial_payment', paidAmount: 2500, chargedAmount: 7500, debtEntryId: 'debt_1',
+    });
+
+    await edit(9000);
+
+    expect(stamp().chargedAmount).toBe(captured.debtAmounts[0].charged);
+    expect(Number(stamp().paidAmount) + Number(stamp().chargedAmount)).toBe(9000);
+  });
+
+  it('closes the stamp only when the tender lines declare nothing on account', async () => {
+    park(10000, [{ method: 'cash', amount: 10000 }, { method: 'debt', amount: 0 }], 10000, {
+      type: 'paid_full', paidAmount: 10000, chargedAmount: 0, debtEntryId: 'debt_1',
+    });
+
+    await edit(10000);
+
+    expect(captured.debtAmounts[0].charged).toBe(0);
+    expect(stamp()).toMatchObject({ type: 'paid_full', paidAmount: 10000, chargedAmount: 0 });
+  });
+
+  it('names the entry it corrected on an invoice that carried no stamp', async () => {
+    park(10000, [{ method: 'debt', amount: 10000 }], 0);
+
+    await edit(12000);
+
+    expect(stamp()).toMatchObject({ debtEntryId: 'debt_1', chargedAmount: 12000, paidAmount: 0 });
   });
 });
