@@ -280,6 +280,8 @@
     "noPending": "No pending approval requests from staff.",
     "noHistory": "No History",
     "noHistorySub": "No past approval requests recorded yet.",
+    "streamFailedTitle": "Cannot load approvals",
+    "streamFailedBody": "The request list did not reach this phone. Check the connection and reopen this screen — do not assume the queue is empty.",
     "confirmApproveTitle": "Confirm Approval",
     "confirmApproveBody": "Are you sure you want to approve \"{{action}}\"?",
     "approvedSuccess": "Approved \"{{action}}\" for {{name}}.",

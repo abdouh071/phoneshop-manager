@@ -7,6 +7,8 @@ import {
   getDoc,
   onSnapshot,
   query,
+  where,
+  orderBy,
   limit,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -63,7 +65,7 @@ interface ApprovalState {
 let _knownPendingIds: Set<string> | null = null;
 
 // The Approvals screen and the admin dashboard can be mounted at the same time.
-// Without refcounting, each held its own listener on the same 120-document query,
+// Without refcounting, each held its own pair of listeners on the same queries,
 // so every request arriving was billed and processed twice.
 let _pendingStream: RefCountedSubscription | null = null;
 
@@ -71,55 +73,76 @@ type PendingSetter = (partial: Partial<ApprovalState>) => void;
 
 const attachPendingListeners = (set: PendingSetter): (() => void) => {
   set({ isLoading: true });
-  // Query approval requests (limit to 120 items)
-  const q = query(collection(db, 'approvalRequests'), limit(120));
 
-  return onSnapshot(
-    q,
+  // Two indexed streams instead of one unfiltered window. `limit(120)` with no
+  // ordering returned a slice chosen by document id, so once the shop's approval
+  // history outgrew it a fresh request never reached the phone at all — the admin
+  // saw an empty queue while staff waited. Both queries ride the (status,
+  // requestedAt) composite index that is already deployed, as on the desktop.
+  const pendingQuery = query(
+    collection(db, 'approvalRequests'),
+    where('status', '==', 'pending'),
+    orderBy('requestedAt', 'desc'),
+    limit(100)
+  );
+  const resolvedQuery = query(
+    collection(db, 'approvalRequests'),
+    where('status', 'in', ['approved', 'rejected']),
+    orderBy('requestedAt', 'desc'),
+    limit(30)
+  );
+
+  // A resolved snapshot must not clear the pending stream's error: an empty queue
+  // that is really a failed query is the one reading that stalls the counter.
+  let pendingError: string | null = null;
+  let resolvedError: string | null = null;
+  const publishError = () => set({ error: pendingError ?? resolvedError });
+
+  const unsubscribePending = onSnapshot(
+    pendingQuery,
     (snapshot) => {
-      const all: ApprovalRequest[] = [];
-      snapshot.forEach((d) => {
-        all.push({ id: d.id, ...d.data() } as ApprovalRequest);
-      });
+      const pending = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as ApprovalRequest));
 
-      // Sort descending by requestedAt
-      all.sort((a, b) => {
-        const tA = a.requestedAt ? new Date(a.requestedAt).getTime() : 0;
-        const tB = b.requestedAt ? new Date(b.requestedAt).getTime() : 0;
-        return tB - tA;
-      });
-
-      const pending = all.filter((r) => r.status === 'pending');
-      const resolved = all.filter((r) => r.status === 'approved' || r.status === 'rejected').slice(0, 30);
-
-      // Check if there is a new pending request that just arrived
+      // Only the pending stream may seed or advance the chime set. A resolved
+      // snapshot landing first would make every open request look newly arrived.
       if (_knownPendingIds !== null) {
-        const currentIds = new Set(pending.map((r) => r.id));
         const hasNew = pending.some((r) => !_knownPendingIds!.has(r.id));
-        if (hasNew) {
-          const currentUser = useAuthStore.getState().user;
-          if (currentUser?.role === 'admin') {
-            Vibration.vibrate([0, 200, 100, 200]);
-          }
+        if (hasNew && useAuthStore.getState().user?.role === 'admin') {
+          Vibration.vibrate([0, 200, 100, 200]);
         }
-        _knownPendingIds = currentIds;
-      } else {
-        _knownPendingIds = new Set(pending.map((r) => r.id));
       }
+      _knownPendingIds = new Set(pending.map((r) => r.id));
 
-      set({
-        pendingRequests: pending,
-        recentResolved: resolved,
-        pendingCount: pending.length,
-        isLoading: false,
-        error: null,
-      });
+      pendingError = null;
+      set({ pendingRequests: pending, pendingCount: pending.length, isLoading: false });
+      publishError();
     },
     (err) => {
-      console.warn('[ApprovalStore] Subscription error:', err);
-      set({ error: err.message, isLoading: false });
+      console.warn('[ApprovalStore] Pending subscription error:', err);
+      pendingError = err.message;
+      set({ isLoading: false });
+      publishError();
     }
   );
+
+  const unsubscribeResolved = onSnapshot(
+    resolvedQuery,
+    (snapshot) => {
+      resolvedError = null;
+      set({ recentResolved: snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as ApprovalRequest)) });
+      publishError();
+    },
+    (err) => {
+      console.warn('[ApprovalStore] Resolved subscription error:', err);
+      resolvedError = err.message;
+      publishError();
+    }
+  );
+
+  return () => {
+    unsubscribePending();
+    unsubscribeResolved();
+  };
 };
 
 export const useApprovalStore = create<ApprovalState>((set, get) => ({

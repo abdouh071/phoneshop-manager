@@ -280,6 +280,8 @@
     "noPending": "Aucune demande d'approbation en attente.",
     "noHistory": "Aucun historique",
     "noHistorySub": "Aucune demande d'approbation passée enregistrée.",
+    "streamFailedTitle": "Impossible de charger les approbations",
+    "streamFailedBody": "La liste des demandes n’est pas parvenue à ce téléphone. Vérifiez la connexion et rouvrez cet écran — ne considérez pas la file comme vide.",
     "confirmApproveTitle": "Confirmer l'approbation",
     "confirmApproveBody": "Êtes-vous sûr de vouloir approuver « {{action}} » ?",
     "approvedSuccess": "« {{action}} » approuvé pour {{name}}.",

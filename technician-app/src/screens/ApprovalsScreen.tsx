@@ -46,6 +46,7 @@ export const ApprovalsScreen = ({ navigation }: any) => {
     recentResolved,
     pendingCount,
     isLoading,
+    error,
     approveRequest,
     rejectRequest,
     subscribeToPending,
@@ -319,7 +320,17 @@ export const ApprovalsScreen = ({ navigation }: any) => {
         </View>
       )}
 
-      {!isLoading && activeTab === 'pending' && (
+      {/* A failed read must never wear the "All Clear!" face: staff would keep
+          waiting on an approval nobody was ever shown. */}
+      {!isLoading && error && (
+        <View style={styles.centerContainer}>
+          <MaterialCommunityIcons name="cloud-off-outline" size={56} color="#dc2626" />
+          <Text style={styles.emptyTitle}>{t('approvals.streamFailedTitle', 'Cannot load approvals')}</Text>
+          <Text style={styles.emptySub}>{t('approvals.streamFailedBody', 'The request list did not reach this phone. Check the connection and reopen this screen — do not assume the queue is empty.')}</Text>
+        </View>
+      )}
+
+      {!isLoading && !error && activeTab === 'pending' && (
         <FlatList
           data={pendingRequests}
           keyExtractor={(item) => item.id}
@@ -335,7 +346,7 @@ export const ApprovalsScreen = ({ navigation }: any) => {
         />
       )}
 
-      {!isLoading && activeTab === 'history' && (
+      {!isLoading && !error && activeTab === 'history' && (
         <FlatList
           data={recentResolved}
           keyExtractor={(item) => item.id}
