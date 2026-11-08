@@ -4,6 +4,7 @@ import { getCustomerOverdueInfo, getOverdueDebts } from '../../utils/debtAlerts'
 import { normalizePhoneDigits, isPhoneMatch } from '../../utils/phoneUtils';
 import { matchesCustomer } from '../../utils/customerFinancials';
 import { formatDate } from './customersPageUtils';
+import { normalizeArabic } from '../../utils/normalizeText';
 import type { CustomerFilter, SortKey, WalkInStatusFilter } from './customersPageTypes';
 
 // Fast lookup of tickets per customer (indexed across ALL active customers)
@@ -211,14 +212,14 @@ export const filterCustomersDirectory = ({
 
     // Text search (matches name, phone, email, shop, address, notes, registered devices, and linked repair tickets)
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
+      const q = normalizeArabic(searchQuery).trim();
       const cleanQueryDigits = normalizePhoneDigits(searchQuery);
       const rawQueryDigits = searchQuery.replace(/\D/g, '');
 
       const matchCustomer = (c: Customer): boolean => {
         // 1. Name & Shop Name
-        if (c.name && c.name.toLowerCase().includes(q)) return true;
-        if (c.shopName && c.shopName.toLowerCase().includes(q)) return true;
+        if (c.name && normalizeArabic(c.name).includes(q)) return true;
+        if (c.shopName && normalizeArabic(c.shopName).includes(q)) return true;
 
         // 2. Phone matches (exact, normalized, partial digits)
         if (c.phone && c.phone.toLowerCase().includes(q)) return true;
@@ -231,18 +232,18 @@ export const filterCustomersDirectory = ({
         if (rawQueryDigits.length >= 2 && c.phone && c.phone.replace(/\D/g, '').includes(rawQueryDigits)) return true;
 
         // 3. Email, Address, Notes
-        if (c.email && c.email.toLowerCase().includes(q)) return true;
-        if (c.address && c.address.toLowerCase().includes(q)) return true;
-        if (c.notes && c.notes.toLowerCase().includes(q)) return true;
+        if (c.email && normalizeArabic(c.email).includes(q)) return true;
+        if (c.address && normalizeArabic(c.address).includes(q)) return true;
+        if (c.notes && normalizeArabic(c.notes).includes(q)) return true;
 
         // 4. Registered Devices (brand, model, combined name, IMEI, device notes)
         if (c.registeredDevices && c.registeredDevices.length > 0) {
           const devMatch = c.registeredDevices.some(d =>
-            (d.brand && d.brand.toLowerCase().includes(q)) ||
-            (d.model && d.model.toLowerCase().includes(q)) ||
-            (`${d.brand || ''} ${d.model || ''}`.toLowerCase().includes(q)) ||
+            (d.brand && normalizeArabic(d.brand).includes(q)) ||
+            (d.model && normalizeArabic(d.model).includes(q)) ||
+            (normalizeArabic(`${d.brand || ''} ${d.model || ''}`).includes(q)) ||
             (d.imei && d.imei.toLowerCase().includes(q)) ||
-            (d.notes && d.notes.toLowerCase().includes(q))
+            (d.notes && normalizeArabic(d.notes).includes(q))
           );
           if (devMatch) return true;
         }
@@ -252,12 +253,12 @@ export const filterCustomersDirectory = ({
         if (cTickets.length > 0) {
           const tktMatch = cTickets.some(t =>
             (t.ticketNumber && t.ticketNumber.toLowerCase().includes(q)) ||
-            (t.deviceBrand && t.deviceBrand.toLowerCase().includes(q)) ||
-            (t.deviceModel && t.deviceModel.toLowerCase().includes(q)) ||
-            (`${t.deviceBrand || ''} ${t.deviceModel || ''}`.toLowerCase().includes(q)) ||
+            (t.deviceBrand && normalizeArabic(t.deviceBrand).includes(q)) ||
+            (t.deviceModel && normalizeArabic(t.deviceModel).includes(q)) ||
+            (normalizeArabic(`${t.deviceBrand || ''} ${t.deviceModel || ''}`).includes(q)) ||
             (t.deviceImei && t.deviceImei.toLowerCase().includes(q)) ||
-            (t.issueDescription && t.issueDescription.toLowerCase().includes(q)) ||
-            (t.assignedTechnician && t.assignedTechnician.toLowerCase().includes(q))
+            (t.issueDescription && normalizeArabic(t.issueDescription).includes(q)) ||
+            (t.assignedTechnician && normalizeArabic(t.assignedTechnician).includes(q))
           );
           if (tktMatch) return true;
         }

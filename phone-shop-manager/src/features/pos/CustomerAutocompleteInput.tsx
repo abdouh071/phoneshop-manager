@@ -7,6 +7,7 @@ import { isShopCustomer, isRetailCustomer } from '../../types';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { isPhoneMatch, formatStandardPhone, normalizePhoneDigits } from '../../utils/phoneUtils';
 import { CustomerDuplicatePromptCard } from '../../components/customers/CustomerDuplicatePromptCard';
+import { normalizeArabic } from '../../utils/normalizeText';
 import styles from './CustomerAutocomplete.module.css';
 
 interface CustomerAutocompleteInputProps {
@@ -526,14 +527,14 @@ export const CustomerAutocompleteInput: React.FC<CustomerAutocompleteInputProps>
         .sort((a, b) => new Date(b.lastVisitDate).getTime() - new Date(a.lastVisitDate).getTime())
         .slice(0, 8);
     }
-    const q = value.toLowerCase().trim();
+    const q = normalizeArabic(value).trim();
     const cleanDigits = normalizePhoneDigits(value);
     const rawDigits = value.replace(/\D/g, '');
 
     return pool.filter(c =>
-      c.name.toLowerCase().includes(q) ||
-      (c.shopName && c.shopName.toLowerCase().includes(q)) ||
-      (c.email && c.email.toLowerCase().includes(q)) ||
+      normalizeArabic(c.name ?? '').includes(q) ||
+      (c.shopName && normalizeArabic(c.shopName).includes(q)) ||
+      (c.email && normalizeArabic(c.email).includes(q)) ||
       c.phone.toLowerCase().includes(q) ||
       (c.normalizedPhone && c.normalizedPhone.includes(q)) ||
       (cleanDigits.length >= 2 && (

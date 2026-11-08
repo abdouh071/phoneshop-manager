@@ -288,7 +288,7 @@ export const inventoryService = {
       const pendingAdj = getPendingStockAdjustments();
       savePendingStockAdjustments([
         ...pendingAdj.filter(a => a.productId !== id),
-        { id: `adj_${Date.now()}_${id}`, productId: id, delta: 0, newStock, mode: 'absolute', timestamp: new Date().toISOString() }
+        { id: newIdempotencyKey('tx'), productId: id, delta: 0, newStock, mode: 'absolute', timestamp: new Date().toISOString() }
       ]);
       return updatedLocal;
     }
@@ -306,7 +306,7 @@ export const inventoryService = {
       const pendingAdj = getPendingStockAdjustments();
       savePendingStockAdjustments([
         ...pendingAdj.filter(a => a.productId !== id),
-        { id: `adj_${Date.now()}_${id}`, productId: id, delta: 0, newStock, mode: 'absolute', timestamp: new Date().toISOString() }
+        { id: newIdempotencyKey('tx'), productId: id, delta: 0, newStock, mode: 'absolute', timestamp: new Date().toISOString() }
       ]);
       return updatedLocal;
     }
@@ -347,7 +347,7 @@ export const inventoryService = {
       } else {
         savePendingStockAdjustments([
           ...pendingAdj,
-          { id: `adj_${Date.now()}_${id}`, productId: id, delta, newStock, mode: 'relative', timestamp: new Date().toISOString() }
+          { id: newIdempotencyKey('tx'), productId: id, delta, newStock, mode: 'relative', timestamp: new Date().toISOString() }
         ]);
       }
     };

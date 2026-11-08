@@ -27,6 +27,7 @@ import { collection, doc, getDoc, getDocs, limit, query, updateDoc } from 'fireb
 import { db } from '../lib/firebase';
 import { addIdempotently } from './idempotentReplay';
 import { allocateTicketNumber } from './ticketCounter';
+import { claimInvoiceNumber } from './invoiceCounter';
 import { customerService } from './customerService';
 import { commitPartsAllocation, commitSaleEffects, applyStockLines } from './stockService';
 import {
@@ -739,6 +740,22 @@ const flushSales = async (): Promise<FlushResult> => {
       }
       // Replayed under the key the sale was written with, not a fresh one: the
       // document this attempt is looking for is the one the till believes failed.
+      // An invoice number minted while offline is a clock-based placeholder. The
+      // real counter must claim a permanent number before the document lands on
+      // the server, or two overlapping offline sessions can produce the same
+      // receipt number. Failure is non-fatal — the provisional number stays and
+      // the receipt remains usable, just potentially non-sequential.
+      if (dataToSave.invoiceNumberProvisional) {
+        try {
+          const { invoiceNumber: realNumber, provisional } = await claimInvoiceNumber();
+          if (!provisional) {
+            dataToSave.invoiceNumber = realNumber;
+            dataToSave.invoiceNumberProvisional = false;
+          }
+        } catch {
+          // Keep the provisional number; non-fatal.
+        }
+      }
       const { id } = await addIdempotently('transactions', replayKeyOf(payload, action.id), {
         ...dataToSave,
         saleType: dataToSave.saleType || 'retail',

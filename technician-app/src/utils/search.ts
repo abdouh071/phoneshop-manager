@@ -104,6 +104,17 @@ const isDigitToken = (token: string): boolean => /^[0-9]+$/.test(token);
  * An empty or whitespace-only query matches everything, which is what the screens
  * want before the user has typed.
  */
+/**
+ * Converts Arabic-Indic (٠-٩, U+0660-U+0669) and Extended Arabic-Indic (۰-۹, U+06F0-U+06F9)
+ * digits to ASCII, then strips everything that is not a digit — the same step that
+ * `\D` does today, but without erasing valid phone characters written in Arabic script.
+ */
+export const normalizePhone = (raw: string): string =>
+  (raw ?? '')
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0))
+    .replace(/\D/g, '');
+
 export const matchesSearch = (doc: SearchDoc, query: unknown): boolean => {
   const normalizedQuery = normalizeForSearch(query);
   if (!normalizedQuery) return true;

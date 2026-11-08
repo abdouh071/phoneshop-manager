@@ -17,8 +17,10 @@ const COLLECTION = 'transactions';
 const LOCAL_STORAGE_KEY = 'offline_transactions';
 
 const docToTx = (id: string, data: Record<string, unknown>): SaleTransaction => ({
-  ...(data as Omit<SaleTransaction, 'id'>),
+  ...(data as Omit<SaleTransaction, 'id' | 'items' | 'payments'>),
   id,
+  items: Array.isArray(data.items) ? (data.items as SaleTransaction['items']) : [],
+  payments: Array.isArray(data.payments) ? (data.payments as SaleTransaction['payments']) : [],
 });
 
 const getLocalTransactions = (): SaleTransaction[] => {

@@ -33,6 +33,7 @@ import styles from './Inventory.module.css';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { ACCESSORY_SUB_CATEGORIES } from '../../utils/accessorySubCategories';
+import { normalizeArabic } from '../../utils/normalizeText';
 
 const margin = (p: PhoneModel) =>
   p.price > 0 ? (((p.price - p.costPrice) / p.price) * 100) : 0;
@@ -149,9 +150,10 @@ export const InventoryPage = () => {
     return roleFilteredProducts.filter(p => {
       let matchesSearch = true;
       if (searchQuery.trim()) {
-        const words = searchQuery.toLowerCase().trim().split(/\s+/);
-        const full = [p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier, p.accessorySubCategory].filter(Boolean).join(' ').toLowerCase();
-        matchesSearch = words.every(w => full.includes(w));
+        const words = normalizeArabic(searchQuery).trim().split(/\s+/);
+        const full = [p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier, p.accessorySubCategory].filter(Boolean).join(' ');
+        const normalizedFull = normalizeArabic(full);
+        matchesSearch = words.every(w => normalizedFull.includes(w));
       }
       const matchesStatus =
         statusFilter === 'all'

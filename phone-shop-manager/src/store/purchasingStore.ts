@@ -5,6 +5,7 @@ import type { PurchaseOrderReceiptLine, ReceivedPurchaseOrderResult } from '../s
 import { useActivityStore } from './activityStore';
 import { useAuthStore } from './authStore';
 import { useInventoryStore } from './inventoryStore';
+import { normalizeArabic } from '../utils/normalizeText';
 
 interface PurchasingState {
   suppliers: Supplier[];
@@ -163,20 +164,20 @@ export const usePurchasingStore = create<PurchasingState>((set, get) => ({
   getFilteredSuppliers: () => {
     const { suppliers, searchQuery } = get();
     if (!searchQuery) return suppliers;
-    const q = searchQuery.toLowerCase();
+    const q = normalizeArabic(searchQuery);
     return suppliers.filter(s => 
-      s.name.toLowerCase().includes(q) || 
-      (s.contactName && s.contactName.toLowerCase().includes(q))
+      normalizeArabic(s.name).includes(q) || 
+      (s.contactName && normalizeArabic(s.contactName).includes(q))
     );
   },
 
   getFilteredPOs: () => {
     const { purchaseOrders, searchQuery } = get();
     if (!searchQuery) return purchaseOrders;
-    const q = searchQuery.toLowerCase();
+    const q = normalizeArabic(searchQuery);
     return purchaseOrders.filter(po => 
-      po.poNumber.toLowerCase().includes(q) || 
-      po.supplierName.toLowerCase().includes(q)
+      normalizeArabic(po.poNumber).includes(q) || 
+      normalizeArabic(po.supplierName).includes(q)
     );
   },
 }));

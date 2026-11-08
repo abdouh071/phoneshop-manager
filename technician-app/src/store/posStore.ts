@@ -234,6 +234,7 @@ export const usePosStore = create<PosState>((set, get) => ({
       processedById: currentUser?.id || 'technician-app',
       processedByName: currentUser?.name || 'Sales Agent',
       status: 'completed',
+      ...(params.notes ? { notes: params.notes } : {}),
     };
 
     let realTx: SaleTransaction;

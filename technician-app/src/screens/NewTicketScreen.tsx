@@ -7,6 +7,7 @@ import { useAuthStore } from '../store/authStore';
 import { usePermissions } from '../hooks/usePermissions';
 import { customerService } from '../services/customerService';
 import { isValidClientName } from '../utils/clientNames';
+import { normalizePhone } from '../utils/search';
 import { useTranslation } from 'react-i18next';
 import type { Customer } from '../types';
 
@@ -45,7 +46,7 @@ export const NewTicketScreen = ({ navigation }: any) => {
   // registered account is offered: a placeholder row (generic name) must never be
   // suggested as the client standing at the desk.
   useEffect(() => {
-    const cleanPhone = customerPhone.replace(/\D/g, '');
+    const cleanPhone = normalizePhone(customerPhone);
     if (cleanPhone.length >= 8) {
       const timer = setTimeout(async () => {
         const found = await customerService.findByPhone(customerPhone);

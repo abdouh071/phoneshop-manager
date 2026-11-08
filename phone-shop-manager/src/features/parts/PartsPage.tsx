@@ -55,6 +55,7 @@ import styles from './Parts.module.css';
 import posStyles from '../pos/POS.module.css';
 import b2bStyles from './B2BParts.module.css';
 import { errorMessage } from '../../utils/errorUtils';
+import { normalizeArabic } from '../../utils/normalizeText';
 
 // ─── HELPER COMPONENTS & UTILS ───────────────────────────────────────────
 
@@ -360,9 +361,9 @@ export const PartsPage = () => {
       p = p.filter(prod => prod.stockStatus === statusFilter);
     }
     if (searchQuery.trim()) {
-      const words = searchQuery.toLowerCase().trim().split(/\s+/);
+      const words = normalizeArabic(searchQuery).trim().split(/\s+/);
       p = p.filter(prod => {
-        const full = [prod.name, prod.model, prod.sku, prod.location, prod.supplier, prod.notes].filter(Boolean).join(' ').toLowerCase();
+        const full = normalizeArabic([prod.name, prod.model, prod.sku, prod.location, prod.supplier, prod.notes].filter(Boolean).join(' '));
         return words.every(w => full.includes(w));
       });
     }

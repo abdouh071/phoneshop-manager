@@ -235,6 +235,8 @@ export interface SaleTransaction {
    */
   stockApplied?: boolean;
   profileApplied?: boolean;
+  /** ID of the approval request that authorised this operation (void, refund, edit). */
+  approvedRequestId?: string;
   accountSettlement?: {
     type: 'paid_full' | 'charged_to_account' | 'partial_payment';
     paidAmount: number;

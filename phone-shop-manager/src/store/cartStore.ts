@@ -1214,7 +1214,31 @@ export const useCartStore = create<CartState>((set, get) => ({
           .catch(console.error);
       }
 
-      customerStore.updateDebtAmount(linkedDebt.id, total, itemsSummary).catch(console.error);
+      // The debt portion is whatever the adjusted payments declare as 'account'; everything
+      // else is cash/card/mobile that the customer already handed over.
+      const newDebtCharged = adjustedPayments
+        .filter(p => p.method === 'account')
+        .reduce((sum, p) => sum + p.amount, 0);
+      customerStore.updateDebtAmount(linkedDebt.id, total, itemsSummary, newDebtCharged).catch(console.error);
+
+      // Keep the account-settlement stamp in sync with what the debt entry now records.
+      // Without this the printed invoice still shows the pre-edit paidAmount/chargedAmount.
+      if (tx.accountSettlement) {
+        const newPaid = linkedDebt.amountPaid || 0;
+        const newCharged = Math.max(0, total - newPaid);
+        const newSettlementType: 'paid_full' | 'charged_to_account' | 'partial_payment' =
+          newCharged === 0
+            ? 'paid_full'
+            : newPaid === 0
+              ? 'charged_to_account'
+              : 'partial_payment';
+        updates.accountSettlement = {
+          ...tx.accountSettlement,
+          paidAmount: newPaid,
+          chargedAmount: newCharged,
+          type: newSettlementType,
+        };
+      }
     }
 
     await transactionService.updateTransaction(txId, updates);

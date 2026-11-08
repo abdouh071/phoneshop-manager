@@ -11,6 +11,7 @@ import { useAuthStore } from './authStore';
 import { formatCurrency } from '../utils/formatCurrency';
 import { isPhoneMatch, normalizePhoneDigits, isMoreDescriptiveName, formatStandardPhone, isValidNameForDeduplication, isDummyPhone } from '../utils/phoneUtils';
 import { calculateCustomerFinancials, matchesCustomer, isGenericCustomerName } from '../utils/customerFinancials';
+import { normalizeArabic } from '../utils/normalizeText';
 
 interface CustomerState {
   customers: Customer[];
@@ -56,7 +57,8 @@ interface CustomerState {
   updateDebtAmount: (
     debtId: string,
     newTotalAmount: number,
-    newItemsSummary?: string
+    newItemsSummary?: string,
+    newChargedAmount?: number
   ) => Promise<CustomerDebtEntry>;
   deleteDebt: (debtId: string) => Promise<void>;
   /** Close a debt at zero because the sale behind it was refunded; needs no admin rights. */
@@ -733,10 +735,10 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
     }
   },
 
-  updateDebtAmount: async (debtId, newTotalAmount, newItemsSummary) => {
+  updateDebtAmount: async (debtId, newTotalAmount, newItemsSummary, newChargedAmount) => {
     try {
       const target = get().debts.find(d => d.id === debtId);
-      const updatedDebt = await debtService.updateDebtAmount(debtId, newTotalAmount, newItemsSummary);
+      const updatedDebt = await debtService.updateDebtAmount(debtId, newTotalAmount, newItemsSummary, newChargedAmount);
       set(state => {
         const updatedDebts = state.debts.map(d => (d.id === debtId ? updatedDebt : d));
         const newTotalDebt = updatedDebts
@@ -1909,12 +1911,13 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
     // Exclude merged/archived customers from all active views
     const active = customers.filter(c => !c.mergedIntoId);
     if (!searchQuery.trim()) return active;
-    const q = searchQuery.toLowerCase();
+    const q = normalizeArabic(searchQuery);
+    const cleanDigits = searchQuery.replace(/\D/g, '');
     return active.filter(c =>
-      c.name.toLowerCase().includes(q) ||
-      (c.shopName && c.shopName.toLowerCase().includes(q)) ||
-      c.phone.toLowerCase().includes(q) ||
-      (c.email && c.email.toLowerCase().includes(q))
+      normalizeArabic(c.name ?? '').includes(q) ||
+      (c.shopName && normalizeArabic(c.shopName).includes(q)) ||
+      (cleanDigits && c.phone.replace(/\D/g, '').includes(cleanDigits)) ||
+      (c.email && normalizeArabic(c.email).includes(q))
     );
   },
 

@@ -30,6 +30,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { commitStockDelta } from '../services/stockService';
 import { useAuthStore } from '../store/authStore';
 import { usePosStore } from '../store/posStore';
 import { activityLogService } from '../services/activityLogService';
@@ -375,9 +376,15 @@ export const InventoryScreen = ({ navigation }: any) => {
           ? 'low_stock'
           : 'in_stock';
 
+      // Use an atomic delta so a concurrent sale or desktop edit is composed, not
+      // overwritten. commitStockDelta reads the server value inside a transaction and
+      // applies the signed delta — the same primitive the POS uses at checkout.
+      const delta = newStock - targetProduct.stock;
+      if (delta !== 0) {
+        await commitStockDelta(targetProduct.id, delta);
+      }
+      // Stamp the timestamp (stockStatus is handled by commitStockDelta).
       await updateDoc(doc(db, 'inventory', targetProduct.id), {
-        stock: newStock,
-        stockStatus,
         updatedAt: new Date().toISOString(),
       });
 

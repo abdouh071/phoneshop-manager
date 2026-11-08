@@ -294,7 +294,8 @@ export const debtService = {
   updateDebtAmount: async (
     debtId: string,
     newTotalAmount: number,
-    newItemsSummary?: string
+    newItemsSummary?: string,
+    newChargedAmount?: number
   ): Promise<CustomerDebtEntry> => {
     const now = new Date().toISOString();
 
@@ -305,7 +306,9 @@ export const debtService = {
       if (!debt) throw new Error('Debt entry not found');
 
       const amountPaid = debt.amountPaid || 0;
-      const newRemainingBalance = Math.max(0, newTotalAmount - amountPaid);
+      const newRemainingBalance = typeof newChargedAmount === 'number'
+        ? Math.max(0, newChargedAmount)
+        : Math.max(0, newTotalAmount - amountPaid);
       const newStatus: CustomerDebtEntry['status'] =
         newRemainingBalance <= 0
           ? 'paid'
@@ -329,7 +332,9 @@ export const debtService = {
     try {
       const updatedDebt = await commitDebtChange(debtId, debt => {
         const amountPaid = debt.amountPaid || 0;
-        const newRemainingBalance = Math.max(0, newTotalAmount - amountPaid);
+        const newRemainingBalance = typeof newChargedAmount === 'number'
+        ? Math.max(0, newChargedAmount)
+        : Math.max(0, newTotalAmount - amountPaid);
         const newStatus: CustomerDebtEntry['status'] =
           newRemainingBalance <= 0
             ? 'paid'
@@ -357,7 +362,9 @@ export const debtService = {
       if (!debt) throw new Error('Debt entry not found');
 
       const amountPaid = debt.amountPaid || 0;
-      const newRemainingBalance = Math.max(0, newTotalAmount - amountPaid);
+      const newRemainingBalance = typeof newChargedAmount === 'number'
+        ? Math.max(0, newChargedAmount)
+        : Math.max(0, newTotalAmount - amountPaid);
       const newStatus: CustomerDebtEntry['status'] =
         newRemainingBalance <= 0
           ? 'paid'

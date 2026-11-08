@@ -220,6 +220,14 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
       }
     }
 
+    // Record which approval authorised this money movement so an audit can trace
+    // void→approval→invoice without relying on the approval list alone.
+    if (reqData.targetId) {
+      updateDoc(doc(db, 'transactions', reqData.targetId), {
+        approvedRequestId: requestId,
+      }).catch((err) => console.error('[ApprovalStore] approvedRequestId back-link failed:', err));
+    }
+
     // Push trilingual notification back to requesting staff member
     if (reqData.requestedBy?.uid) {
       notificationService.notifyStaffApprovalDecision(
@@ -276,6 +284,14 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
       } catch (txErr) {
         console.warn('[ApprovalStore] Error reverting transaction status:', txErr);
       }
+    }
+
+    // Record which approval authorised this money movement so an audit can trace
+    // void→approval→invoice without relying on the approval list alone.
+    if (reqData.targetId) {
+      updateDoc(doc(db, 'transactions', reqData.targetId), {
+        approvedRequestId: requestId,
+      }).catch((err) => console.error('[ApprovalStore] approvedRequestId back-link failed:', err));
     }
 
     // Push trilingual notification back to requesting staff member

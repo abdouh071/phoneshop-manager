@@ -25,7 +25,7 @@ import { useAuthStore } from '../store/authStore';
 import { usePermissions } from '../hooks/usePermissions';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import { useTranslation } from 'react-i18next';
-import { buildSearch, matchesSearch } from '../utils/search';
+import { buildSearch, matchesSearch, normalizePhone } from '../utils/search';
 import { resolveProductByCode, codesToShow } from '../utils/productCode';
 import { askWhichProduct } from '../utils/productCodePrompt';
 import { discountAmountOf, discountPercentOf, requiresDiscountApproval, DISCOUNT_APPROVAL_PERCENT } from '../utils/discountPolicy';
@@ -308,7 +308,7 @@ export const POSScreen = ({ navigation }: any) => {
   const handleWhatsAppShare = () => {
     if (!completedTx) return;
     const text = buildReceiptText(completedTx);
-    const phone = completedTx.customerPhone ? completedTx.customerPhone.replace(/\D/g, '') : '';
+    const phone = completedTx.customerPhone ? normalizePhone(completedTx.customerPhone) : '';
     const url = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
     Linking.openURL(url).catch(() => Alert.alert(t('common.error', 'Error'), t('common.whatsappMissing', 'WhatsApp is not installed.')));
   };
@@ -613,7 +613,7 @@ export const POSScreen = ({ navigation }: any) => {
                     <Text style={styles.qtyVal}>{item.quantity}</Text>
                     <TouchableOpacity
                       style={styles.qtyBtn}
-                      onPress={() => updateQuantity(item.product.id, item.quantity + 1)}
+                      onPress={() => updateQuantity(item.product.id, Math.min(item.quantity + 1, item.product.stock))}
                     >
                       <MaterialCommunityIcons name="plus" size={16} color={colors.textPrimary} />
                     </TouchableOpacity>
