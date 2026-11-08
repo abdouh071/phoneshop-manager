@@ -25,7 +25,8 @@ import { useAuthStore } from '../store/authStore';
 import { usePermissions } from '../hooks/usePermissions';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import { useTranslation } from 'react-i18next';
-import { buildSearch, matchesSearch, normalizePhone } from '../utils/search';
+import { buildSearch, matchesSearch } from '../utils/search';
+import { phoneDigits } from '../utils/phone';
 import { resolveProductByCode, codesToShow } from '../utils/productCode';
 import { askWhichProduct } from '../utils/productCodePrompt';
 import { discountAmountOf, discountPercentOf, requiresDiscountApproval, DISCOUNT_APPROVAL_PERCENT } from '../utils/discountPolicy';
@@ -308,7 +309,7 @@ export const POSScreen = ({ navigation }: any) => {
   const handleWhatsAppShare = () => {
     if (!completedTx) return;
     const text = buildReceiptText(completedTx);
-    const phone = completedTx.customerPhone ? normalizePhone(completedTx.customerPhone) : '';
+    const phone = phoneDigits(completedTx.customerPhone);
     const url = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
     Linking.openURL(url).catch(() => Alert.alert(t('common.error', 'Error'), t('common.whatsappMissing', 'WhatsApp is not installed.')));
   };

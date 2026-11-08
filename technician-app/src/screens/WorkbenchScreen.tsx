@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import { buildSearch, matchesSearch } from '../utils/search';
+import { isSamePhone } from '../utils/phone';
 import {
   colors,
   fontSize,
@@ -294,11 +295,15 @@ export const WorkbenchScreen = ({ navigation }: any) => {
     navigation.navigate('Scanner', {
       onScan: (data: string) => {
         const clean = data.trim();
-        const found = tickets.find(t => 
-          t.ticketNumber?.toLowerCase() === clean.toLowerCase() ||
-          t.trackingPin?.toLowerCase() === clean.toLowerCase() ||
-          (clean.length >= 8 && t.customerPhone && t.customerPhone.replace(/\D/g, '') === clean.replace(/\D/g, ''))
-        );
+        const code = clean.toLowerCase();
+        // An exact identifier outranks a phone line: one client holds several
+        // tickets, and the first row in the list must not beat the scanned PIN.
+        // The phone branch compares canonical keys, so an Arabic-keyboard number
+        // resolves — and a code with no digits can never equal a blank phone.
+        const found = code
+          ? tickets.find(t => t.ticketNumber?.toLowerCase() === code || t.trackingPin?.toLowerCase() === code) ||
+            tickets.find(t => isSamePhone(t.customerPhone, clean))
+          : undefined;
         if (found) {
           navigation.navigate('TicketDetail', { ticket: found });
         } else {

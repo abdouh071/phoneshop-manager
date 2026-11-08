@@ -10,12 +10,12 @@
  * re-normalises every field of every row on every keystroke.
  */
 
+import { foldDigitsToAscii, phoneDigits } from './phone.ts';
+
 /** Arabic harakat and superscript alef, plus tatweel (the stretch character). */
 const ARABIC_MARKS = /[ـ\u064B-\u0652\u0670]/g;
 /** Combining marks left over from Latin names typed with a dead key. */
 const COMBINING_MARKS = /[\u0300-\u035F]/g;
-
-const ARABIC_DIGITS = /[\u0660-\u0669\u06F0-\u06F9]/g;
 
 const ARABIC_FOLDS: [RegExp, string][] = [
   [/[آأإٱ]/g, 'ا'],
@@ -49,13 +49,6 @@ const asText = (value: unknown): string => {
   return '';
 };
 
-/** Arabic-Indic and Eastern Arabic-Indic digits folded to ASCII, so a phone typed
- *  on an Arabic keyboard matches the ASCII digits the desktop app stored. */
-const foldDigits = (text: string): string =>
-  text.replace(ARABIC_DIGITS, (ch) =>
-    String(ch.charCodeAt(0) - (ch.charCodeAt(0) >= 0x06f0 ? 0x06f0 : 0x0660))
-  );
-
 /**
  * Case-folded, diacritic-stripped, letter-folded, whitespace-collapsed text that
  * two records can be compared in even when one was typed on an Arabic keyboard
@@ -66,16 +59,14 @@ export const normalizeForSearch = (value: unknown): string => {
   text = text.replace(ARABIC_MARKS, '').replace(COMBINING_MARKS, '');
   for (const [pattern, replacement] of ARABIC_FOLDS) text = text.replace(pattern, replacement);
   for (const [pattern, replacement] of LATIN_FOLDS) text = text.replace(pattern, replacement);
-  text = foldDigits(text);
+  text = foldDigitsToAscii(text);
   return text.replace(NON_ALPHANUMERIC, ' ').replace(/\s+/g, ' ').trim();
 };
 
 /** Every digit in the values, concatenated — so `0770 12 34 56` matches `0770123456`.
- *  Arabic-Indic digits are folded FIRST: `\D` is ASCII-only and used to strip them
- *  from both sides of the comparison, so a phone typed on an Arabic keyboard found
- *  nothing at all. */
-const digitsOf = (values: readonly unknown[]): string =>
-  values.map(asText).map(foldDigits).join('').replace(/\D/g, '');
+ *  `phoneDigits` folds Arabic-Indic digits before stripping: `\D` is ASCII-only and
+ *  used to erase them, so a phone typed on an Arabic keyboard found nothing at all. */
+const digitsOf = (values: readonly unknown[]): string => values.map(phoneDigits).join('');
 
 export type SearchDoc = {
   /** Normalised, space-separated haystack for this record. */
@@ -104,17 +95,6 @@ const isDigitToken = (token: string): boolean => /^[0-9]+$/.test(token);
  * An empty or whitespace-only query matches everything, which is what the screens
  * want before the user has typed.
  */
-/**
- * Converts Arabic-Indic (٠-٩, U+0660-U+0669) and Extended Arabic-Indic (۰-۹, U+06F0-U+06F9)
- * digits to ASCII, then strips everything that is not a digit — the same step that
- * `\D` does today, but without erasing valid phone characters written in Arabic script.
- */
-export const normalizePhone = (raw: string): string =>
-  (raw ?? '')
-    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
-    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0))
-    .replace(/\D/g, '');
-
 export const matchesSearch = (doc: SearchDoc, query: unknown): boolean => {
   const normalizedQuery = normalizeForSearch(query);
   if (!normalizedQuery) return true;

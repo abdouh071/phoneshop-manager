@@ -40,3 +40,21 @@ test('a shared suffix is not the same line', () => {
   assert.equal(isSamePhone('00000000', '00000000'), false);
   assert.equal(isSamePhone('0770123456', ''), false);
 });
+
+test('a scanned code with no digits is nobody\'s phone line', () => {
+  // The ticket scanner used to strip both sides with \D and compare: a barcode
+  // like this reduced to '' and so did a phone field holding 'N/A', which opened
+  // a stranger's ticket. Neither side may be empty for a match.
+  for (const stored of ['N/A', '-', '٠٠٠٠٠٠٠٠', '', undefined, null]) {
+    assert.equal(isSamePhone(stored, 'SAMSUNG-COVER-BLK'), false);
+    assert.equal(isSamePhone(stored, ''), false);
+  }
+  assert.equal(isSamePhone('0770123456', 'SAMSUNG-COVER-BLK'), false);
+  assert.equal(isSamePhone('0770123456', 'A54'), false);
+});
+
+test('a scanned phone resolves across keyboards and country codes', () => {
+  assert.equal(isSamePhone('0770 12 34 56', '٠٧٧٠١٢٣٤٥٦'), true);
+  assert.equal(isSamePhone('٠٧٧٠١٢٣٤٥٦', '+213 770 12 34 56'), true);
+  assert.equal(isSamePhone('0770123456', '00213770123456'), true);
+});

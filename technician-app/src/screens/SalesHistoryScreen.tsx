@@ -38,7 +38,8 @@ import { EditSaleSheet } from '../components/EditSaleSheet';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import { usePermissions } from '../hooks/usePermissions';
 import { useTranslation } from 'react-i18next';
-import { buildSearch, matchesSearch, normalizePhone } from '../utils/search';
+import { buildSearch, matchesSearch } from '../utils/search';
+import { phoneDigits } from '../utils/phone';
 import { discountsGivenOf } from '../utils/discountPolicy';
 import { lineDisplayOf, netUnitsSold } from '../utils/saleEditLines';
 import { docToSale } from '../utils/saleDocument';
@@ -311,7 +312,7 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
   };
 
   const handleWhatsAppCustomer = (tx: SaleTransaction) => {
-    const phone = normalizePhone(tx.customerPhone || '');
+    const phone = phoneDigits(tx.customerPhone);
     if (!phone) {
       Alert.alert(t('salesHistory.noPhone', 'No Phone'), t('salesHistory.noPhoneBody', 'No customer phone number attached to this transaction.'));
       return;
