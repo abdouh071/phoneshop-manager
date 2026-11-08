@@ -10,7 +10,7 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useTranslation } from 'react-i18next';
 import { buildSearch, matchesSearch } from '../utils/search';
-import { phoneDigits } from '../utils/phone';
+import { whatsAppUrl } from '../utils/whatsappLink';
 import { colors, fontSize, radius, ramp, repairStatusColors, spacing, statusAppearance } from '../theme/tokens';
 import type { RepairTicket } from '../types';
 
@@ -225,10 +225,19 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
   };
 
   const handleWhatsApp = () => {
-    if (ticket.customerPhone) {
-      const phone = phoneDigits(ticket.customerPhone);
-      Linking.openURL(`whatsapp://send?phone=${phone}`);
+    const url = whatsAppUrl(ticket.customerPhone);
+    // The button shows whenever the ticket carries a phone field, placeholder or
+    // not, so a refusal has to be said out loud rather than opening nothing.
+    if (!url) {
+      Alert.alert(
+        t('common.noUsablePhoneTitle', 'No usable phone number'),
+        t('common.noUsablePhoneBody', 'This number is missing or a placeholder, so WhatsApp cannot open a chat. Check the customer’s number and try again.')
+      );
+      return;
     }
+    Linking.openURL(url).catch(() =>
+      Alert.alert(t('common.error', 'Error'), t('common.whatsappMissing', 'WhatsApp is not installed.'))
+    );
   };
 
   const handlePrintRemote = async () => {

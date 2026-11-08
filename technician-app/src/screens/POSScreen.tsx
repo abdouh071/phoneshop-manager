@@ -26,7 +26,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import { RoleBottomNav } from '../components/RoleBottomNav';
 import { useTranslation } from 'react-i18next';
 import { buildSearch, matchesSearch } from '../utils/search';
-import { phoneDigits } from '../utils/phone';
+import { whatsAppUrl } from '../utils/whatsappLink';
 import { resolveProductByCode, codesToShow } from '../utils/productCode';
 import { askWhichProduct } from '../utils/productCodePrompt';
 import { alertCartStockRefusal } from '../utils/cartStockPrompt';
@@ -310,8 +310,12 @@ export const POSScreen = ({ navigation }: any) => {
   const handleWhatsAppShare = () => {
     if (!completedTx) return;
     const text = buildReceiptText(completedTx);
-    const phone = phoneDigits(completedTx.customerPhone);
-    const url = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
+    // A walk-in has no line to address, so the receipt goes to the share picker —
+    // the same fallback the counter's receipt modal uses. A placeholder number
+    // takes that path too, rather than opening a chat that does not exist.
+    const url =
+      whatsAppUrl(completedTx.customerPhone, text) ??
+      `https://wa.me/?text=${encodeURIComponent(text)}`;
     Linking.openURL(url).catch(() => Alert.alert(t('common.error', 'Error'), t('common.whatsappMissing', 'WhatsApp is not installed.')));
   };
 

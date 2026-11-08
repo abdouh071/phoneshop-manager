@@ -41,7 +41,7 @@ import { RoleBottomNav } from '../components/RoleBottomNav';
 import { usePermissions } from '../hooks/usePermissions';
 import { useTranslation } from 'react-i18next';
 import { buildSearch, matchesSearch } from '../utils/search';
-import { phoneDigits } from '../utils/phone';
+import { whatsAppUrl } from '../utils/whatsappLink';
 import { discountsGivenOf } from '../utils/discountPolicy';
 import { lineDisplayOf, netUnitsSold } from '../utils/saleEditLines';
 import { docToSale } from '../utils/saleDocument';
@@ -327,19 +327,20 @@ export const SalesHistoryScreen = ({ navigation }: any) => {
   };
 
   const handleWhatsAppCustomer = (tx: SaleTransaction) => {
-    const phone = phoneDigits(tx.customerPhone);
-    if (!phone) {
-      Alert.alert(t('salesHistory.noPhone', 'No Phone'), t('salesHistory.noPhoneBody', 'No customer phone number attached to this transaction.'));
+    const message = t('salesHistory.receiptMessage', 'Hello {{name}}, here is your receipt #{{invoice}} from PhoneShop Pro: Total: {{total}} DA. Thank you!', {
+      name: tx.customerName || t('salesHistory.valuedCustomer', 'valued customer'),
+      invoice: tx.invoiceNumber || tx.id.slice(-6),
+      total: (tx.total || 0).toLocaleString(),
+    });
+    const url = whatsAppUrl(tx.customerPhone, message);
+    if (!url) {
+      Alert.alert(
+        t('common.noUsablePhoneTitle', 'No usable phone number'),
+        t('common.noUsablePhoneBody', 'This number is missing or a placeholder, so WhatsApp cannot open a chat. Check the customer’s number and try again.')
+      );
       return;
     }
-    const lines = [
-      t('salesHistory.receiptMessage', 'Hello {{name}}, here is your receipt #{{invoice}} from PhoneShop Pro: Total: {{total}} DA. Thank you!', {
-        name: tx.customerName || t('salesHistory.valuedCustomer', 'valued customer'),
-        invoice: tx.invoiceNumber || tx.id.slice(-6),
-        total: (tx.total || 0).toLocaleString(),
-      }),
-    ];
-    Linking.openURL(`https://wa.me/${phone}?text=${encodeURIComponent(lines.join('\n'))}`).catch(
+    Linking.openURL(url).catch(
       () => Alert.alert(t('common.error', 'Error'), t('common.whatsappMissing', 'WhatsApp is not installed.'))
     );
   };
