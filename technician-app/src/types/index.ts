@@ -241,7 +241,11 @@ export interface SaleTransaction {
    */
   stockApplied?: boolean;
   profileApplied?: boolean;
-  /** ID of the approval request that authorised this operation (void, refund, edit). */
+  /**
+   * The approval that authorised this void, refund or edit. Kept for the audit trail:
+   * unlike `approvalRequestId` it survives the correction landing, so an invoice edited
+   * under permission still names the permission after it stops waiting for anyone.
+   */
   approvedRequestId?: string;
   accountSettlement?: {
     type: 'paid_full' | 'charged_to_account' | 'partial_payment';
@@ -254,6 +258,7 @@ export interface SaleTransaction {
   processedById?: string;
   processedByName?: string;
   status?: 'completed' | 'refunded' | 'partially_refunded' | 'voided' | 'cancelled' | 'pending_approval';
+  /** The request this invoice is parked behind while it waits; cleared once the answer lands. */
   approvalRequestId?: string;
   notes?: string;
 }

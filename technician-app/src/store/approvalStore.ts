@@ -19,6 +19,13 @@ import { activityLogService } from '../services/activityLogService';
 import { voidSale, type SaleVoidOutcome } from '../services/saleVoidService';
 import type { ApprovalRequest, SaleTransaction } from '../types';
 
+/**
+ * Actions whose `targetId` names an invoice. Every other action points at a product,
+ * a part, a ticket, a customer or a debt — stamping those ids into `transactions`
+ * writes at a document that was never there.
+ */
+const INVOICE_ACTIONS = ['void_sale', 'pos_edit_receipt', 'pos_refund_transaction', 'pos_discount_override'];
+
 interface ApprovalState {
   pendingRequests: ApprovalRequest[];
   recentResolved: ApprovalRequest[];
@@ -221,8 +228,11 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
     }
 
     // Record which approval authorised this money movement so an audit can trace
-    // void→approval→invoice without relying on the approval list alone.
-    if (reqData.targetId) {
+    // void→approval→invoice without relying on the approval list alone. This outlives
+    // `approvalRequestId`, which names the request an invoice is still waiting on and
+    // is cleared the moment the correction lands. A refusal authorises nothing, so
+    // only an approve writes it.
+    if (reqData.targetId && INVOICE_ACTIONS.includes(reqData.actionType)) {
       updateDoc(doc(db, 'transactions', reqData.targetId), {
         approvedRequestId: requestId,
       }).catch((err) => console.error('[ApprovalStore] approvedRequestId back-link failed:', err));
@@ -284,14 +294,6 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
       } catch (txErr) {
         console.warn('[ApprovalStore] Error reverting transaction status:', txErr);
       }
-    }
-
-    // Record which approval authorised this money movement so an audit can trace
-    // void→approval→invoice without relying on the approval list alone.
-    if (reqData.targetId) {
-      updateDoc(doc(db, 'transactions', reqData.targetId), {
-        approvedRequestId: requestId,
-      }).catch((err) => console.error('[ApprovalStore] approvedRequestId back-link failed:', err));
     }
 
     // Push trilingual notification back to requesting staff member
