@@ -17,6 +17,7 @@ import {
 import { db } from '../lib/firebase';
 import type { RepairTicket, RepairStatusHistoryEntry } from '../types';
 import { deduplicateTickets, isSameTicketContent } from '../utils/ticketDeduplication';
+import { mergeStatusHistory } from '../utils/statusHistoryMerge';
 import { newIdempotencyKey } from './idempotentReplay';
 import { offlineQueue } from './offlineQueue';
 
@@ -435,16 +436,31 @@ export const repairService = {
 
     try {
       const ref = doc(db, COLLECTION, id);
-      const updatePayload: Record<string, unknown> = { status, updatedAt };
-      if (repairedAt) updatePayload.repairedAt = repairedAt;
-      if (statusHistory) updatePayload.statusHistory = statusHistory;
-
-      const updatePromise = updateDoc(ref, updatePayload);
+      const updatePromise = runTransaction(db, async (tx) => {
+        const liveSnap = await tx.get(ref);
+        const live = liveSnap.exists() ? (liveSnap.data() as Record<string, unknown>) : {};
+        const updatePayload: Record<string, unknown> = { status, updatedAt };
+        if (repairedAt) updatePayload.repairedAt = repairedAt;
+        let mergedHistory = statusHistory;
+        if (statusHistory && statusHistory.length > 0) {
+          // Append-only against the live document: a verbatim write used to
+          // erase entries another window — or a replayed offline action —
+          // recorded in between, so both writers now keep everything they each
+          // recorded, in order.
+          mergedHistory = mergeStatusHistory(
+            (live.statusHistory as RepairStatusHistoryEntry[]) || [],
+            statusHistory
+          );
+          updatePayload.statusHistory = mergedHistory;
+        }
+        tx.update(ref, updatePayload);
+        return mergedHistory;
+      });
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Firestore updateDoc timeout')), 1200)
       );
-      await Promise.race([updatePromise, timeoutPromise]);
-      return updatedLocal;
+      const mergedHistory = await Promise.race([updatePromise, timeoutPromise]);
+      return mergedHistory ? { ...updatedLocal, statusHistory: mergedHistory } : updatedLocal;
     } catch (err) {
       console.warn('Failed to update status on Firestore, stored locally & queued for sync:', err);
       offlineQueue.enqueue({
