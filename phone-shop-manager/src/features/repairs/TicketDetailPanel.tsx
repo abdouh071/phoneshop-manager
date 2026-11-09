@@ -460,6 +460,12 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
         lockType: ticket.lockType,
         lockValue: ticket.lockValue,
         estimatedCompletionDate: returnForm.pickupDate || undefined,
+        // The re-repair usually falls to whoever worked the device first; a child
+        // created without a technician used to land in the Unassigned bucket and
+        // the original technician's work went uncredited until someone remembered
+        // to assign it by hand.
+        assignedTechnician: ticket.assignedTechnician || undefined,
+        assignedTechnicianId: ticket.assignedTechnicianId || undefined,
       });
 
       // A return without its child ticket is a device with no work ticket. The
