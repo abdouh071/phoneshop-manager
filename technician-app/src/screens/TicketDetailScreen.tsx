@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert, TouchableOpacity, Linking, Modal } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, StyleSheet, ScrollView, Alert, TouchableOpacity, Linking, Modal, Vibration } from 'react-native';
 import { Text, Card, Title, Paragraph, Button, TextInput, IconButton } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRepairStore } from '../store/repairStore';
 import { useAuthStore } from '../store/authStore';
 import { usePosStore } from '../store/posStore';
+import { usePrintJobStore, type PrintJob } from '../store/printJobStore';
 import { usePermissions } from '../hooks/usePermissions';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -30,6 +31,55 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
 
   // Find live ticket state from store so edits refresh dynamically
   const ticket: RepairTicket = tickets.find(t => t.id === initialTicket.id) || initialTicket;
+
+  // The live outcome of this ticket's remote print request. The store keeps the
+  // listener alive when the technician walks away from the screen, so the truth
+  // is still here when they come back.
+  const printJobId = usePrintJobStore(s => s.ticketJobs[ticket.id]);
+  const printJob = usePrintJobStore(s => (printJobId ? s.jobs[printJobId] : undefined));
+  const trackJob = usePrintJobStore(s => s.trackJob);
+
+  const printJobLabel = (job: PrintJob): string => {
+    switch (job.status) {
+      case 'pending':
+        return t('ticketDetail.printJobPending', 'Sent to the PC — waiting for it to pick it up…');
+      case 'processing':
+        return t('ticketDetail.printJobProcessing', 'The PC is printing the sticker…');
+      case 'pending_retry':
+        return t('ticketDetail.printJobRetrying', 'The printer refused — will retry (attempt {{attempt}})…', {
+          attempt: job.attempts ?? 1,
+        });
+      case 'completed':
+        return t('ticketDetail.printJobDone', 'Sticker printed');
+      case 'failed':
+        return t('ticketDetail.printJobFailed', 'Print failed — {{reason}}', {
+          reason: job.error || job.lastError || t('ticketDetail.printFailed', 'Failed to send print command.'),
+        });
+    }
+  };
+
+  // A terminal outcome is worth interrupting for once: a failure needs the
+  // technician to act, a success is a quiet buzz. Each job announces itself
+  // exactly once, even across screen revisits.
+  const announcedJobRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!printJob) return;
+    if (printJob.status !== 'completed' && printJob.status !== 'failed') {
+      announcedJobRef.current = null;
+      return;
+    }
+    const key = `${printJob.id}:${printJob.status}`;
+    if (announcedJobRef.current === key) return;
+    announcedJobRef.current = key;
+    if (printJob.status === 'failed') {
+      Alert.alert(
+        t('ticketDetail.printJobFailedTitle', 'Sticker not printed'),
+        printJob.error || printJob.lastError || t('ticketDetail.printFailed', 'Failed to send print command.')
+      );
+    } else {
+      Vibration.vibrate(40);
+    }
+  }, [printJob, t]);
   
   // Parts state
   const [parts, setParts] = useState<{ name: string; cost: number; productId?: string; quantity?: number }[]>(ticket.partsUsed || []);
@@ -249,14 +299,16 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
         { text: t('common.print', 'Print'), 
           onPress: async () => {
             try {
-              await addDoc(collection(db, 'printQueue'), {
+              // The chip below carries the outcome from here on, so the phone
+              // never again claims more than the desk actually delivered.
+              const docRef = await addDoc(collection(db, 'printQueue'), {
                 status: 'pending',
                 type: 'repair_label',
                 ticket: ticket,
                 requestedBy: user?.name,
                 createdAt: serverTimestamp(),
               });
-              Alert.alert(t('common.success', 'Success'), t('ticketDetail.printSent', 'Print command sent to PC!'));
+              trackJob(docRef.id, ticket.id);
             } catch (error) {
               Alert.alert(t('common.error', 'Error'), t('ticketDetail.printFailed', 'Failed to send print command.'));
             }
@@ -317,6 +369,36 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
               {t('ticketDetail.printSticker', 'Print Sticker')}
             </Button>
           </View>
+
+          {/* The live outcome of the remote print request, straight from the
+              queue document the desk drives. It replaces the old "sent!" alert,
+              which could only ever promise what it did not know. */}
+          {printJob && (
+            <View style={styles.printJobRow}>
+              <MaterialCommunityIcons
+                name={
+                  printJob.status === 'completed' ? 'check-circle'
+                  : printJob.status === 'failed' ? 'alert-circle'
+                  : 'clock-outline'
+                }
+                size={14}
+                color={
+                  printJob.status === 'completed' ? ramp.green700
+                  : printJob.status === 'failed' ? colors.danger
+                  : colors.textMuted
+                }
+              />
+              <Text
+                style={[
+                  styles.printJobText,
+                  printJob.status === 'completed' && styles.printJobTextDone,
+                  printJob.status === 'failed' && styles.printJobTextFailed,
+                ]}
+              >
+                {printJobLabel(printJob)}
+              </Text>
+            </View>
+          )}
 
           {/* Pricing & Deposit summary bar */}
           <View style={styles.priceSummaryBar}>
@@ -866,6 +948,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: spacing.xs,
+  },
+  printJobRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  printJobText: {
+    fontSize: fontSize.label,
+    color: colors.textMuted,
+    flexShrink: 1,
+  },
+  printJobTextDone: {
+    color: ramp.green700,
+  },
+  printJobTextFailed: {
+    color: colors.danger,
   },
   dateText: {
     color: colors.textMuted,
