@@ -128,6 +128,7 @@
   "ticketDetail": {
     "printSticker": "Print Sticker",
     "printStickerMsg": "Send a print command to the PC?",
+    "openReturnTicket": "Open the return ticket #{{number}}",
     "printFailed": "Failed to send print command.",
     "printJobPending": "Sent to the PC — waiting for it to pick it up…",
     "printJobProcessing": "The PC is printing the sticker…",

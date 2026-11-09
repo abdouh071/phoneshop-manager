@@ -128,6 +128,7 @@
   "ticketDetail": {
     "printSticker": "طباعة الملصق",
     "printStickerMsg": "إرسال أمر الطباعة إلى الحاسوب؟",
+    "openReturnTicket": "افتح تذكرة الإرجاع #{{number}}",
     "printFailed": "فشل إرسال أمر الطباعة.",
     "printJobPending": "أُرسل إلى الحاسوب — بانتظار أن يلتقطه…",
     "printJobProcessing": "الحاسوب يطبع الملصق الآن…",

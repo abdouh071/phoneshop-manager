@@ -42,6 +42,16 @@ export interface RepairTicket {
   lockType?: 'none' | 'pin' | 'pattern' | 'password';
   lockValue?: string;
   partsUsed?: { productId: string; name: string; cost: number; quantity: number }[];
+  // Return family: the desktop opens a separate return ticket when a customer
+  // brings a repaired device back, linking both directions. The phone reads
+  // these links to route the technician to the ticket that holds the work.
+  parentTicketId?: string;
+  parentTicketNumber?: string;
+  isReturn?: boolean;
+  activeReturnTicketId?: string;
+  activeReturnTicketNumber?: string;
+  returnReason?: string;
+  returnDate?: string;
 }
 
 export interface Customer {

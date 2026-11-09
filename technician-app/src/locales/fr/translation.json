@@ -128,6 +128,7 @@
   "ticketDetail": {
     "printSticker": "Imprimer l'étiquette",
     "printStickerMsg": "Envoyer une commande d'impression au PC ?",
+    "openReturnTicket": "Ouvrir le ticket de retour #{{number}}",
     "printFailed": "Échec de l'envoi de la commande d'impression.",
     "printJobPending": "Envoyé au PC — en attente de prise en charge…",
     "printJobProcessing": "Le PC imprime l'étiquette…",

@@ -80,6 +80,18 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
       Vibration.vibrate(40);
     }
   }, [printJob, t]);
+
+  // A returned ticket is the desktop's parent of a return: the actual work
+  // lives in the child ticket it links. When that child is open, the action
+  // bar routes the technician to it instead of reopening the parent — working
+  // the parent used to leave two open tickets for one device and settle the
+  // second cycle against cleared money.
+  const returnChild = useMemo(() => {
+    if (ticket.status !== 'returned' || !ticket.activeReturnTicketId) return undefined;
+    return tickets.find(
+      t => t.id === ticket.activeReturnTicketId && t.status !== 'completed' && t.status !== 'cancelled'
+    );
+  }, [ticket, tickets]);
   
   // Parts state
   const [parts, setParts] = useState<{ name: string; cost: number; productId?: string; quantity?: number }[]>(ticket.partsUsed || []);
@@ -648,7 +660,22 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
 
       {/* Action Buttons Bar at bottom */}
       <View style={styles.actionContainer}>
-        {(ticket.status === 'pending' || ticket.status === 'returned') && can.repair_status && (
+        {ticket.status === 'returned' && returnChild && can.repair_status && (
+          <Button
+            mode="contained"
+            onPress={() => navigation.navigate('TicketDetail', { ticket: returnChild })}
+            loading={loading}
+            disabled={loading}
+            style={[styles.actionButton, { backgroundColor: repairStatusColors.in_progress.ink }]}
+            contentStyle={styles.buttonContent}
+            labelStyle={styles.buttonLabel}
+            icon="arrow-right-bold"
+          >
+            {t('ticketDetail.openReturnTicket', 'Open the return ticket #{{number}}', { number: returnChild.ticketNumber })}
+          </Button>
+        )}
+
+        {(ticket.status === 'pending' || (ticket.status === 'returned' && !returnChild)) && can.repair_status && (
           <Button
             mode="contained"
             onPress={handleStartRepair}

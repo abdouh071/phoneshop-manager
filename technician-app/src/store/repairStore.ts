@@ -419,6 +419,39 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         if (customerId) {
           await customerService.recordCustomerSpending(customerId, finalPrice);
         }
+
+        // 4b. A return child settled here closes its parent, exactly as the
+        // desktop does when it settles the child — otherwise the parent stays
+        // "returned" until a desktop reload heals it, and the customer reads a
+        // closed repair as open.
+        if (ticket.parentTicketId) {
+          try {
+            const parentRef = doc(db, 'repairs', ticket.parentTicketId);
+            const parentSnap = await getDoc(parentRef);
+            const parent = parentSnap.exists() ? (parentSnap.data() as Record<string, unknown>) : null;
+            if (parent && parent.status === 'returned') {
+              await updateDoc(parentRef, buildStatusPatch(parent, {
+                status: 'completed',
+                timestamp: now,
+                actorId,
+                actorName,
+                notes: `Return ticket #${ticket.ticketNumber} settled on the technician app`,
+                additionalUpdates: { activeReturnTicketId: null, activeReturnTicketNumber: null },
+              }));
+              set(state => ({
+                tickets: state.tickets.map(t =>
+                  t.id === ticket.parentTicketId && t.status === 'returned'
+                    ? { ...t, status: 'completed' as const, completedAt: now, activeReturnTicketId: undefined, activeReturnTicketNumber: undefined }
+                    : t
+                ),
+              }));
+            }
+          } catch (parentErr) {
+            // The desktop's auto-heal closes the parent on its next load; the
+            // settle itself is already recorded.
+            console.warn('[RepairStore] Could not close parent of settled return:', parentErr);
+          }
+        }
       }
 
       // 5. Activity log
