@@ -220,13 +220,32 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       const currentSnap = await getDoc(docRef);
       const current = currentSnap.exists() ? (currentSnap.data() as Record<string, unknown>) : null;
 
+      // A returned ticket reopened is a new cycle: the first cycle's settlement
+      // must not leak into the second settle's math. The desktop clears the same
+      // fields on this transition; a stale paidAmount here could otherwise make
+      // the retry guard read a cycle-2 settle as "already recorded" and skip the
+      // money, or count only the old deposit against the new total.
+      const reopening = current?.status === 'returned' && status === 'in_progress';
+
       const patch = buildStatusPatch(current, {
         status,
         timestamp: now,
         actorId: changerId,
         actorName,
         notes: typeof additionalUpdates?.notes === 'string' ? additionalUpdates.notes : undefined,
-        additionalUpdates: (additionalUpdates as Record<string, unknown> | null) ?? null,
+        additionalUpdates: {
+          ...((additionalUpdates as Record<string, unknown> | null) ?? null),
+          ...(reopening
+            ? {
+                paymentStatus: null,
+                paidAmount: null,
+                handoverAmountPaid: null,
+                completedAt: null,
+                debtEntryId: null,
+                settlementNotes: null,
+              }
+            : {}),
+        },
       });
 
       await updateDoc(docRef, patch);

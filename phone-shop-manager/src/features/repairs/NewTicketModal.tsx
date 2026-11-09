@@ -540,52 +540,66 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
         const oldPrice = ticketToEdit.actualCost ?? ticketToEdit.estimatedCost ?? 0;
         ticketPayload.actualCost = newCost;
 
-        const totalPaid = ticketToEdit.paidAmount !== undefined ? ticketToEdit.paidAmount : newDeposit;
-        if (newCost <= totalPaid) {
-          ticketPayload.paymentStatus = 'paid';
-        } else if (totalPaid > 0) {
-          ticketPayload.paymentStatus = 'partial';
-        } else {
-          ticketPayload.paymentStatus = 'debt';
-        }
+        // A ticket reopened after a return has had its settlement cleared (the
+        // store empties paidAmount / handoverAmountPaid / debtEntryId /
+        // completedAt on returned -> in_progress) so the next settle starts a
+        // clean cycle. The edit must not resurrect debt math from those empty
+        // fields — it used to read them as "the customer never paid" and mint a
+        // fresh debt row on top of money already collected in the first cycle.
+        const settlementCleared =
+          ticketToEdit.paidAmount === undefined &&
+          ticketToEdit.handoverAmountPaid === undefined &&
+          ticketToEdit.debtEntryId === undefined &&
+          ticketToEdit.completedAt === undefined;
 
-        if (ticketToEdit.debtEntryId) {
-          try {
-            await useCustomerStore.getState().updateDebtAmount(
-              ticketToEdit.debtEntryId,
-              newCost,
-              `Repair #${ticketToEdit.ticketNumber} total adjusted to ${formatCurrency(newCost)}`
-            );
-          } catch (debtErr) {
-            console.error('Failed to update debt entry:', debtErr);
+        if (!settlementCleared) {
+          const totalPaid = ticketToEdit.paidAmount !== undefined ? ticketToEdit.paidAmount : newDeposit;
+          if (newCost <= totalPaid) {
+            ticketPayload.paymentStatus = 'paid';
+          } else if (totalPaid > 0) {
+            ticketPayload.paymentStatus = 'partial';
+          } else {
+            ticketPayload.paymentStatus = 'debt';
           }
-        } else if (newCost > totalPaid && ticketToEdit.customerId) {
-          // Gap 3B fix: If price was increased on a fully paid ticket, create a new debt entry for the unpaid remainder
-          try {
-            const unpaidRemainder = newCost - totalPaid;
-            const newDebt = await useCustomerStore.getState().addDebt({
-              customerId: ticketToEdit.customerId,
-              customerName: ticketToEdit.customerName,
-              customerPhone: ticketToEdit.customerPhone,
-              productOrService: `Repair #${ticketToEdit.ticketNumber} - ${ticketToEdit.deviceBrand} ${ticketToEdit.deviceModel}`,
-              totalAmount: newCost,
-              amountPaid: totalPaid,
-              date: new Date().toISOString(),
-              type: 'repair',
-              linkedTicketId: ticketToEdit.id,
-              linkedTicketNumber: ticketToEdit.ticketNumber,
-              notes: `Repair #${ticketToEdit.ticketNumber} price adjusted to ${formatCurrency(newCost)} (${formatCurrency(unpaidRemainder)} balance due)`,
-              payments: totalPaid > 0 ? [{
-                id: `pay_${Date.now()}`,
-                date: ticketToEdit.createdAt || new Date().toISOString(),
-                amount: totalPaid,
-                method: 'cash',
-                note: 'Prior payment before price edit',
-              }] : []
-            });
-            ticketPayload.debtEntryId = newDebt.id;
-          } catch (createDebtErr) {
-            console.error('Failed to create debt entry on repair price increase:', createDebtErr);
+
+          if (ticketToEdit.debtEntryId) {
+            try {
+              await useCustomerStore.getState().updateDebtAmount(
+                ticketToEdit.debtEntryId,
+                newCost,
+                `Repair #${ticketToEdit.ticketNumber} total adjusted to ${formatCurrency(newCost)}`
+              );
+            } catch (debtErr) {
+              console.error('Failed to update debt entry:', debtErr);
+            }
+          } else if (newCost > totalPaid && ticketToEdit.customerId) {
+            // Gap 3B fix: If price was increased on a fully paid ticket, create a new debt entry for the unpaid remainder
+            try {
+              const unpaidRemainder = newCost - totalPaid;
+              const newDebt = await useCustomerStore.getState().addDebt({
+                customerId: ticketToEdit.customerId,
+                customerName: ticketToEdit.customerName,
+                customerPhone: ticketToEdit.customerPhone,
+                productOrService: `Repair #${ticketToEdit.ticketNumber} - ${ticketToEdit.deviceBrand} ${ticketToEdit.deviceModel}`,
+                totalAmount: newCost,
+                amountPaid: totalPaid,
+                date: new Date().toISOString(),
+                type: 'repair',
+                linkedTicketId: ticketToEdit.id,
+                linkedTicketNumber: ticketToEdit.ticketNumber,
+                notes: `Repair #${ticketToEdit.ticketNumber} price adjusted to ${formatCurrency(newCost)} (${formatCurrency(unpaidRemainder)} balance due)`,
+                payments: totalPaid > 0 ? [{
+                  id: `pay_${Date.now()}`,
+                  date: ticketToEdit.createdAt || new Date().toISOString(),
+                  amount: totalPaid,
+                  method: 'cash',
+                  note: 'Prior payment before price edit',
+                }] : []
+              });
+              ticketPayload.debtEntryId = newDebt.id;
+            } catch (createDebtErr) {
+              console.error('Failed to create debt entry on repair price increase:', createDebtErr);
+            }
           }
         }
 
