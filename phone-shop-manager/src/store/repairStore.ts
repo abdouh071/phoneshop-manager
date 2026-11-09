@@ -108,24 +108,27 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       const deduped = deduplicateTickets(tickets);
 
       // Auto-heal historical tickets stuck in 'returned' whose return child was completed
-      const staleToHeal: string[] = [];
+      const staleToHeal: { id: string; completedAt: string }[] = [];
       const healedTickets = deduped.map(t => {
         if (t.status === 'returned' && !isTicketActiveReturnPending(t, deduped)) {
-          staleToHeal.push(t.id);
+          const completedAt = t.completedAt || new Date().toISOString();
+          staleToHeal.push({ id: t.id, completedAt });
           return {
             ...t,
             status: 'completed' as const,
-            completedAt: t.completedAt || new Date().toISOString(),
+            completedAt,
           };
         }
         return t;
       });
 
-      // Asynchronously persist to server so database is permanently clean
+      // Asynchronously persist to server so database is permanently clean. The
+      // completion moment rides along: a healed row without its completedAt used
+      // to lose the handover timestamp on every reload.
       if (staleToHeal.length > 0 && !staleHealRunThisSession) {
         staleHealRunThisSession = true;
-        staleToHeal.forEach(id => {
-          repairService.updateStatus(id, 'completed').catch(console.warn);
+        staleToHeal.forEach(({ id, completedAt }) => {
+          repairService.updateStatus(id, 'completed', undefined, { completedAt }).catch(console.warn);
         });
       }
 

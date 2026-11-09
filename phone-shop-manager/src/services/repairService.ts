@@ -396,7 +396,7 @@ export const repairService = {
     id: string,
     status: RepairTicket['status'],
     statusHistory?: RepairStatusHistoryEntry[],
-    options?: { throwOnError?: boolean }
+    options?: { throwOnError?: boolean; completedAt?: string }
   ): Promise<RepairTicket> => {
     const updatedAt = new Date().toISOString();
     const local = getLocalRepairs();
@@ -411,6 +411,7 @@ export const repairService = {
       updatedAt,
       ...(repairedAt ? { repairedAt } : {}),
       ...(statusHistory ? { statusHistory } : {}),
+      ...(options?.completedAt ? { completedAt: options.completedAt } : {}),
     };
 
     // Save to local storage immediately
@@ -429,7 +430,7 @@ export const repairService = {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       offlineQueue.enqueue({
         type: 'UPDATE_REPAIR_STATUS',
-        payload: { id, status, history: statusHistory }
+        payload: { id, status, history: statusHistory, completedAt: options?.completedAt }
       }).catch(console.warn);
       return updatedLocal;
     }
@@ -441,6 +442,7 @@ export const repairService = {
         const live = liveSnap.exists() ? (liveSnap.data() as Record<string, unknown>) : {};
         const updatePayload: Record<string, unknown> = { status, updatedAt };
         if (repairedAt) updatePayload.repairedAt = repairedAt;
+        if (options?.completedAt) updatePayload.completedAt = options.completedAt;
         let mergedHistory = statusHistory;
         if (statusHistory && statusHistory.length > 0) {
           // Append-only against the live document: a verbatim write used to
@@ -465,7 +467,7 @@ export const repairService = {
       console.warn('Failed to update status on Firestore, stored locally & queued for sync:', err);
       offlineQueue.enqueue({
         type: 'UPDATE_REPAIR_STATUS',
-        payload: { id, status, history: statusHistory }
+        payload: { id, status, history: statusHistory, completedAt: options?.completedAt }
       }).catch(console.warn);
 
       if (options?.throwOnError) {

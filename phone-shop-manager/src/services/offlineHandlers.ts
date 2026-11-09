@@ -46,9 +46,13 @@ export function registerOfflineHandlers(): void {
     id: string;
     status: RepairTicket['status'];
     history?: RepairStatusHistoryEntry[];
+    completedAt?: string;
   }) => {
     assertUploadedTicketId(payload.id, 'UPDATE_REPAIR_STATUS');
-    await repairService.updateStatus(payload.id, payload.status, payload.history, { throwOnError: true });
+    await repairService.updateStatus(payload.id, payload.status, payload.history, {
+      throwOnError: true,
+      completedAt: payload.completedAt,
+    });
   });
 
   /**
