@@ -385,6 +385,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         // Preserve existing assigned technician!
         if (ticket.assignedTechnician) {
           updates.assignedTechnician = ticket.assignedTechnician;
+          if (ticket.assignedTechnicianId) updates.assignedTechnicianId = ticket.assignedTechnicianId;
         }
 
         await updateDoc(docRef, updates);

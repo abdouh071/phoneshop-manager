@@ -26,6 +26,7 @@ export interface RepairTicket {
   createdAt: string;
   updatedAt: string;
   assignedTechnician?: string;
+  assignedTechnicianId?: string;
   technicianRemark?: string;
   remark?: string; // Technician findings / intake remark
   repairedAt?: string; // Timestamp when marked ready

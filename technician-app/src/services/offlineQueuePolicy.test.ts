@@ -170,6 +170,7 @@ test('a replayed status update keeps audit data another device added', () => {
   const serverDoc = {
     status: 'in_progress',
     assignedTechnician: 'Karim',
+    assignedTechnicianId: 'u_karim',
     remark: 'Screen backlight dead',
     statusHistory: [{ status: 'in_progress', at: 'earlier' }],
   };
@@ -186,6 +187,7 @@ test('a replayed status update keeps audit data another device added', () => {
   // The two destructive behaviours this replaces:
   assert.equal((patch.statusHistory as any[]).length, 2, 'history grows, never resets');
   assert.equal(patch.assignedTechnician, 'Karim', 'ownership is not cleared');
+  assert.equal(patch.assignedTechnicianId, 'u_karim', 'the owner id travels with the name');
   assert.equal('remark' in patch, false, 'a patch that says nothing about the remark leaves it alone');
   assert.equal(patch.repairedAt, iso, 'ready stamps repairedAt');
 });
@@ -196,8 +198,21 @@ test('an empty remark from a stale queue entry cannot erase the real one', () =>
 });
 
 test('a ready transition with no owner on the doc claims it for the actor', () => {
-  const patch = buildStatusPatch(null, { status: 'ready', timestamp: iso, actorName: 'Yacine' });
+  const patch = buildStatusPatch(null, { status: 'ready', timestamp: iso, actorId: 'u_yacine', actorName: 'Yacine' });
   assert.equal(patch.assignedTechnician, 'Yacine');
+  assert.equal(patch.assignedTechnicianId, 'u_yacine', 'the claim carries the actor id, not just the name');
+});
+
+test('a claim with no actor id stamps a null id rather than a mismatched one', () => {
+  const patch = buildStatusPatch(null, { status: 'in_progress', timestamp: iso, actorName: 'Yacine' });
+  assert.equal(patch.assignedTechnician, 'Yacine');
+  assert.equal(patch.assignedTechnicianId, null);
+});
+
+test('a legacy name-only owner is preserved without inventing an id', () => {
+  const patch = buildStatusPatch({ assignedTechnician: 'Karim' }, { status: 'ready', timestamp: iso, actorId: 'u1', actorName: 'Yacine' });
+  assert.equal(patch.assignedTechnician, 'Karim');
+  assert.equal(patch.assignedTechnicianId, null, 'no id is fabricated for a legacy owner');
 });
 
 test('a completed transition stamps completedAt but not repairedAt', () => {

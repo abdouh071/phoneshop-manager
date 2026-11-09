@@ -291,11 +291,17 @@ export const buildStatusPatch = (
     ),
   };
 
-  // Never let a stale queue entry clear who owns the repair.
+  // Never let a stale queue entry clear who owns the repair. The id travels with
+  // the name so a claim or a preserved owner is never left name-only.
   const incomingTech = patch.assignedTechnician;
   if (incomingTech === undefined || incomingTech === null || incomingTech === '') {
-    if (current?.assignedTechnician) patch.assignedTechnician = current.assignedTechnician;
-    else if (input.status === 'in_progress' || input.status === 'ready') patch.assignedTechnician = input.actorName || null;
+    if (current?.assignedTechnician) {
+      patch.assignedTechnician = current.assignedTechnician;
+      patch.assignedTechnicianId = current.assignedTechnicianId ?? null;
+    } else if (input.status === 'in_progress' || input.status === 'ready') {
+      patch.assignedTechnician = input.actorName || null;
+      patch.assignedTechnicianId = input.actorId || null;
+    }
   }
 
   // A technician's written remark must not be replaced by an empty one.

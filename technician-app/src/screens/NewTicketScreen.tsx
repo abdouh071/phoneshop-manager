@@ -106,6 +106,9 @@ export const NewTicketScreen = ({ navigation }: any) => {
         lockType,
         lockValue: lockType === 'none' ? undefined : lockValue,
         assignedTechnician: assignedTechnician || undefined,
+        assignedTechnicianId: assignedTechnician
+          ? staff.find(s => s.role === 'repair_agent' && s.name === assignedTechnician)?.id
+          : undefined,
         estimatedCost: estimatedCost ? parseFloat(estimatedCost) : 0,
         depositAmount: depositAmount ? parseFloat(depositAmount) : 0,
         createdById: user?.id,
