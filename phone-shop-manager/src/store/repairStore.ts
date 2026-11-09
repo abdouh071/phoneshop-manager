@@ -276,9 +276,13 @@ export const useRepairStore = create<RepairState>((set, get) => ({
             get().updateStatus(parent.id, 'completed').catch(console.error);
           }
         } else if (ticket.activeReturnTicketId) {
+          // Completing the parent means the customer took the device back: the
+          // open return ticket was never worked and closes as cancelled, not as
+          // a re-repair that never happened. A child already `ready` carries
+          // real work and is left for the counter to settle.
           const child = get().tickets.find(t => t.id === ticket.activeReturnTicketId);
-          if (child && child.status !== 'completed') {
-            get().updateStatus(child.id, 'completed').catch(console.error);
+          if (child && (child.status === 'pending' || child.status === 'in_progress')) {
+            get().updateStatus(child.id, 'cancelled').catch(console.error);
           }
         }
       }
@@ -429,11 +433,15 @@ export const useRepairStore = create<RepairState>((set, get) => ({
             }).catch(console.error);
           }
         } else if (existing.activeReturnTicketId) {
+          // Completing the parent means the customer took the device back: the
+          // open return ticket was never worked and closes as cancelled, not as
+          // a re-repair that never happened. A child already `ready` carries
+          // real work and is left for the counter to settle.
           const child = get().tickets.find(t => t.id === existing.activeReturnTicketId);
-          if (child && child.status !== 'completed') {
+          if (child && (child.status === 'pending' || child.status === 'in_progress')) {
             get().updateTicket(child.id, {
-              status: 'completed',
-              completedAt: updates.completedAt || new Date().toISOString(),
+              status: 'cancelled',
+              updatedAt: new Date().toISOString(),
             }).catch(console.error);
           }
         }

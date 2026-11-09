@@ -347,10 +347,20 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
         }
       } else if (ticket.activeReturnTicketId) {
         const child = storeTickets.find(t => t.id === ticket.activeReturnTicketId);
-        if (child && child.status !== 'completed') {
+        // Settling the parent means the customer took the device back. The
+        // open return ticket was never worked, so it closes as cancelled —
+        // force-completing it used to record a re-repair that never happened.
+        // A child that already reached `ready` carries real work and is left
+        // for the counter to settle.
+        if (child && (child.status === 'pending' || child.status === 'in_progress')) {
           updateTicket(child.id, {
-            status: 'completed',
-            completedAt: new Date().toISOString(),
+            status: 'cancelled',
+            updatedAt: new Date().toISOString(),
+          }).then(() => {
+            toast.info(
+              'Return ticket cancelled',
+              `Return ticket #${child.ticketNumber} was cancelled — the customer took the device back.`
+            );
           }).catch(console.error);
         }
       }
