@@ -437,60 +437,87 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
       return;
     }
     setIsSubmitting(true);
-    
-    const parsedCost = parseFloat(returnForm.estimatedCost) || 0;
-    const isWarranty = !returnForm.chargeCustomer;
-    
-    // Create the return child ticket linked to original parent
-    const childTicket = await createTicket({
-      customerName: ticket.customerName,
-      customerPhone: ticket.customerPhone,
-      customerId: ticket.customerId,
-      deviceBrand: ticket.deviceBrand,
-      deviceModel: ticket.deviceModel,
-      issueDescription: `[RETURN of #${ticket.ticketNumber}] ${returnForm.reason.trim()}`,
-      estimatedCost: returnForm.chargeCustomer ? parsedCost : 0,
-      actualCost: isWarranty ? 0 : undefined,
-      depositAmount: 0,
-      status: 'pending',
-      parentTicketId: ticket.parentTicketId || ticket.id,
-      parentTicketNumber: ticket.parentTicketNumber || ticket.ticketNumber,
-      isReturn: true,
-      paymentStatus: isWarranty ? 'paid' : 'pending',
-      lockType: ticket.lockType,
-      lockValue: ticket.lockValue,
-      estimatedCompletionDate: returnForm.pickupDate || undefined,
-    });
+    try {
+      const parsedCost = parseFloat(returnForm.estimatedCost) || 0;
+      const isWarranty = !returnForm.chargeCustomer;
 
-    const newReturnRecord = {
-      id: `ret_${Date.now()}`,
-      returnDate: new Date().toISOString(),
-      reason: returnForm.reason.trim(),
-      returnTicketId: childTicket?.id,
-      returnTicketNumber: childTicket?.ticketNumber,
-      isWarranty,
-      estimatedCost: returnForm.chargeCustomer ? parsedCost : 0,
-      status: 'pending' as const,
-    };
+      // Create the return child ticket linked to original parent
+      const childTicket = await createTicket({
+        customerName: ticket.customerName,
+        customerPhone: ticket.customerPhone,
+        customerId: ticket.customerId,
+        deviceBrand: ticket.deviceBrand,
+        deviceModel: ticket.deviceModel,
+        issueDescription: `[RETURN of #${ticket.ticketNumber}] ${returnForm.reason.trim()}`,
+        estimatedCost: returnForm.chargeCustomer ? parsedCost : 0,
+        actualCost: isWarranty ? 0 : undefined,
+        depositAmount: 0,
+        status: 'pending',
+        parentTicketId: ticket.parentTicketId || ticket.id,
+        parentTicketNumber: ticket.parentTicketNumber || ticket.ticketNumber,
+        isReturn: true,
+        paymentStatus: isWarranty ? 'paid' : 'pending',
+        lockType: ticket.lockType,
+        lockValue: ticket.lockValue,
+        estimatedCompletionDate: returnForm.pickupDate || undefined,
+      });
 
-    const existingRecords = ticket.returnRecords || [];
+      // A return without its child ticket is a device with no work ticket. The
+      // original must stay untouched while the child does not exist — marking
+      // first used to strand the device in `returned` with a record pointing at
+      // nothing when the create failed offline or was refused as a duplicate.
+      if (!childTicket) {
+        toast.error(
+          t('ticket.returnFailedTitle', 'Return not recorded'),
+          t('ticket.returnFailedBody', 'The return ticket could not be created, so the original ticket was left untouched. Check the connection and try again.')
+        );
+        return;
+      }
 
-    await updateTicket(ticket.id, {
-      returnReason: returnForm.reason.trim(),
-      returnDate: new Date().toISOString(),
-      activeReturnTicketId: childTicket?.id,
-      activeReturnTicketNumber: childTicket?.ticketNumber,
-      returnRecords: [...existingRecords, newReturnRecord],
-    });
-    await updateStatus(ticket.id, 'returned');
-    
-    toast.success(
-      t('ticket.ticketReturned'), 
-      childTicket ? `Return Ticket #${childTicket.ticketNumber} created and linked to #${ticket.ticketNumber}` : t('ticket.ticketReturnedDesc', { ticketNumber: ticket.ticketNumber })
-    );
-    setIsSubmitting(false);
-    setShowReturnPrompt(false);
-    setReturnForm({ reason: '', estimatedCost: '', pickupDate: '', chargeCustomer: false });
+      const newReturnRecord = {
+        id: `ret_${Date.now()}`,
+        returnDate: new Date().toISOString(),
+        reason: returnForm.reason.trim(),
+        returnTicketId: childTicket.id,
+        returnTicketNumber: childTicket.ticketNumber,
+        isWarranty,
+        estimatedCost: returnForm.chargeCustomer ? parsedCost : 0,
+        status: 'pending' as const,
+      };
+
+      try {
+        await updateTicket(ticket.id, {
+          returnReason: returnForm.reason.trim(),
+          returnDate: new Date().toISOString(),
+          activeReturnTicketId: childTicket.id,
+          activeReturnTicketNumber: childTicket.ticketNumber,
+          returnRecords: [...(ticket.returnRecords || []), newReturnRecord],
+        });
+        await updateStatus(ticket.id, 'returned');
+      } catch (parentErr) {
+        console.error('Failed to mark parent returned after creating return child:', parentErr);
+        toast.error(
+          t('ticket.returnChildOnlyTitle', 'Return ticket created'),
+          t('ticket.returnChildOnlyBody', 'Return ticket #{{number}} was created, but the original could not be marked returned. Open the original ticket and mark it returned.', { number: childTicket.ticketNumber })
+        );
+        return;
+      }
+
+      toast.success(
+        t('ticket.ticketReturned'),
+        t('ticket.ticketReturnedWithNumber', 'Return Ticket #{{number}} created and linked to #{{parent}}.', {
+          number: childTicket.ticketNumber,
+          parent: ticket.ticketNumber,
+        })
+      );
+      setShowReturnPrompt(false);
+      setReturnForm({ reason: '', estimatedCost: '', pickupDate: '', chargeCustomer: false });
+    } catch (err) {
+      console.error('Failed to record return:', err);
+      toast.error(t('ticket.ticketReturned'), errorMessage(err) || 'Could not record the return.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const isTerminal = ticket.status === 'completed' || ticket.status === 'cancelled';
