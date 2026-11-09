@@ -25,6 +25,9 @@ dist-electron/
 print-server/.env
 print-server/node_modules/
 
+# Live-data scratch dumps must never be committed again
+scratch/*.json
+
 # Large APK binaries (distribute via GitHub Releases)
 *.apk
 public/downloads/*.apk
