@@ -239,6 +239,7 @@ export interface RepairTicket {
   activeReturnTicketNumber?: string; // Human-readable ticket number of active child return ticket
   assignedTechnician?: string;
   assignedTechnicianId?: string;
+  lastPriceEditAt?: string; // Stamped when the price changes after completion; flags the payouts row
   // Device Lock / Passcode
   lockType?: 'pin' | 'pattern' | 'password' | 'none';
   lockValue?: string; // e.g. "1234" or "1-2-5-8-9"

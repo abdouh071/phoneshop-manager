@@ -508,6 +508,14 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
       }
 
       const assignedTechnician = form.assignedTechnician.trim() || ticketToEdit?.assignedTechnician || undefined;
+      // Keep the id paired with the name. The modal has no technician picker, so an
+      // edit keeps the ticket's own id; a name carried in from a draft resolves
+      // against the staff list instead of stranding a name-only assignment.
+      const assignedTechnicianId = !assignedTechnician
+        ? undefined
+        : assignedTechnician === ticketToEdit?.assignedTechnician
+          ? ticketToEdit?.assignedTechnicianId
+          : useAuthStore.getState().staff.find(s => s.role === 'repair_agent' && s.name === assignedTechnician)?.id;
       const newCost = Number(form.estimatedCost) || 0;
       const newDeposit = form.depositAmount ? Number(form.depositAmount) : 0;
       const isCompleted = ticketToEdit?.status === 'completed' || ticketToEdit?.actualCost !== undefined;
@@ -530,6 +538,7 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
             })()
           : undefined,
         assignedTechnician,
+        assignedTechnicianId,
         lockType: lockType !== 'none' && lockValue.trim() ? lockType : undefined,
         lockValue: lockType !== 'none' && lockValue.trim() ? lockValue.trim() : undefined,
         status: ticketToEdit?.status || (autoStart ? 'in_progress' : 'pending'),
@@ -609,6 +618,9 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
         }
 
         if (oldPrice !== newCost) {
+          // Commission is derived live from actualCost, so this edit just changed a
+          // past payout — stamp it so the settlements row can say the number moved.
+          ticketPayload.lastPriceEditAt = new Date().toISOString();
           activityLogService.log(
             'repairs',
             `Repair ticket #${ticketToEdit.ticketNumber} price edited on completed ticket`,

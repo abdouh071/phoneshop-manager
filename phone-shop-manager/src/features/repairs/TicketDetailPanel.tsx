@@ -127,11 +127,29 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
     return staff.filter(s => s.role === 'repair_agent' && s.status !== 'revoked');
   }, [staff]);
 
-  const handleAssignTechnician = async (techName: string) => {
+  const handleAssignTechnician = async (techId: string) => {
     if (!ticket) return;
+    const tech = technicians.find(s => s.id === techId);
+    if (!tech) return;
+    if (ticket.assignedTechnicianId === tech.id && ticket.assignedTechnician === tech.name) {
+      setIsAssigningTech(false);
+      return;
+    }
     try {
-      await updateTicket(ticket.id, { assignedTechnician: techName });
-      toast.success(t('ticket.technicianAssigned'), t('ticket.technicianAssignedDesc', { name: techName }));
+      await updateTicket(ticket.id, { assignedTechnician: tech.name, assignedTechnicianId: tech.id });
+      activityLogService.log(
+        'repairs',
+        `Repair ticket #${ticket.ticketNumber} assigned to ${tech.name}`,
+        {
+          detail: ticket.assignedTechnician
+            ? `Technician changed from ${ticket.assignedTechnician} to ${tech.name}.`
+            : `Technician set to ${tech.name}.`,
+          entityId: ticket.id,
+          userName: user?.name || 'Staff',
+          userId: user?.id,
+        }
+      ).catch(console.error);
+      toast.success(t('ticket.technicianAssigned'), t('ticket.technicianAssignedDesc', { name: tech.name }));
       setIsAssigningTech(false);
     } catch {
       toast.error(t('error.failedToAssign'));
@@ -995,8 +1013,8 @@ export const TicketDetailPanel: React.FC<TicketDetailPanelProps> = ({
                           autoFocus
                         >
                           <option value="" disabled>{t('ticket.selectTechnician')}</option>
-                          {technicians.map(t => (
-                            <option key={t.id} value={t.name}>{t.name} ({t.email})</option>
+                          {technicians.map(tech => (
+                            <option key={tech.id} value={tech.id}>{tech.name} ({tech.email})</option>
                           ))}
                         </select>
                         <button

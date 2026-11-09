@@ -672,6 +672,7 @@ export const repairService = {
           lockType: undefined,
           lockValue: undefined,
           assignedTechnician: undefined,
+          assignedTechnicianId: undefined,
           createdById: undefined,
           createdByName: undefined,
           partsUsed: raw.partsUsed?.map(p => ({
@@ -721,6 +722,7 @@ export const repairService = {
         lockType: undefined,
         lockValue: undefined,
         assignedTechnician: undefined,
+        assignedTechnicianId: undefined,
         createdById: undefined,
         createdByName: undefined,
         partsUsed: raw.partsUsed?.map(p => ({ ...p, cost: 0 })),

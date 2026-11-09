@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useFormatCurrency } from '../../utils/formatCurrency';
 import { normalizeArabic } from '../../utils/normalizeText';
+import { computeTicketCommission } from '../../utils/technicianCommission';
 import type { RepairTicket } from '../../types';
 import styles from './TechnicianSettlements.module.css';
 
@@ -35,6 +36,9 @@ interface TechStats {
   readyCount: number;
   completedCount: number;
   commissionRate: number;
+  warrantyCount: number;
+  warrantyPartsCost: number;
+  estimatedRevenue: number;
 }
 
 interface DayBreakdown {
@@ -337,30 +341,31 @@ export const TechnicianSettlementsTab: React.FC = () => {
     });
 
     return Object.entries(grouped).map(([name, tix]) => {
+      const commissionRate = settings.getTechnicianRate(name);
       let grossRevenue = 0;
       let totalPartsCost = 0;
+      let techProfit = 0;
       let readyCount = 0;
       let completedCount = 0;
+      let warrantyCount = 0;
+      let warrantyPartsCost = 0;
+      let estimatedRevenue = 0;
 
       tix.forEach(t => {
-        const rev = parseFloat(String(t.actualCost ?? t.estimatedCost ?? 0)) || 0;
-        grossRevenue += rev;
-
-        if (t.partsUsed && Array.isArray(t.partsUsed)) {
-          t.partsUsed.forEach((p) => {
-            const cost = parseFloat(String(p.cost)) || 0;
-            const qty = p.quantity || 1;
-            totalPartsCost += cost * qty;
-          });
+        const c = computeTicketCommission(t, commissionRate);
+        grossRevenue += c.revenue;
+        totalPartsCost += c.partsCost;
+        techProfit += c.techCut;
+        if (c.isWarranty) {
+          warrantyCount += 1;
+          warrantyPartsCost += c.partsCost;
         }
-
+        if (c.isEstimate) estimatedRevenue += c.revenue;
         if (t.status === 'ready') readyCount += 1;
         if (t.status === 'completed') completedCount += 1;
       });
 
       const netRevenue = grossRevenue - totalPartsCost;
-      const commissionRate = settings.getTechnicianRate(name);
-      const techProfit = netRevenue * (commissionRate / 100);
 
       return {
         name,
@@ -372,6 +377,9 @@ export const TechnicianSettlementsTab: React.FC = () => {
         readyCount,
         completedCount,
         commissionRate,
+        warrantyCount,
+        warrantyPartsCost,
+        estimatedRevenue,
       };
     }).sort((a, b) => b.netRevenue - a.netRevenue);
   }, [qualifyingTickets, availableTechnicians, settings]);
@@ -383,26 +391,21 @@ export const TechnicianSettlementsTab: React.FC = () => {
     let readyCount = 0;
     let completedCount = 0;
     let totalTechProfit = 0;
+    let warrantyCount = 0;
+    let warrantyPartsCost = 0;
+    let estimatedGross = 0;
 
     filteredTickets.forEach(t => {
-      const rev = parseFloat(String(t.actualCost ?? t.estimatedCost ?? 0)) || 0;
-      gross += rev;
-
-      let ticketParts = 0;
-      if (t.partsUsed && Array.isArray(t.partsUsed)) {
-        t.partsUsed.forEach((p) => {
-          const cost = parseFloat(String(p.cost)) || 0;
-          const qty = p.quantity || 1;
-          ticketParts += cost * qty;
-        });
-      }
-      parts += ticketParts;
-
-      const net = rev - ticketParts;
       const techName = t.assignedTechnician?.trim() || 'Unassigned';
-      const techRate = settings.getTechnicianRate(techName);
-      totalTechProfit += net * (techRate / 100);
-
+      const c = computeTicketCommission(t, settings.getTechnicianRate(techName));
+      gross += c.revenue;
+      parts += c.partsCost;
+      totalTechProfit += c.techCut;
+      if (c.isWarranty) {
+        warrantyCount += 1;
+        warrantyPartsCost += c.partsCost;
+      }
+      if (c.isEstimate) estimatedGross += c.revenue;
       if (t.status === 'ready') readyCount += 1;
       if (t.status === 'completed') completedCount += 1;
     });
@@ -421,6 +424,9 @@ export const TechnicianSettlementsTab: React.FC = () => {
       totalCount: filteredTickets.length,
       readyCount,
       completedCount,
+      warrantyCount,
+      warrantyPartsCost,
+      estimatedGross,
     };
   }, [filteredTickets, settings]);
 
@@ -455,19 +461,11 @@ export const TechnicianSettlementsTab: React.FC = () => {
       let dayTechProfit = 0;
 
       dayTickets.forEach(t => {
-        const rev = parseFloat(String(t.actualCost ?? t.estimatedCost ?? 0)) || 0;
-        dayGross += rev;
-        let partsCost = 0;
-        if (t.partsUsed && Array.isArray(t.partsUsed)) {
-          t.partsUsed.forEach((p) => {
-            partsCost += (parseFloat(String(p.cost)) || 0) * (p.quantity || 1);
-          });
-        }
-        dayParts += partsCost;
-        const net = rev - partsCost;
         const techName = t.assignedTechnician?.trim() || 'Unassigned';
-        const rate = settings.getTechnicianRate(techName);
-        dayTechProfit += net * (rate / 100);
+        const c = computeTicketCommission(t, settings.getTechnicianRate(techName));
+        dayGross += c.revenue;
+        dayParts += c.partsCost;
+        dayTechProfit += c.techCut;
       });
 
       const dayNet = dayGross - dayParts;
@@ -787,7 +785,11 @@ export const TechnicianSettlementsTab: React.FC = () => {
           <div className={[styles.summaryValue, styles.summaryValueGross].join(' ')}>
             {fmt(totals.gross)}
           </div>
-          <div className={styles.summarySub}>Total client repair charges</div>
+          <div className={styles.summarySub}>
+            {totals.estimatedGross > 0
+              ? `Includes ${fmt(totals.estimatedGross)} not yet billed (estimates)`
+              : 'Total client repair charges'}
+          </div>
         </div>
 
         {/* Card 3: Spare Parts Cost Deduction */}
@@ -831,6 +833,16 @@ export const TechnicianSettlementsTab: React.FC = () => {
         </div>
       </div>
 
+      {totals.warrantyCount > 0 && (
+        <div className={styles.warrantyBanner}>
+          <span className={styles.warrantyBannerIcon}>🛡️</span>
+          <span>
+            <strong>{totals.warrantyCount}</strong> warranty repair{totals.warrantyCount !== 1 ? 's' : ''} in this period ·{' '}
+            <strong>{fmt(totals.warrantyPartsCost)}</strong> in parts absorbed by the shop · no technician commission charged.
+          </span>
+        </div>
+      )}
+
       {/* ── Per-Technician Breakdown Cards (When "All Technicians" selected) ── */}
       {selectedTech === 'all' && techData.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -866,7 +878,12 @@ export const TechnicianSettlementsTab: React.FC = () => {
 
                 <div className={styles.techStats}>
                   <div className={styles.techStatRow}>
-                    <span className={styles.techStatLabel}>Gross Fees</span>
+                    <span className={styles.techStatLabel}>
+                      Gross Fees
+                      {tech.estimatedRevenue > 0 && (
+                        <span className={styles.estimateHint}> · {fmt(tech.estimatedRevenue)} est.</span>
+                      )}
+                    </span>
                     <span className={styles.techStatValue} style={{ color: '#2563eb' }}>
                       {fmt(tech.grossRevenue)}
                     </span>
@@ -883,6 +900,15 @@ export const TechnicianSettlementsTab: React.FC = () => {
                       {fmt(tech.netRevenue)}
                     </span>
                   </div>
+
+                  {tech.warrantyCount > 0 && (
+                    <div className={styles.techStatRow}>
+                      <span className={styles.techStatLabel}>🛡️ Warranty (no cut)</span>
+                      <span className={styles.techStatValue} style={{ color: '#b45309' }}>
+                        {tech.warrantyCount} · -{fmt(tech.warrantyPartsCost)}
+                      </span>
+                    </div>
+                  )}
 
                   {/* Individual Commission (%) Editor */}
                   <div className={styles.techCommissionRow}>
@@ -985,23 +1011,19 @@ export const TechnicianSettlementsTab: React.FC = () => {
         ) : (
           <div className={styles.ticketList}>
             {filteredTickets.map(t => {
-              const rev = parseFloat(String(t.actualCost ?? t.estimatedCost ?? 0)) || 0;
-              let partsCost = 0;
+              const techName = t.assignedTechnician?.trim() || 'Unassigned';
+              const techRate = settings.getTechnicianRate(techName);
+              const { revenue: rev, partsCost, net, isWarranty, isEstimate, techCut } = computeTicketCommission(t, techRate);
               const partsList: { name: string; cost: number; qty: number }[] = [];
 
               if (t.partsUsed && Array.isArray(t.partsUsed)) {
                 t.partsUsed.forEach((p) => {
                   const c = parseFloat(String(p.cost)) || 0;
                   const q = p.quantity || 1;
-                  partsCost += c * q;
                   partsList.push({ name: p.name || 'Part', cost: c * q, qty: q });
                 });
               }
 
-              const net = rev - partsCost;
-              const techName = t.assignedTechnician?.trim() || 'Unassigned';
-              const techRate = settings.getTechnicianRate(techName);
-              const techCut = net * (techRate / 100);
               const isReadyOnly = t.status === 'ready';
               const dateTimestamp = t.repairedAt || t.completedAt || t.updatedAt;
               const formattedDate = dateTimestamp
@@ -1033,6 +1055,17 @@ export const TechnicianSettlementsTab: React.FC = () => {
                       <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
                         {isReadyOnly ? 'Repaired on: ' : 'Handed over: '} {formattedDate}
                       </div>
+                      {t.lastPriceEditAt && (
+                        <span className={styles.priceEditedBadge}>
+                          Price edited after completion ·{' '}
+                          {new Date(t.lastPriceEditAt).toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -1062,6 +1095,7 @@ export const TechnicianSettlementsTab: React.FC = () => {
                   <div className={styles.ticketRight}>
                     <span className={styles.ticketGrossText}>
                       Gross: {fmt(rev)}
+                      {isEstimate && <span className={styles.estimateHint}> · est.</span>}
                     </span>
                     {partsCost > 0 && (
                       <span style={{ fontSize: '12px', color: '#ef4444', fontWeight: 600 }}>
@@ -1071,9 +1105,13 @@ export const TechnicianSettlementsTab: React.FC = () => {
                     <span className={styles.ticketNetText}>
                       Net: {fmt(net)}
                     </span>
-                    <span className={styles.ticketCutBadge}>
-                      Cut ({techRate}%): +{fmt(techCut)}
-                    </span>
+                    {isWarranty ? (
+                      <span className={styles.warrantyBadge}>Warranty · no commission</span>
+                    ) : (
+                      <span className={styles.ticketCutBadge}>
+                        Cut ({techRate}%): +{fmt(techCut)}
+                      </span>
+                    )}
                   </div>
                 </div>
               );
