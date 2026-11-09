@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, KeyboardAvoidingView, Platform, Alert, ScrollView, TouchableOpacity, Image } from 'react-native';
-import { TextInput, Button, Title, Text, useTheme, Card, Divider, Switch } from 'react-native-paper';
+import { Text, useTheme, Card, Divider, Switch } from 'react-native-paper';
 import { useSettingsStore } from '../store/settingsStore';
 import { useAuthStore } from '../store/authStore';
 import { useLockStore } from '../store/lockStore';
@@ -20,12 +20,14 @@ const APP_VERSION = appConfig?.expo?.version ?? '—';
 
 export const SettingsScreen = ({ navigation }: any) => {
   const theme = useTheme();
-  const { profitPercentage, personalPercentage, shopPercentage, saveProfitPercentage, followShopDefault } = useSettingsStore();
+  const { profitPercentage, shopPercentage, technicianRates } = useSettingsStore();
   const { user, logout } = useAuthStore();
   const { t } = useTranslation();
-  
-  const [localPercentage, setLocalPercentage] = useState(profitPercentage);
-  const [saving, setSaving] = useState(false);
+
+  // The payout tab pays the admin's per-name rate when one exists, else the shop
+  // default — this phone only shows that number, it can no longer invent its own.
+  const hasAdminRate =
+    typeof user?.name === 'string' && typeof technicianRates[user.name] === 'number';
 
   const lockRequired = useLockStore((state) => state.required);
   const lockCanEnable = useLockStore((state) => state.canEnable);
@@ -40,38 +42,7 @@ export const SettingsScreen = ({ navigation }: any) => {
     void refreshLockAvailability();
   }, [refreshLockAvailability]);
 
-  // The store may resolve the personal number from the profile after this screen
-  // mounted; re-seed the field so the input is never left showing a stale default.
-  useEffect(() => {
-    setLocalPercentage(profitPercentage);
-  }, [profitPercentage]);
-
   const [currentLang, setCurrentLang] = useState(i18next.language || 'en');
-
-  const handleSave = async () => {
-    const parsed = parseFloat(localPercentage);
-    if (isNaN(parsed) || parsed < 0 || parsed > 100) {
-      Alert.alert(t('error.invalidInput', 'Invalid Input'), t('settings.invalidPercentage', 'Please enter a valid percentage between 0 and 100.'));
-      return;
-    }
-    setSaving(true);
-    const ok = await saveProfitPercentage(localPercentage);
-    setSaving(false);
-    if (!ok) {
-      Alert.alert(
-        t('common.error', 'Error'),
-        t('settings.saveFailed', 'Saved on this device, but it could not be stored on your profile. It will not follow you to another phone.')
-      );
-      return;
-    }
-    Alert.alert(t('common.success', 'Success'), t('settings.saved', 'Settings saved successfully!'));
-  };
-
-  const handleFollowShop = async () => {
-    setSaving(true);
-    await followShopDefault();
-    setSaving(false);
-  };
 
   // Turning it on makes the phone prove it answers first, so the switch can never
   // be the thing that locks a technician out of their own till.
@@ -168,30 +139,21 @@ export const SettingsScreen = ({ navigation }: any) => {
               <MaterialCommunityIcons name="cash-multiple" size={24} color="#64748b" />
               <Text style={styles.prefLabel}>{t('settings.profitCalc', 'Profit Calculation')}</Text>
             </View>
-            <TextInput
-              label={t('settings.profitPercentage', 'Profit Percentage (%)')}
-              value={localPercentage}
-              onChangeText={setLocalPercentage}
-              mode="outlined"
-              keyboardType="numeric"
-              style={styles.input}
-              right={<TextInput.Affix text="%" />}
-            />
-            {shopPercentage !== null && (
-              <Text style={styles.shopHint}>
-                {personalPercentage
-                  ? t('settings.usingOwn', { shop: shopPercentage, own: personalPercentage })
-                  : t('settings.usingShop', { shop: shopPercentage })}
+            {/* Read-only: the number the counter's payout tab actually pays. The
+                technician cannot invent their own rate on this phone anymore —
+                two different truths used to leave them expecting a number the
+                owner never paid. */}
+            <View style={styles.profitDisplayRow}>
+              <Text style={styles.profitDisplayValue}>{profitPercentage}%</Text>
+              <Text style={styles.profitDisplayLabel}>
+                {t('settings.profitPercentage', 'Profit Percentage (%)')}
               </Text>
-            )}
-            <Button mode="contained" onPress={handleSave} loading={saving} disabled={saving} style={styles.saveButton}>
-              {t('settings.saveSettings', 'Save Settings')}
-            </Button>
-            {personalPercentage && (
-              <Button mode="text" onPress={handleFollowShop} disabled={saving} style={styles.followButton}>
-                {t('settings.followShop', 'Use the shop default instead')}
-              </Button>
-            )}
+            </View>
+            <Text style={styles.shopHint}>
+              {hasAdminRate
+                ? t('settings.profitSetByAdmin', 'This rate is set by the administrator — ask them to change it.')
+                : t('settings.usingShop', { shop: shopPercentage ?? '—' })}
+            </Text>
           </Card.Content>
         </Card>
 
@@ -357,15 +319,20 @@ const styles = StyleSheet.create({
   divider: {
     marginVertical: 16,
   },
-  input: {
-    backgroundColor: '#ffffff',
-    marginBottom: 16,
+  profitDisplayRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginBottom: 8,
   },
-  saveButton: {
-    borderRadius: 8,
+  profitDisplayValue: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: colors.textPrimary,
   },
-  followButton: {
-    marginTop: 4,
+  profitDisplayLabel: {
+    fontSize: 14,
+    color: '#64748b',
   },
   shopHint: {
     fontSize: 12,
