@@ -707,9 +707,14 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       remark: customUpdates.remark !== undefined ? customUpdates.remark : fusedRemark,
       settlementNotes: customUpdates.settlementNotes !== undefined ? customUpdates.settlementNotes : fusedSettlementNotes,
       statusHistory: mergedHistory.length > 0 ? mergedHistory : undefined,
-      depositAmount: Math.max(primary.depositAmount || 0, secondary.depositAmount || 0) || undefined,
-      paidAmount: Math.max(primary.paidAmount || 0, secondary.paidAmount || 0) || undefined,
-      handoverAmountPaid: Math.max(primary.handoverAmountPaid || 0, secondary.handoverAmountPaid || 0) || undefined,
+      // Money is additive, never a maximum: a duplicate pair that both took
+      // deposits has been paid twice, and taking the larger number would make
+      // the smaller payment vanish from the ledger and overcharge at settle.
+      // The secondary's own debt row stays in the customer's ledger untouched —
+      // only the ticket link follows the primary.
+      depositAmount: (primary.depositAmount || 0) + (secondary.depositAmount || 0) || undefined,
+      paidAmount: (primary.paidAmount || 0) + (secondary.paidAmount || 0) || undefined,
+      handoverAmountPaid: (primary.handoverAmountPaid || 0) + (secondary.handoverAmountPaid || 0) || undefined,
       debtEntryId: primary.debtEntryId || secondary.debtEntryId,
       trackingPin: primary.trackingPin || secondary.trackingPin,
     };
