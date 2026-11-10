@@ -19,19 +19,78 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return isSignedIn() && (
-        callerProfile().isSuperAdmin == true || 
+        callerProfile().isSuperAdmin == true ||
         callerProfile().role == 'admin' ||
         request.auth.token.email == 'admin@example.com'
       );
     }
 
+    // ─── Permission flags (one contract with both apps) ─────────────────────
+    // Desktop `usePermissions` and mobile `effectivePermissions` agree: admins
+    // hold every flag; a stored `permissions` map overrides the role preset key
+    // by key (only explicit booleans count); anything unstated falls back to the
+    // preset. hasPerm mirrors that, so a capability revoked in the staff editor
+    // is revoked at the database too. The profile is read once per helper call.
+    //
+    // What rules cannot mirror: the device-side admin unlocks (password typed
+    // at the till, approval answered on the phone). The write still runs under
+    // the asking staffer's session and carries no artifact of the unlock, so
+    // the unions below admit every role that can legitimately reach the write;
+    // the unlock itself remains a workflow guard. Field-level money invariants
+    // (totals, refund arithmetic) belong in Cloud Functions, not rules.
+
+    function hasPerm(p, key) {
+      return p.role == 'admin' || (
+        ('permissions' in p && p.permissions is map && key in p.permissions && p.permissions[key] is bool)
+          ? p.permissions[key] == true
+          : (
+              (p.role == 'sales_agent' && key in ['dashboard', 'pos', 'inventory_products', 'customers']) ||
+              (p.role == 'repair_agent' && key in ['dashboard', 'repairs', 'repair_add', 'repair_edit', 'repair_status', 'repair_assign', 'inventory_parts', 'parts_sell', 'customers'])
+            )
+      );
+    }
+
+    function canSell(p) {
+      return hasPerm(p, 'pos') || hasPerm(p, 'parts_sell');
+    }
+
+    function canWorkRepairs(p) {
+      return hasPerm(p, 'repair_add') || hasPerm(p, 'repair_edit') ||
+             hasPerm(p, 'repair_status') || hasPerm(p, 'repair_assign');
+    }
+
+    function canViewInventory(p) {
+      return hasPerm(p, 'inventory_products') || hasPerm(p, 'inventory_parts');
+    }
+
+    function canManageDebt(p) {
+      return hasPerm(p, 'customers_debt');
+    }
+
+    function canViewCustomers(p) {
+      return hasPerm(p, 'customers');
+    }
+
     // ─── Inventory & Products ──────────────────────────────────────────────────
-    // All signed-in users can read & write (Admin Unlock modal handles frontend guard).
-    // Field-level checks cannot mirror the per-user permission flags the app actually uses
-    // (`permissions.inventory_edit`, `permissions.pos` stock writes), so tightening writes
-    // beyond "signed-in" belongs in Cloud Functions, not here.
+    // Writes follow the verified flows of both apps:
+    //  - create: the desktop add button sits behind the inventory_edit unlock
+    //    (a page viewer may unlock it with the admin password); the phone
+    //    requires inventory_edit outright.
+    //  - update: stock moves ride on sales (pos/parts_sell), parts allocation
+    //    (repair_edit), restock/reception/stocktake (inventory_edit); a price
+    //    edit approved on the device is applied by the asking staffer, who may
+    //    only hold the inventory view flag — so update admits that union.
+    //  - delete: the edit panels, behind the same unlock as create.
+    // A dashboard/reports-only account can no longer touch the shelf.
     match /inventory/{docId} {
-      allow read, write: if isSignedIn();
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn() &&
+        (hasPerm(callerProfile(), 'inventory_edit') || canViewInventory(callerProfile()));
+      allow update: if isSignedIn() &&
+        (canSell(callerProfile()) || hasPerm(callerProfile(), 'inventory_edit') ||
+         canViewInventory(callerProfile()) || hasPerm(callerProfile(), 'repair_edit'));
+      allow delete: if isSignedIn() &&
+        (hasPerm(callerProfile(), 'inventory_edit') || canViewInventory(callerProfile()));
     }
 
     // The technician app still resolves a part by trying `inventory` first and falling
@@ -39,15 +98,25 @@ service cloud.firestore {
     // same policy as inventory — the catch-all at the bottom would otherwise deny the
     // phone's whole product catalogue and every stock write that lands there.
     match /products/{docId} {
-      allow read, write: if isSignedIn();
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn() &&
+        (hasPerm(callerProfile(), 'inventory_edit') || canViewInventory(callerProfile()));
+      allow update: if isSignedIn() &&
+        (canSell(callerProfile()) || hasPerm(callerProfile(), 'inventory_edit') ||
+         canViewInventory(callerProfile()) || hasPerm(callerProfile(), 'repair_edit'));
+      allow delete: if isSignedIn() &&
+        (hasPerm(callerProfile(), 'inventory_edit') || canViewInventory(callerProfile()));
     }
 
     // ─── Transactions ────────────────────────────────────────────────────────
-    // All signed-in users can create/read. Nobody can ever delete a transaction.
+    // Sellers ring, refund, edit and stamp invoices (the phone's void-request and
+    // sale-effect stamps ride the same flags); repair settlement never writes here
+    // — it writes debts — so repair-only and view-only roles stay out.
+    // Nobody can ever delete a transaction.
     match /transactions/{docId} {
       allow read:   if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn(); // refunds & edits (status/settlement updates)
+      allow create: if isSignedIn() && canSell(callerProfile());
+      allow update: if isSignedIn() && canSell(callerProfile());
       allow delete: if false;        // permanently prohibited
     }
 
@@ -65,25 +134,44 @@ service cloud.firestore {
     match /repairs/{docId} {
       allow read:                   if isSignedIn();
       allow list:                   if isSignedIn() || request.query.limit == 1;
-      allow create, update, delete: if isSignedIn();
+      // Counter staff also create tickets from a customer profile (new phone →
+      // new ticket) and edit or delete a device's tickets from there, so the
+      // customers flag joins the repair flags on writes.
+      allow create:                 if isSignedIn() &&
+        (hasPerm(callerProfile(), 'repair_add') || canViewCustomers(callerProfile()));
+      allow update, delete:         if isSignedIn() &&
+        (canWorkRepairs(callerProfile()) || canViewCustomers(callerProfile()));
     }
 
     // ─── Counters (for sequential numbers like TKT-XXXX) ──────────────────────
+    // Invoice numbers are claimed by sellers, ticket numbers by intake.
     match /counters/{docId} {
-      allow read, write: if isSignedIn();
+      allow read:  if isSignedIn();
+      allow write: if isSignedIn() &&
+        (canSell(callerProfile()) || hasPerm(callerProfile(), 'repair_add'));
     }
 
     // ─── Customers ───────────────────────────────────────────────────────────
-    // Strictly authenticated staff access only
+    // Walk-ins are created at the till and at intake; totals move on sales,
+    // repairs and debt payments; the profile-edit unlock admits any staffer who
+    // can open the customers page. Deletion stays admin-only.
     match /customers/{docId} {
-      allow read, create, update: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() &&
+        (canSell(callerProfile()) || canWorkRepairs(callerProfile()) ||
+         canManageDebt(callerProfile()) || canViewCustomers(callerProfile()));
       allow delete:               if isAdmin() || isSuperAdmin();
     }
 
     // ─── Customer Debts & Credit Tabs ────────────────────────────────────────
-    // Strictly authenticated staff access only
+    // Credit sales (pos/parts_sell), repair settlements and intake down payments
+    // (repair flags) and debt-tab payments (customers_debt) all write here; a
+    // credit-sale refund zeroes the balance from the till, so sellers update too.
+    // Deletion stays admin-only.
     match /customer_debts/{docId} {
-      allow read, create, update: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() &&
+        (canSell(callerProfile()) || canManageDebt(callerProfile()) || canWorkRepairs(callerProfile()));
       allow delete:               if isAdmin() || isSuperAdmin();
     }
 
@@ -113,12 +201,18 @@ service cloud.firestore {
     }
 
     // ─── Purchasing & Suppliers ──────────────────────────────────────────────
+    // The purchasing page requires inventory_edit. The parts restock assistant
+    // also raises purchase orders, so parts staff (inventory_parts) may write
+    // POs — but supplier records stay with the purchasing editors.
     match /suppliers/{docId} {
-      allow read, write: if isSignedIn();
+      allow read:  if isSignedIn();
+      allow write: if isSignedIn() && hasPerm(callerProfile(), 'inventory_edit');
     }
 
     match /purchaseOrders/{docId} {
-      allow read, write: if isSignedIn();
+      allow read:  if isSignedIn();
+      allow write: if isSignedIn() &&
+        (hasPerm(callerProfile(), 'inventory_edit') || hasPerm(callerProfile(), 'inventory_parts'));
     }
 
     // ─── Restock & Write-Off Logs ────────────────────────────────────────────
