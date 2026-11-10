@@ -270,6 +270,8 @@ export const customerService = {
         method: params.paymentMethod || 'cash',
         note: `Handover payment for Repair #${params.ticketNumber}`,
         receivedByName: params.actorName || 'Staff',
+        // Money the ticket already counts at the till; the drawer must not add it again.
+        countedOn: 'repair',
       });
     }
 

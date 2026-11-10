@@ -14,6 +14,7 @@ import { discountAmountOf, lineDiscountOf } from '../utils/discountPolicy';
 import { planSaleEditStock } from '../utils/saleEditStock';
 import { returnedUnits, soldUnits } from '../utils/saleEditLines';
 import { foldStockDeltas } from '../utils/stockDeltas';
+import { saleOpeningPayments } from '../utils/debtPayments';
 
 const getInventoryProducts = () =>
   useInventoryStore.getState().products;
@@ -632,6 +633,9 @@ export const useCartStore = create<CartState>((set, get) => ({
             // number printed on the paper the customer holds — not only by the
             // document id, which nobody in the shop reads.
             invoiceNumber: txData.invoiceNumber,
+            // The down payment in the tender it was actually given in; the drawer
+            // counts it on the sale above, not again on this ledger row.
+            payments: saleOpeningPayments(recordedPayments, txData.date, actor?.name),
             allowCreditLimitOverride: options?.allowCreditLimitOverride,
           });
 
@@ -772,6 +776,8 @@ export const useCartStore = create<CartState>((set, get) => ({
             invoiceNumber,
             itemsSummary,
             type: 'parts_b2b',
+            // Real tender, counted once on the invoice — not a fabricated cash row.
+            payments: saleOpeningPayments(txPayments, now, actor?.name),
           });
         } catch (err) {
           console.error('Failed to add debt for B2B checkout:', err);

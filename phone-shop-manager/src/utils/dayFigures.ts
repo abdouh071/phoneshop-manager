@@ -8,6 +8,7 @@ import {
 } from './repairFinancials';
 import { isSameLocalDate } from './localDate';
 import { netCogsOf } from './saleEditLines';
+import { isDebtPaymentCountedElsewhere } from './debtPayments';
 
 /**
  * The one formula the shop uses to turn raw documents into a day's figures.
@@ -187,8 +188,11 @@ export function computeDayFigures(sources: DayFigureSources, dateStr: string): D
 
   const partsRevenue = partsTx.reduce((s, t) => s + (t.total || 0), 0);
   const partsCOGS = sumCogs(partsTx);
+  // A debt's opening row is money the sale or repair above already counted; only
+  // genuine collections (and manual debts with no other document) enter the drawer.
   const dayDebtPayments = (sources.debts || [])
-    .flatMap(d => (d.payments || []).filter(p => isSameLocalDate(p.date, dateStr)));
+    .flatMap(d => (d.payments || [])
+      .filter(p => isSameLocalDate(p.date, dateStr) && !isDebtPaymentCountedElsewhere(d, p)));
   const debtTender = (method: string): number =>
     dayDebtPayments
       .filter(p => String(p.method ?? '').toLowerCase() === method.toLowerCase())

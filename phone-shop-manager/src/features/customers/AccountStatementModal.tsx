@@ -17,6 +17,7 @@ import { usePrivacyStore } from '../../store/privacyStore';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { exportToCSV } from '../../utils/exportUtils';
 import { matchesCustomer } from '../../utils/customerFinancials';
+import { isDebtPaymentCountedElsewhere } from '../../utils/debtPayments';
 import { formatWhatsAppUrl } from '../../utils/phoneUtils';
 import type { Customer, SaleTransaction, CustomerDebtEntry, RepairTicket } from '../../types';
 import styles from './AccountStatement.module.css';
@@ -343,8 +344,11 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
         });
       }
 
-      // Record subsequent individual payments made on this debt
+      // Record subsequent individual payments made on this debt. A linked debt's
+      // opening rows are money the sale/repair event above already credited — showing
+      // them again would credit the same down payment twice on the statement.
       subsequentPayments.forEach(pay => {
+        if (isLinked && isDebtPaymentCountedElsewhere(debt, pay)) return;
         events.push({
           id: `pay_${pay.id}`,
           date: pay.date,

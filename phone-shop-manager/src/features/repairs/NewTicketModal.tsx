@@ -603,6 +603,8 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
                   amount: totalPaid,
                   method: 'cash',
                   note: 'Prior payment before price edit',
+                  // Money the ticket already counted; the ledger row must not count it again.
+                  countedOn: 'repair' as const,
                 }] : []
               });
               ticketPayload.debtEntryId = newDebt.id;

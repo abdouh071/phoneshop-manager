@@ -470,3 +470,184 @@ describe('the day the money was handed back', () => {
     }
   });
 });
+
+describe('a partial sale counts its money once (B1)', () => {
+  // A debt whose payment rows carry the exact shapes the writers used: the legacy
+  // fabricated `pay_down_` cash row, the new flagged real-tender row, the settlement
+  // modal's `pay_dep_`/`pay_handover_` pair, or a genuine later collection.
+  const debtWith = (
+    id: string,
+    rows: Array<Partial<CustomerDebtEntry['payments'][number]> & { amount: number; method: string }>,
+    links: Partial<CustomerDebtEntry> = {}
+  ): CustomerDebtEntry => {
+    const d = debt(id, rows.map(r => ({ date: at(10), amount: r.amount, method: r.method })));
+    return {
+      ...d,
+      ...links,
+      payments: d.payments.map((p, i) => ({ ...p, date: at(10), ...rows[i] })) as CustomerDebtEntry['payments'],
+    };
+  };
+
+  it('a card-paid B2B down payment never enters the drawer as cash', () => {
+    // The ledger used to fabricate a cash row for the 3 000 paid by card, so the day
+    // claimed 3 000 in the till on top of the invoice's own card line.
+    const figures = computeDayFigures(
+      {
+        transactions: [tx('tx-b2b', 5000, [['card', 3000], ['debt', 2000]], { saleType: 'parts_b2b' })],
+        repairs: [],
+        debts: [debtWith(
+          'd-b2b',
+          [{ id: 'pay_down_1700_ab12', amount: 3000, method: 'cash', note: 'Initial down payment' }],
+          { invoiceNumber: 'INV-PARTS-0001', type: 'parts_b2b' }
+        )],
+      },
+      DAY
+    );
+    expect(figures.partsCard).toBe(3000);
+    expect(figures.partsCash).toBe(0);
+    expect(figures.debtCollectedCash).toBe(0);
+    expect(figures.totalCash).toBe(0);
+  });
+
+  it('a cash-paid B2B down payment lands in the drawer once, not twice', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: [tx('tx-b2b', 5000, [['cash', 3000], ['debt', 2000]], { saleType: 'parts_b2b' })],
+        repairs: [],
+        debts: [debtWith(
+          'd-b2b',
+          [{ id: 'pay_down_1700_ab12', amount: 3000, method: 'cash', note: 'Initial down payment' }],
+          { invoiceNumber: 'INV-PARTS-0001', type: 'parts_b2b' }
+        )],
+      },
+      DAY
+    );
+    expect(figures.partsCash).toBe(3000);
+    expect(figures.debtCollectedCash).toBe(0);
+    expect(figures.totalCash).toBe(3000);
+  });
+
+  it('the new flagged opening row is skipped whatever tender it names', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: [tx('tx-b2b', 5000, [['card', 3000], ['debt', 2000]], { saleType: 'parts_b2b' })],
+        repairs: [],
+        debts: [debtWith(
+          'd-b2b',
+          [{ id: 'pay_down_1700_0_zzzz', amount: 3000, method: 'card', countedOn: 'sale' }],
+          { invoiceNumber: 'INV-PARTS-0001', type: 'parts_b2b' }
+        )],
+      },
+      DAY
+    );
+    expect(figures.partsCard).toBe(3000);
+    expect(figures.debtCollectedCard).toBe(0);
+    expect(figures.debtCollectedCash).toBe(0);
+    expect(figures.totalCash).toBe(0);
+  });
+
+  it('a retail partial sale counts its down payment once', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: [tx('tx-retail', 5000, [['cash', 3000], ['debt', 2000]])],
+        repairs: [],
+        debts: [debtWith(
+          'd-retail',
+          [{ id: 'pay_down_1700_ab12', amount: 3000, method: 'cash', note: 'Initial down payment' }],
+          { transactionId: 'tx-retail' }
+        )],
+      },
+      DAY
+    );
+    expect(figures.salesCash).toBe(3000);
+    expect(figures.debtCollectedCash).toBe(0);
+    expect(figures.totalCash).toBe(3000);
+  });
+
+  it('a manual debt keeps counting its opening row — no other document holds that money', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: [],
+        repairs: [],
+        debts: [debtWith('d-manual', [
+          { id: 'pay_down_1700_ab12', amount: 3000, method: 'cash', note: 'Initial down payment' },
+        ])],
+      },
+      DAY
+    );
+    expect(figures.debtCollectedCash).toBe(3000);
+    expect(figures.totalCash).toBe(3000);
+  });
+
+  it('a genuine later collection on a linked debt still enters the drawer', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: [tx('tx-retail', 5000, [['cash', 3000], ['debt', 2000]])],
+        repairs: [],
+        debts: [debtWith(
+          'd-retail',
+          [{ id: 'pay_1700_efgh', amount: 1000, method: 'cash', note: 'Partial settlement' }],
+          { transactionId: 'tx-retail' }
+        )],
+      },
+      DAY
+    );
+    expect(figures.salesCash).toBe(3000);
+    expect(figures.debtCollectedCash).toBe(1000);
+    expect(figures.totalCash).toBe(4000);
+  });
+
+  it('a repair with a debt counts its deposit and handover once, not again on the ledger', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: [],
+        repairs: [ticket('r-1', {
+          status: 'completed',
+          completedAt: at(17),
+          createdAt: at(9),
+          actualCost: 5000,
+          paymentStatus: 'partial',
+          depositAmount: 1000,
+          handoverAmountPaid: 2000,
+        })],
+        debts: [debtWith(
+          'd-rep',
+          [
+            { id: 'pay_dep_1700', amount: 1000, method: 'cash', date: at(9), note: 'Deposit paid at intake for Repair #TKT-r-1' },
+            { id: 'pay_handover_1700', amount: 2000, method: 'cash', note: 'Payment at handover for Repair #TKT-r-1' },
+          ],
+          { type: 'repair', linkedTicketId: 'r-1' }
+        )],
+      },
+      DAY
+    );
+    expect(figures.repairsDepositCash).toBe(1000);
+    expect(figures.repairsHandoverCash).toBe(2000);
+    expect(figures.debtCollectedCash).toBe(0);
+    expect(figures.totalCash).toBe(3000);
+  });
+
+  it('the phone-written handover row and the price-edit row are skipped on repair debts', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: [],
+        repairs: [],
+        debts: [
+          debtWith(
+            'd-mobile',
+            [{ id: 'pay_1700000000', amount: 2000, method: 'cash', note: 'Handover payment for Repair #TKT-0042' }],
+            { type: 'repair', linkedTicketId: 't-42' }
+          ),
+          debtWith(
+            'd-price-edit',
+            [{ id: 'pay_1700000001', amount: 1000, method: 'cash', note: 'Prior payment before price edit' }],
+            { type: 'repair', linkedTicketId: 't-43' }
+          ),
+        ],
+      },
+      DAY
+    );
+    expect(figures.debtCollectedCash).toBe(0);
+    expect(figures.totalCash).toBe(0);
+  });
+});

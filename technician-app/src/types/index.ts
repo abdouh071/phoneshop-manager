@@ -79,6 +79,9 @@ export interface CustomerDebtPayment {
   method: string;
   note?: string;
   receivedByName?: string;
+  /** This row is money the linked sale or repair document already counts at the till
+   *  (its opening payment row), so the drawer must not add it a second time. */
+  countedOn?: 'sale' | 'repair';
 }
 
 export interface CustomerDebtEntry {

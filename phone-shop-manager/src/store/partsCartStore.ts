@@ -21,6 +21,7 @@ import { partsCartService } from '../services/partsCartService';
 import { formatCurrency } from '../utils/formatCurrency';
 import { discountAmountOf, lineDiscountOf, unitPriceAfterDiscount } from '../utils/discountPolicy';
 import type { LineConcession } from '../utils/discountPolicy';
+import { saleOpeningPayments } from '../utils/debtPayments';
 
 const getInventoryProducts = () => {
   const { parts } = useInventoryStore.getState();
@@ -603,6 +604,8 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
             invoiceNumber,
             itemsSummary,
             type: 'parts_b2b',
+            // Real tender, counted once on the invoice — not a fabricated cash row.
+            payments: saleOpeningPayments(txPayments, now.toISOString(), actor?.name),
             allowCreditLimitOverride,
           });
         } catch (err) {

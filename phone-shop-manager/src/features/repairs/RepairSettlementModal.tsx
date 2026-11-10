@@ -256,6 +256,8 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
               method: 'cash' as PaymentMethod,
               note: `Deposit paid at intake for Repair #${ticket.ticketNumber}`,
               receivedByName: actor?.name || 'Staff',
+              // The ticket's deposit figure already counts this at the till.
+              countedOn: 'repair' as const,
             });
           }
           if (effectivePaidNow > 0) {
@@ -266,6 +268,8 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
               method: effectiveMethod,
               note: `Payment at handover for Repair #${ticket.ticketNumber}`,
               receivedByName: actor?.name || 'Staff',
+              // The ticket's handover figure already counts this at the till.
+              countedOn: 'repair' as const,
             });
           }
 

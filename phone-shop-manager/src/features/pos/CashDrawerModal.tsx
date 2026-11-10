@@ -15,6 +15,7 @@ import { EndOfDayButton } from '../endofday/EndOfDayButton';
 import { isSameLocalDate, toDateStr } from '../../store/endOfDayStore';
 import { isClaimedAndPaidRepair } from '../../utils/repairFinancials';
 import { computeDayFigures, mergeDayInvoices } from '../../utils/dayFigures';
+import { isDebtPaymentCountedElsewhere } from '../../utils/debtPayments';
 import { netUnitsSold } from '../../utils/saleEditLines';
 import styles from './CashDrawer.module.css';
 import { errorMessage } from '../../utils/errorUtils';
@@ -97,7 +98,8 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
     );
     const claimedPaidRepairs = completedRepairs.filter(r => isClaimedAndPaidRepair(r));
     const createdRepairs = tickets.filter(t => isSameLocalDate(t.createdAt, targetDateStr));
-    const todayDebtPayments = debts.flatMap(d => (d.payments || []).filter(p => isSameLocalDate(p.date, targetDateStr)));
+    const todayDebtPayments = debts.flatMap(d => (d.payments || [])
+      .filter(p => isSameLocalDate(p.date, targetDateStr) && !isDebtPaymentCountedElsewhere(d, p)));
 
     // Counts
     const posRetailCount = posRetailTxs.length;
