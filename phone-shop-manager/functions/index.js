@@ -24,7 +24,7 @@
 
 const functions = require('firebase-functions');
 const { initializeApp } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const inv = require('./lib/invariants');
 
 const { onInit, setGlobalOptions, logger, https, firestore } = functions;
@@ -124,32 +124,52 @@ function enforcePinRateLimit(uid) {
 
 const isAdminUser = data => data.role === 'admin' || data.isSuperAdmin === true;
 
-const isApprovalHolder = data =>
-  typeof data.approvalPin === 'string' && data.approvalPin.trim() !== '' && isAdminUser(data) && data.status !== 'revoked';
+/**
+ * Verifiers live in `users/{uid}/secrets/approvalPin`, off the broadly-readable profile.
+ * Pre-migration profiles still carry `users/{uid}.approvalPin`; accept it until the field
+ * is moved, so a deploy never invalidates a working PIN.
+ */
+async function verifierOf(holder) {
+  const secret = await getFirestore()
+    .collection('users').doc(holder.id).collection('secrets').doc('approvalPin').get();
+  const secretData = dataOf(secret);
+  if (secretData && typeof secretData.verifier === 'string' && secretData.verifier.trim() !== '') {
+    return secretData.verifier.trim();
+  }
+  return typeof holder.approvalPin === 'string' ? holder.approvalPin.trim() : '';
+}
 
 async function loadPinHolders(adminId) {
   const db = getFirestore();
+  const candidates = [];
   if (adminId) {
     const snapshot = await db.collection('users').doc(adminId).get();
-    if (!snapshot.exists || !isApprovalHolder(snapshot.data() || {})) return [];
-    return [{ id: snapshot.id, ...(snapshot.data() || {}) }];
+    const data = dataOf(snapshot);
+    if (data && isAdminUser(data) && data.status !== 'revoked') candidates.push({ id: snapshot.id, ...data });
+  } else {
+    // Two indexed equality queries instead of a scan: a shop with more users than the scan
+    // limit would otherwise have admins whose PIN is never even read, and a correct PIN
+    // would be reported as wrong.
+    const found = new Map();
+    const lookups = await Promise.all([
+      col('users').where('role', '==', 'admin').limit(MAX_PIN_HOLDERS_CHECKED).get(),
+      col('users').where('isSuperAdmin', '==', true).limit(MAX_PIN_HOLDERS_CHECKED).get(),
+    ]);
+    for (const snapshot of lookups) {
+      snapshot.docs.forEach(docSnap => {
+        const data = docSnap.data() || {};
+        if (isAdminUser(data) && data.status !== 'revoked') found.set(docSnap.id, { id: docSnap.id, ...data });
+      });
+    }
+    candidates.push(...found.values());
   }
 
-  // Two indexed equality queries instead of a scan: a shop with more users than the scan
-  // limit would otherwise have admins whose PIN is never even read, and a correct PIN
-  // would be reported as wrong.
-  const found = new Map();
-  const lookups = await Promise.all([
-    col('users').where('role', '==', 'admin').limit(MAX_PIN_HOLDERS_CHECKED).get(),
-    col('users').where('isSuperAdmin', '==', true).limit(MAX_PIN_HOLDERS_CHECKED).get(),
-  ]);
-  for (const snapshot of lookups) {
-    snapshot.docs.forEach(docSnap => {
-      const data = docSnap.data() || {};
-      if (isApprovalHolder(data)) found.set(docSnap.id, { id: docSnap.id, ...data });
-    });
+  const holders = [];
+  for (const candidate of candidates.slice(0, MAX_PIN_HOLDERS_CHECKED)) {
+    const verifier = await verifierOf(candidate);
+    if (verifier !== '') holders.push({ ...candidate, approvalPin: verifier });
   }
-  return Array.from(found.values()).slice(0, MAX_PIN_HOLDERS_CHECKED);
+  return holders;
 }
 
 /**
@@ -181,9 +201,11 @@ exports.verifyApprovalPin = onCall(async request => {
     if (result.isLegacy) {
       try {
         await getFirestore()
-          .collection('users')
-          .doc(holder.id)
-          .set({ approvalPin: await inv.buildPinVerifier(pin) }, { merge: true });
+          .collection('users').doc(holder.id).collection('secrets').doc('approvalPin')
+          .set({ verifier: await inv.buildPinVerifier(pin), updatedAt: FieldValue.serverTimestamp() });
+        await getFirestore()
+          .collection('users').doc(holder.id)
+          .set({ hasApprovalPin: true, approvalPin: FieldValue.delete() }, { merge: true });
         upgraded = true;
         logger.info('upgraded a legacy approval PIN verifier', { adminId: holder.id });
       } catch (err) {

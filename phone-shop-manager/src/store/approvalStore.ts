@@ -18,6 +18,7 @@ import { activityLogService } from '../services/activityLogService';
 import { userService, type ApprovalPinHolder } from '../services/userService';
 import { verifyApprovalPin, isLegacyApprovalPinVerifier, hashApprovalPin } from '../utils/security';
 import { serverEnforcement } from '../services/serverEnforcement';
+import { errorCode } from '../utils/errorUtils';
 import type { ApprovalActionData } from '../types';
 
 export interface ApprovalRequest {
@@ -254,7 +255,15 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
         };
       }
       holders = await userService.getApprovalPinVerifiers();
-    } catch {
+    } catch (err) {
+      // The verifiers live in an admin-only subcollection: a staff till is denied by
+      // design, and without the callable there is no local way to check a PIN.
+      if (errorCode(err) === 'permission-denied') {
+        return {
+          success: false,
+          error: 'Quick PIN is not available on this till. Use Remote Request, or the admin password fallback below.',
+        };
+      }
       return {
         success: false,
         error: 'Could not reach the server to verify the approval PIN. Send a remote approval request instead.',

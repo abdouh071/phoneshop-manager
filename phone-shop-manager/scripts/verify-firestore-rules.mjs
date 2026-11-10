@@ -15,6 +15,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   addDoc,
   collection,
   query,
@@ -50,12 +51,18 @@ const seed = (path, data) =>
     await setDoc(doc(ctx.firestore(), col, id), data);
   });
 
+const seedPath = (path, data) =>
+  env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), ...path.split('/')), data);
+  });
+
 // Personas: role presets, per-key overrides, a revoked flag, a legacy null map,
 // a non-boolean override (falls back to the preset), and a view-only account.
 await env.withSecurityRulesDisabled(async (ctx) => {
   const db = ctx.firestore();
   const users = {
     admin: { role: 'admin', name: 'Owner', email: 'owner@shop.dz' },
+    superadmin: { role: 'admin', name: 'SuperOwner', isSuperAdmin: true },
     sales: { role: 'sales_agent', name: 'Seller' },
     repair: { role: 'repair_agent', name: 'Technician' },
     viewonly: {
@@ -97,7 +104,7 @@ await seed('approvalRequests/ap1', { status: 'pending', requestedBy: { uid: 'sal
 await seed('approvalRequests/ap2', { status: 'pending', requestedBy: { uid: 'sales' }, actionType: 'void_sale' });
 
 const dbs = Object.fromEntries(
-  ['admin', 'sales', 'repair', 'viewonly', 'customseller', 'repaironly', 'revokedsales', 'legacysales', 'nonbool']
+  ['admin', 'superadmin', 'sales', 'repair', 'viewonly', 'customseller', 'repaironly', 'revokedsales', 'legacysales', 'nonbool']
     .map((uid) => [uid, env.authenticatedContext(uid).firestore()])
 );
 const anon = env.unauthenticatedContext().firestore();
@@ -209,9 +216,31 @@ await check('staff reads staff profiles', 'allow', getDoc(doc(dbs.sales, 'users'
 await check('self push-token update', 'allow', updateDoc(doc(dbs.sales, 'users', 'sales'), { pushToken: 'tok' }));
 await check('self role escalation blocked', 'deny', updateDoc(doc(dbs.sales, 'users', 'sales'), { role: 'admin' }));
 
+console.log('— approval PIN secrets: owner and admins only —');
+await seedPath('users/admin/secrets/approvalPin', { verifier: 'v2:210000:aaaa:bbbb' });
+await seedPath('users/superadmin/secrets/approvalPin', { verifier: 'v2:210000:cccc:dddd' });
+await seedPath('users/sales/secrets/approvalPin', { verifier: 'v2:210000:eeee:ffff' });
+await check('staff reads own verifier', 'allow', getDoc(doc(dbs.sales, 'users', 'sales', 'secrets', 'approvalPin')));
+await check('staff cannot read an admin verifier', 'deny', getDoc(doc(dbs.sales, 'users', 'admin', 'secrets', 'approvalPin')));
+await check('staff cannot read the owner verifier', 'deny', getDoc(doc(dbs.sales, 'users', 'superadmin', 'secrets', 'approvalPin')));
+await check('technician cannot read an admin verifier', 'deny', getDoc(doc(dbs.repair, 'users', 'admin', 'secrets', 'approvalPin')));
+await check('admin reads a staff verifier (approval prompt)', 'allow', getDoc(doc(dbs.admin, 'users', 'sales', 'secrets', 'approvalPin')));
+await check('admin reads the owner verifier', 'allow', getDoc(doc(dbs.admin, 'users', 'superadmin', 'secrets', 'approvalPin')));
+await check('staff sets own verifier', 'allow', setDoc(doc(dbs.sales, 'users', 'sales', 'secrets', 'approvalPin'), { verifier: 'v2:210000:1111:2222' }));
+await check('staff cannot overwrite an admin verifier', 'deny', setDoc(doc(dbs.sales, 'users', 'admin', 'secrets', 'approvalPin'), { verifier: 'forged' }));
+await check('staff cannot delete an admin verifier', 'deny', deleteDoc(doc(dbs.sales, 'users', 'admin', 'secrets', 'approvalPin')));
+await check('admin resets a staff verifier', 'allow', setDoc(doc(dbs.admin, 'users', 'sales', 'secrets', 'approvalPin'), { verifier: 'v2:210000:3333:4444' }));
+await check('admin cannot overwrite the owner verifier', 'deny', setDoc(doc(dbs.admin, 'users', 'superadmin', 'secrets', 'approvalPin'), { verifier: 'forged' }));
+await check('owner sets any verifier', 'allow', setDoc(doc(dbs.superadmin, 'users', 'admin', 'secrets', 'approvalPin'), { verifier: 'v2:210000:5555:6666' }));
+await check('staff deletes own verifier (PIN removal)', 'allow', deleteDoc(doc(dbs.sales, 'users', 'sales', 'secrets', 'approvalPin')));
+await check('self clears the legacy profile field (migration)', 'allow', updateDoc(doc(dbs.sales, 'users', 'sales'), { hasApprovalPin: true, approvalPin: deleteField() }));
+await check('admin clears a staff legacy field (migration)', 'allow', updateDoc(doc(dbs.admin, 'users', 'repair'), { hasApprovalPin: true, approvalPin: deleteField() }));
+
 console.log('— unauthenticated surface (unchanged) —');
 await check('anon cannot read a transaction', 'deny', getDoc(doc(anon, 'transactions', 'tx1')));
 await check('anon cannot read a ticket by id', 'deny', getDoc(doc(anon, 'repairs', 'r1')));
+await check('anon cannot read a PIN verifier', 'deny', getDoc(doc(anon, 'users', 'admin', 'secrets', 'approvalPin')));
+await check('anon cannot write a PIN verifier', 'deny', setDoc(doc(anon, 'users', 'admin', 'secrets', 'approvalPin'), { verifier: 'forged' }));
 await check('anon tracking lookup limit(1) still open (A2 slice)', 'allow', getDocs(query(collection(anon, 'repairs'), limit(1))));
 await check('anon reads public store settings', 'allow', getDoc(doc(anon, 'settings', 'general')));
 

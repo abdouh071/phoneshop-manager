@@ -9,6 +9,7 @@ import { NewUserModal } from './NewUserModal';
 import { EditUserModal } from './EditUserModal';
 import { SetPinModal } from './SetPinModal';
 import { useToast } from '../../components/ui/Toast';
+import { userService } from '../../services/userService';
 import styles from './Settings.module.css';
 import { errorMessage } from '../../utils/errorUtils';
 
@@ -22,6 +23,9 @@ export const UsersTab = () => {
 
   useEffect(() => {
     fetchStaff();
+    // Move legacy on-profile PIN verifiers into the admin-only subcollection; silent
+    // because the page works either way and the next visit retries whatever failed.
+    void userService.migrateLegacyApprovalPins().catch(() => {});
   }, [fetchStaff]);
 
   const isUserAdmin = user?.role === 'admin' || user?.isSuperAdmin === true;

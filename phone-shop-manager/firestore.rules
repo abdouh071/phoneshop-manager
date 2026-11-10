@@ -269,6 +269,20 @@ service cloud.firestore {
 
       // Only Super Admins can delete user profiles
       allow delete: if isSignedIn() && isSuperAdmin();
+
+      // Approval PIN verifiers live OFF the broadly-readable profile: a 4–8 digit
+      // PIN is brute-forceable offline once read, so only the owner and admins may
+      // read a verifier. Writes mirror the staff editor: self, a true super admin,
+      // or an admin managing a non-super profile (never the owner's PIN).
+      match /secrets/{secretId} {
+        allow read: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
+        allow write: if isSignedIn() && (
+          request.auth.uid == userId ||
+          callerProfile().get('isSuperAdmin', false) == true ||
+          (isAdmin() &&
+           get(/databases/$(database)/documents/users/$(userId)).data.get('isSuperAdmin', false) != true)
+        );
+      }
     }
 
     // ─── Active & Suspended Carts ────────────────────────────────────────────

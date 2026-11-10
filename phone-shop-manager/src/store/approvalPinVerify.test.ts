@@ -3,57 +3,78 @@
  *
  * Covers the three things that would be felt immediately in the shop if they broke: a PIN
  * hashed by the old fixed-salt code still authorizes, a wrong PIN does not, and a till that
- * cannot read the users collection says so instead of claiming nobody has a PIN. The silent
- * v1 → v2 rewrite is checked too, because that is what retires the weak hashes over time.
- * The last group is the deployed-functions path: the server's answer is taken, and a "no"
- * from it is never traded for a local "yes".
+ * cannot read the verifiers says so instead of claiming nobody has a PIN. The silent
+ * v1 → v2 rewrite is checked too — it now lands in `users/{uid}/secrets/approvalPin` and
+ * clears the exposed profile field. The last group is the deployed-functions path: the
+ * server's answer is taken, and a "no" from it is never traded for a local "yes".
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 type FakeDoc = Record<string, unknown>;
 
 const fake = vi.hoisted(() => {
-  const store = new Map<string, Map<string, FakeDoc>>();
-  const flags = { failListReads: false };
+  const store = new Map<string, FakeDoc>();
+  const flags = { failListReads: false, denySecretReads: false };
   const stats = { reads: 0 };
-
-  const collOf = (name: string): Map<string, FakeDoc> => {
-    let c = store.get(name);
-    if (!c) {
-      c = new Map<string, FakeDoc>();
-      store.set(name, c);
-    }
-    return c;
-  };
+  const DELETE_MARKER = '__deleteField__';
 
   return {
     stats,
     flags,
     seed(name: string, id: string, data: FakeDoc): void {
-      collOf(name).set(id, { ...data });
+      store.set(`${name}/${id}`, { ...data });
+    },
+    seedPath(path: string, data: FakeDoc): void {
+      store.set(path, { ...data });
     },
     read(name: string, id: string): FakeDoc | undefined {
-      return store.get(name)?.get(id);
+      return store.get(`${name}/${id}`);
+    },
+    readPath(path: string): FakeDoc | undefined {
+      return store.get(path);
     },
     reset(): void {
       store.clear();
       flags.failListReads = false;
+      flags.denySecretReads = false;
       stats.reads = 0;
     },
     collection: (_db: unknown, name: string) => ({ coll: name }),
-    doc: (_db: unknown, name: string, id: string) => ({ coll: name, id }),
+    doc: (_db: unknown, ...segments: string[]) => ({ path: segments.join('/') }),
     query: (base: { coll: string }) => base,
     orderBy: () => ({ type: 'orderBy' }),
     limit: (n: number) => ({ type: 'limit', n }),
+    deleteField: () => DELETE_MARKER,
     getDocs: async (q: { coll: string }) => {
       stats.reads++;
       if (flags.failListReads) throw new Error('unavailable: offline');
-      const coll = store.get(q.coll) ?? new Map<string, FakeDoc>();
-      return { docs: [...coll.entries()].map(([id, data]) => ({ id, data: () => ({ ...data }) })) };
+      const prefix = q.coll + '/';
+      const docs = [...store.entries()]
+        .filter(([path]) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
+        .map(([path, data]) => ({ id: path.slice(prefix.length), data: () => ({ ...data }) }));
+      return { docs };
     },
-    setDoc: async (ref: { coll: string; id: string }, data: FakeDoc) => {
-      if (flags.failListReads) throw new Error('permission-denied: users/' + ref.id);
-      collOf(ref.coll).set(ref.id, { ...(store.get(ref.coll)?.get(ref.id) ?? {}), ...data });
+    getDoc: async (ref: { path: string }) => {
+      if (flags.denySecretReads && ref.path.includes('/secrets/')) {
+        throw Object.assign(new Error('permission-denied: ' + ref.path), { code: 'permission-denied' });
+      }
+      const data = store.get(ref.path);
+      return {
+        id: ref.path.split('/').pop(),
+        exists: () => data !== undefined,
+        data: () => ({ ...(data ?? {}) }),
+      };
+    },
+    setDoc: async (ref: { path: string }, data: FakeDoc) => {
+      if (flags.failListReads) throw new Error('permission-denied: ' + ref.path);
+      const merged: FakeDoc = { ...(store.get(ref.path) ?? {}), ...data };
+      for (const [key, value] of Object.entries(data)) {
+        if (value === DELETE_MARKER) delete merged[key];
+      }
+      store.set(ref.path, merged);
+    },
+    deleteDoc: async (ref: { path: string }) => {
+      store.delete(ref.path);
     },
   };
 });
@@ -67,12 +88,15 @@ vi.mock('firebase/firestore', async (importOriginal) => {
     query: fake.query,
     orderBy: fake.orderBy,
     limit: fake.limit,
+    deleteField: fake.deleteField,
     getDocs: fake.getDocs,
+    getDoc: fake.getDoc,
     setDoc: fake.setDoc,
+    deleteDoc: fake.deleteDoc,
   };
 });
 
-vi.mock('../lib/firebase', () => ({ db: {} }));
+vi.mock('../lib/firebase', () => ({ db: {}, auth: { currentUser: null } }));
 
 vi.mock('./authStore', () => ({
   useAuthStore: { getState: () => ({ user: { id: 'agent_1', name: 'Hala', role: 'sales_agent' } }) },
@@ -121,8 +145,11 @@ describe('verifyPin', () => {
 
     expect(result).toMatchObject({ success: true, adminName: 'Rania', adminId: 'admin_1' });
     await vi.waitFor(() => {
-      expect(String(fake.read('users', 'admin_1')?.approvalPin)).toMatch(/^v2:210000:[0-9a-f]{32}:[0-9a-f]{64}$/);
+      expect(String(fake.readPath('users/admin_1/secrets/approvalPin')?.verifier)).toMatch(/^v2:210000:[0-9a-f]{32}:[0-9a-f]{64}$/);
     });
+    // The exposed profile field is gone; only the flag remains.
+    expect(fake.read('users', 'admin_1')).not.toHaveProperty('approvalPin');
+    expect(fake.read('users', 'admin_1')).toMatchObject({ hasApprovalPin: true });
     // And the upgraded verifier keeps authorizing the same PIN.
     expect(await (await loadApprovalStore()).getState().verifyPin('2468')).toMatchObject({ success: true });
   });
@@ -164,6 +191,19 @@ describe('verifyPin', () => {
     expect(result.success).toBe(false);
     expect(result.noPinConfigured).toBeFalsy();
     expect(result.error).toMatch(/remote approval/);
+  });
+
+  it('points a staff till at remote approval when the rules deny the verifiers', async () => {
+    fake.seed('users', 'admin_1', { name: 'Rania', role: 'admin', status: 'active', hasApprovalPin: true });
+    fake.seedPath('users/admin_1/secrets/approvalPin', { verifier: await legacyHash('2468') });
+    fake.flags.denySecretReads = true;
+
+    const result = await (await loadApprovalStore()).getState().verifyPin('2468');
+
+    expect(result.success).toBe(false);
+    expect(result.noPinConfigured).toBeFalsy();
+    expect(result.error).toMatch(/Quick PIN is not available on this till/);
+    expect(result.error).toMatch(/Remote Request/);
   });
 
   it('refuses an empty PIN before reading anything', async () => {
