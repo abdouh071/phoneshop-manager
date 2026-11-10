@@ -184,6 +184,48 @@ test('a split payment keeps its shape and sums exactly to the new total', () => 
   assert.deepEqual(rescaled.map(p => p.method), ['cash', 'card', 'mobile']);
 });
 
+test('an invoice that took no money writes no tender line, not a full cash one', () => {
+  // The parts-B2B shape: nothing tendered, the whole charge on the account. A cash
+  // row here would put money in the drawer that never changed hands.
+  assert.deepEqual(rescalePayments([], 12000, 10000), []);
+});
+
+test('a lone tender that only partly paid the invoice keeps what was received', () => {
+  // 3 000 of a 10 000 invoice was paid by card; the rest was charged, not received.
+  assert.deepEqual(
+    rescalePayments([{ method: 'card', amount: 3000 }], 12000, 10000),
+    [{ method: 'card', amount: 3000 }]
+  );
+});
+
+test('a correction below what was tendered caps the line at the new total', () => {
+  assert.deepEqual(
+    rescalePayments([{ method: 'card', amount: 3000 }], 2000, 10000),
+    [{ method: 'card', amount: 2000 }]
+  );
+});
+
+test('a fully paid single tender still rescales with the correction', () => {
+  assert.deepEqual(
+    rescalePayments([{ method: 'cash', amount: 10000 }], 12000, 10000),
+    [{ method: 'cash', amount: 12000 }]
+  );
+});
+
+test('a lone charge row follows the total without becoming money received', () => {
+  assert.deepEqual(
+    rescalePayments([{ method: 'debt', amount: 10000 }], 12000, 10000),
+    [{ method: 'debt', amount: 12000 }]
+  );
+});
+
+test('a document written before tenders were recorded keeps the legacy cash reading', () => {
+  assert.deepEqual(
+    rescalePayments(undefined as unknown as SaleTransaction['payments'], 12000),
+    [{ method: 'cash', amount: 12000 }]
+  );
+});
+
 test('one SKU written on two rows is one control, and the rows it never touches stay standing', () => {
   const twin = makeProduct();
   const tx = makeTx({ items: [line(twin, 1), line(twin, 4)] });

@@ -1100,9 +1100,27 @@ export const useCartStore = create<CartState>((set, get) => ({
 
     // Split payments adjustment: preserve proportional ratio so payments sum strictly equals total
     let adjustedPayments: { method: PaymentMethod; amount: number }[] = [];
-    if (!tx.payments || tx.payments.length <= 1) {
-      const method = tx.payments?.[0]?.method || 'cash';
-      adjustedPayments = [{ method, amount: total }];
+    if (!tx.payments) {
+      // A document written before the till recorded tenders reads as cash everywhere;
+      // the correction keeps that reading rather than inventing a split.
+      adjustedPayments = [{ method: 'cash', amount: total }];
+    } else if (tx.payments.length === 0) {
+      // Nothing was tendered — the whole invoice sits on the account. A cash row here
+      // would put money in the drawer that never changed hands.
+      adjustedPayments = [];
+    } else if (tx.payments.length === 1) {
+      const only = tx.payments[0];
+      if (only.method === 'debt') {
+        // A charge row is not money received: it follows the corrected total.
+        adjustedPayments = [{ ...only, amount: total }];
+      } else if ((Number(only.amount) || 0) < (tx.total || 0)) {
+        // One tender line that only partly paid the invoice (the parts-B2B shape): the
+        // rest was charged to the account, not received. Money already handed over is a
+        // fact — the correction can cap it at the new total but never grow it.
+        adjustedPayments = [{ ...only, amount: Math.max(0, Math.min(Number(only.amount) || 0, total)) }];
+      } else {
+        adjustedPayments = [{ ...only, amount: total }];
+      }
     } else {
       const oldSum = tx.payments.reduce((sum, p) => sum + p.amount, 0) || tx.total || 1;
       let running = 0;

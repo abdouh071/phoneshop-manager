@@ -729,7 +729,7 @@ describe('the account split a corrected invoice leaves behind', () => {
 
   const park = (
     invoiceTotal: number,
-    payments: Array<{ method: string; amount: number }>,
+    payments: Array<{ method: string; amount: number }> | undefined,
     collected: number,
     settlement?: Record<string, unknown>
   ) => {
@@ -765,6 +765,12 @@ describe('the account split a corrected invoice leaves behind', () => {
     const written = captured.updates[0];
     if (!written) throw new Error('the correction wrote no invoice update');
     return written.updates.accountSettlement as Record<string, unknown>;
+  };
+
+  const writtenPayments = () => {
+    const written = captured.updates[0];
+    if (!written) throw new Error('the correction wrote no invoice update');
+    return written.updates.payments as Array<{ method: string; amount: number }>;
   };
 
   it('keeps a mixed-tender balance open at the account portion the invoice declares', async () => {
@@ -833,5 +839,71 @@ describe('the account split a corrected invoice leaves behind', () => {
     await edit(12000);
 
     expect(stamp()).toMatchObject({ debtEntryId: 'debt_1', chargedAmount: 12000, paidAmount: 0 });
+  });
+
+  it('a fully charged parts invoice writes no tender line at all', async () => {
+    // The drawer reads the payments array as money received. Rewriting an empty one
+    // to a full cash row put the whole charged invoice in the till on paper.
+    park(10000, [], 0, {
+      type: 'charged_to_account', paidAmount: 0, chargedAmount: 10000, debtEntryId: 'debt_1',
+    });
+
+    await edit(12000);
+
+    expect(writtenPayments()).toEqual([]);
+    expect(stamp()).toMatchObject({ type: 'charged_to_account', paidAmount: 0, chargedAmount: 12000 });
+  });
+
+  it('a lone card tender on a partly paid invoice keeps only what was received', async () => {
+    // 3 000 of a 10 000 parts invoice was paid by card; the rest sat on the account.
+    // Growing the invoice to 12 000 must not record 12 000 of card money taken.
+    park(10000, [{ method: 'card', amount: 3000 }], 3000, {
+      type: 'partial_payment', paidAmount: 3000, chargedAmount: 7000, debtEntryId: 'debt_1',
+    });
+
+    await edit(12000);
+
+    expect(writtenPayments()).toEqual([{ method: 'card', amount: 3000 }]);
+    expect(stamp()).toMatchObject({ paidAmount: 3000, chargedAmount: 9000 });
+  });
+
+  it('a correction below what was tendered caps the line at the new total', async () => {
+    park(10000, [{ method: 'card', amount: 3000 }], 3000, {
+      type: 'partial_payment', paidAmount: 3000, chargedAmount: 7000, debtEntryId: 'debt_1',
+    });
+
+    await edit(2000);
+
+    expect(writtenPayments()).toEqual([{ method: 'card', amount: 2000 }]);
+    // The 1 000 the customer over-paid is held as Avoir, not eaten.
+    expect(captured.credit).toEqual([
+      { kind: 'add', customerId: 'cust_1', amount: 1000, note: expect.any(String) },
+    ]);
+  });
+
+  it('a fully paid single-tender invoice still rescales with the correction', async () => {
+    park(10000, [{ method: 'cash', amount: 10000 }], 10000, {
+      type: 'paid_full', paidAmount: 10000, chargedAmount: 0, debtEntryId: 'debt_1',
+    });
+
+    await edit(12000);
+
+    expect(writtenPayments()).toEqual([{ method: 'cash', amount: 12000 }]);
+  });
+
+  it('a lone charge row follows the total without becoming money', async () => {
+    park(10000, [{ method: 'debt', amount: 10000 }], 0);
+
+    await edit(12000);
+
+    expect(writtenPayments()).toEqual([{ method: 'debt', amount: 12000 }]);
+  });
+
+  it('a document with no recorded tenders keeps the legacy cash reading', async () => {
+    park(10000, undefined, 0);
+
+    await edit(12000);
+
+    expect(writtenPayments()).toEqual([{ method: 'cash', amount: 12000 }]);
   });
 });

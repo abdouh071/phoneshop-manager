@@ -115,11 +115,33 @@ const money = (value: number, fallback: number): number => {
 export const rescalePayments = (
   payments: SaleTransaction['payments'],
   total: number,
-  /** The desktop divides by the recorded total when the payment lines add up to nothing. */
+  /** The recorded total: the divisor when the lines add up to nothing, and the proof
+   *  that a lone tender line only partly paid the invoice. */
   fallbackSum = 1
 ): SaleTransaction['payments'] => {
-  if (!payments || payments.length <= 1) {
-    return [{ method: payments?.[0]?.method || 'cash', amount: total }];
+  // A document written before the till recorded tenders reads as cash everywhere;
+  // the correction keeps that reading rather than inventing a split.
+  if (!payments) {
+    return [{ method: 'cash', amount: total }];
+  }
+  // Nothing was tendered — the whole invoice sits on the account. A cash row here
+  // would put money in the drawer that never changed hands.
+  if (payments.length === 0) {
+    return [];
+  }
+  if (payments.length === 1) {
+    const only = payments[0];
+    // A charge row is not money received: it follows the corrected total.
+    if (only.method === 'debt') {
+      return [{ ...only, amount: total }];
+    }
+    // One tender line that only partly paid the invoice (the parts-B2B shape): the
+    // rest was charged to the account, not received. Money already handed over is a
+    // fact — the correction can cap it at the new total but never grow it.
+    if ((Number(only.amount) || 0) < fallbackSum) {
+      return [{ ...only, amount: Math.max(0, Math.min(Number(only.amount) || 0, total)) }];
+    }
+    return [{ ...only, amount: total }];
   }
   const oldSum = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) || fallbackSum || 1;
   let running = 0;
