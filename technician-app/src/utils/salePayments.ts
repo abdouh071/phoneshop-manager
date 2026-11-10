@@ -12,9 +12,29 @@
  * used. An unpaid balance is a tender the shop handed over instead of money, so it
  * gets its own `debt` line like any other.
  */
-import type { PaymentMethod } from '../types';
+import type { Customer, PaymentMethod } from '../types';
 
 const money = (n: number): number => Math.round(Math.max(0, n) * 100) / 100;
+
+/**
+ * How much of the invoice goes on a customer's account — and the counter's rule
+ * that nothing goes on account unless an account holds it. A credit sale with
+ * nobody attached used to write the invoice and silently skip the ledger entry,
+ * so the shop was owed money no document recorded. Refuse before anything is
+ * written, exactly as the desktop till does.
+ */
+export const creditAmountOf = (
+  method: PaymentMethod,
+  total: number,
+  amountPaid: number,
+  customer: Customer | null | undefined
+): number => {
+  const owed = method === 'debt' ? total : Math.max(0, total - (amountPaid || total));
+  if (owed > 0 && !customer) {
+    throw new Error('A customer profile is required to put an order on Credit Tab / Debt.');
+  }
+  return owed;
+};
 
 /** A tender line of nothing is noise the drawer would have to reconcile. */
 const tender = (method: PaymentMethod, amount: number) => ({ method, amount: money(amount) });

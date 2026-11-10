@@ -18,7 +18,7 @@ import { claimInvoiceNumber } from '../services/invoiceCounter';
 import { applyStockLines, type StockLine } from '../services/stockService';
 import { discountAmountOf } from '../utils/discountPolicy';
 import { checkCartStock, type CartStockResult } from '../utils/cartStock';
-import { salePayments } from '../utils/salePayments';
+import { creditAmountOf, salePayments } from '../utils/salePayments';
 import type { PhoneModel, CartItem, SaleTransaction, Customer, PaymentMethod, CustomerDebtEntry, StockStatus } from '../types';
 
 interface CheckoutParams {
@@ -197,6 +197,9 @@ export const usePosStore = create<PosState>((set, get) => ({
       const resolvedId = await customerService.resolveOfflineCustomer(cust.id);
       if (resolvedId) cust = { ...cust, id: resolvedId };
     }
+    // Before a number is claimed or anything is written: a sale on account needs
+    // the account it is owed on, or the debt entry below would be silently skipped.
+    const debtAmount = creditAmountOf(params.paymentMethod, total, params.amountPaid, cust);
     // One reference per sale, drawn from the counter's own daily book — the same
     // document the till's desktop reads — so a phone and the counter cannot print the
     // same number twice. `invoiceNumber` is also the key both apps match a debt to its
@@ -208,11 +211,6 @@ export const usePosStore = create<PosState>((set, get) => ({
     // never happened" — and a document written without it cannot be found at all.
     const saleKey = newIdempotencyKey('sale');
     const debtKey = newIdempotencyKey('debt');
-
-    // Calculate debt if payment method is 'debt' or partial payment
-    const debtAmount = params.paymentMethod === 'debt' 
-      ? total 
-      : Math.max(0, total - (params.amountPaid || total));
 
     const settlement: SaleTransaction['accountSettlement'] = debtAmount > 0 ? {
       type: debtAmount === total ? 'charged_to_account' : 'partial_payment',
