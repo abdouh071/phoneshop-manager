@@ -64,6 +64,9 @@ const matchingFigures = (): DayFigures => ({
   repairsPartsCost: 200,
   repairsNetProfit: 500,
   repairsHandoverCash: 600,
+  repairsHandoverCard: 0,
+  repairsHandoverMobile: 0,
+  repairsHandoverTransfer: 0,
   repairsDepositCash: 0,
   repairsCash: 600,
   repairsDebt: 400,
@@ -145,5 +148,27 @@ describe('reconcileEodDay', () => {
     const result = reconcileEodDay(sealed(), figures);
     expect(result.hasDrift).toBe(true);
     expect(result.revenueDelta).toBe(-3200);
+  });
+
+  it('shows a card handover arriving after the close as repair-card drift, not drawer cash', () => {
+    const figures = {
+      ...matchingFigures(),
+      repairsHandoverCard: 700,
+      totalCard: 1200,
+    };
+    const result = reconcileEodDay(sealed(), figures);
+
+    const fields = result.drifts.map(d => d.field);
+    expect(fields).toContain('repairsCard');
+    expect(fields).toContain('totalCard');
+    expect(fields).not.toContain('totalCash');
+    expect(fields).not.toContain('repairsCash');
+    expect(result.drifts.find(d => d.field === 'repairsCard')?.delta).toBe(700);
+  });
+
+  it('stays quiet about transfer handovers a seal written before the split never stored', () => {
+    const legacy = sealed({ repairsTransfer: undefined });
+    const result = reconcileEodDay(legacy, { ...matchingFigures(), repairsHandoverTransfer: 900 });
+    expect(result.drifts.map(d => d.field)).not.toContain('repairsTransfer');
   });
 });

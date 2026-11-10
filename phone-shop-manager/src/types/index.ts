@@ -261,6 +261,10 @@ export interface RepairTicket {
   paymentStatus?: 'paid' | 'partial' | 'debt' | 'pending';
   paidAmount?: number;
   handoverAmountPaid?: number;
+  /** Each handover payment with the tender it was actually taken in. The drawer counts
+   *  every row under its own tender; handover money above the rows' sum was collected
+   *  before tenders were stamped and stays cash. */
+  handoverPayments?: { amount: number; method: PaymentMethod; date: string }[];
   completedAt?: string;
   debtEntryId?: string;
   /** Structured return history records on this ticket */

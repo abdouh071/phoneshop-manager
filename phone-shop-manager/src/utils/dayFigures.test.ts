@@ -651,3 +651,142 @@ describe('a partial sale counts its money once (B1)', () => {
     expect(figures.totalCash).toBe(0);
   });
 });
+
+describe('a handover counts under the tender it was taken in (B3)', () => {
+  const settled = (options: Partial<RepairTicket>): RepairTicket => ticket('r-handover', {
+    status: 'completed',
+    completedAt: at(17),
+    createdAt: at(9),
+    paymentStatus: 'paid',
+    ...options,
+  });
+  const row = (amount: number, method: string): NonNullable<RepairTicket['handoverPayments']>[number] =>
+    ({ amount, method, date: at(17) } as NonNullable<RepairTicket['handoverPayments']>[number]);
+
+  it('a card handover never enters the physical drawer', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: [],
+        repairs: [settled({
+          actualCost: 5000,
+          depositAmount: 1000,
+          handoverAmountPaid: 4000,
+          handoverPayments: [row(4000, 'card')],
+        })],
+        debts: [],
+      },
+      DAY
+    );
+    expect(figures.repairsHandoverCash).toBe(0);
+    expect(figures.repairsHandoverCard).toBe(4000);
+    // The intake deposit was cash; only it belongs in the till.
+    expect(figures.repairsDepositCash).toBe(1000);
+    expect(figures.repairsCash).toBe(1000);
+    expect(figures.totalCash).toBe(1000);
+    expect(figures.totalCard).toBe(4000);
+  });
+
+  it('a transfer handover counts only under transfer', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: [],
+        repairs: [settled({
+          actualCost: 6000,
+          depositAmount: 1000,
+          handoverAmountPaid: 5000,
+          handoverPayments: [row(5000, 'transfer')],
+        })],
+        debts: [],
+      },
+      DAY
+    );
+    expect(figures.repairsHandoverTransfer).toBe(5000);
+    expect(figures.repairsHandoverCash).toBe(0);
+    expect(figures.repairsCash).toBe(1000);
+    expect(figures.totalCash).toBe(1000);
+    expect(figures.totalCard).toBe(0);
+  });
+
+  it('a re-settled handover splits across the tenders actually taken', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: [],
+        repairs: [settled({
+          actualCost: 5000,
+          handoverAmountPaid: 5000,
+          handoverPayments: [row(3000, 'cash'), row(2000, 'card')],
+        })],
+        debts: [],
+      },
+      DAY
+    );
+    expect(figures.repairsHandoverCash).toBe(3000);
+    expect(figures.repairsHandoverCard).toBe(2000);
+    expect(figures.repairsCash).toBe(3000);
+    expect(figures.totalCash).toBe(3000);
+    expect(figures.totalCard).toBe(2000);
+  });
+
+  it('a ticket settled before tenders were stamped keeps the cash reading', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: [],
+        repairs: [settled({ actualCost: 5000, depositAmount: 1000, handoverAmountPaid: 4000 })],
+        debts: [],
+      },
+      DAY
+    );
+    expect(figures.repairsHandoverCash).toBe(4000);
+    expect(figures.repairsHandoverCard).toBe(0);
+    expect(figures.repairsCash).toBe(5000);
+    expect(figures.totalCash).toBe(5000);
+  });
+
+  it('a mobile handover counts under mobile, not the till', () => {
+    const figures = computeDayFigures(
+      {
+        transactions: [],
+        repairs: [settled({
+          actualCost: 1500,
+          handoverAmountPaid: 1500,
+          handoverPayments: [row(1500, 'mobile')],
+        })],
+        debts: [],
+      },
+      DAY
+    );
+    expect(figures.repairsHandoverMobile).toBe(1500);
+    expect(figures.repairsHandoverCash).toBe(0);
+    expect(figures.repairsCash).toBe(0);
+    expect(figures.totalCash).toBe(0);
+    expect(figures.totalMobile).toBe(1500);
+  });
+
+  it('the handover row on the repair ledger is not counted again as a card collection', () => {
+    const d = debt('d-rep-card', [{ date: at(17), amount: 4000, method: 'card' }]);
+    const figures = computeDayFigures(
+      {
+        transactions: [],
+        repairs: [settled({
+          actualCost: 4000,
+          handoverAmountPaid: 4000,
+          handoverPayments: [row(4000, 'card')],
+        })],
+        debts: [{
+          ...d,
+          type: 'repair',
+          linkedTicketId: 'r-handover',
+          payments: d.payments.map(p => ({
+            ...p,
+            id: 'pay_handover_1700',
+            note: 'Payment at handover for Repair #TKT-r-handover',
+          })) as CustomerDebtEntry['payments'],
+        }],
+      },
+      DAY
+    );
+    expect(figures.repairsHandoverCard).toBe(4000);
+    expect(figures.debtCollectedCard).toBe(0);
+    expect(figures.totalCard).toBe(4000);
+  });
+});

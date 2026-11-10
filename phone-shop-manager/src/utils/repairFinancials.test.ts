@@ -12,6 +12,7 @@ import {
   isClaimedAndPaidRepair,
   getClaimedRepairRevenue,
   getClaimedRepairHandoverCash,
+  getClaimedRepairHandoverByTender,
   getClaimedRepairDebt,
   getClaimedRepairPartsCost,
   getClaimedRepairProfit,
@@ -186,6 +187,115 @@ describe('getClaimedRepairHandoverCash', () => {
   it('returns partial paid amount minus deposit for partial payment', () => {
     const t = makeTicket({ paymentStatus: 'partial', actualCost: 5000, depositAmount: 1000, paidAmount: 3000 });
     expect(getClaimedRepairHandoverCash(t)).toBe(2000); // 3000 - 1000
+  });
+});
+
+// ─── handover tender split (B3) ───────────────────────────────────────────────
+
+describe('a handover counts under the tender it was taken in', () => {
+  const row = (amount: number, method: 'cash' | 'card' | 'transfer' | 'mobile') => ({
+    amount,
+    method,
+    date: '2026-11-10T10:00:00.000Z',
+  });
+
+  it('a card settlement never enters the physical drawer', () => {
+    const t = makeTicket({
+      paymentStatus: 'paid',
+      actualCost: 5000,
+      depositAmount: 1000,
+      handoverAmountPaid: 4000,
+      handoverPayments: [row(4000, 'card')],
+    });
+    expect(getClaimedRepairHandoverCash(t)).toBe(0);
+    expect(getClaimedRepairHandoverByTender(t, 'card')).toBe(4000);
+    expect(getClaimedRepairHandoverByTender(t, 'transfer')).toBe(0);
+  });
+
+  it('a re-settle in a second tender splits the money between the two', () => {
+    const t = makeTicket({
+      paymentStatus: 'paid',
+      actualCost: 6000,
+      depositAmount: 1000,
+      handoverAmountPaid: 5000,
+      handoverPayments: [row(3000, 'cash'), row(2000, 'card')],
+    });
+    expect(getClaimedRepairHandoverCash(t)).toBe(3000);
+    expect(getClaimedRepairHandoverByTender(t, 'card')).toBe(2000);
+  });
+
+  it('money taken before the stamp existed stays cash', () => {
+    const t = makeTicket({
+      paymentStatus: 'paid',
+      actualCost: 6000,
+      depositAmount: 1000,
+      handoverAmountPaid: 5000,
+      handoverPayments: [row(2000, 'card')],
+    });
+    expect(getClaimedRepairHandoverCash(t)).toBe(3000);
+    expect(getClaimedRepairHandoverByTender(t, 'card')).toBe(2000);
+  });
+
+  it('a ticket with no rows keeps the old all-cash reading', () => {
+    const t = makeTicket({ paymentStatus: 'paid', actualCost: 5000, depositAmount: 1000, handoverAmountPaid: 4000 });
+    expect(getClaimedRepairHandoverCash(t)).toBe(4000);
+    expect(getClaimedRepairHandoverByTender(t, 'card')).toBe(0);
+    expect(getClaimedRepairHandoverByTender(t, 'mobile')).toBe(0);
+  });
+
+  it('an empty row list is the same legacy reading', () => {
+    const t = makeTicket({
+      paymentStatus: 'paid',
+      actualCost: 5000,
+      handoverAmountPaid: 5000,
+      handoverPayments: [],
+    });
+    expect(getClaimedRepairHandoverCash(t)).toBe(5000);
+    expect(getClaimedRepairHandoverByTender(t, 'card')).toBe(0);
+  });
+
+  it('a transfer settlement counts under transfer only', () => {
+    const t = makeTicket({
+      paymentStatus: 'paid',
+      actualCost: 5000,
+      handoverAmountPaid: 5000,
+      handoverPayments: [row(5000, 'transfer')],
+    });
+    expect(getClaimedRepairHandoverCash(t)).toBe(0);
+    expect(getClaimedRepairHandoverByTender(t, 'transfer')).toBe(5000);
+  });
+
+  it('matches the tender whatever case it was stored in', () => {
+    const t = makeTicket({
+      paymentStatus: 'paid',
+      actualCost: 5000,
+      handoverAmountPaid: 5000,
+      handoverPayments: [row(5000, 'card')],
+    });
+    expect(getClaimedRepairHandoverByTender(t, 'CARD')).toBe(5000);
+    expect(getClaimedRepairHandoverByTender(t, 'Cash')).toBe(0);
+  });
+
+  it('a pure-debt ticket counts nothing, rows or no rows', () => {
+    const t = makeTicket({
+      paymentStatus: 'debt',
+      actualCost: 5000,
+      handoverAmountPaid: 0,
+      handoverPayments: [row(0, 'card')],
+    });
+    expect(getClaimedRepairHandoverCash(t)).toBe(0);
+    expect(getClaimedRepairHandoverByTender(t, 'card')).toBe(0);
+  });
+
+  it('a phone that has not been claimed counts nothing', () => {
+    const t = makeTicket({
+      status: 'ready',
+      paymentStatus: 'paid',
+      handoverAmountPaid: 4000,
+      handoverPayments: [row(4000, 'cash')],
+    });
+    expect(getClaimedRepairHandoverCash(t)).toBe(0);
+    expect(getClaimedRepairHandoverByTender(t, 'cash')).toBe(0);
   });
 });
 

@@ -45,6 +45,8 @@ export interface EndOfDayRecord {
   repairsCash: number;
   repairsCard: number;
   repairsMobile: number;
+  /** Seals written before handover tenders were split carry no transfer figure. */
+  repairsTransfer?: number;
   repairsDebt: number;
   repairsTotalRevenue: number;
   repairsPartsCost: number;

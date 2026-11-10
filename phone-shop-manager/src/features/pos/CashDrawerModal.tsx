@@ -154,7 +154,7 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
       debtCollectionsCount,
       cardTotal: figures.totalCard,
       mobileTotal: figures.totalMobile,
-      transferTotal: figures.salesTransfer + figures.partsTransfer,
+      transferTotal: figures.salesTransfer + figures.partsTransfer + figures.repairsHandoverTransfer,
       debtTotal: figures.salesDebt + figures.partsDebt,
       creditTotal: figures.salesStoreCredit + figures.partsStoreCredit,
       unitsSold,
@@ -459,7 +459,7 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
                   <span>💳 Card / TPE Terminal</span>
                   {stats.debtCollectedCard > 0 && (
                     <span className={styles.detailRowSub}>
-                      ({formatCurrency(stats.cardTotal)} sales + {formatCurrency(stats.debtCollectedCard)} debt)
+                      ({formatCurrency(stats.cardTotal)} sales + repairs + {formatCurrency(stats.debtCollectedCard)} debt)
                     </span>
                   )}
                 </div>
@@ -471,7 +471,7 @@ export const CashDrawerModal: React.FC<CashDrawerModalProps> = ({ isOpen, onClos
                   <span>📱 Mobile / BaridiMob</span>
                   {stats.debtCollectedMobile > 0 && (
                     <span className={styles.detailRowSub}>
-                      ({formatCurrency(stats.mobileTotal)} sales + {formatCurrency(stats.debtCollectedMobile)} debt)
+                      ({formatCurrency(stats.mobileTotal)} sales + repairs + {formatCurrency(stats.debtCollectedMobile)} debt)
                     </span>
                   )}
                 </div>

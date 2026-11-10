@@ -34,6 +34,10 @@ export interface RepairTicket {
   paymentStatus?: 'paid' | 'partial' | 'debt';
   paidAmount?: number;
   handoverAmountPaid?: number;
+  /** Each handover payment with the tender it was actually taken in. The drawer counts
+   *  every row under its own tender; handover money above the rows' sum was collected
+   *  before tenders were stamped and stays cash. */
+  handoverPayments?: { amount: number; method: PaymentMethod; date: string }[];
   debtEntryId?: string;
   settlementNotes?: string;
   trackingPin?: string;

@@ -222,6 +222,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
           paymentStatus: undefined,
           paidAmount: undefined,
           handoverAmountPaid: undefined,
+          handoverPayments: undefined,
           completedAt: undefined,
           debtEntryId: undefined,
           settlementNotes: undefined,
@@ -703,6 +704,9 @@ export const useRepairStore = create<RepairState>((set, get) => ({
     const remarks = [primary.remark, secondary.remark].filter(Boolean);
     const fusedRemark = remarks.length > 0 ? Array.from(new Set(remarks)).join(' | ') : undefined;
 
+    // The handover total is additive below, so the tender rows must add up the same way.
+    const fusedHandoverPayments = [...(primary.handoverPayments || []), ...(secondary.handoverPayments || [])];
+
     const fusedSettlementNotes = [primary.settlementNotes, secondary.settlementNotes]
       .filter(Boolean)
       .join('\n---\nMerged Notes:\n') || undefined;
@@ -726,6 +730,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       depositAmount: (primary.depositAmount || 0) + (secondary.depositAmount || 0) || undefined,
       paidAmount: (primary.paidAmount || 0) + (secondary.paidAmount || 0) || undefined,
       handoverAmountPaid: (primary.handoverAmountPaid || 0) + (secondary.handoverAmountPaid || 0) || undefined,
+      handoverPayments: fusedHandoverPayments.length > 0 ? fusedHandoverPayments : undefined,
       debtEntryId: primary.debtEntryId || secondary.debtEntryId,
       trackingPin: primary.trackingPin || secondary.trackingPin,
     };

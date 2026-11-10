@@ -242,6 +242,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
                 paymentStatus: null,
                 paidAmount: null,
                 handoverAmountPaid: null,
+                handoverPayments: null,
                 completedAt: null,
                 debtEntryId: null,
                 settlementNotes: null,
@@ -377,6 +378,11 @@ export const useRepairStore = create<RepairState>((set, get) => ({
           actualCost: finalPrice,
           paidAmount: effectiveTotalPaid,
           handoverAmountPaid: handoverAmountPaid || 0,
+          // This settle writes the whole handover total, so the tender rows replace
+          // whatever stood there: the drawer must read the same money the ticket claims.
+          handoverPayments: (handoverAmountPaid || 0) > 0
+            ? [{ amount: handoverAmountPaid, method: paymentMethod, date: now }]
+            : null,
           paymentStatus,
           completedAt: now,
           customerId: customerId || null,

@@ -108,6 +108,11 @@ const fuseTicketData = (preferred: RepairTicket, absorbed: RepairTicket): Repair
     depositAmount: Math.max(preferred.depositAmount || 0, absorbed.depositAmount || 0) || undefined,
     paidAmount: Math.max(preferred.paidAmount || 0, absorbed.paidAmount || 0) || undefined,
     handoverAmountPaid: Math.max(preferred.handoverAmountPaid || 0, absorbed.handoverAmountPaid || 0) || undefined,
+    // The total above keeps the larger handover, so the tender rows follow the ticket
+    // that paid it; the smaller side's rows would stamp money the total does not hold.
+    handoverPayments: (absorbed.handoverAmountPaid || 0) > (preferred.handoverAmountPaid || 0)
+      ? absorbed.handoverPayments
+      : preferred.handoverPayments,
     debtEntryId: preferred.debtEntryId || absorbed.debtEntryId,
     trackingPin: preferred.trackingPin || absorbed.trackingPin,
   };

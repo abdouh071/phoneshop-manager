@@ -115,8 +115,9 @@ export const useEndOfDayStore = create<EndOfDayState>((set, get) => ({
 
       repairsCompleted: figures.repairsCompletedCount,
       repairsCash: figures.repairsCash,
-      repairsCard: 0,
-      repairsMobile: 0,
+      repairsCard: figures.repairsHandoverCard,
+      repairsMobile: figures.repairsHandoverMobile,
+      repairsTransfer: figures.repairsHandoverTransfer,
       repairsDebt: figures.repairsDebt,
       repairsTotalRevenue: figures.repairsRevenue,
       repairsPartsCost: figures.repairsPartsCost,

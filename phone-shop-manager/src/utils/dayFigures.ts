@@ -2,7 +2,7 @@ import type { CustomerDebtEntry, RepairTicket, SaleTransaction } from '../types'
 import {
   isClaimedAndPaidRepair,
   getClaimedRepairDebt,
-  getClaimedRepairHandoverCash,
+  getClaimedRepairHandoverByTender,
   getClaimedRepairPartsCost,
   getClaimedRepairRevenue,
 } from './repairFinancials';
@@ -52,6 +52,9 @@ export interface DayFigures {
   repairsPartsCost: number;
   repairsNetProfit: number;
   repairsHandoverCash: number;
+  repairsHandoverCard: number;
+  repairsHandoverMobile: number;
+  repairsHandoverTransfer: number;
   repairsDepositCash: number;
   repairsCash: number;
   repairsDebt: number;
@@ -177,7 +180,15 @@ export function computeDayFigures(sources: DayFigureSources, dateStr: string): D
   const recognizedRepairs = completedRepairs.filter(r => isClaimedAndPaidRepair(r));
   const repairsRevenue = recognizedRepairs.reduce((s, r) => s + getClaimedRepairRevenue(r), 0);
   const repairsPartsCost = recognizedRepairs.reduce((s, r) => s + getClaimedRepairPartsCost(r), 0);
-  const repairsHandoverCash = recognizedRepairs.reduce((s, r) => s + getClaimedRepairHandoverCash(r), 0);
+  // A handover counts under the tender the counter actually took: a card or transfer
+  // settlement never entered the physical drawer. Tickets settled before tenders were
+  // stamped keep the old cash reading inside the helper.
+  const handoverTender = (method: string): number =>
+    recognizedRepairs.reduce((s, r) => s + getClaimedRepairHandoverByTender(r, method), 0);
+  const repairsHandoverCash = handoverTender('cash');
+  const repairsHandoverCard = handoverTender('card');
+  const repairsHandoverMobile = handoverTender('mobile');
+  const repairsHandoverTransfer = handoverTender('transfer');
   const repairsDebt = completedRepairs.reduce((s, r) => s + getClaimedRepairDebt(r), 0);
 
   // Intake deposits are cash the shop took today, on phones received today whether or not they were fixed.
@@ -224,6 +235,9 @@ export function computeDayFigures(sources: DayFigureSources, dateStr: string): D
     repairsPartsCost,
     repairsNetProfit: repairsRevenue - repairsPartsCost,
     repairsHandoverCash,
+    repairsHandoverCard,
+    repairsHandoverMobile,
+    repairsHandoverTransfer,
     repairsDepositCash,
     repairsCash,
     repairsDebt,
@@ -249,7 +263,7 @@ export function computeDayFigures(sources: DayFigureSources, dateStr: string): D
     // Physical drawer money. A sale handed back the same day is already out of the sums
     // above; one handed back today after being sold earlier is cash that left today.
     totalCash: Math.max(0, salesCash + sumPayment(partsTx, 'cash') + repairsCash + debtCollectedCash - earlierDayRefundsCash),
-    totalCard: salesCard + sumPayment(partsTx, 'card'),
-    totalMobile: salesMobile + sumPayment(partsTx, 'mobile'),
+    totalCard: salesCard + sumPayment(partsTx, 'card') + repairsHandoverCard,
+    totalMobile: salesMobile + sumPayment(partsTx, 'mobile') + repairsHandoverMobile,
   };
 }

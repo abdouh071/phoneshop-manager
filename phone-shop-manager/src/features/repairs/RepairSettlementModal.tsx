@@ -314,6 +314,14 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
         paidAmount: effectiveTotalPaid,
         handoverAmountPaid:
           (ticket.status === 'completed' ? (ticket.handoverAmountPaid || 0) : 0) + effectivePaidNow,
+        // The tender stamp follows the same cycle rule as the amount: a re-settle
+        // appends to the rows already on the ticket, a fresh cycle starts new ones.
+        handoverPayments: effectivePaidNow > 0
+          ? [
+              ...(ticket.status === 'completed' ? (ticket.handoverPayments || []) : []),
+              { amount: effectivePaidNow, method: effectiveMethod, date: new Date().toISOString() },
+            ]
+          : (ticket.status === 'completed' ? ticket.handoverPayments : undefined),
         paymentStatus,
         completedAt: new Date().toISOString(),
         debtEntryId: createdDebtId,

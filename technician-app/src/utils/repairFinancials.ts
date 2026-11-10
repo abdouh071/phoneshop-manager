@@ -104,10 +104,10 @@ export const getClaimedRepairRevenue = (ticket: RepairTicket | null | undefined)
 export const getClaimedRepairPrice = getClaimedRepairRevenue;
 
 /**
- * Returns the handover cash collected at the time of claim/completion.
+ * The handover money collected at claim/completion, whatever tender it came in.
  * Excludes intake deposit (which was received when the ticket was created).
  */
-export const getClaimedRepairHandoverCash = (ticket: RepairTicket | null | undefined): number => {
+const handoverTotalOf = (ticket: RepairTicket | null | undefined): number => {
   if (!isClaimedAndPaidRepair(ticket)) return 0;
   if (ticket?.paymentStatus === 'debt') return 0;
 
@@ -126,6 +126,42 @@ export const getClaimedRepairHandoverCash = (ticket: RepairTicket | null | undef
   // Fully paid: full price minus whatever was already paid as deposit
   return Math.max(0, fullPrice - deposit);
 };
+
+/**
+ * The handover money taken in one tender. A card or transfer settlement is not
+ * drawer cash: each stamped row counts under the tender the counter chose, and
+ * only money collected before the stamp existed (no rows, or handover above the
+ * rows' sum) keeps the old cash reading — the till that took it counted it cash.
+ */
+export const getClaimedRepairHandoverByTender = (
+  ticket: RepairTicket | null | undefined,
+  method: string
+): number => {
+  const handover = handoverTotalOf(ticket);
+  if (handover <= 0) return 0;
+
+  const target = method.toLowerCase();
+  const rows = ticket?.handoverPayments;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return target === 'cash' ? handover : 0;
+  }
+
+  let stamped = 0;
+  let stampedTotal = 0;
+  for (const row of rows) {
+    const amount = Math.max(0, Number(row.amount) || 0);
+    stampedTotal += amount;
+    if (String(row.method ?? '').toLowerCase() === target) stamped += amount;
+  }
+  const unstamped = Math.max(0, handover - stampedTotal);
+  return stamped + (target === 'cash' ? unstamped : 0);
+};
+
+/**
+ * The handover money that landed in the physical drawer.
+ */
+export const getClaimedRepairHandoverCash = (ticket: RepairTicket | null | undefined): number =>
+  getClaimedRepairHandoverByTender(ticket, 'cash');
 
 /**
  * Returns the remaining debt (unpaid balance) for a claimed repair.
