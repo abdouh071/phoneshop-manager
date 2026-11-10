@@ -155,29 +155,36 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
         // If offline and we have a cached user, retain session without attempting remote validation
         if (isOffline && cached) {
-          const isSuper = cached.isSuperAdmin === true || cached.email === LEGACY_OWNER_EMAIL;
           set({
             user: cached,
             isAuthenticated: true,
             isInitializing: false,
-            isSuperAdmin: isSuper,
+            // Offline cannot verify super-admin status: the session stays usable
+            // (role-based permissions and history unlock included) but the elevated
+            // flag is never granted from the cache alone.
+            isSuperAdmin: false,
             isHistoryUnlocked: cached.role === 'admin'
           });
           return;
         }
 
         let profile: User | null = null;
+        // A profile that only the local cache could supply (degraded read) must not
+        // confer the super-admin flag; only a successful server read may do that.
+        let profileFromCache = false;
         try {
           profile = await userService.getUserById(firebaseUser.uid);
         } catch (fetchErr) {
           console.warn('Could not fetch user profile from Firestore, falling back to cache:', fetchErr);
           if (cached && (cached.id === firebaseUser.uid || !cached.id)) {
             profile = cached;
+            profileFromCache = true;
           }
         }
 
         if (!profile && cached && (cached.id === firebaseUser.uid || !cached.id)) {
           profile = cached;
+          profileFromCache = true;
         }
 
         if (profile) {
@@ -228,7 +235,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
           }
 
           // Check super admin status with fallback to legacy owner email
-          const isSuper = profile.isSuperAdmin === true || profile.email === LEGACY_OWNER_EMAIL;
+          const isSuper = !profileFromCache && (profile.isSuperAdmin === true || profile.email === LEGACY_OWNER_EMAIL);
 
           // One-time migration: attempt to set isSuperAdmin in DB asynchronously
           if (!isOffline && profile.email === LEGACY_OWNER_EMAIL && profile.isSuperAdmin !== true) {
@@ -237,7 +244,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
           }
 
           // Apply Role Override (Quick Login)
-          const override = localStorage.getItem('role_override');
+          const override = sessionStorage.getItem('role_override');
           if (override && isSuper) {
             profile.role = override as 'sales_agent' | 'repair_agent';
             profile.name = override === 'sales_agent' ? 'Sales Agent' : 'Repair Technician';
@@ -321,12 +328,13 @@ export const useAuthStore = create<AuthState>((set, get) => {
       const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
       const cached = getCachedUser();
       if (isOffline && cached) {
-        // In offline reload, keep cached user session
+        // In offline reload, keep cached user session — but never the super-admin
+        // flag, which only a validated server profile may grant.
         set({
           user: cached,
           isAuthenticated: true,
           isInitializing: false,
-          isSuperAdmin: cached.isSuperAdmin === true || cached.email === LEGACY_OWNER_EMAIL,
+          isSuperAdmin: false,
           isHistoryUnlocked: cached.role === 'admin'
         });
       } else {
@@ -340,11 +348,14 @@ export const useAuthStore = create<AuthState>((set, get) => {
     user: initialCachedUser,
     isAuthenticated: !!initialCachedUser,
     isLoading: false,
-    isInitializing: !initialCachedUser,
+    // The cached identity is display-only until the auth-state handler validates it.
+    // Privileged flags are never granted from the cache at startup; the handler sets
+    // them from the server profile (or the explicit offline branch below).
+    isInitializing: !!initialCachedUser,
     error: null,
     staff: [],
-    isSuperAdmin: initialCachedUser?.isSuperAdmin || initialCachedUser?.email === LEGACY_OWNER_EMAIL || false,
-    isHistoryUnlocked: initialCachedUser?.role === 'admin',
+    isSuperAdmin: false,
+    isHistoryUnlocked: false,
 
     login: async (email, pass) => {
       set({ isLoading: true, error: null });
@@ -427,7 +438,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
         }
 
         // Apply Role Override on login (if any)
-        const override = localStorage.getItem('role_override');
+        const override = sessionStorage.getItem('role_override');
         if (override && profile.isSuperAdmin) {
           profile.role = override as 'sales_agent' | 'repair_agent';
           profile.name = override === 'sales_agent' ? 'Sales Agent' : 'Repair Technician';
@@ -463,7 +474,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       if (currentUser) {
         activityLogService.log('system', `${currentUser.name} logged out`, { userName: currentUser.name, userId: currentUser.id }).catch(console.error);
       }
-      localStorage.removeItem('role_override');
+      sessionStorage.removeItem('role_override');
       try {
         await signOut(auth);
       } catch (err) {
@@ -614,10 +625,10 @@ export const useAuthStore = create<AuthState>((set, get) => {
       
       set({ isLoading: true, error: null });
       try {
-        localStorage.setItem('role_override', role);
+        sessionStorage.setItem('role_override', role);
         await get().login(superAdminEmail, adminPass);
       } catch (err: unknown) {
-        localStorage.removeItem('role_override');
+        sessionStorage.removeItem('role_override');
         set({ error: errorMessage(err) || 'Failed to authenticate Admin.', isLoading: false });
       }
     },
