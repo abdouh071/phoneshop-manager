@@ -1,6 +1,7 @@
 import { renderToString } from 'react-dom/server';
 import JsBarcode from 'jsbarcode';
 import { formatCurrency, formatCurrencyWith } from './formatCurrency';
+import { escapeHtml } from './escapeHtml';
 import { useSettingsStore } from '../store/settingsStore';
 import type { RepairTicket } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
@@ -439,7 +440,7 @@ export function openPrintWindow(htmlContent: string, title = 'Print') {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>${title}</title>
+  <title>${escapeHtml(title)}</title>
   <style>
     @page { margin: 0; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -553,7 +554,7 @@ export function buildReceiptHTML(transaction: {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;font-size:12px;line-height:1.35;">
         <span style="flex:1;padding-right:8px;color:#111827;">
           ${isReturn ? `<span style="display:inline-block;background:#fee2e2;color:#b91c1c;font-size:9.5px;font-weight:700;padding:0 3px;border-radius:2px;margin-right:3px;">${tr.returnItem}</span>` : ''}
-          <strong style="color:#374151;">${item.quantity}×</strong> ${item.product.name} ${item.product.model || ''}
+          <strong style="color:#374151;">${item.quantity}×</strong> ${escapeHtml(item.product.name)} ${escapeHtml(item.product.model || '')}
         </span>
         <span style="white-space:nowrap;font-variant-numeric:tabular-nums;${isReturn ? 'color:#b91c1c;font-weight:600;' : 'color:#111827;'}">
           ${isReturn ? '−' : ''}${formatCurrency(Math.abs(lineTotal))}
@@ -581,8 +582,8 @@ export function buildReceiptHTML(transaction: {
       <!-- Store Header -->
       <div style="text-align:center;margin-bottom:8px;">
         ${logoDataUrl ? `<div style="text-align:center;margin-bottom:6px;"><img src="${logoDataUrl}" alt="Logo" style="max-width:140px;max-height:50px;object-fit:contain;" /></div>` : ''}
-        <h2 style="font-size:15px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;margin:0 0 2px 0;color:#111827;">${storeName || 'PhoneShop'}</h2>
-        ${activeHeader ? `<p style="font-size:11px;color:#6b7280;margin:2px 0;">${activeHeader}</p>` : ''}
+        <h2 style="font-size:15px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;margin:0 0 2px 0;color:#111827;">${escapeHtml(storeName || 'PhoneShop')}</h2>
+        ${activeHeader ? `<p style="font-size:11px;color:#6b7280;margin:2px 0;">${escapeHtml(activeHeader)}</p>` : ''}
         <div style="border-top:1px dashed #d1d5db;margin:8px 0;"></div>
         <p style="font-size:11px;color:#6b7280;margin:0;">${formatDate(transaction.date)}</p>
         <p style="font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:10.5px;color:#4b5563;font-weight:600;margin:2px 0 0 0;">#${transaction.id}</p>
@@ -594,12 +595,12 @@ export function buildReceiptHTML(transaction: {
         <div style="font-size:11.5px;line-height:1.4;">
           ${transaction.customerName ? `
             <div style="display:flex;justify-content:space-between;padding:1px 0;">
-              <span style="color:#6b7280;">${tr.customer}</span><span style="font-weight:600;color:#1f2937;">${transaction.customerName}</span>
+              <span style="color:#6b7280;">${tr.customer}</span><span style="font-weight:600;color:#1f2937;">${escapeHtml(transaction.customerName)}</span>
             </div>
           ` : ''}
           ${transaction.processedByName ? `
             <div style="display:flex;justify-content:space-between;padding:1px 0;">
-              <span style="color:#6b7280;">${tr.cashier}</span><span style="font-weight:600;color:#1f2937;">${transaction.processedByName}</span>
+              <span style="color:#6b7280;">${tr.cashier}</span><span style="font-weight:600;color:#1f2937;">${escapeHtml(transaction.processedByName)}</span>
             </div>
           ` : ''}
         </div>
@@ -670,7 +671,7 @@ export function buildReceiptHTML(transaction: {
       <!-- Footer Policy -->
       <div style="border-top:1px dashed #d1d5db;margin:10px 0 8px 0;"></div>
       <div style="text-align:center;font-size:11px;color:#6b7280;line-height:1.4;">
-        <p style="margin:0;">${activeFooter}</p>
+        <p style="margin:0;">${escapeHtml(activeFooter)}</p>
       </div>
     </div>
   `;
@@ -765,17 +766,17 @@ export function buildLabelsHTML(products: {
     const fontWeight = '400';
 
     const linesHtml = textLines.map(line => `
-      <div style="font-size:${fontSize};font-weight:${fontWeight};color:#111;line-height:1.15;padding:0 2px;transform:translateX(-${shiftMm}mm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${line}</div>
+      <div style="font-size:${fontSize};font-weight:${fontWeight};color:#111;line-height:1.15;padding:0 2px;transform:translateX(-${shiftMm}mm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${escapeHtml(line)}</div>
     `).join('');
 
     return `
       <div class="ticket-label" style="box-sizing:border-box;width:50mm;height:20mm;max-height:20mm;background:#fff;border:1px solid #94a3b8;border-radius:2px;padding:0.6mm 1mm;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.12);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-        <div style="font-weight:700;font-size:11px;letter-spacing:0.3px;text-transform:uppercase;line-height:1;margin-top:0.4mm;transform:translateX(-2mm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">${activeStoreName}</div>
+        <div style="font-weight:700;font-size:11px;letter-spacing:0.3px;text-transform:uppercase;line-height:1;margin-top:0.4mm;transform:translateX(-2mm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">${escapeHtml(activeStoreName)}</div>
         <div style="border-top:1.5px solid #000;width:100%;margin:1mm 0 1.2mm 0;"></div>
         ${linesHtml}
         <div style="margin-top:${p.hidePrice ? (textLines.length > 1 ? '0.4mm' : '0.8mm') : '0.4mm'};display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;width:100%;">
           <div style="display:flex;justify-content:center;align-items:center;max-width:34mm;overflow:hidden;">${barcodeSvg}</div>
-          <div style="font-size:8px;font-weight:500;color:#222;margin-top:0.3mm;letter-spacing:0.4px;line-height:1;text-align:center;">${cleanSku}</div>
+          <div style="font-size:8px;font-weight:500;color:#222;margin-top:0.3mm;letter-spacing:0.4px;line-height:1;text-align:center;">${escapeHtml(cleanSku)}</div>
         </div>
         ${!p.hidePrice ? `<div style="font-size:13px;font-weight:800;height:4mm;line-height:4mm;margin-top:0.6mm;letter-spacing:0.3px;">${formatCurrency(p.price)}</div>` : ''}
       </div>
@@ -988,7 +989,7 @@ export function buildZReportHTML(
   const { summary } = data;
   const staffRows = summary.staffBreakdown.map(s => `
     <div style="display:flex;justify-content:space-between;font-size:12px;margin:2px 0;">
-      <span>${s.name} (${s.count} ${i18n.t('reports.txs', 'txs')})</span>
+      <span>${escapeHtml(s.name)} (${s.count} ${i18n.t('reports.txs', 'txs')})</span>
       <strong>${formatCurrency(s.total)}</strong>
     </div>
   `).join('');
@@ -1002,10 +1003,10 @@ export function buildZReportHTML(
   return `
     <div style="font-family:'Courier New',Courier,monospace;font-size:12px;max-width:320px;margin:0 auto;padding:12px;background:#fff;color:#000;">
       <div style="text-align:center;margin-bottom:8px;">
-        <h2 style="font-size:16px;font-weight:bold;margin:0 0 4px 0;text-transform:uppercase;">${storeName || 'PhoneShop Pro'}</h2>
+        <h2 style="font-size:16px;font-weight:bold;margin:0 0 4px 0;text-transform:uppercase;">${escapeHtml(storeName || 'PhoneShop Pro')}</h2>
         <div style="font-size:13px;font-weight:bold;margin:4px 0;">${i18n.t('reports.zReport', '*** END-OF-DAY Z-REPORT ***')}</div>
         <div style="font-size:11px;color:#333;">${i18n.t('reports.reportDate', 'Date:')} ${data.date}</div>
-        <div style="font-size:11px;color:#333;">${i18n.t('reports.cashier', 'Cashier:')} ${data.generatedBy}</div>
+        <div style="font-size:11px;color:#333;">${i18n.t('reports.cashier', 'Cashier:')} ${escapeHtml(data.generatedBy)}</div>
         <div style="font-size:10px;color:#666;">${i18n.t('reports.generatedAt', 'Generated:')} ${new Date().toLocaleTimeString()}</div>
       </div>
 
@@ -1178,7 +1179,7 @@ export function buildRepairLabelHTML(ticket: {
     });
     barcodeSvg = svgNode.outerHTML;
   } catch (e) {
-    barcodeSvg = `<div style="font-size:11px;font-weight:bold;">${ticketNum}</div>`;
+    barcodeSvg = `<div style="font-size:11px;font-weight:bold;">${escapeHtml(ticketNum)}</div>`;
   }
 
   return `
@@ -1186,7 +1187,7 @@ export function buildRepairLabelHTML(ticket: {
     <html>
     <head>
       <meta charset="utf-8" />
-      <title>Phone Back Label - ${ticketNum}</title>
+      <title>Phone Back Label - ${escapeHtml(ticketNum)}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -1335,16 +1336,16 @@ export function buildRepairLabelHTML(ticket: {
       <div class="preview-wrapper">
         <div class="label-card">
           <div class="header-row">
-            <span class="phone-name">${phoneHeader}</span>
+            <span class="phone-name">${escapeHtml(phoneHeader)}</span>
           </div>
           <div class="divider"></div>
           <div class="info-row">
             <span class="info-label">${i18n.t('ticket.customer', 'Client')}&nbsp;:&nbsp;</span>
-            <span class="info-val">${custName}</span>
+            <span class="info-val">${escapeHtml(custName)}</span>
           </div>
           <div class="info-row">
             <span class="info-label">${i18n.t('ticket.issue', 'Prob')}&nbsp;:&nbsp;</span>
-            <span class="info-val">${issueDesc || 'Diagnostic'}</span>
+            <span class="info-val">${issueDesc ? escapeHtml(issueDesc) : 'Diagnostic'}</span>
           </div>
           <div class="info-row">
             <span class="info-label">${i18n.t('ticket.cost', 'Prix')}&nbsp;:&nbsp;</span>
@@ -1352,7 +1353,7 @@ export function buildRepairLabelHTML(ticket: {
           </div>
           <div class="barcode-wrap">
             <div class="barcode-svg">${barcodeSvg}</div>
-            <div class="ticket-num">${ticketNum}</div>
+            <div class="ticket-num">${escapeHtml(ticketNum)}</div>
           </div>
         </div>
         <div class="badge">🏷️ ${i18n.t('ticket.deviceLabel', 'Device Back Sticker')}</div>
@@ -1396,7 +1397,7 @@ export function buildRepairReceiptHTML(ticket: {
   const deposit = ticket.depositAmount || 0;
   const balanceDue = Math.max(0, totalCost - deposit);
 
-  const lockSnippet = ticket.lockValue ? `${ticket.lockType === 'pattern' ? i18n.t('ticket.pattern', 'Pattern Lock') : i18n.t('ticket.pinLabel', 'PIN / Passcode')}: ${ticket.lockValue}` : i18n.t('common.none', 'None');
+  const lockSnippet = ticket.lockValue ? `${ticket.lockType === 'pattern' ? i18n.t('ticket.pattern', 'Pattern Lock') : i18n.t('ticket.pinLabel', 'PIN / Passcode')}: ${escapeHtml(ticket.lockValue)}` : i18n.t('common.none', 'None');
 
   // Generate QR Code SVG manually (using renderToString as this returns an HTML string)
   let qrCodeSvg = '';
@@ -1411,7 +1412,7 @@ export function buildRepairReceiptHTML(ticket: {
       />
     );
   } catch (e) {
-    qrCodeSvg = `<div style="font-size:12px;font-weight:bold;">${ticketNum}</div>`;
+    qrCodeSvg = `<div style="font-size:12px;font-weight:bold;">${escapeHtml(ticketNum)}</div>`;
   }
 
   return `
@@ -1475,11 +1476,11 @@ export function buildRepairReceiptHTML(ticket: {
 
         <!-- Header -->
         <div class="center">
-          <div class="store-name">${activeStoreName}</div>
-          ${receiptHeader ? `<div class="header-msg">${receiptHeader}</div>` : ''}
+          <div class="store-name">${escapeHtml(activeStoreName)}</div>
+          ${receiptHeader ? `<div class="header-msg">${escapeHtml(receiptHeader)}</div>` : ''}
           <div class="ticket-label">${i18n.t('ticket.repairTicket', 'Repair Intake Ticket')}</div>
-          <div><span class="ticket-num">${ticketNum}</span></div>
-          ${pinSnippet ? `<div class="pin-row">${i18n.t('ticket.pin', 'PIN:')} ${pinSnippet}</div>` : ''}
+          <div><span class="ticket-num">${escapeHtml(ticketNum)}</span></div>
+          ${pinSnippet ? `<div class="pin-row">${i18n.t('ticket.pin', 'PIN:')} ${escapeHtml(pinSnippet)}</div>` : ''}
           <div class="date-row">${formattedDate}</div>
         </div>
 
@@ -1489,9 +1490,9 @@ export function buildRepairReceiptHTML(ticket: {
         <div class="section-label">${i18n.t('ticket.customerInfo', 'Customer')}</div>
         <div class="row">
           <span class="row-label">${i18n.t('ticket.customer', 'Name')}</span>
-          <span class="row-value">${ticket.customerName}</span>
+          <span class="row-value">${escapeHtml(ticket.customerName)}</span>
         </div>
-        ${ticket.customerPhone ? `<div class="row"><span class="row-label">${i18n.t('common.phone', 'Phone')}</span><span class="row-value">${ticket.customerPhone}</span></div>` : ''}
+        ${ticket.customerPhone ? `<div class="row"><span class="row-label">${i18n.t('common.phone', 'Phone')}</span><span class="row-value">${escapeHtml(ticket.customerPhone)}</span></div>` : ''}
 
         <div class="rule"></div>
 
@@ -1499,14 +1500,14 @@ export function buildRepairReceiptHTML(ticket: {
         <div class="section-label">${i18n.t('ticket.deviceInfo', 'Device')}</div>
         <div class="row">
           <span class="row-label">${i18n.t('ticket.device', 'Model')}</span>
-          <span class="row-value">${ticket.deviceBrand} ${ticket.deviceModel}</span>
+          <span class="row-value">${escapeHtml(ticket.deviceBrand)} ${escapeHtml(ticket.deviceModel)}</span>
         </div>
         <div class="row">
           <span class="row-label">${i18n.t('ticket.security', 'Security')}</span>
           <span class="row-value">${lockSnippet}</span>
         </div>
-        ${ticket.assignedTechnician ? `<div class="row"><span class="row-label">${i18n.t('ticket.assignedTo', 'Technician')}</span><span class="row-value">${ticket.assignedTechnician}</span></div>` : ''}
-        ${ticket.createdByName ? `<div class="row"><span class="row-label">${i18n.t('ticket.intakeBy', 'Intake By')}</span><span class="row-value">${ticket.createdByName}</span></div>` : ''}
+        ${ticket.assignedTechnician ? `<div class="row"><span class="row-label">${i18n.t('ticket.assignedTo', 'Technician')}</span><span class="row-value">${escapeHtml(ticket.assignedTechnician)}</span></div>` : ''}
+        ${ticket.createdByName ? `<div class="row"><span class="row-label">${i18n.t('ticket.intakeBy', 'Intake By')}</span><span class="row-value">${escapeHtml(ticket.createdByName)}</span></div>` : ''}
         ${ticket.estimatedCompletionDate ? `<div class="row"><span class="row-label">${i18n.t('ticket.estReady', 'Est. Ready')}</span><span class="row-value">${new Date(ticket.estimatedCompletionDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>` : ''}
 
         <div class="rule"></div>
@@ -1514,7 +1515,7 @@ export function buildRepairReceiptHTML(ticket: {
         <!-- Issue -->
         <div class="issue-block">
           <div class="issue-title">${i18n.t('ticket.issueDescription', 'Reported Problem')}</div>
-          <div class="issue-text">${ticket.issueDescription || i18n.t('ticket.diagnostic', 'Diagnostic required')}</div>
+          <div class="issue-text">${ticket.issueDescription ? escapeHtml(ticket.issueDescription) : i18n.t('ticket.diagnostic', 'Diagnostic required')}</div>
         </div>
 
         <div class="rule"></div>
@@ -1542,14 +1543,14 @@ export function buildRepairReceiptHTML(ticket: {
         <div class="center" style="margin:4px 0;">
           <div style="display:flex;justify-content:center;">${qrCodeSvg}</div>
           <div class="qr-caption">${i18n.t('ticket.scanTrack', 'Scan to track repair online')}</div>
-          <div class="qr-id">${ticketNum}</div>
+          <div class="qr-id">${escapeHtml(ticketNum)}</div>
         </div>
 
         <div class="rule-dashed"></div>
 
         <!-- Footer -->
         <div class="footer-msg">
-          ${receiptFooter || i18n.t('ticket.presentTicket', 'Please present this ticket when picking up your device.')}
+          ${receiptFooter ? escapeHtml(receiptFooter) : i18n.t('ticket.presentTicket', 'Please present this ticket when picking up your device.')}
         </div>
 
       </div>

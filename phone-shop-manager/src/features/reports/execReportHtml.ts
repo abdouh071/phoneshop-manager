@@ -1,6 +1,7 @@
 import { formatCurrency } from '../../utils/formatCurrency';
 import type { TFunction } from 'i18next';
 import type { ReportData } from '../../services/reportsService';
+import { escapeHtml } from '../../utils/escapeHtml';
 
 interface ExecReportHtmlParams {
   data: ReportData;
@@ -18,13 +19,13 @@ export const buildExecutiveReportHtml = ({
   const html = `
       <div class="report-header">
         <div>
-          <div class="shop-name">${storeName}</div>
+          <div class="shop-name">${escapeHtml(storeName)}</div>
           <div class="report-title">${t('reports.execTitle', 'Executive Financial & Operations Report')}</div>
         </div>
         <div class="meta-info">
-          <div><strong>${t('reports.execPeriod', 'Period:')}</strong> ${data.timeframeLabel}</div>
+          <div><strong>${t('reports.execPeriod', 'Period:')}</strong> ${escapeHtml(data.timeframeLabel)}</div>
           <div><strong>${t('reports.execGenerated', 'Generated:')}</strong> ${new Date().toLocaleString()}</div>
-          <div><strong>${t('reports.execAuthorizedBy', 'Authorized by:')}</strong> ${authorizedByName}</div>
+          <div><strong>${t('reports.execAuthorizedBy', 'Authorized by:')}</strong> ${escapeHtml(authorizedByName)}</div>
         </div>
       </div>
 
@@ -62,7 +63,7 @@ export const buildExecutiveReportHtml = ({
         <tbody>
           ${(data.dailyIncomeDetails || []).map(d => `
             <tr>
-              <td><strong>${d.dayLabel}</strong> (${d.date})</td>
+              <td><strong>${escapeHtml(d.dayLabel)}</strong> (${escapeHtml(d.date)})</td>
               <td>${d.isClosed ? (d.isAutoClose ? t('reports.execSealedAuto', 'Sealed (Auto 00:00)') : t('reports.execSealedBy', 'Sealed ({{name}})', { name: d.closedByName || 'Admin' })) : t('reports.execOpenLive', 'Open / Live')}</td>
               <td class="text-right font-mono">${formatCurrency(d.salesGrossRevenue)}</td>
               <td class="text-right font-mono">${formatCurrency(d.repairsRevenue)}</td>
@@ -132,7 +133,7 @@ export const buildExecutiveReportHtml = ({
         <tbody>
           ${data.topProducts.map(p => `
             <tr>
-              <td>${p.name}</td>
+              <td>${escapeHtml(p.name)}</td>
               <td class="text-right">${p.units}</td>
               <td class="text-right font-mono">${formatCurrency(p.revenue)}</td>
               <td class="text-right font-mono text-success">${formatCurrency(p.profit)}</td>
@@ -157,7 +158,7 @@ export const buildExecutiveReportHtml = ({
         <tbody>
           ${data.staffPerformance.map(s => `
             <tr>
-              <td><strong>${s.name}</strong></td>
+              <td><strong>${escapeHtml(s.name)}</strong></td>
               <td class="text-right">${s.salesCount}</td>
               <td class="text-right font-mono">${formatCurrency(s.salesRevenue)}</td>
               <td class="text-right">${s.repairsCount}</td>

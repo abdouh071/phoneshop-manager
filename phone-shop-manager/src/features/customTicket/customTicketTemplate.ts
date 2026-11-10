@@ -3,6 +3,7 @@ import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { QRCodeSVG } from 'qrcode.react';
 import type { CustomTicketData } from './customTicketTypes';
+import { escapeHtml } from '../../utils/escapeHtml';
 
 export function buildCustomTicketHTML(
   data: CustomTicketData,
@@ -32,7 +33,7 @@ export function buildCustomTicketHTML(
         barcodeHtml = `
           <div style="text-align:center;margin:8px 0;">
             ${qrSvg}
-            <div style="font-size:9.5px;font-family:monospace;color:#333;margin-top:2px;">${val}</div>
+            <div style="font-size:9.5px;font-family:monospace;color:#333;margin-top:2px;">${escapeHtml(val)}</div>
           </div>
         `;
       } catch (err) {
@@ -113,10 +114,10 @@ export function buildCustomTicketHTML(
     if (isSticker) {
       return `
         <div style="width:50mm;height:${stickerHeight};max-height:${stickerHeight};margin:0 auto;box-sizing:border-box;padding:1mm 1.5mm;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:${align};background:#fffef0;border:1.5px dashed #c8b400;border-radius:4px;overflow:hidden;font-family:ui-monospace,SFMono-Regular,monospace;">
-          ${data.showStoreNameOnSticker ? `<div style="font-size:9px;font-weight:900;text-transform:uppercase;color:#555;margin-bottom:2px;border-bottom:1px solid #ccc;width:100%;text-align:center;">${(storeName || 'PhoneShop Pro').substring(0, 24)}</div>` : ''}
+          ${data.showStoreNameOnSticker ? `<div style="font-size:9px;font-weight:900;text-transform:uppercase;color:#555;margin-bottom:2px;border-bottom:1px solid #ccc;width:100%;text-align:center;">${escapeHtml((storeName || 'PhoneShop Pro').substring(0, 24))}</div>` : ''}
           <div style="flex:1;display:flex;justify-content:center;align-items:center;width:100%;">
             <div style="font-size:${fSize};font-weight:${isBold ? '900' : 'normal'};color:#111;white-space:pre-wrap;word-break:break-word;line-height:1.25;width:100%;">
-              ${text ? text.replace(/</g, '&lt;').replace(/>/g, '&gt;') : '<span style="color:#aaa;font-size:10px;font-style:italic;">Type on keyboard to print here...</span>'}
+              ${text ? escapeHtml(text) : '<span style="color:#aaa;font-size:10px;font-style:italic;">Type on keyboard to print here...</span>'}
             </div>
           </div>
           ${barcodeHtml ? `<div style="margin-top:2px;width:100%;">${barcodeHtml}</div>` : ''}
@@ -128,12 +129,12 @@ export function buildCustomTicketHTML(
       <div style="${widthStyle}margin:0 auto;font-family:ui-monospace,SFMono-Regular,monospace;color:#000;padding:4mm 2mm;box-sizing:border-box;text-align:${align};">
         ${data.showStoreNameOnSticker ? `
           <div style="text-align:center;font-size:13px;font-weight:bold;text-transform:uppercase;margin-bottom:6px;border-bottom:1px dashed #666;padding-bottom:4px;">
-            ${storeName || 'PhoneShop Pro'}
+            ${escapeHtml(storeName || 'PhoneShop Pro')}
           </div>
         ` : ''}
         <div style="padding:20px 0;display:flex;justify-content:center;align-items:center;min-height:80px;">
           <div style="font-size:${fSize};font-weight:${isBold ? '900' : 'normal'};white-space:pre-wrap;word-break:break-word;line-height:1.35;width:100%;">
-            ${text ? text.replace(/</g, '&lt;').replace(/>/g, '&gt;') : '<span style="color:#aaa;font-size:11px;font-style:italic;">Type on keyboard to print here...</span>'}
+            ${text ? escapeHtml(text) : '<span style="color:#aaa;font-size:11px;font-style:italic;">Type on keyboard to print here...</span>'}
           </div>
         </div>
         ${barcodeHtml ? `<div style="margin-top:6px;border-top:1px dashed #aaa;padding-top:4px;">${barcodeHtml}</div>` : ''}
@@ -150,13 +151,13 @@ export function buildCustomTicketHTML(
     return `
       <div style="${widthStyle}min-height:${stickerHeight};max-height:${stickerHeight};margin:0 auto;font-family:Arial,sans-serif;color:#000;font-size:8.5px;line-height:1.15;padding:1mm 1.5mm;box-sizing:border-box;overflow:hidden;background:#fffef0;border:1.5px dashed #c8b400;border-radius:3px;">
         <div style="text-align:center;border-bottom:1px solid #000;padding-bottom:1px;margin-bottom:1px;">
-          <strong style="font-size:9.5px;text-transform:uppercase;">${storeName || 'PhoneShop'}</strong>
-          ${data.title ? `<div style="font-size:8px;font-weight:bold;color:#444;">${data.title}</div>` : ''}
+          <strong style="font-size:9.5px;text-transform:uppercase;">${escapeHtml(storeName || 'PhoneShop')}</strong>
+          ${data.title ? `<div style="font-size:8px;font-weight:bold;color:#444;">${escapeHtml(data.title)}</div>` : ''}
         </div>
 
         ${data.deviceModel ? `
           <div style="font-size:9px;font-weight:bold;text-align:center;margin:1px 0;">
-            ${data.deviceModel}
+            ${escapeHtml(data.deviceModel)}
           </div>
         ` : ''}
 
@@ -164,8 +165,8 @@ export function buildCustomTicketHTML(
           ${allSpecs.length <= maxSpecCount ? (
             allSpecs.map(s => `
               <div style="display:flex;justify-content:space-between;width:100%;">
-                <span style="color:#555;">${s.label} :</span>
-                <strong>${s.value}</strong>
+                <span style="color:#555;">${escapeHtml(s.label)} :</span>
+                <strong>${escapeHtml(s.value)}</strong>
               </div>
             `).join('')
           ) : (
@@ -174,8 +175,8 @@ export function buildCustomTicketHTML(
               const s2 = allSpecs[idx * 2 + 1];
               return `
                 <div style="display:flex;justify-content:space-between;align-items:center;width:100%;font-size:7px;line-height:1.1;">
-                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:48%;"><span style="color:#666;">${s1.label}:</span> <strong>${s1.value}</strong></span>
-                  ${s2 ? `<span style="color:#bbb;margin:0 2px;">|</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:48%;"><span style="color:#666;">${s2.label}:</span> <strong>${s2.value}</strong></span>` : ''}
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:48%;"><span style="color:#666;">${escapeHtml(s1.label)}:</span> <strong>${escapeHtml(s1.value)}</strong></span>
+                  ${s2 ? `<span style="color:#bbb;margin:0 2px;">|</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:48%;"><span style="color:#666;">${escapeHtml(s2.label)}:</span> <strong>${escapeHtml(s2.value)}</strong></span>` : ''}
                 </div>
               `;
             }).join('')
@@ -185,7 +186,7 @@ export function buildCustomTicketHTML(
         ${cleanPrice ? `
           <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #000;padding-top:1px;margin-top:1px;">
             <span style="font-size:8px;font-weight:bold;">PRICE :</span>
-            <span style="font-size:10px;font-weight:bold;">${cleanPrice} ${currency}</span>
+            <span style="font-size:10px;font-weight:bold;">${escapeHtml(cleanPrice)} ${escapeHtml(currency)}</span>
           </div>
         ` : ''}
 
@@ -193,7 +194,7 @@ export function buildCustomTicketHTML(
 
         ${data.notes ? `
           <div style="font-size:7.5px;border-top:0.5px dashed #666;padding-top:1px;margin-top:1px;color:#333;">
-            ${data.notes}
+            ${escapeHtml(data.notes)}
           </div>
         ` : ''}
       </div>
@@ -207,9 +208,9 @@ export function buildCustomTicketHTML(
       {/* Store Header */}
       ${data.showStoreHeader ? `
         <div style="text-align:center;margin-bottom:8px;">
-          <h2 style="font-size:16px;font-weight:800;margin:0 0 2px;letter-spacing:0.5px;">${storeName || 'PhoneShop Pro'}</h2>
-          ${storePhone ? `<p style="font-size:10.5px;color:#444;margin:1px 0;">📞 ${storePhone}</p>` : ''}
-          ${storeAddress ? `<p style="font-size:10px;color:#666;margin:1px 0;">📍 ${storeAddress}</p>` : ''}
+          <h2 style="font-size:16px;font-weight:800;margin:0 0 2px;letter-spacing:0.5px;">${escapeHtml(storeName || 'PhoneShop Pro')}</h2>
+          ${storePhone ? `<p style="font-size:10.5px;color:#444;margin:1px 0;">📞 ${escapeHtml(storePhone)}</p>` : ''}
+          ${storeAddress ? `<p style="font-size:10px;color:#666;margin:1px 0;">📍 ${escapeHtml(storeAddress)}</p>` : ''}
           <div style="border-top:1px dashed #888;margin:6px 0;"></div>
         </div>
       ` : ''}
@@ -217,9 +218,9 @@ export function buildCustomTicketHTML(
       {/* Ticket Title & Meta */}
       <div style="text-align:center;margin-bottom:6px;">
         <h3 style="font-size:13px;font-weight:800;text-transform:uppercase;margin:0 0 2px;letter-spacing:0.4px;">
-          ${data.title || 'DEVICE SPECIFICATIONS'}
+          ${data.title ? escapeHtml(data.title) : 'DEVICE SPECIFICATIONS'}
         </h3>
-        ${data.subtitle ? `<p style="font-size:10.5px;color:#555;margin:1px 0;">${data.subtitle}</p>` : ''}
+        ${data.subtitle ? `<p style="font-size:10.5px;color:#555;margin:1px 0;">${escapeHtml(data.subtitle)}</p>` : ''}
         <p style="font-size:10px;color:#777;margin:2px 0 4px;">Date: ${nowStr}</p>
         <div style="border-top:1.5px solid #000;margin:4px 0;"></div>
       </div>
@@ -228,7 +229,7 @@ export function buildCustomTicketHTML(
       ${data.deviceModel ? `
         <div style="background:#f4f4f5;border:1px solid #ddd;border-radius:4px;padding:6px 8px;margin-bottom:8px;text-align:center;">
           <div style="font-size:9.5px;text-transform:uppercase;color:#666;font-weight:700;letter-spacing:0.5px;">Device Model</div>
-          <div style="font-size:14px;font-weight:800;color:#000;margin-top:1px;">${data.deviceModel}</div>
+          <div style="font-size:14px;font-weight:800;color:#000;margin-top:1px;">${escapeHtml(data.deviceModel)}</div>
         </div>
       ` : ''}
 
@@ -240,8 +241,8 @@ export function buildCustomTicketHTML(
           </div>
           ${allSpecs.map((s, idx) => `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:2.5px 0;${idx < allSpecs.length - 1 ? 'border-bottom:1px dashed #eee;' : ''}">
-              <span style="color:#555;font-size:10.5px;">${s.label}</span>
-              <span style="font-weight:700;font-size:11px;text-align:right;">${s.value}</span>
+              <span style="color:#555;font-size:10.5px;">${escapeHtml(s.label)}</span>
+              <span style="font-weight:700;font-size:11px;text-align:right;">${escapeHtml(s.value)}</span>
             </div>
           `).join('')}
         </div>
@@ -251,7 +252,7 @@ export function buildCustomTicketHTML(
       ${cleanPrice ? `
         <div style="border:1.5px solid #000;border-radius:6px;padding:6px 10px;margin:8px 0;display:flex;justify-content:space-between;align-items:center;background:#fafafa;">
           <span style="font-size:12px;font-weight:800;letter-spacing:0.5px;">PRICE:</span>
-          <span style="font-size:16px;font-weight:900;">${cleanPrice} ${currency}</span>
+          <span style="font-size:16px;font-weight:900;">${escapeHtml(cleanPrice)} ${escapeHtml(currency)}</span>
         </div>
       ` : ''}
 
@@ -259,7 +260,7 @@ export function buildCustomTicketHTML(
       ${data.notes ? `
         <div style="border-top:1px dashed #999;padding-top:5px;margin:8px 0;">
           <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#444;margin-bottom:2px;">Notes & Observations:</div>
-          <p style="font-size:10.5px;color:#111;margin:0;white-space:pre-wrap;line-height:1.35;">${data.notes}</p>
+          <p style="font-size:10.5px;color:#111;margin:0;white-space:pre-wrap;line-height:1.35;">${escapeHtml(data.notes)}</p>
         </div>
       ` : ''}
 
@@ -269,7 +270,7 @@ export function buildCustomTicketHTML(
       {/* Footer Message */}
       ${data.showStoreFooter ? `
         <div style="border-top:1px dashed #999;margin-top:10px;padding-top:6px;text-align:center;font-size:10px;color:#555;">
-          <p style="margin:0 0 2px;font-weight:600;">${data.customFooter || 'Thank you for choosing PhoneShop Pro!'}</p>
+          <p style="margin:0 0 2px;font-weight:600;">${data.customFooter ? escapeHtml(data.customFooter) : 'Thank you for choosing PhoneShop Pro!'}</p>
           <p style="font-size:9px;color:#888;margin:0;">Tested & Verified by Technical Team</p>
         </div>
       ` : ''}
