@@ -7,6 +7,7 @@ import {
   query,
   where,
   orderBy,
+  runTransaction,
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -213,29 +214,47 @@ export const transactionService = {
   },
 
   /** Closes the sale and returns the moment it stamped, so the caller's in-memory copy
-   *  carries the identical day rather than a second clock reading. */
-  refund: async (id: string): Promise<string> => {
+   *  carries the identical day rather than a second clock reading.
+   *
+   *  The status is read and stamped in one transaction: two tills holding a stale
+   *  `completed` for the same invoice both reach here, and only the first one through
+   *  gets `claimed`, so the shelf moves once and the account is settled once. The
+   *  phone's void makes the same claim — `voided` there and `refunded` here close the
+   *  same door, and neither may be closed twice. */
+  claimRefund: async (id: string): Promise<{ claimed: boolean; refundedAt: string }> => {
     // Without the moment, the day's figures can only put the money handed back on the
     // day the sale was rung up: Tuesday's drawer pays out and Monday's report shows it.
     // One patch for both writes, so the mirror and the server cannot name two moments.
-    const patch = { status: 'refunded' as const, refundedAt: new Date().toISOString() };
-    const local = getLocalTransactions();
-    saveLocalTransactions(local.map(t => t.id === id ? { ...t, ...patch } : t));
+    const refundedAt = new Date().toISOString();
+    const patchLocal = () => {
+      const local = getLocalTransactions();
+      saveLocalTransactions(local.map(t => t.id === id ? { ...t, status: 'refunded' as const, refundedAt } : t));
+    };
 
+    // A sale this till wrote offline has no server document to claim; the local mirror
+    // is all there is, exactly as before.
     if (id.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-      return patch.refundedAt;
+      patchLocal();
+      return { claimed: true, refundedAt };
     }
 
-    try {
-      const updatePromise = updateDoc(doc(db, COLLECTION, id), patch);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Firestore refund timeout')), 1200)
-      );
-      await Promise.race([updatePromise, timeoutPromise]);
-    } catch (err) {
-      console.warn('Failed to update refund in Firestore, updated locally:', err);
-    }
-    return patch.refundedAt;
+    const claimPromise = runTransaction(db, async (t) => {
+      const ref = doc(db, COLLECTION, id);
+      const snap = await t.get(ref);
+      if (!snap.exists()) throw new Error(`Transaction ${id} no longer exists.`);
+      const status = (snap.data() as { status?: string }).status;
+      if (status === 'refunded' || status === 'voided' || status === 'cancelled') return false;
+      t.update(ref, { status: 'refunded', refundedAt });
+      return true;
+    });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore refund claim timeout')), 6000)
+    );
+    // A claim that cannot be answered is not a refund: throwing here keeps the stock,
+    // the debt and the Avoir untouched until the till can ask again.
+    const claimed = await Promise.race([claimPromise, timeoutPromise]);
+    if (claimed) patchLocal();
+    return { claimed, refundedAt };
   },
 
   updateTransaction: async (id: string, updates: Partial<SaleTransaction>): Promise<void> => {

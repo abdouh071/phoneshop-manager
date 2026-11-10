@@ -36,6 +36,14 @@ const captured = vi.hoisted(() => ({
     invoiceNumber: string;
     provisional: boolean;
   },
+  /** What the server answers when the till claims a refund. */
+  claim: { claimed: true, refundedAt: '2026-11-04T12:00:00.000Z' } as { claimed: boolean; refundedAt: string },
+  /** Every refund claim the till asked for, in order. */
+  claims: [] as string[],
+  /** Every stock move the refund path asked the shelf store for, in order. */
+  stockBy: [] as Array<{ productId: string; delta: number }>,
+  /** Every debt the refund path asked to settle, in order. */
+  settled: [] as string[],
 }));
 
 vi.mock('../services/invoiceCounter', () => ({
@@ -54,7 +62,10 @@ vi.mock('../services/transactionService', () => ({
       return true;
     },
     getRetailTransactions: async () => [],
-    refund: async () => new Date().toISOString(),
+    claimRefund: async (id: string) => {
+      captured.claims.push(id);
+      return { ...captured.claim };
+    },
   },
 }));
 
@@ -121,6 +132,10 @@ vi.mock('./customerStore', () => ({
         captured.debtDeductions.push({ customerId, amount, note });
         return amount;
       },
+      settleDebt: async (debtId: string, _note?: string) => {
+        captured.settled.push(debtId);
+        return undefined;
+      },
     }),
   },
 }));
@@ -155,7 +170,9 @@ vi.mock('./inventoryStore', () => ({
       products: shelf.items,
       parts: shelf.items,
       fetchProducts: async () => undefined,
-      adjustStockBy: () => undefined,
+      adjustStockBy: (productId: string, delta: number) => {
+        captured.stockBy.push({ productId, delta });
+      },
     }),
   },
 }));
@@ -188,6 +205,10 @@ beforeEach(() => {
   captured.newDebts.length = 0;
   captured.debtAmounts.length = 0;
   captured.counter = { invoiceNumber: 'INV-261104-0007', provisional: false };
+  captured.claim = { claimed: true, refundedAt: '2026-11-04T12:00:00.000Z' };
+  captured.claims.length = 0;
+  captured.stockBy.length = 0;
+  captured.settled.length = 0;
   emptyCart();
   (phone as { price: number }).price = 10005;
 });
@@ -905,5 +926,89 @@ describe('the account split a corrected invoice leaves behind', () => {
     await edit(12000);
 
     expect(writtenPayments()).toEqual([{ method: 'cash', amount: 12000 }]);
+  });
+});
+
+/**
+ * The refund claim: the list this till holds is whatever it last fetched, so two
+ * tills can both be holding `completed` for an invoice one of them is closing.
+ * The server's answer — not the local copy — decides whether the shelf moves,
+ * the debt closes and the Avoir is handed back.
+ */
+describe('a refund only the server lets through (B5)', () => {
+  const seedSale = (status: SaleTransaction['status'] = 'completed') => {
+    useCartStore.setState({
+      transactions: [
+        {
+          id: 'tx_refund',
+          date: '2026-11-02T10:00:00.000Z',
+          items: [{ product: { ...phone }, quantity: 2 }],
+          subtotal: 20000,
+          total: 20000,
+          payments: [{ method: 'debt', amount: 20000 }],
+          status,
+          invoiceNumber: 'INV-REFUND',
+          customerId: 'cust_1',
+        } as unknown as SaleTransaction,
+      ],
+    });
+    captured.debts.push({
+      id: 'debt_1',
+      customerId: 'cust_1',
+      amountPaid: 0,
+      totalAmount: 20000,
+      invoiceNumber: 'INV-REFUND',
+    });
+  };
+
+  const refund = () => useCartStore.getState().refundTransaction('tx_refund');
+  const stored = () => useCartStore.getState().transactions.find(t => t.id === 'tx_refund');
+
+  it('a claim the server refuses moves nothing at all', async () => {
+    seedSale();
+    captured.claim = { claimed: false, refundedAt: '2026-11-04T12:00:00.000Z' };
+
+    const warnings = await refund();
+
+    expect(warnings).toEqual([]);
+    expect(captured.claims).toEqual(['tx_refund']);
+    expect(captured.stockBy).toEqual([]);
+    expect(captured.settled).toEqual([]);
+    expect(captured.credit).toEqual([]);
+    expect(stored()?.status).toBe('completed');
+  });
+
+  it('a claimed refund moves the shelf and closes the debt exactly once', async () => {
+    seedSale();
+
+    await refund();
+
+    expect(captured.stockBy).toEqual([{ productId: 'sku_phone', delta: 2 }]);
+    expect(captured.settled).toEqual(['debt_1']);
+    expect(stored()?.status).toBe('refunded');
+    expect(stored()?.refundedAt).toBe(captured.claim.refundedAt);
+  });
+
+  it('a stale list still holding completed cannot refund the same sale twice', async () => {
+    seedSale();
+    await refund();
+    // The other till never heard about the first refund: its list still says completed.
+    seedSale();
+    captured.claim = { claimed: false, refundedAt: '2026-11-04T12:05:00.000Z' };
+
+    await refund();
+
+    expect(captured.stockBy).toEqual([{ productId: 'sku_phone', delta: 2 }]);
+    expect(captured.settled).toEqual(['debt_1']);
+  });
+
+  it('a sale the phone already voided is not asked of the server at all', async () => {
+    seedSale('voided');
+
+    await refund();
+
+    expect(captured.claims).toEqual([]);
+    expect(captured.stockBy).toEqual([]);
+    expect(captured.settled).toEqual([]);
   });
 });

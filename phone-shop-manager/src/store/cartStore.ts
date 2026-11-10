@@ -896,7 +896,15 @@ export const useCartStore = create<CartState>((set, get) => ({
       tx = usePartsCartStore.getState().invoices.find(t => t.id === txId);
       if (tx) isPartsB2B = true;
     }
-    if (!tx || tx.status === 'refunded') return warnings;
+    // A cheap refusal on the copy this till holds; the claim below asks the server.
+    // The phone closes a sale as `voided`, so that door counts as closed here too.
+    if (!tx || tx.status === 'refunded' || tx.status === 'voided' || tx.status === 'cancelled') return warnings;
+
+    // The claim comes before any stock, debt or Avoir moves: two tills can both hold
+    // `completed` for an invoice one of them is about to close, and only the till the
+    // server lets through may hand the money back. A lost claim changes nothing.
+    const { claimed, refundedAt } = await transactionService.claimRefund(txId);
+    if (!claimed) return warnings;
     
     // 1. Authoritative stock reversal (Problem 4 fix):
     // Regular purchases -> return to stock (+qty)
@@ -968,8 +976,8 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
 
     // 5. Deduct from customer's totalSpent & totalPurchases
-    // 6. Process refund in Firebase
-    const refundedAt = await transactionService.refund(txId);
+    // 6. The sale was already closed on the server by the claim above; the moment it
+    // stamped is the moment every copy below carries.
 
     // 5. Authoritative recalculation of customer financials on refund
     if (tx.customerId) {

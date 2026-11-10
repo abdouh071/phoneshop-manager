@@ -32,6 +32,10 @@ export const RefundModal: React.FC<RefundModalProps> = ({ isOpen, onClose, trans
         toast.success('Refund Processed', `Transaction ${transaction.id} has been refunded.`);
       }
       onClose();
+    } catch (err) {
+      // The claim could not be answered, so nothing was handed back and nothing
+      // moved on the shelf or the account. The till has to hear that, not a crash.
+      toast.error('Refund not processed', err instanceof Error ? err.message : 'Could not reach the server. Try again.');
     } finally {
       setIsProcessing(false);
     }
