@@ -18,6 +18,8 @@ import { customerService } from '../services/customerService';
 import { offlineSyncService } from '../services/offlineSyncService';
 import { notificationService } from '../services/notificationService';
 import { commitPartsAllocation } from '../services/stockService';
+import { writeTrackingMirror, refreshTrackingMirrorForTicket } from '../services/trackingMirrorService';
+import type { TrackingMirrorSource } from '../utils/trackingMirror';
 import { allocateTicketNumber } from '../services/ticketCounter';
 import { appendHistory, buildStatusPatch, isSettleAlreadyRecorded, isOfflineCustomerId, type HistoryEntryLike } from '../services/offlineQueuePolicy';
 import { createRefCountedSubscription, type RefCountedSubscription } from '../utils/liveSubscription';
@@ -250,6 +252,10 @@ export const useRepairStore = create<RepairState>((set, get) => ({
 
       await updateDoc(docRef, patch);
 
+      if (current) {
+        void writeTrackingMirror({ ...current, ...patch } as TrackingMirrorSource);
+      }
+
       // Log to shared activityLogs collection
       const localTicket = get().tickets.find(t => t.id === id);
       const ticketNum = localTicket?.ticketNumber || id;
@@ -390,6 +396,8 @@ export const useRepairStore = create<RepairState>((set, get) => ({
 
         await updateDoc(docRef, updates);
 
+        void writeTrackingMirror({ ...ticket, ...updates } as TrackingMirrorSource);
+
         // 3. Debt row, idempotent by ticket number: a crash between the ticket write
         // and this write must not leave a second row behind on the retry. A debt the
         // retry cannot register is a failure, not a silent drop — the ticket already
@@ -431,14 +439,16 @@ export const useRepairStore = create<RepairState>((set, get) => ({
             const parentSnap = await getDoc(parentRef);
             const parent = parentSnap.exists() ? (parentSnap.data() as Record<string, unknown>) : null;
             if (parent && parent.status === 'returned') {
-              await updateDoc(parentRef, buildStatusPatch(parent, {
+              const parentPatch = buildStatusPatch(parent, {
                 status: 'completed',
                 timestamp: now,
                 actorId,
                 actorName,
                 notes: `Return ticket #${ticket.ticketNumber} settled on the technician app`,
                 additionalUpdates: { activeReturnTicketId: null, activeReturnTicketNumber: null },
-              }));
+              });
+              await updateDoc(parentRef, parentPatch);
+              void writeTrackingMirror({ ...parent, ...parentPatch } as TrackingMirrorSource);
               set(state => ({
                 tickets: state.tickets.map(t =>
                   t.id === ticket.parentTicketId && t.status === 'returned'
@@ -484,6 +494,8 @@ export const useRepairStore = create<RepairState>((set, get) => ({
         remark,
         updatedAt: now,
       });
+
+      void refreshTrackingMirrorForTicket(id);
 
       const localTicket = get().tickets.find(t => t.id === id);
       await activityLogService.log(
@@ -603,6 +615,8 @@ export const useRepairStore = create<RepairState>((set, get) => ({
 
       try {
         const createdDoc = await addDoc(collection(db, 'repairs'), newTicket);
+
+        void writeTrackingMirror(newTicket as TrackingMirrorSource);
 
         // Log activity
         await activityLogService.log(

@@ -20,6 +20,7 @@ import {
   collection,
   query,
   limit,
+  where,
   getDocs,
 } from 'firebase/firestore';
 
@@ -236,13 +237,29 @@ await check('staff deletes own verifier (PIN removal)', 'allow', deleteDoc(doc(d
 await check('self clears the legacy profile field (migration)', 'allow', updateDoc(doc(dbs.sales, 'users', 'sales'), { hasApprovalPin: true, approvalPin: deleteField() }));
 await check('admin clears a staff legacy field (migration)', 'allow', updateDoc(doc(dbs.admin, 'users', 'repair'), { hasApprovalPin: true, approvalPin: deleteField() }));
 
-console.log('— unauthenticated surface (unchanged) —');
+console.log('— unauthenticated surface —');
 await check('anon cannot read a transaction', 'deny', getDoc(doc(anon, 'transactions', 'tx1')));
 await check('anon cannot read a ticket by id', 'deny', getDoc(doc(anon, 'repairs', 'r1')));
 await check('anon cannot read a PIN verifier', 'deny', getDoc(doc(anon, 'users', 'admin', 'secrets', 'approvalPin')));
 await check('anon cannot write a PIN verifier', 'deny', setDoc(doc(anon, 'users', 'admin', 'secrets', 'approvalPin'), { verifier: 'forged' }));
-await check('anon tracking lookup limit(1) still open (A2 slice)', 'allow', getDocs(query(collection(anon, 'repairs'), limit(1))));
+await check('anon cannot page repairs with limit(1) (A2 closed)', 'deny', getDocs(query(collection(anon, 'repairs'), limit(1))));
+await check('anon cannot list repairs unfiltered', 'deny', getDocs(collection(anon, 'repairs')));
+await check('anon cannot read a ticket by ticketNumber query', 'deny', getDocs(query(collection(anon, 'repairs'), where('ticketNumber', '==', 'TKT-0001'), limit(1))));
 await check('anon reads public store settings', 'allow', getDoc(doc(anon, 'settings', 'general')));
+
+console.log('— public tracking mirror —');
+await seed('repair_tracking/m1', { ticketNumber: 'TKT-0001', status: 'pending', deviceBrand: 'Samsung', deviceModel: 'A15', createdAt: '2026-11-10T08:00:00.000Z', issueDescription: 'Screen', statusTimestamps: { pending: '2026-11-10T08:00:00.000Z' } });
+await check('anon reads a mirror by id (the id is the PIN proof)', 'allow', getDoc(doc(anon, 'repair_tracking', 'm1')));
+await check('anon cannot enumerate mirrors', 'deny', getDocs(collection(anon, 'repair_tracking')));
+await check('anon cannot enumerate mirrors with limit(1)', 'deny', getDocs(query(collection(anon, 'repair_tracking'), limit(1))));
+await check('anon cannot write a mirror', 'deny', setDoc(doc(anon, 'repair_tracking', 'm1'), { status: 'completed' }));
+await check('anon cannot delete a mirror', 'deny', deleteDoc(doc(anon, 'repair_tracking', 'm1')));
+await check('technician writes a mirror', 'allow', setDoc(doc(dbs.repair, 'repair_tracking', 'm2'), { ticketNumber: 'TKT-0002', status: 'ready' }));
+await check('counter writes a mirror (customers flag)', 'allow', setDoc(doc(dbs.sales, 'repair_tracking', 'm3'), { ticketNumber: 'TKT-0003', status: 'pending' }));
+await check('view-only cannot write a mirror', 'deny', setDoc(doc(dbs.viewonly, 'repair_tracking', 'm4'), { ticketNumber: 'TKT-0004', status: 'pending' }));
+await check('admin lists mirrors for the rebuild', 'allow', getDocs(collection(dbs.admin, 'repair_tracking')));
+await check('technician deletes a stale mirror (rebuild)', 'allow', deleteDoc(doc(dbs.repair, 'repair_tracking', 'm2')));
+await check('staff still reads the full ticket', 'allow', getDoc(doc(dbs.repair, 'repairs', 'r1')));
 
 await env.cleanup();
 console.log(`\n${passed} passed, ${failed} failed`);

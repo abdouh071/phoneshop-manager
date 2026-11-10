@@ -6,6 +6,8 @@ import { formatStandardPhone, normalizePhoneDigits, isMoreDescriptiveName } from
 import { errorMessage } from '../utils/errorUtils';
 import { findExistingDocId } from './idempotentReplay';
 import { offlineQueueMirror } from './offlineQueueMirror';
+import { deleteTrackingMirrorFor, writeTrackingMirror } from './trackingMirrorService';
+import { mirrorIdOf, type TrackingMirrorSource } from '../utils/trackingMirror';
 
 export interface OfflineCustomerQueueItem {
   tempId: string;
@@ -308,6 +310,15 @@ export const offlineCustomerSyncService = {
           });
         });
         await batch.commit();
+        // The phone behind a legacy last-4 tracking PIN may have changed with the
+        // remap; retire the old mirror id and publish the new one.
+        for (const d of snapRepairs.docs) {
+          const before = d.data() as TrackingMirrorSource;
+          const after = { ...before, customerPhone: customerData.phone };
+          const [oldId, newId] = await Promise.all([mirrorIdOf(before), mirrorIdOf(after)]);
+          if (oldId && oldId !== newId) await deleteTrackingMirrorFor(before);
+          await writeTrackingMirror(after);
+        }
       }
     } catch (e) {
       console.warn('[OfflineCustomerSync] Firestore repairs customerId update skipped/failed:', e);

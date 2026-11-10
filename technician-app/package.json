@@ -19,6 +19,7 @@
     "expo-updates": "~57.0.26",
     "firebase": "^12.19.0",
     "i18next": "^26.4.2",
+    "js-sha256": "1.0.0",
     "react": "^19.2.3",
     "react-i18next": "^17.0.15",
     "react-native": "^0.86.3",

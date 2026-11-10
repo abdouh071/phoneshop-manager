@@ -13,13 +13,26 @@ import {
   runTransaction,
   setDoc,
   deleteDoc,
+  type QuerySnapshot,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { RepairTicket, RepairStatusHistoryEntry } from '../types';
 import { deduplicateTickets, isSameTicketContent } from '../utils/ticketDeduplication';
 import { mergeStatusHistory } from '../utils/statusHistoryMerge';
+import {
+  TRACKING_MIRROR_COLLECTION,
+  mirrorToPublicTicket,
+  trackingMirrorId,
+  type TrackingMirrorPayload,
+  type TrackingMirrorSource,
+} from '../utils/trackingMirror';
 import { newIdempotencyKey } from './idempotentReplay';
 import { offlineQueue } from './offlineQueue';
+import {
+  deleteTrackingMirrorFor,
+  refreshTrackingMirrorById,
+  writeTrackingMirror,
+} from './trackingMirrorService';
 
 const COLLECTION = 'repairs';
 const LOCAL_STORAGE_KEY = 'offline_repairs';
@@ -462,6 +475,7 @@ export const repairService = {
         setTimeout(() => reject(new Error('Firestore updateDoc timeout')), 1200)
       );
       const mergedHistory = await Promise.race([updatePromise, timeoutPromise]);
+      void refreshTrackingMirrorById(id);
       return mergedHistory ? { ...updatedLocal, statusHistory: mergedHistory } : updatedLocal;
     } catch (err) {
       console.warn('Failed to update status on Firestore, stored locally & queued for sync:', err);
@@ -551,6 +565,7 @@ export const repairService = {
         const docRef = await Promise.race([addDocPromise, timeoutPromise]);
         const created = { ...newTicket, id: docRef.id };
         saveLocalRepairs([created, ...local.filter(t => t.id !== created.id && t.ticketNumber !== created.ticketNumber)]);
+        void writeTrackingMirror(created);
         return created;
       } catch (err) {
         console.warn('Failed to create ticket on Firestore, saving locally:', err);
@@ -604,6 +619,9 @@ export const repairService = {
         setTimeout(() => reject(new Error('Firestore updateDoc timeout')), 1200)
       );
       await Promise.race([updatePromise, timeoutPromise]);
+      // The pre-write local copy lets the refresh retire the old mirror id when
+      // this edit changed the phone behind a legacy last-4 PIN.
+      void refreshTrackingMirrorById(id, existing);
       return merged;
     } catch (err) {
       console.warn('Failed to update ticket on Firestore, stored locally & queued for sync:', err);
@@ -624,7 +642,13 @@ export const repairService = {
    * Subscribe to a ticket by its public ticketNumber (e.g. "TKT-0042") and a security PIN.
    * Used by the customer-facing tracking page. Returns an unsubscribe function.
    * If the PIN is invalid, returns null.
-   * Sensitive fields (lock code, tech notes, part costs) are stripped before the callback.
+   *
+   * The sanitized mirror (repair_tracking) is the source: its id embeds the PIN
+   * proof and its payload holds display fields only. The legacy repairs query
+   * stays as a fallback for the transition window — tickets not yet mirrored —
+   * and is torn down as soon as the mirror answers. Once the rules deploy closes
+   * anonymous repairs reads, the fallback simply reports "not found" until the
+   * admin rebuild has run.
    */
   subscribeToTicketByNumber: (
     ticketNumber: string,
@@ -633,60 +657,97 @@ export const repairService = {
   ): (() => void) => {
     const cleanNum = (ticketNumber || '').trim().toUpperCase();
     const cleanPin = (pin || '').trim().toUpperCase();
-    
+
     if (!cleanNum || !/^TKT-\d{4,}$/i.test(cleanNum) || !cleanPin) {
       callback(null);
       return () => {};
     }
 
-    const q = query(
+    const legacyQuery = query(
       collection(db, COLLECTION),
       where('ticketNumber', '==', cleanNum),
       limit(1)
     );
 
-    return onSnapshot(
-      q,
-      (snapshot) => {
-        if (snapshot.empty) {
-          callback(null);
-          return;
-        }
-        const docSnap = snapshot.docs[0];
-        const raw = docToTicket(docSnap.id, docSnap.data() as Record<string, unknown>);
-        
-        // --- Security PIN Verification ---
-        // For new tickets, check trackingPin. For older tickets, check last 4 of phone number.
-        const isPinValid = 
-          (raw.trackingPin && raw.trackingPin.toUpperCase() === cleanPin) || 
-          (!raw.trackingPin && raw.customerPhone && raw.customerPhone.slice(-4) === cleanPin);
+    const onLegacySnapshot = (snapshot: QuerySnapshot) => {
+      if (snapshot.empty) {
+        callback(null);
+        return;
+      }
+      const docSnap = snapshot.docs[0];
+      const raw = docToTicket(docSnap.id, docSnap.data() as Record<string, unknown>);
 
-        if (!isPinValid) {
-          callback(null);
-          return;
-        }
+      // --- Security PIN Verification ---
+      // For new tickets, check trackingPin. For older tickets, check last 4 of phone number.
+      const isPinValid =
+        (raw.trackingPin && raw.trackingPin.toUpperCase() === cleanPin) ||
+        (!raw.trackingPin && raw.customerPhone && raw.customerPhone.slice(-4) === cleanPin);
 
-        // Strip sensitive fields for public consumption
-        const safeTicket: RepairTicket = {
-          ...raw,
-          lockType: undefined,
-          lockValue: undefined,
-          assignedTechnician: undefined,
-          assignedTechnicianId: undefined,
-          createdById: undefined,
-          createdByName: undefined,
-          partsUsed: raw.partsUsed?.map(p => ({
-            ...p,
-            cost: 0, // hide internal part costs
-          })),
-        };
-        callback(safeTicket);
-      },
-      (err) => {
+      if (!isPinValid) {
+        callback(null);
+        return;
+      }
+
+      // Strip sensitive fields for public consumption
+      const safeTicket: RepairTicket = {
+        ...raw,
+        lockType: undefined,
+        lockValue: undefined,
+        assignedTechnician: undefined,
+        assignedTechnicianId: undefined,
+        createdById: undefined,
+        createdByName: undefined,
+        partsUsed: raw.partsUsed?.map(p => ({
+          ...p,
+          cost: 0, // hide internal part costs
+        })),
+      };
+      callback(safeTicket);
+    };
+
+    let disposed = false;
+    let unsubMirror: (() => void) | null = null;
+    let unsubLegacy: (() => void) | null = null;
+
+    const startLegacy = () => {
+      if (disposed || unsubLegacy) return;
+      unsubLegacy = onSnapshot(legacyQuery, onLegacySnapshot, (err) => {
         console.error('[Tracking] Firestore subscription error:', err);
         callback(null);
-      }
-    );
+      });
+    };
+
+    void trackingMirrorId(cleanNum, cleanPin)
+      .then((mirrorId) => {
+        if (disposed) return;
+        unsubMirror = onSnapshot(
+          doc(db, TRACKING_MIRROR_COLLECTION, mirrorId),
+          (snap) => {
+            if (snap.exists()) {
+              if (unsubLegacy) {
+                unsubLegacy();
+                unsubLegacy = null;
+              }
+              callback(mirrorToPublicTicket(snap.id, snap.data() as TrackingMirrorPayload));
+              return;
+            }
+            // No mirror yet (pre-rebuild ticket), or it was just deleted with the
+            // ticket. The legacy path decides which of the two the customer sees.
+            startLegacy();
+          },
+          (err) => {
+            console.warn('[Tracking] Mirror stream unavailable, trying the legacy path:', err);
+            startLegacy();
+          }
+        );
+      })
+      .catch(() => startLegacy());
+
+    return () => {
+      disposed = true;
+      unsubMirror?.();
+      unsubLegacy?.();
+    };
   },
 
   /**
@@ -699,6 +760,16 @@ export const repairService = {
     if (!cleanNum || !/^TKT-\d{4,}$/i.test(cleanNum) || !cleanPin) return null;
 
     try {
+      const mirrorId = await trackingMirrorId(cleanNum, cleanPin);
+      const mirrorSnap = await getDoc(doc(db, TRACKING_MIRROR_COLLECTION, mirrorId));
+      if (mirrorSnap.exists()) {
+        return mirrorToPublicTicket(mirrorSnap.id, mirrorSnap.data() as TrackingMirrorPayload);
+      }
+    } catch (err) {
+      console.warn('[Tracking] Mirror lookup failed, trying the legacy path:', err);
+    }
+
+    try {
       const q = query(
         collection(db, COLLECTION),
         where('ticketNumber', '==', cleanNum),
@@ -708,10 +779,10 @@ export const repairService = {
       if (snap.empty) return null;
       const docSnap = snap.docs[0];
       const raw = docToTicket(docSnap.id, docSnap.data() as Record<string, unknown>);
-      
+
       // --- Security PIN Verification ---
-      const isPinValid = 
-        (raw.trackingPin && raw.trackingPin.toUpperCase() === cleanPin) || 
+      const isPinValid =
+        (raw.trackingPin && raw.trackingPin.toUpperCase() === cleanPin) ||
         (!raw.trackingPin && raw.customerPhone && raw.customerPhone.slice(-4) === cleanPin);
 
       if (!isPinValid) return null;
@@ -742,6 +813,7 @@ export const repairService = {
 
     // 2. Purge from local storage immediately
     const local = getLocalRepairs();
+    const beingDeleted = local.find(t => t.id === id);
     saveLocalRepairs(local.filter(t => t.id !== id));
 
     // 3. Offline tickets only exist locally
@@ -761,11 +833,16 @@ export const repairService = {
     // 5. Online Firestore deletion with timeout guard
     try {
       const ref = doc(db, COLLECTION, id);
+      // The public mirror id derives from the ticket's number and PIN; capture
+      // them before the document is gone. The local cache almost always has it.
+      const mirrorSource: TrackingMirrorSource | undefined = beingDeleted
+        ?? (await getDoc(ref).then(s => (s.exists() ? (s.data() as TrackingMirrorSource) : undefined)).catch(() => undefined));
       const delPromise = deleteDoc(ref);
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Firestore deleteDoc timeout')), 2500)
       );
       await Promise.race([delPromise, timeoutPromise]);
+      if (mirrorSource) void deleteTrackingMirrorFor(mirrorSource);
     } catch (err) {
       console.warn('Failed to delete repair ticket on Firestore, enqueuing for offline sync:', err);
       offlineQueue.enqueue({
@@ -834,7 +911,9 @@ export const repairService = {
               deviceBrand: newBrand.trim(),
               deviceModel: newModel.trim(),
               updatedAt: new Date().toISOString(),
-            }).catch(() => {})
+            })
+              .then(() => refreshTrackingMirrorById(id))
+              .catch(() => {})
           )
         );
       } catch (err) {
@@ -878,7 +957,11 @@ export const repairService = {
             customerName: targetCustomerName,
             customerPhone: targetCustomerPhone,
             updatedAt: new Date().toISOString(),
-          }).catch(() => {})
+          })
+            // A reassignment can change the phone behind a legacy last-4 PIN;
+            // the pre-write copy lets the refresh retire the old mirror id.
+            .then(() => refreshTrackingMirrorById(t.id, local.find(l => l.id === t.id)))
+            .catch(() => {})
         )
       );
     } catch (err) {

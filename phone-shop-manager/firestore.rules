@@ -121,25 +121,34 @@ service cloud.firestore {
     }
 
     // ─── Repairs ─────────────────────────────────────────────────────────────
-    // Signed-in staff read and write every repair.
-    // An unauthenticated caller may only run the customer tracking lookup, which asks for
-    // one ticket by ticketNumber with limit(1). A probe against the live database showed
-    // `limit <= 5` was not enough: an unauthenticated list with no filter at all returned
-    // five full tickets - names, phone numbers, devices and lock codes - and startAfter on
-    // the last one walks the whole collection. Rules cannot read the client's `where`
-    // values, so capping the page to exactly 1 only slows that walk; it does not close it.
-    // The read of an arbitrary document by id is refused outright.
-    // Closing this properly needs a sanitized public mirror (a small per-ticket doc with
-    // status only), which the Spark plan has to build from the client, not from Functions.
+    // Signed-in staff read and write every repair; anonymous callers get nothing.
+    // The old `list if limit == 1` escape existed for the customer tracking lookup,
+    // but a live probe showed an unauthenticated list with no filter at all walked
+    // full tickets — names, phone numbers, devices and lock codes — one page at a
+    // time. Rules cannot read the client's `where` values, so no page cap closes
+    // that walk. The public tracking page now reads the sanitized mirror below.
     match /repairs/{docId} {
       allow read:                   if isSignedIn();
-      allow list:                   if isSignedIn() || request.query.limit == 1;
       // Counter staff also create tickets from a customer profile (new phone →
       // new ticket) and edit or delete a device's tickets from there, so the
       // customers flag joins the repair flags on writes.
       allow create:                 if isSignedIn() &&
         (hasPerm(callerProfile(), 'repair_add') || canViewCustomers(callerProfile()));
       allow update, delete:         if isSignedIn() &&
+        (canWorkRepairs(callerProfile()) || canViewCustomers(callerProfile()));
+    }
+
+    // ─── Public tracking mirror ────────────────────────────────────────────────
+    // One sanitized display-fields-only document per trackable ticket, written by
+    // both apps on every repair mutation (Spark has no server triggers). The doc id
+    // is ticketNumber + sha256(ticketNumber:PIN), so holding the id IS the proof of
+    // the PIN: a point get is the only public read, and there is no anonymous query
+    // to enumerate. Online PIN guessing costs a billed read per attempt. Staff list
+    // only to run the admin rebuild, which also deletes orphaned mirrors.
+    match /repair_tracking/{mirrorId} {
+      allow get:                    if true;
+      allow list:                   if isSignedIn();
+      allow write:                  if isSignedIn() &&
         (canWorkRepairs(callerProfile()) || canViewCustomers(callerProfile()));
     }
 

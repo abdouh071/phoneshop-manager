@@ -30,6 +30,8 @@ import { allocateTicketNumber } from './ticketCounter';
 import { claimInvoiceNumber } from './invoiceCounter';
 import { customerService } from './customerService';
 import { commitPartsAllocation, commitSaleEffects, applyStockLines } from './stockService';
+import { writeTrackingMirror, refreshTrackingMirrorForTicket } from './trackingMirrorService';
+import type { TrackingMirrorSource } from '../utils/trackingMirror';
 import {
   MAX_ATTEMPTS,
   buildStatusPatch,
@@ -464,6 +466,10 @@ const flushTickets = async (map: IdMap): Promise<FlushResult> => {
 
       const { id: realId } = await addIdempotently('repairs', action.id, dataToSave);
 
+      // Refresh from the live document: an adopted ticket (a previous attempt
+      // already committed) may carry fields this queue entry never saw.
+      void refreshTrackingMirrorForTicket(realId);
+
       done.add(action.id);
       out.synced++;
 
@@ -547,6 +553,7 @@ const flushStatuses = async (map: IdMap, queuedTicketIds: Set<string>): Promise<
       });
 
       await updateDoc(ref, patch);
+      void writeTrackingMirror({ ...current, ...patch } as TrackingMirrorSource);
       await removeActions('status', new Set([action.id]));
       out.synced++;
     } catch (err) {
@@ -664,6 +671,7 @@ const flushRemarks = async (map: IdMap, queuedTicketIds: Set<string>): Promise<F
 
       // Last write wins: the technician's note is the newest intent for this field.
       await updateDoc(ref, { remark: String(payload.remark ?? ''), updatedAt: nowIso() });
+      void refreshTrackingMirrorForTicket(ticketId);
       await removeActions('remark', new Set([action.id]));
       out.synced++;
     } catch (err) {

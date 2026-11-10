@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Save, ShieldAlert, Globe, AlertTriangle, Loader2, Palette, Check, Laptop, Monitor, TabletSmartphone } from 'lucide-react';
+import { Save, ShieldAlert, Globe, AlertTriangle, Loader2, Palette, Check, Laptop, Monitor, TabletSmartphone, RefreshCw } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -9,6 +9,7 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { useToast } from '../../components/ui/Toast';
 import { fetchPublicIP, useAuthStore } from '../../store/authStore';
 import { usePosDensityStore, POS_DENSITY_OPTIONS } from '../../store/posDensityStore';
+import { backfillTrackingMirrors } from '../../services/trackingMirrorService';
 import { UsersTab } from './UsersTab';
 import { ReceiptTab } from './ReceiptTab';
 import { PrintersTab } from './PrintersTab';
@@ -133,6 +134,7 @@ export const SettingsPage = () => {
   const [currentLang, setCurrentLang] = useState(i18n.language.split('-')[0] || 'en');
   const [isDetectingIp, setIsDetectingIp] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRebuildingTracking, setIsRebuildingTracking] = useState(false);
 
   // Currency change confirmation modal
   const [pendingCurrency, setPendingCurrency] = useState<string | null>(null);
@@ -298,6 +300,25 @@ export const SettingsPage = () => {
       toast.success(t('settings.ipDetected', 'IP Detected'), `Store allowed IP set to: ${updatedIp}`);
     } else {
       toast.error(t('settings.ipDetectFailed', 'Failed to Detect IP'), t('settings.ipDetectFailedDesc', 'Could not fetch your public IP address. Please enter it manually.'));
+    }
+  };
+
+  // ─── Tracking mirror rebuild (admin, idempotent) ───────────
+  const handleRebuildTracking = async () => {
+    setIsRebuildingTracking(true);
+    try {
+      const result = await backfillTrackingMirrors();
+      toast.success(
+        t('settings.rebuildTracking', 'Rebuild Tracking Links'),
+        t('settings.rebuildTrackingDone', 'Tracking links rebuilt: {{mirrored}} published, {{removed}} stale removed, {{skipped}} not trackable.', { mirrored: result.mirrored, removed: result.removed, skipped: result.skipped })
+      );
+    } catch (err: unknown) {
+      toast.error(
+        t('settings.rebuildTracking', 'Rebuild Tracking Links'),
+        errorMessage(err) || t('settings.rebuildTrackingFailed', 'Could not rebuild the tracking links. Check the connection and try again.')
+      );
+    } finally {
+      setIsRebuildingTracking(false);
     }
   };
 
@@ -528,6 +549,20 @@ export const SettingsPage = () => {
                 onChange={e => updateDraft('trackingBaseUrl', e.target.value)}
                 placeholder="e.g. https://myphoneshop.com/track (leave blank to use current app URL)"
               />
+            </div>
+            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--color-surface-container-low)' }}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleRebuildTracking}
+                isLoading={isRebuildingTracking}
+                leftIcon={<RefreshCw size={16} />}
+              >
+                {t('settings.rebuildTracking', 'Rebuild Tracking Links')}
+              </Button>
+              <p style={{ fontSize: '12px', color: 'var(--color-on-surface-variant, #666)', marginTop: '8px', lineHeight: 1.4 }}>
+                {t('settings.rebuildTrackingDesc', 'Rewrites the public tracking copy of every ticket and removes stale ones. Run once after the security rules update, after a backup restore, and after the technician phones take the mirror update. Safe to re-run; it never touches the tickets themselves.')}
+              </p>
             </div>
           </Card>
 

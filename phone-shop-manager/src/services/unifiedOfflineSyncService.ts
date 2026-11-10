@@ -30,6 +30,7 @@ import { db } from '../lib/firebase';
 import { offlineQueue } from './offlineQueue';
 import { offlineCustomerSyncService } from './offlineCustomerSyncService';
 import { inventoryService, commitStockDelta } from './inventoryService';
+import { refreshTrackingMirrorById } from './trackingMirrorService';
 import type { RepairTicket, SaleTransaction, CustomerDebtEntry, CustomerActivityLog } from '../types';
 import { computeStockStatus } from '../utils/stockStatus';
 import { toast } from '../components/ui/Toast';
@@ -358,6 +359,10 @@ export const unifiedOfflineSyncService = {
         // adopting the other shop's document drops this ticket out of the queue as "synced"
         // without ever uploading the repair the counter actually wrote.
         const realDocId = await addIdempotently('repairs', replayKeyOf(ticket, oldTempId), { ...ticketData });
+
+        // Refresh from the live document: an adopted ticket (a previous attempt
+        // already committed) may carry fields this local copy never saw.
+        void refreshTrackingMirrorById(realDocId);
 
         remapped.set(oldTempId, realDocId);
         synced++;
