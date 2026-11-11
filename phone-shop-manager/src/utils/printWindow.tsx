@@ -761,12 +761,12 @@ export function buildLabelsHTML(products: {
     });
     const barcodeSvg = svgNode.outerHTML;
 
-    // Font size: Store name is Font 2 (~11px bold), Parts are Font 2 (~11px regular), Products are Font 1 (~9.5px)
-    const fontSize = isPart ? '11px' : '9.5px';
+    // Font size: slightly smaller text for product names
+    const fontSize = isPart ? '9px' : '8px';
     const fontWeight = '400';
 
-    const linesHtml = textLines.map(line => `
-      <div style="font-size:${fontSize};font-weight:${fontWeight};color:#111;line-height:1.15;padding:0 2px;transform:translateX(-${shiftMm}mm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${escapeHtml(line)}</div>
+    const linesHtml = textLines.map((line, idx) => `
+      <div style="font-size:${fontSize};font-weight:${fontWeight};color:#111;line-height:1.1;padding:0 2px;${idx > 0 ? 'margin-top:1.5mm;' : ''}transform:translateX(-${shiftMm}mm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${escapeHtml(line)}</div>
     `).join('');
 
     return `

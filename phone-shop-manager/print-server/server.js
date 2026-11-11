@@ -1844,9 +1844,9 @@ async function handlePrintBarcode(body) {
         // Product Name: only product name + model (clean, bold, same size as store name)
         let fullText = tsplText(`${product.name || ''}${product.model ? ` ${product.model}` : ''}`, 60);
 
-        const fontType = '2';
-        const fontArgs = `"2",0,1,1`;
-        const maxChars = 24;
+        const fontType = '1';
+        const fontArgs = `"1",0,1,1`;
+        const maxChars = 32;
         const shiftDots = 16; // 2mm margin alignment with store title
 
         // Split into up to 2 lines if long text exceeds line width
@@ -1870,7 +1870,6 @@ async function handlePrintBarcode(body) {
 
         // Shift shop name 2mm (16 dots at 203 DPI) to the left
         const shopX = Math.max(0, getCenteredX(shopTitle, '2') - 16);
-        const skuX = Math.max(0, getCenteredX(sku, '1'));
         const { x: barcodeX, narrow, wide } = getBarcodeParams(sku);
 
         if (product.hidePrice) {
@@ -1883,7 +1882,7 @@ async function handlePrintBarcode(body) {
             const line1X = Math.max(0, getCenteredX(textLines[0], fontType) - shiftDots);
             const line2X = Math.max(0, getCenteredX(textLines[1], fontType) - shiftDots);
             fullTspl += `TEXT ${line1X},34,${fontArgs},"${textLines[0]}"\r\n`;
-            fullTspl += `TEXT ${line2X},54,${fontArgs},"${textLines[1]}"\r\n`;
+            fullTspl += `TEXT ${line2X},58,${fontArgs},"${textLines[1]}"\r\n`;
             fullTspl += `BARCODE ${barcodeX},122,"128",32,0,0,${narrow},${wide},"${sku}"\r\n`;
           } else {
             const nameSpecsX = Math.max(0, getCenteredX(textLines[0], fontType) - shiftDots);
@@ -1900,7 +1899,7 @@ async function handlePrintBarcode(body) {
             const line1X = Math.max(0, getCenteredX(textLines[0], fontType) - shiftDots);
             const line2X = Math.max(0, getCenteredX(textLines[1], fontType) - shiftDots);
             fullTspl += `TEXT ${line1X},32,${fontArgs},"${textLines[0]}"\r\n`;
-            fullTspl += `TEXT ${line2X},50,${fontArgs},"${textLines[1]}"\r\n`;
+            fullTspl += `TEXT ${line2X},56,${fontArgs},"${textLines[1]}"\r\n`;
             fullTspl += `BARCODE ${barcodeX},110,"128",24,0,0,${narrow},${wide},"${sku}"\r\n`;
           } else {
             const nameSpecsX = Math.max(0, getCenteredX(textLines[0], fontType) - shiftDots);
