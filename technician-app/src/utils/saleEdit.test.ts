@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { CartItem, PhoneModel, SaleTransaction } from '../types/index.ts';
-import { diffSaleEdit, planSaleEdit, rescalePayments, surplusShiftOf } from './saleEdit.ts';
+import { diffSaleEdit, openDebtTotal, planSaleEdit, rescalePayments, surplusShiftOf } from './saleEdit.ts';
 
 const makeProduct = (over: Partial<PhoneModel> = {}): PhoneModel => ({
   id: over.id ?? 'p1',
@@ -703,4 +703,42 @@ test('a trade-in of more units than were sold is not read as a shrinking sale', 
   assert.equal(plan.total, 10000);
   assert.equal(plan.status, 'completed');
   assert.equal(plan.hasChanges, false);
+});
+
+test('a failed debt query answers null, not this invoice alone', () => {
+  // The account total is an absolute figure: returning just this invoice's balance
+  // would wipe every other open debt when the profile is written back.
+  assert.equal(openDebtTotal(null, 'd1', 5000), null);
+});
+
+test('the account total sums the other open entries and this one at its new balance', () => {
+  const rows = [
+    { id: 'd1', status: 'unpaid', remainingBalance: 9000 },
+    { id: 'd2', status: 'unpaid', remainingBalance: 3000 },
+    { id: 'd3', status: 'partially_paid', remainingBalance: 1500 },
+  ];
+  // d1 was just corrected to 5 000; the server row still says 9 000.
+  assert.equal(openDebtTotal(rows, 'd1', 5000), 9500);
+});
+
+test('a void counts the closed entry at zero and keeps the rest of the account', () => {
+  const rows = [
+    { id: 'd1', status: 'unpaid', remainingBalance: 9000 },
+    { id: 'd2', status: 'unpaid', remainingBalance: 3000 },
+  ];
+  assert.equal(openDebtTotal(rows, 'd1', 0), 3000);
+});
+
+test('settled entries are not part of what the account owes', () => {
+  const rows = [
+    { id: 'd1', status: 'unpaid', remainingBalance: 9000 },
+    { id: 'd2', status: 'paid', remainingBalance: 4000 },
+    { id: 'd3', remainingBalance: 2000 },
+  ];
+  assert.equal(openDebtTotal(rows, 'd1', 5000), 5000);
+});
+
+test('a successful query with no entries is a real zero, not a failed read', () => {
+  assert.equal(openDebtTotal([], 'd1', 0), 0);
+  assert.equal(openDebtTotal([{ id: 'd1', status: 'paid', remainingBalance: 0 }], 'd1', 0), 0);
 });

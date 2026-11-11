@@ -22,7 +22,7 @@
 import { addDoc, collection, doc, getDoc, getDocs, limit, query, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
-import { surplusShiftOf, type SaleEditPlan } from '../utils/saleEdit';
+import { openDebtTotal, surplusShiftOf, type SaleEditPlan } from '../utils/saleEdit';
 import type { SaleTransaction } from '../types';
 import { activityLogService } from './activityLogService';
 import { customerService } from './customerService';
@@ -213,22 +213,25 @@ export const writeCustomerTotals = async (
  * it has just been given rather than the one the server still holds.
  *
  * The desktop reads this off the debt list already in memory; a phone has to ask —
- * one bounded query, and only for a sale that went to account.
+ * one bounded query, and only for a sale that went to account. Null when the query
+ * failed: the callers pass it straight to `writeCustomerTotals`, which then leaves
+ * the profile's absolute totalDebt untouched instead of erasing the other debts.
  */
 export const sumOpenDebt = async (
   customerId: string,
   thisId: string,
   thisBalance: number
-): Promise<number> => {
+): Promise<number | null> => {
   const others = await getDocs(
     query(collection(db, 'customer_debts'), where('customerId', '==', customerId), limit(100))
   ).catch(() => null);
-  if (!others) return Math.max(0, thisBalance);
-  return others.docs.reduce((sum, row) => {
-    if (row.id === thisId) return sum + Math.max(0, thisBalance);
-    const data = row.data() as { status?: string; remainingBalance?: number };
-    return data.status && data.status !== 'paid' ? sum + (Number(data.remainingBalance) || 0) : sum;
-  }, 0);
+  return openDebtTotal(
+    others
+      ? others.docs.map(row => ({ id: row.id, ...(row.data() as { status?: string; remainingBalance?: number }) }))
+      : null,
+    thisId,
+    thisBalance
+  );
 };
 
 /**

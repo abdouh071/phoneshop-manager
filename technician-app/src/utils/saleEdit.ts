@@ -399,6 +399,33 @@ export const planSaleEdit = (
 export const surplusShiftOf = (paid: number, newTotal: number, oldTotal: number): number =>
   Math.max(0, paid - newTotal) - Math.max(0, paid - oldTotal);
 
+export interface OpenDebtRow {
+  id: string;
+  status?: string;
+  remainingBalance?: number;
+}
+
+/**
+ * What an account owes across every entry that is not settled, with `thisId` counted
+ * at the balance the correction just gave it rather than the one the server holds.
+ *
+ * `null` rows mean the read never reached the server. The total is an absolute
+ * lifetime figure: rebuilding it from this one invoice would wipe every other open
+ * debt on the account, so a failed read answers null and the caller leaves the
+ * profile's totalDebt alone — the counter's rule for degraded reads.
+ */
+export const openDebtTotal = (
+  rows: OpenDebtRow[] | null,
+  thisId: string,
+  thisBalance: number
+): number | null => {
+  if (!rows) return null;
+  return rows.reduce((sum, row) => {
+    if (row.id === thisId) return sum + Math.max(0, thisBalance);
+    return row.status && row.status !== 'paid' ? sum + (Number(row.remainingBalance) || 0) : sum;
+  }, 0);
+};
+
 /**
  * The changes reduced to what a remote admin reads on their own screen before they
  * answer: which line shrank, which price moved, which product was put on the
