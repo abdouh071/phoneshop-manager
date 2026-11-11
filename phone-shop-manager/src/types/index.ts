@@ -87,6 +87,15 @@ export interface SaleTransaction {
    * race was giving up has no local id in its document, so it gets written twice.
    */
   idempotencyKey?: string;
+  /**
+   * False from the moment the invoice is written until the shelf has actually moved
+   * for it, then true — stamped in the same transaction that deducts the stock. A
+   * crash between the sale write and the stock move leaves this false, and the
+   * unfinished-sale sweep finishes exactly those invoices once. Documents written
+   * before the stamp existed carry no field at all, so the sweep never reaches back
+   * into old history and deducts a second time.
+   */
+  stockApplied?: boolean;
   accountSettlement?: {
     type: 'paid_full' | 'charged_to_account' | 'partial_payment';
     paidAmount: number;

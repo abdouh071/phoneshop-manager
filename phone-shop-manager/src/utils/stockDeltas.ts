@@ -11,6 +11,8 @@
  * Nothing here decides what a line owes the shelf; the caller keeps its own signs,
  * because checkout, the B2B counter and a refund each read the same lines differently.
  */
+import type { CartItem } from '../types';
+
 export interface StockDeltaEntry {
   productId?: string;
   delta: number;
@@ -43,3 +45,33 @@ export const foldStockDeltas = (entries: StockDeltaEntry[]): StockDelta[] => {
     .filter(([, delta]) => delta !== 0)
     .map(([productId, delta]) => ({ productId, delta }));
 };
+
+/**
+ * What a whole invoice owes the shelf, in one place.
+ * ===================================================
+ * Checkout writes this movement, and the sync pass and the unfinished-sale sweep
+ * re-derive it from the stored document when a crash left the shelf unmoved. They
+ * must agree to the unit, or the heal would deduct a different number than the till
+ * intended — so the signs live here once, not copied into each caller.
+ *
+ * A retail return goes back on the shelf unless the counter explicitly kept it out
+ * (`restock === false`); a parts B2B line is always a dispatch out. Net-zero products
+ * are dropped by the fold, exactly as the till's own checkout drops them.
+ */
+export const saleStockDeltas = (
+  items: CartItem[],
+  saleType?: 'retail' | 'parts_b2b'
+): StockDelta[] =>
+  foldStockDeltas(
+    (items || []).map(item => ({
+      productId: item.product?.id,
+      delta:
+        saleType === 'parts_b2b'
+          ? -item.quantity
+          : item.isReturn
+            ? item.restock !== false
+              ? item.quantity
+              : 0
+            : -item.quantity,
+    }))
+  );

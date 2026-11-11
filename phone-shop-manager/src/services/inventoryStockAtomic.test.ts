@@ -8,7 +8,7 @@
  * (two tills selling the same model) into an observable abort instead of silent data loss.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { inventoryService, commitStockDelta } from './inventoryService';
+import { inventoryService, commitStockDelta, commitSaleStockEffects } from './inventoryService';
 import { unifiedOfflineSyncService } from './unifiedOfflineSyncService';
 
 type FakeDoc = Record<string, unknown>;
@@ -227,6 +227,154 @@ describe('Atomic stock writes', () => {
       expect(keys).not.toContain('mv_0');
       expect(keys[0]).toBe('mv_5');
       expect(keys[39]).toBe('mv_44');
+    });
+  });
+
+  describe('commitSaleStockEffects (B8: the sale anchors the shelf movement)', () => {
+    /** A sale document on the server, carrying the stamp the till wrote at checkout. */
+    const seedSale = (id: string, stockApplied: boolean): void => {
+      fake.docs.set(`transactions/${id}`, { stockApplied, total: 1000 });
+    };
+    const saleStamp = (id: string): unknown => fake.docs.get(`transactions/${id}`)?.stockApplied;
+
+    it('deducts the signed deltas and stamps the invoice in one transaction', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(10, 10);
+      seedSale('sale_1', false);
+
+      const { applied, missed, adopted } = await commitSaleStockEffects('sale_1', [
+        { productId: 'prod_1', delta: -3 },
+      ]);
+
+      expect(adopted).toBe(false);
+      expect(missed).toHaveLength(0);
+      expect(applied).toEqual([{ productId: 'prod_1', previousStock: 10, stock: 7, stockStatus: 'in_stock' }]);
+      expect(fake.stockOf('prod_1')).toBe(7);
+      expect(saleStamp('sale_1')).toBe(true);
+      // One commit moved both the shelf and the stamp — there is no gap to crash into.
+      expect(fake.stats.commits).toBe(1);
+    });
+
+    it('adopts an invoice already stamped, moving nothing a second time', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(7, 7);
+      seedSale('sale_1', true);
+      const before = fake.versionOf('inventory/prod_1');
+
+      const { applied, adopted } = await commitSaleStockEffects('sale_1', [{ productId: 'prod_1', delta: -3 }]);
+
+      expect(adopted).toBe(true);
+      expect(applied).toHaveLength(0);
+      expect(fake.stockOf('prod_1')).toBe(7);
+      expect(fake.versionOf('inventory/prod_1')).toBe(before);
+    });
+
+    it('finishes a half-committed sale once when the first commit lost its acknowledgement', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(10, 10);
+      seedSale('sale_1', false);
+      fake.flags.lostAck = true;
+
+      // The transaction lands on the server (shelf 7, stamp true) but the till hears a failure.
+      await expect(commitSaleStockEffects('sale_1', [{ productId: 'prod_1', delta: -3 }])).rejects.toThrow();
+      expect(fake.stockOf('prod_1')).toBe(7);
+      expect(saleStamp('sale_1')).toBe(true);
+
+      // The sweep retries the same invoice: it adopts the finished work instead of deducting again.
+      fake.flags.lostAck = false;
+      const retry = await commitSaleStockEffects('sale_1', [{ productId: 'prod_1', delta: -3 }]);
+      expect(retry.adopted).toBe(true);
+      expect(fake.stockOf('prod_1')).toBe(7);
+    });
+
+    it('falls back to the products collection when inventory does not hold the row', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      fake.docs.set('products/prod_old', { stock: 8, lowStockThreshold: 1 });
+      inventoryService.saveLocalInventory([]);
+      seedSale('sale_1', false);
+
+      const { applied, missed } = await commitSaleStockEffects('sale_1', [{ productId: 'prod_old', delta: -2 }]);
+
+      expect(missed).toHaveLength(0);
+      expect(applied[0]).toMatchObject({ productId: 'prod_old', previousStock: 8, stock: 6 });
+      expect(fake.docs.get('products/prod_old')?.stock).toBe(6);
+      expect(saleStamp('sale_1')).toBe(true);
+    });
+
+    it('never drives the shelf below zero', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(2, 2);
+      seedSale('sale_1', false);
+
+      const { applied } = await commitSaleStockEffects('sale_1', [{ productId: 'prod_1', delta: -50 }]);
+
+      expect(applied[0].stock).toBe(0);
+      expect(applied[0].stockStatus).toBe('out_of_stock');
+      expect(fake.stockOf('prod_1')).toBe(0);
+    });
+
+    it('restocks a returned unit on a signed positive delta', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(4, 4);
+      seedSale('sale_1', false);
+
+      const { applied } = await commitSaleStockEffects('sale_1', [{ productId: 'prod_1', delta: 2 }]);
+
+      expect(applied[0].stock).toBe(6);
+      expect(fake.stockOf('prod_1')).toBe(6);
+    });
+
+    it('reports a product on neither shelf without aborting the rest of the sale', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(10, 10);
+      seedSale('sale_1', false);
+
+      const { applied, missed } = await commitSaleStockEffects('sale_1', [
+        { productId: 'prod_1', delta: -3 },
+        { productId: 'prod_gone', delta: -1 },
+      ]);
+
+      expect(applied).toHaveLength(1);
+      expect(missed).toEqual([{ productId: 'prod_gone', delta: -1, error: expect.stringContaining('prod_gone') }]);
+      expect(fake.stockOf('prod_1')).toBe(7);
+      // The invoice is still stamped: the missing line is queued separately, not retried whole.
+      expect(saleStamp('sale_1')).toBe(true);
+    });
+
+    it('reconciles this device\'s mirror to the authoritative shelf', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      // Another till already sold down to 6; this device still caches 10.
+      seedProduct(6, 10);
+      seedSale('sale_1', false);
+
+      await commitSaleStockEffects('sale_1', [{ productId: 'prod_1', delta: -2 }]);
+
+      expect(fake.stockOf('prod_1')).toBe(4);
+      expect(inventoryService.getLocalInventory()[0].stock).toBe(4);
+    });
+
+    it('lets only one of two racing tills deduct the same invoice', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(5, 5);
+      seedSale('sale_1', false);
+
+      const results = await Promise.allSettled([
+        commitSaleStockEffects('sale_1', [{ productId: 'prod_1', delta: -1 }]),
+        commitSaleStockEffects('sale_1', [{ productId: 'prod_1', delta: -1 }]),
+      ]);
+
+      const fulfilled = results.filter(r => r.status === 'fulfilled');
+      expect(fulfilled).toHaveLength(1);
+      expect(fake.stockOf('prod_1')).toBe(4);
+      expect(saleStamp('sale_1')).toBe(true);
+    });
+
+    it('throws when the invoice no longer exists, leaving the shelf untouched', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(10, 10);
+
+      await expect(commitSaleStockEffects('sale_gone', [{ productId: 'prod_1', delta: -3 }])).rejects.toThrow();
+      expect(fake.stockOf('prod_1')).toBe(10);
     });
   });
 

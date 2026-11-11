@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { PhoneModel, StockStatus } from '../types';
+import type { StockDelta } from '../utils/stockDeltas';
 import { computeStockStatus } from '../utils/stockStatus';
 import { withTimeout } from '../utils/withTimeout';
 import { offlineQueue } from './offlineQueue';
@@ -176,6 +177,106 @@ export const commitStockDelta = async (
     STOCK_TX_TIMEOUT_MS,
     'stockTransaction'
   );
+
+/** A sale's shelf movement needs a wider budget than one product: it reads the invoice
+ *  and every line it carries before it can commit. */
+const SALE_STOCK_TX_TIMEOUT_MS = 4000;
+
+export interface SaleStockApplied {
+  productId: string;
+  previousStock: number;
+  stock: number;
+  stockStatus: StockStatus;
+}
+
+export interface SaleStockOutcome {
+  applied: SaleStockApplied[];
+  /** A line whose product is on neither shelf — reported, not thrown, so one deleted
+   *  SKU cannot abort the rest of a settled sale. The caller queues these durably. */
+  missed: { productId: string; delta: number; error: string }[];
+  /** The invoice already carried the stamp, so nothing moved a second time. */
+  adopted: boolean;
+}
+
+/**
+ * Move the shelf for a whole invoice and stamp the invoice as moved, in ONE transaction.
+ * =====================================================================================
+ * The till used to write the sale and then fire the stock writes off separately. A crash
+ * — or a closed tab — in the gap left an invoice the shelf never answered for, and nothing
+ * replayed it: the sale was online, so the offline queue never saw it, and the stock queue
+ * only holds deltas a write actually attempted. The invoice anchors the movement here: the
+ * stamp is read and written inside the same transaction that deducts the units, so a retry
+ * (the sync pass, the unfinished-sale sweep, a second till) adopts a finished sale instead
+ * of deducting it again, and a half-finished one is completed exactly once.
+ *
+ * Signs are the caller's — `saleStockDeltas` decides what a retail return or a parts
+ * dispatch owes the shelf — and the server's current stock is read inside the transaction,
+ * so two tills selling the same model compose rather than clobber.
+ */
+export const commitSaleStockEffects = async (
+  saleId: string,
+  deltas: StockDelta[]
+): Promise<SaleStockOutcome> => {
+  let applied: SaleStockApplied[] = [];
+  let missed: { productId: string; delta: number; error: string }[] = [];
+  let adopted = false;
+
+  await withTimeout(
+    runTransaction(db, async (tx) => {
+      // Firestore re-runs this callback when a document it read moves underneath it, so
+      // every attempt starts from an empty report rather than appending to the last one.
+      applied = [];
+      missed = [];
+      adopted = false;
+
+      const saleRef = doc(db, 'transactions', saleId);
+      const saleSnap = await tx.get(saleRef);
+      if (!saleSnap.exists()) throw new Error(`Sale ${saleId} no longer exists`);
+      if ((saleSnap.data() as Record<string, unknown>).stockApplied === true) {
+        adopted = true;
+        return;
+      }
+
+      for (const { productId, delta } of deltas) {
+        let ref = doc(db, COLLECTION, productId);
+        let snap = await tx.get(ref);
+        if (!snap.exists()) {
+          ref = doc(db, 'products', productId);
+          snap = await tx.get(ref);
+          if (!snap.exists()) {
+            missed.push({ productId, delta, error: `Product ${productId} not found in inventory or products` });
+            continue;
+          }
+        }
+        const data = snap.data() as Record<string, unknown>;
+        const previousStock = typeof data.stock === 'number' ? data.stock : 0;
+        const threshold = typeof data.lowStockThreshold === 'number' ? data.lowStockThreshold : 1;
+        const stock = Math.max(0, previousStock + delta);
+        const stockStatus = computeStockStatus(stock, threshold);
+        tx.update(ref, { stock, stockStatus });
+        applied.push({ productId, previousStock, stock, stockStatus });
+      }
+
+      tx.update(saleRef, { stockApplied: true });
+    }),
+    SALE_STOCK_TX_TIMEOUT_MS,
+    'saleStockEffects'
+  );
+
+  // Reconcile this device's shelf mirror with what the server committed, so the till shows
+  // the authoritative number rather than its own optimistic guess.
+  if (applied.length) {
+    const level = new Map(applied.map(a => [a.productId, a]));
+    saveLocalInventory(
+      getLocalInventory().map(p => {
+        const a = level.get(p.id);
+        return a ? { ...p, stock: a.stock, stockStatus: a.stockStatus } : p;
+      })
+    );
+  }
+
+  return { applied, missed, adopted };
+};
 
 export const inventoryService = {
   // Export local storage accessors for the unified sync service

@@ -44,6 +44,8 @@ const captured = vi.hoisted(() => ({
   stockBy: [] as Array<{ productId: string; delta: number }>,
   /** Every debt the refund path asked to settle, in order. */
   settled: [] as string[],
+  /** Every atomic shelf movement a checkout anchored to its sale, in order. */
+  saleStock: [] as Array<{ saleId: string; deltas: Array<{ productId: string; delta: number }> }>,
 }));
 
 vi.mock('../services/invoiceCounter', () => ({
@@ -85,6 +87,22 @@ vi.mock('../services/inventoryService', () => ({
       captured.stock.push(delta);
       return undefined;
     },
+  },
+  commitSaleStockEffects: async (
+    saleId: string,
+    deltas: Array<{ productId: string; delta: number }>
+  ) => {
+    captured.saleStock.push({ saleId, deltas });
+    return {
+      applied: deltas.map(d => ({
+        productId: d.productId,
+        previousStock: 10,
+        stock: 10 + d.delta,
+        stockStatus: 'in_stock' as const,
+      })),
+      missed: [],
+      adopted: false,
+    };
   },
 }));
 
@@ -174,6 +192,7 @@ vi.mock('./inventoryStore', () => ({
         captured.stockBy.push({ productId, delta });
       },
     }),
+    setState: () => undefined,
   },
 }));
 
@@ -209,6 +228,7 @@ beforeEach(() => {
   captured.claims.length = 0;
   captured.stockBy.length = 0;
   captured.settled.length = 0;
+  captured.saleStock.length = 0;
   emptyCart();
   (phone as { price: number }).price = 10005;
 });
@@ -320,6 +340,55 @@ describe('the sale as it is written down', () => {
     // A clock number repeats every sixteen and a half minutes, so the shop has to be
     // able to find the sales carrying one instead of trusting them to be unique.
     expect(tx.invoiceNumberProvisional).toBe(true);
+  });
+});
+
+describe('the shelf movement anchored to the sale (B8)', () => {
+  it('writes the invoice unfinished, then moves the shelf in one call keyed to that invoice', async () => {
+    add(phone);
+    await useCartStore.getState().checkout();
+
+    const tx = captured.transactions[0] as { stockApplied?: boolean };
+    // The document is born owing the shelf a movement. If the till dies between the
+    // write and the deduction, this false stamp is what the sweep finds to finish it.
+    expect(tx.stockApplied).toBe(false);
+    expect(captured.saleStock).toHaveLength(1);
+    expect(captured.saleStock[0]).toEqual({
+      saleId: 'tx_1',
+      deltas: [{ productId: 'sku_phone', delta: -1 }],
+    });
+  });
+
+  it('folds a sale line and a return line of one model into the net the shelf owes', async () => {
+    add(phone, 3);
+    useCartStore.getState().addReturnItem(phone, { quantity: 1 });
+    await useCartStore.getState().checkout();
+
+    // Three sold, one handed back: one movement of two, not two writes that abort
+    // each other on the same document.
+    expect(captured.saleStock[0].deltas).toEqual([{ productId: 'sku_phone', delta: -2 }]);
+  });
+
+  it('restocks the returned accessory while it deducts the phone sold', async () => {
+    add(phone);
+    useCartStore.getState().addReturnItem(cable, { quantity: 1 });
+    await useCartStore.getState().checkout();
+
+    expect(captured.saleStock[0].deltas).toEqual([
+      { productId: 'sku_phone', delta: -1 },
+      { productId: 'sku_cable', delta: 1 },
+    ]);
+  });
+
+  it('moves nothing for an even exchange of one model, but still anchors the sale', async () => {
+    add(phone);
+    useCartStore.getState().addReturnItem(phone, { quantity: 1 });
+    await useCartStore.getState().checkout();
+
+    // The sale and the return cancel out, so no shelf write is owed — yet the call
+    // still happens, because it is what stamps the invoice finished.
+    expect(captured.saleStock).toHaveLength(1);
+    expect(captured.saleStock[0].deltas).toEqual([]);
   });
 });
 

@@ -19,9 +19,14 @@
  */
 
 import {
+  collection,
   doc,
   getDoc,
+  getDocs,
+  limit,
+  query,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 import { addIdempotently, replayKeyOf } from './idempotentReplay';
 import { offlineDeadLetterStore } from './offlineDeadLetterStore';
@@ -29,10 +34,11 @@ import { offlineQueueMirror } from './offlineQueueMirror';
 import { db } from '../lib/firebase';
 import { offlineQueue } from './offlineQueue';
 import { offlineCustomerSyncService } from './offlineCustomerSyncService';
-import { inventoryService, commitStockDelta } from './inventoryService';
+import { inventoryService, commitStockDelta, commitSaleStockEffects } from './inventoryService';
 import { refreshTrackingMirrorById } from './trackingMirrorService';
 import type { RepairTicket, SaleTransaction, CustomerDebtEntry, CustomerActivityLog } from '../types';
 import { computeStockStatus } from '../utils/stockStatus';
+import { saleStockDeltas } from '../utils/stockDeltas';
 import { toast } from '../components/ui/Toast';
 
 const REPAIRS_LOCAL_KEY = 'offline_repairs';
@@ -80,7 +86,9 @@ function pruneLocalCache(): void {
 type SyncCountListener = (totalPending: number) => void;
 const listeners = new Set<SyncCountListener>();
 let isSyncing = false;
+let isSweeping = false;
 let syncDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
+let sweepDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
 function notifyCountListeners(): void {
   const count = unifiedOfflineSyncService.getTotalPendingCount();
@@ -420,6 +428,15 @@ export const unifiedOfflineSyncService = {
 
         remapped.set(oldTempId, realDocId);
         synced++;
+
+        // An offline sale normally carries stockApplied:true — the till stamped it before the
+        // shelf moved and the stock queue replays the deltas. A crash before that stamp leaves
+        // it false with nothing queued, so finish the shelf from the invoice here. The
+        // transaction re-reads the server stamp, so an already-finished sale simply adopts.
+        if (tx.stockApplied !== true) {
+          await commitSaleStockEffects(realDocId, saleStockDeltas(tx.items || [], tx.saleType))
+            .catch(err => console.warn(`[UnifiedOfflineSync] Could not heal stock for ${realDocId}:`, err));
+        }
       } catch (err) {
         console.error(`[UnifiedOfflineSync] Failed to sync offline transaction ${tx.id}:`, err);
       }
@@ -698,6 +715,53 @@ export const unifiedOfflineSyncService = {
   },
 
   /**
+   * Finish invoices whose shelf movement was interrupted.
+   * =====================================================
+   * A sale written online and then crashed — or a stock transaction that timed out — leaves
+   * `stockApplied:false` on the server and NOTHING in the local queue, so the pending-count
+   * gates that drive the rest of this service would never look at it. This sweep queries the
+   * stamp directly and completes each such invoice once, through the same transaction that
+   * stamps it, so a second pass (or a second till) adopts instead of deducting again.
+   *
+   * Only documents that carry the field and still say false are reached: invoices written
+   * before the stamp existed have no field at all, so old history is never deducted twice.
+   * The query is a single-field equality, so it needs no composite index, and it is bounded
+   * to keep one pass cheap on the Spark plan.
+   */
+  sweepUnfinishedSales: async (): Promise<number> => {
+    if (isSweeping) return 0;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return 0;
+    isSweeping = true;
+    let healed = 0;
+    try {
+      const snap = await getDocs(
+        query(collection(db, 'transactions'), where('stockApplied', '==', false), limit(50))
+      );
+      for (const d of snap.docs) {
+        const tx = { id: d.id, ...(d.data() as Omit<SaleTransaction, 'id'>) };
+        try {
+          const { applied, missed, adopted } = await commitSaleStockEffects(
+            tx.id,
+            saleStockDeltas(tx.items || [], tx.saleType)
+          );
+          if (!adopted && applied.length) healed++;
+          // A line whose product is on neither shelf is queued durably, as checkout does.
+          for (const m of missed) {
+            await inventoryService.applyStockDelta(m.productId, m.delta).catch(() => undefined);
+          }
+        } catch (err) {
+          console.warn(`[UnifiedOfflineSync] Could not finish sale ${tx.id}:`, err);
+        }
+      }
+    } catch (err) {
+      console.warn('[UnifiedOfflineSync] Unfinished-sale sweep failed:', err);
+    } finally {
+      isSweeping = false;
+    }
+    return healed;
+  },
+
+  /**
    * Debounced sync trigger
    */
   triggerDebouncedSync: (delay = 800) => {
@@ -710,11 +774,26 @@ export const unifiedOfflineSyncService = {
   },
 
   /**
+   * Debounced unfinished-sale sweep. Unlike the sync trigger this is NOT gated on the
+   * pending count: a crashed online sale leaves nothing queued, so the count would be zero
+   * and the sale would never be looked at. Focus, reconnection and load each call it.
+   */
+  triggerDebouncedSweep: (delay = 1500) => {
+    if (sweepDebounceTimeout) clearTimeout(sweepDebounceTimeout);
+    sweepDebounceTimeout = setTimeout(() => {
+      unifiedOfflineSyncService.sweepUnfinishedSales().catch(err => {
+        console.warn('[UnifiedOfflineSync] Background sweep error:', err);
+      });
+    }, delay);
+  },
+
+  /**
    * Initialize global listeners for online reconnection, window focus, and heartbeat
    */
   init: (): (() => void) => {
     const handleOnline = () => {
       unifiedOfflineSyncService.triggerDebouncedSync(500);
+      unifiedOfflineSyncService.triggerDebouncedSweep(1000);
     };
 
     const handleFocus = () => {
@@ -722,6 +801,9 @@ export const unifiedOfflineSyncService = {
         if (unifiedOfflineSyncService.getTotalPendingCount() > 0) {
           unifiedOfflineSyncService.triggerDebouncedSync(1000);
         }
+        // The sweep runs even with an empty queue: an interrupted online sale is invisible
+        // to the pending count, and returning to the window is the moment to finish it.
+        unifiedOfflineSyncService.triggerDebouncedSweep(1500);
       }
     };
 
@@ -743,6 +825,9 @@ export const unifiedOfflineSyncService = {
       if (unifiedOfflineSyncService.getTotalPendingCount() > 0) {
         unifiedOfflineSyncService.triggerDebouncedSync(2000);
       }
+      // A crash since the last session may have left an invoice the shelf never answered
+      // for. Nothing is queued for it, so sweep on load regardless of the pending count.
+      unifiedOfflineSyncService.triggerDebouncedSweep(2500);
     }
 
     notifyCountListeners();
@@ -753,6 +838,7 @@ export const unifiedOfflineSyncService = {
       window.removeEventListener('focus', handleFocus);
       clearInterval(intervalId);
       if (syncDebounceTimeout) clearTimeout(syncDebounceTimeout);
+      if (sweepDebounceTimeout) clearTimeout(sweepDebounceTimeout);
     };
   },
 };

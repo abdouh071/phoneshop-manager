@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { CartItem, Customer, PaymentMethod, PhoneModel, SaleTransaction, SuspendedCart, B2BCheckoutOptions, CustomerDebtEntry } from '../types';
 import { useInventoryStore } from './inventoryStore';
-import { inventoryService } from '../services/inventoryService';
+import { inventoryService, commitSaleStockEffects } from '../services/inventoryService';
 import { transactionService } from '../services/transactionService';
 import { claimInvoiceNumber } from '../services/invoiceCounter';
 import { activityLogService } from '../services/activityLogService';
@@ -13,7 +13,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { discountAmountOf, lineDiscountOf } from '../utils/discountPolicy';
 import { planSaleEditStock } from '../utils/saleEditStock';
 import { returnedUnits, soldUnits } from '../utils/saleEditLines';
-import { foldStockDeltas } from '../utils/stockDeltas';
+import { foldStockDeltas, saleStockDeltas } from '../utils/stockDeltas';
 import { saleOpeningPayments } from '../utils/debtPayments';
 
 const getInventoryProducts = () =>
@@ -26,6 +26,51 @@ const getInventoryProducts = () =>
  */
 const lineNote = (item: CartItem): string =>
   `${item.isReturn ? '−' : ''}${item.quantity}x ${item.product?.name ?? 'Item'} ${item.product?.model ?? ''}`.trim();
+
+/**
+ * Move the shelf for a settled invoice once, and leave a trail a crash can be healed from.
+ *
+ * Online: one transaction deducts the units and stamps the invoice (`commitSaleStockEffects`).
+ * If it is interrupted the stamp stays false and the unfinished-sale sweep finishes it, so
+ * nothing is queued here as well — that would deduct the same units a second time.
+ *
+ * Offline: the local copy is marked done BEFORE the shelf moves. The per-product queue then
+ * carries the deltas to the server and the upload adopts the stamp instead of deducting again.
+ * A crash before the stamp leaves it false with an empty queue, so the sync pass heals the
+ * shelf from the invoice; a crash after it leaves the queue as the only deduction. Neither
+ * path doubles, and the till's own shelf still updates immediately while there is no signal.
+ */
+const moveSaleStock = async (
+  saved: SaleTransaction,
+  items: CartItem[],
+  saleType: 'retail' | 'parts_b2b'
+): Promise<void> => {
+  const deltas = saleStockDeltas(items, saleType);
+
+  if (saved.id.startsWith('offline_')) {
+    await transactionService.updateTransaction(saved.id, { stockApplied: true }).catch(console.error);
+    saved.stockApplied = true;
+    deltas.forEach(({ productId, delta }) => useInventoryStore.getState().adjustStockBy(productId, delta));
+    return;
+  }
+
+  try {
+    const { applied, missed } = await commitSaleStockEffects(saved.id, deltas);
+    saved.stockApplied = true;
+    if (applied.length) {
+      const level = new Map(applied.map(a => [a.productId, a]));
+      useInventoryStore.setState(state => ({
+        products: state.products.map(p => { const a = level.get(p.id); return a ? { ...p, stock: a.stock, stockStatus: a.stockStatus } : p; }),
+        parts: state.parts.map(p => { const a = level.get(p.id); return a ? { ...p, stock: a.stock, stockStatus: a.stockStatus } : p; }),
+      }));
+    }
+    // A line whose product is on neither shelf is queued durably, as the per-product path did.
+    for (const m of missed) useInventoryStore.getState().adjustStockBy(m.productId, m.delta);
+  } catch (err) {
+    // The stamp stays false; the sweep finishes this sale. Queueing here too would deduct twice.
+    console.error('Failed to move stock on checkout:', err);
+  }
+};
 
 const STORAGE_KEY_ACTIVE = 'pos_active_cart';
 const STORAGE_KEY_SUSPENDED = 'pos_suspended_carts';
@@ -564,6 +609,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         customerPhone: customerPhone || matchedOrCreatedCustomer?.phone || undefined,
         customerId: matchedOrCreatedCustomer?.id,
         saleType: 'retail',
+        stockApplied: false,
         invoiceNumber,
         invoiceNumberProvisional: numberGuessed || undefined,
         status: 'completed',
@@ -663,22 +709,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       }
       
       // 6. Authoritative Stock Adjustments in Zustand & Firestore (executed ONCE per transaction):
-      // Regular purchases -> deduct stock (-qty)
-      // Returned items -> restock into inventory (+qty)
-      // One movement per product, because an exchange puts a sale row and a return row
-      // of the same model on one document and two writes on one product abort each other.
-      try {
-        foldStockDeltas(
-          itemsSnapshot.map(item => ({
-            productId: item.product?.id,
-            delta: item.isReturn ? (item.restock !== false ? item.quantity : 0) : -item.quantity,
-          }))
-        ).forEach(({ productId, delta }) => {
-          useInventoryStore.getState().adjustStockBy(productId, delta);
-        });
-      } catch (err) {
-        console.error('Failed to adjust stock on checkout:', err);
-      }
+      // Regular purchases -> deduct stock (-qty); returned items -> restock (+qty). One movement
+      // per product, stamped on the invoice so a crash between the sale and the shelf is healed.
+      await moveSaleStock(saved, itemsSnapshot, 'retail');
 
       set(state => ({
         transactions: [saved, ...state.transactions],
@@ -797,6 +830,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         customerId: customer.id,
         shopName: customer.shopName || customer.name,
         saleType: 'parts_b2b',
+        stockApplied: false,
         invoiceNumber,
         invoiceNumberProvisional: numberGuessed || undefined,
         accountSettlement: {
@@ -821,16 +855,9 @@ export const useCartStore = create<CartState>((set, get) => ({
         console.error('Failed to update customer purchase stats:', err);
       }
 
-      // 4. Immediate Authoritative Stock Deduction in Zustand & Firestore (executed ONCE per snapshot)
-      try {
-        foldStockDeltas(
-          itemsSnapshot.map(item => ({ productId: item.product?.id, delta: -item.quantity }))
-        ).forEach(({ productId, delta }) => {
-          useInventoryStore.getState().adjustStockBy(productId, delta);
-        });
-      } catch (err) {
-        console.error('Failed to deduct stock:', err);
-      }
+      // 4. Immediate Authoritative Stock Deduction in Zustand & Firestore (executed ONCE per
+      // snapshot), stamped on the invoice so a crash between the sale and the shelf is healed.
+      await moveSaleStock(saved, itemsSnapshot, 'parts_b2b');
 
       // 5. Clear active cart
       set(state => ({
