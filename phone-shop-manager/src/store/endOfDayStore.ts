@@ -183,9 +183,23 @@ export const useEndOfDayStore = create<EndOfDayState>((set, get) => ({
       return sealed;
     }
     if (server.status === 'rejected') {
-      // The shop still has to close its day, so a refusal degrades to the local write - but
-      // out loud, because a rejected seal means something the next report will disagree with.
-      console.warn('Server refused this seal, closing the day locally:', server.message);
+      // The server ran the rule and said no (inconsistent figures, illegal date). A local
+      // seal anyway would be a second, different truth for this day in the reports.
+      set({ isSaving: false });
+      throw new Error(server.message);
+    }
+
+    // No answer (offline, callables undeployed): the shop still has to close its day. But
+    // the seal may have been committed before the response was lost, so look once more
+    // before writing a second one.
+    const meanwhile = await endOfDayService.getByDate(targetDateStr);
+    if (meanwhile) {
+      set(s => ({
+        records: [meanwhile, ...s.records.filter(r => r.date !== meanwhile.date)],
+        todayRecord: meanwhile.date === toDateStr() ? meanwhile : s.todayRecord,
+        isSaving: false,
+      }));
+      return meanwhile;
     }
 
     const record = await endOfDayService.save(payload);
@@ -214,7 +228,12 @@ export const useEndOfDayStore = create<EndOfDayState>((set, get) => ({
         const prev = get().buildPreview(pastDateStr);
         // If there was any activity on that day, seal it automatically
         if (prev.totalRevenue > 0 || prev.totalCash > 0 || prev.salesCount > 0 || prev.repairsCompleted > 0) {
-          lastClosedRecord = await get().closeDay(true, `Auto-closed for ${pastDateStr} on shop open`, pastDateStr);
+          try {
+            lastClosedRecord = await get().closeDay(true, `Auto-closed for ${pastDateStr} on shop open`, pastDateStr);
+          } catch (err) {
+            // One refused day must not stop the rest of the backlog from closing.
+            console.error(`[EndOfDay] Could not auto-close ${pastDateStr}:`, err);
+          }
         }
       }
     }

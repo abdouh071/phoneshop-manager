@@ -35,12 +35,14 @@ const server = vi.hoisted(() => ({
   sealAnswer: null as null | Record<string, unknown>,
   /** The row the callable wrote only becomes readable *after* it ran; before that the day is open. */
   called: false,
+  calls: 0,
 }));
 
 vi.mock('../services/serverEnforcement', () => ({
   serverEnforcement: {
     sealEndOfDay: async () => {
       server.called = true;
+      server.calls += 1;
       return server.sealAnswer ?? { status: 'unavailable', message: 'functions are not deployed' };
     },
     verifyApprovalPin: async () => ({ status: 'unavailable', message: 'functions are not deployed' }),
@@ -100,6 +102,7 @@ describe('endOfDayStore.closeDay', () => {
     data.serverSeal = null;
     server.sealAnswer = null;
     server.called = false;
+    server.calls = 0;
     data.saved.length = 0;
   });
 
@@ -201,19 +204,63 @@ describe('endOfDayStore.closeDay', () => {
     expect(record.id).toBe('seal-server');
   });
 
-  it('closes locally when the server refuses, and says so', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('refuses to close when the server rejects the seal', async () => {
     const store = await loadStore();
     const today = localDate();
     data.transactions = [tx('tx-1', atOn(today, 10), 400)];
     server.sealAnswer = { status: 'rejected', code: 'failed-precondition', message: 'inconsistent seal' };
 
-    const record = await store.getState().closeDay(true, '');
+    await expect(store.getState().closeDay(true, '')).rejects.toThrow('inconsistent seal');
+
+    // A local seal after a refusal would be a second, different truth for this day.
+    expect(data.saved).toHaveLength(0);
+    expect(store.getState().records).toHaveLength(0);
+    expect(store.getState().isSaving).toBe(false);
+  });
+
+  it('adopts the seal the server committed when its answer was lost', async () => {
+    const store = await loadStore();
+    const today = localDate();
+    data.transactions = [tx('tx-1', atOn(today, 10), 400)];
+    // The callable wrote the seal, then the response never arrived: the day looks open
+    // locally, but writing again would give reports two truths for one date.
+    data.serverSeal = { id: 'seal-server', date: today, totalRevenue: 400, closedAt: atOn(today, 23) };
+    server.sealAnswer = { status: 'unavailable', message: 'response lost' };
+
+    const record = await store.getState().closeDay(false, '');
+
+    expect(record.id).toBe('seal-server');
+    expect(data.saved).toHaveLength(0);
+    expect(store.getState().todayRecord?.id).toBe('seal-server');
+  });
+
+  it('still closes locally when no server answered and no seal exists', async () => {
+    const store = await loadStore();
+    const today = localDate();
+    data.transactions = [tx('tx-1', atOn(today, 10), 400)];
+    server.sealAnswer = { status: 'unavailable', message: 'functions are not deployed' };
+
+    const record = await store.getState().closeDay(false, '');
 
     expect(data.saved).toHaveLength(1);
     expect(record.id).toBe('seal-new');
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+  });
+
+  it('keeps closing the backlog after one day is refused', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const store = await loadStore();
+    data.transactions = [
+      tx('tx-1', atOn(localDate(-1), 10), 400),
+      tx('tx-2', atOn(localDate(-2), 10), 300),
+    ];
+    server.sealAnswer = { status: 'rejected', code: 'failed-precondition', message: 'inconsistent seal' };
+
+    const record = await store.getState().autoCloseMissedDays();
+
+    expect(record).toBeNull();
+    expect(server.calls).toBe(2);
+    expect(data.saved).toHaveLength(0);
+    error.mockRestore();
   });
 
   it('previews without writing anything', async () => {

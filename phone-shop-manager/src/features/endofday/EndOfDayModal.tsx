@@ -62,7 +62,7 @@ export const EndOfDayModal: React.FC<Props> = ({ isOpen, onClose, viewRecord }) 
       setDone(true);
     } catch (err) {
       console.error('Failed to close day:', err);
-      toast.error('Close Day Failed', 'Could not save the end-of-day report. Please try again.');
+      toast.error('Close Day Failed', err instanceof Error ? err.message : 'Could not save the end-of-day report. Please try again.');
     }
   };
 
