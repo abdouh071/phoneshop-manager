@@ -52,6 +52,7 @@ import {
   resolveRef,
   shouldDeadLetter,
   toDeadLetter,
+  unfinishedSaleEffects,
   unownedKey,
   type DeadLetterEntry,
   type IdMap,
@@ -128,6 +129,7 @@ const DEFER_MS = 20_000;
 
 let ownerUid: string | null = null;
 let isSyncing = false;
+let isSweeping = false;
 let seq = 0;
 
 type SyncListener = (pendingCount: number, isSyncing: boolean, droppedCount: number) => void;
@@ -917,6 +919,30 @@ const flushDebts = async (): Promise<FlushResult> => {
   return out;
 };
 
+/**
+ * Finish one invoice the shelf (or the customer's record) never answered for. The numbers
+ * it still owes are derived by `unfinishedSaleEffects`, so the sweep and the offline upload
+ * agree; a return-line invoice is deferred to the counter's signed sweep, and a failed line
+ * is queued durably as the per-line path did.
+ */
+const finishUnfinishedSale = async (d: { id: string; data: () => Record<string, unknown> }): Promise<boolean> => {
+  const { lines, profile, deferred } = unfinishedSaleEffects(d.data());
+  if (deferred) return false;
+
+  const { applied, failed, adopted } = await commitSaleEffects(d.id, lines, profile);
+  for (const f of failed) {
+    await enqueue({
+      id: newActionId('stock'),
+      kind: 'stock',
+      payload: { productId: f.line.productId, name: f.line.name, delta: -f.line.quantity, reason: `Sale ${d.id}` } as StockPayload,
+      createdAt: nowIso(),
+      attempts: 0,
+      nextAttemptAt: 0,
+    });
+  }
+  return !adopted && (applied.length > 0 || !!profile);
+};
+
 // ─── Public service ────────────────────────────────────────────────────────────
 
 export const offlineSyncService = {
@@ -1139,6 +1165,50 @@ export const offlineSyncService = {
    * pending makes no Firestore request at all, which is what keeps the heartbeat
    * affordable on the Spark plan's read quota.
    */
+  /**
+   * Finish invoices whose shelf movement was interrupted.
+   * =====================================================
+   * A sale written online and then crashed leaves `stockApplied:false` on the server and
+   * NOTHING in the local queue, so the pending-count gate that drives syncAll would never
+   * look at it. This sweep queries the stamps directly and completes each such invoice once,
+   * through the same transaction that stamps it, so a second pass — or the counter's own
+   * sweep — adopts instead of deducting again.
+   *
+   * Two single-field equality reads, no composite index: the stock stamp catches every
+   * interrupted sale, and the profile stamp catches a phone sale whose shelf the counter
+   * already finished, so its customer's own numbers are not left orphaned. Only documents
+   * that carry a stamp and still say false are reached — invoices written before the stamps
+   * existed have no field, so old history is never deducted twice. Bounded to keep one pass
+   * cheap on the Spark plan, and run on load and foreground, never on the heartbeat.
+   */
+  sweepUnfinishedSales: async (): Promise<number> => {
+    if (isSweeping) return 0;
+    isSweeping = true;
+    let healed = 0;
+    try {
+      const seen = new Set<string>();
+      for (const stamp of ['stockApplied', 'profileApplied'] as const) {
+        const snap = await getDocs(
+          query(collection(db, 'transactions'), where(stamp, '==', false), limit(50))
+        );
+        for (const d of snap.docs) {
+          if (seen.has(d.id)) continue;
+          seen.add(d.id);
+          try {
+            if (await finishUnfinishedSale(d)) healed++;
+          } catch (err) {
+            console.warn(`[OfflineSync] Could not finish sale ${d.id}:`, err);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[OfflineSync] Unfinished-sale sweep failed:', err);
+    } finally {
+      isSweeping = false;
+    }
+    return healed;
+  },
+
   syncAll: async (): Promise<{ syncedCount: number; errors: boolean; droppedCount: number }> => {
     if (isSyncing) return { syncedCount: 0, errors: false, droppedCount: 0 };
 
@@ -1212,6 +1282,9 @@ export const offlineSyncService = {
    */
   init: (): (() => void) => {
     void offlineSyncService.syncAll();
+    // A crash since the last session may have left an invoice the shelf never answered for.
+    // Nothing is queued for it, so sweep on load regardless of the pending count.
+    void offlineSyncService.sweepUnfinishedSales();
 
     const intervalId = setInterval(() => {
       void offlineSyncService.syncAll();
@@ -1220,7 +1293,13 @@ export const offlineSyncService = {
     const stateSubscription = AppState.addEventListener(
       'change',
       (status: AppStateStatus) => {
-        if (status === 'active') void offlineSyncService.syncAll();
+        if (status === 'active') {
+          void offlineSyncService.syncAll();
+          // Returning to the app is the moment to finish an interrupted online sale, which
+          // the pending-count gate cannot see. Not on the heartbeat: that would spend reads
+          // every minute on a query that is almost always empty.
+          void offlineSyncService.sweepUnfinishedSales();
+        }
       }
     );
 

@@ -15,7 +15,7 @@ import { customerService } from '../services/customerService';
 import { isOfflineCustomerId, newIdempotencyKey } from '../services/offlineQueuePolicy';
 import { notificationService } from '../services/notificationService';
 import { claimInvoiceNumber } from '../services/invoiceCounter';
-import { applyStockLines, type StockLine } from '../services/stockService';
+import { commitSaleEffects, type StockLine } from '../services/stockService';
 import { discountAmountOf } from '../utils/discountPolicy';
 import { checkCartStock, type CartStockResult } from '../utils/cartStock';
 import { creditAmountOf, salePayments } from '../utils/salePayments';
@@ -251,6 +251,12 @@ export const usePosStore = create<PosState>((set, get) => ({
       processedById: currentUser?.id || 'technician-app',
       processedByName: currentUser?.name || 'Sales Agent',
       status: 'completed',
+      // Born owing the shelf — and the customer's own record — a movement. commitSaleEffects
+      // stamps these true in the same transaction that moves them; a crash before it leaves
+      // them false for the unfinished-sale sweep to finish once, so the invoice is never
+      // left on the server with the units still on the shelf.
+      stockApplied: false,
+      ...(cust ? { profileApplied: false } : {}),
       ...(params.notes ? { notes: params.notes } : {}),
     };
 
@@ -282,9 +288,12 @@ export const usePosStore = create<PosState>((set, get) => ({
       await offlineSyncService.saveOfflineSale(realTx);
     }
 
-    // Stock moves only for a sale this device actually wrote. A queued sale is
-    // deducted by the sync pass that creates its document — deducting here as well
-    // would take the units off the shelf twice.
+    // The shelf and the customer's own numbers move in one transaction anchored to the
+    // invoice, which was stamped unfinished above. Only a sale this device actually wrote
+    // moves here: a queued sale is finished by the sync pass that creates its document, so
+    // deducting here as well would take the units off the shelf twice. If this transaction
+    // is interrupted the stamps stay false and the unfinished-sale sweep finishes them once
+    // — nothing is queued here as well, which would deduct the same units a second time.
     if (saleUploaded) {
       const lines: StockLine[] = cart.map((item) => ({
         productId: item.product.id,
@@ -292,31 +301,35 @@ export const usePosStore = create<PosState>((set, get) => ({
         quantity: Math.max(1, Math.trunc(item.quantity || 1)),
       }));
 
-      const { ok, failed } = await applyStockLines(lines, -1);
+      try {
+        const { applied, failed } = await commitSaleEffects(
+          realTx.id,
+          lines,
+          cust
+            ? { customerId: cust.id, paid: Math.max(0, total - debtAmount), charged: debtAmount }
+            : undefined
+        );
 
-      for (const applied of ok) {
-        if (applied.result.stockStatus !== 'in_stock') {
-          notificationService.notifyLowStock(applied.line.name, applied.result.stock)
-            .catch(err => console.warn('[PosStore] Low stock notification error:', err));
+        for (const a of applied) {
+          if (a.result.stockStatus !== 'in_stock') {
+            notificationService.notifyLowStock(a.line.name, a.result.stock)
+              .catch(err => console.warn('[PosStore] Low stock notification error:', err));
+          }
         }
+        // A line whose product is on neither shelf is queued durably, as the per-line path did.
+        for (const f of failed) {
+          console.warn(`[PosStore] Stock delta failed for ${f.line.name}, queued:`, f.error);
+          await offlineSyncService.saveOfflineStockDelta({
+            productId: f.line.productId,
+            name: f.line.name,
+            delta: -f.line.quantity,
+            reason: `Sale ${invoiceNumber}`,
+          });
+        }
+      } catch (err) {
+        // The stamps stay false; the sweep finishes this sale. Queueing here too would deduct twice.
+        console.warn('[PosStore] Could not move stock/profile for sale, leaving it for the sweep:', err);
       }
-      // A delta the server never took is not lost: the stock queue replays it.
-      for (const f of failed) {
-        console.warn(`[PosStore] Stock delta failed for ${f.line.name}, queued:`, f.error);
-        await offlineSyncService.saveOfflineStockDelta({
-          productId: f.line.productId,
-          name: f.line.name,
-          delta: -f.line.quantity,
-          reason: `Sale ${invoiceNumber}`,
-        });
-      }
-    }
-
-    // The profile of the man this sale was written on gains what it took in. A sale
-    // this phone could not write is recorded by the sync pass that creates its
-    // document instead, so an invoice is never counted on the customer twice.
-    if (saleUploaded && cust) {
-      await customerService.recordSaleOnProfile(cust.id, total - debtAmount, debtAmount);
     }
 
     // If debt payment or partial payment, record customer debt entry

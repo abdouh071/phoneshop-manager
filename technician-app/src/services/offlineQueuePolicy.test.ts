@@ -30,6 +30,7 @@ import {
   replaceCachedCustomer,
   saleProfileDeltas,
   profileTotalsAfter,
+  unfinishedSaleEffects,
   needsInvoiceNumber,
   renumberedInvoice,
   invoiceClaimDate,
@@ -368,6 +369,97 @@ test('two sales to the same customer add up instead of overwriting each other', 
   const first = profileTotalsAfter({ totalPurchases: 2, totalSpent: 900.5, totalDebt: 0 }, saleProfileDeltas(100.25, 0));
   const second = profileTotalsAfter(first, saleProfileDeltas(0, 300));
   assert.deepEqual(second, { totalPurchases: 4, totalSpent: 1000.75, totalDebt: 300 });
+});
+
+test('an unfinished phone sale owes the shelf its units and the customer its split', () => {
+  const { lines, profile, deferred } = unfinishedSaleEffects({
+    items: [{ product: { id: 'p1', name: 'A55' }, quantity: 2 }],
+    customerId: 'cust_1',
+    total: 10000,
+    accountSettlement: { chargedAmount: 4000 },
+    profileApplied: false,
+  });
+  assert.equal(deferred, false);
+  assert.deepEqual(lines, [{ productId: 'p1', name: 'A55', quantity: 2 }]);
+  assert.deepEqual(profile, { customerId: 'cust_1', paid: 6000, charged: 4000 });
+});
+
+test('a walk-in cash sale moves the shelf and no profile', () => {
+  const { lines, profile } = unfinishedSaleEffects({
+    items: [{ product: { id: 'p1', name: 'Cable' }, quantity: 1 }],
+    total: 300,
+  });
+  assert.deepEqual(lines, [{ productId: 'p1', name: 'Cable', quantity: 1 }]);
+  assert.equal(profile, undefined);
+});
+
+test('a counter sale carries no profile stamp, so the phone never adds to its customer twice', () => {
+  // The desktop recomputes customer totals from history. Its invoices have a customerId
+  // but no profileApplied field; moving the profile here would count the money a second time.
+  const { lines, profile } = unfinishedSaleEffects({
+    items: [{ product: { id: 'p1', name: 'A55' }, quantity: 1 }],
+    customerId: 'cust_1',
+    total: 10000,
+    accountSettlement: { chargedAmount: 0 },
+  });
+  assert.deepEqual(lines, [{ productId: 'p1', name: 'A55', quantity: 1 }]);
+  assert.equal(profile, undefined, 'no profileApplied:false stamp means the profile is not the phone\'s to move');
+});
+
+test('a profile already stamped done is not moved again', () => {
+  const { profile } = unfinishedSaleEffects({
+    items: [{ product: { id: 'p1', name: 'A55' }, quantity: 1 }],
+    customerId: 'cust_1',
+    total: 10000,
+    profileApplied: true,
+  });
+  assert.equal(profile, undefined);
+});
+
+test('an invoice carrying a return line is deferred to the counter\'s signed sweep', () => {
+  // The phone's commit is deduct-only; a return needs the net of both signs, which only
+  // the counter computes. Deducting the returned units here would take them off twice.
+  const { lines, deferred } = unfinishedSaleEffects({
+    items: [
+      { product: { id: 'p1', name: 'A55' }, quantity: 1 },
+      { product: { id: 'p1', name: 'A55' }, quantity: 1, isReturn: true },
+    ],
+    customerId: 'cust_1',
+    total: 0,
+    profileApplied: false,
+  });
+  assert.equal(deferred, true);
+  assert.deepEqual(lines, []);
+});
+
+test('a line the document never gave a product is dropped, and units stay whole', () => {
+  const { lines } = unfinishedSaleEffects({
+    items: [
+      { quantity: 2 },
+      { product: { id: 'p1', name: 'A55' }, quantity: 2.7 },
+      { product: { id: 'p9', name: 'Case' }, quantity: 0 },
+    ],
+  });
+  assert.deepEqual(lines, [
+    { productId: 'p1', name: 'A55', quantity: 2 },
+    { productId: 'p9', name: 'Case', quantity: 1 },
+  ]);
+});
+
+test('an empty or missing basket owes the shelf nothing and is not deferred', () => {
+  assert.deepEqual(unfinishedSaleEffects({}), { lines: [], profile: undefined, deferred: false });
+  assert.deepEqual(unfinishedSaleEffects({ items: [] }), { lines: [], profile: undefined, deferred: false });
+});
+
+test('a full account sale charges the whole total and takes no money', () => {
+  const { profile } = unfinishedSaleEffects({
+    items: [{ product: { id: 'p1', name: 'A55' }, quantity: 1 }],
+    customerId: 'cust_1',
+    total: 1000,
+    accountSettlement: { chargedAmount: 1000 },
+    profileApplied: false,
+  });
+  assert.deepEqual(profile, { customerId: 'cust_1', paid: 0, charged: 1000 });
 });
 
 test('only a sale still carrying an unclaimed guess owes the counter a number', () => {

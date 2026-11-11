@@ -449,6 +449,54 @@ export interface NumberedInvoice {
 }
 
 /**
+ * What an unfinished invoice still owes the shelf and the customer, derived from the
+ * document alone so the sweep and the upload agree on the same numbers.
+ *
+ * The phone's commit is deduct-only: a return line needs the net of both signs, which only
+ * the counter's sweep computes, so an invoice carrying one is `deferred` and left to it.
+ * The customer's own numbers are the phone's to move only when it stamped `profileApplied`
+ * false itself — a counter sale carries no such stamp and recomputes its totals from
+ * history, so moving them here would count the customer's money twice.
+ */
+export const unfinishedSaleEffects = (data: {
+  items?: unknown;
+  customerId?: unknown;
+  total?: unknown;
+  accountSettlement?: { chargedAmount?: unknown } | null;
+  profileApplied?: unknown;
+}): {
+  lines: { productId: string; name: string; quantity: number }[];
+  profile?: { customerId: string; paid: number; charged: number };
+  deferred: boolean;
+} => {
+  const items = Array.isArray(data.items) ? data.items : [];
+  if (items.some((item) => (item as { isReturn?: unknown } | null)?.isReturn)) {
+    return { lines: [], deferred: true };
+  }
+
+  const lines: { productId: string; name: string; quantity: number }[] = [];
+  for (const raw of items) {
+    const item = raw as { product?: { id?: unknown; name?: unknown } | null; quantity?: unknown } | null;
+    const productId = String(item?.product?.id || '');
+    if (!productId) continue;
+    lines.push({
+      productId,
+      name: String(item?.product?.name || ''),
+      quantity: Math.max(1, Math.trunc(Number(item?.quantity) || 1)),
+    });
+  }
+
+  const customerId = String(data.customerId || '');
+  const charged = Math.max(0, Number(data.accountSettlement?.chargedAmount) || 0);
+  const profile =
+    data.profileApplied === false && customerId
+      ? { customerId, paid: Math.max(0, (Number(data.total) || 0) - charged), charged }
+      : undefined;
+
+  return { lines, profile, deferred: false };
+};
+
+/**
  * True when this queued sale still owes the counter a number. Once a claim has been
  * remembered on the action the answer is no, so a sale the server took while the
  * phone saw a timeout is replayed under the number already claimed for it instead
