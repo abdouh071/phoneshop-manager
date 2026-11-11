@@ -1884,14 +1884,12 @@ async function handlePrintBarcode(body) {
             const line2X = Math.max(0, getCenteredX(textLines[1], fontType) - shiftDots);
             fullTspl += `TEXT ${line1X},34,${fontArgs},"${textLines[0]}"\r\n`;
             fullTspl += `TEXT ${line2X},54,${fontArgs},"${textLines[1]}"\r\n`;
-            fullTspl += `BARCODE ${barcodeX},82,"128",42,0,0,${narrow},${wide},"${sku}"\r\n`;
+            fullTspl += `BARCODE ${barcodeX},122,"128",32,0,0,${narrow},${wide},"${sku}"\r\n`;
           } else {
             const nameSpecsX = Math.max(0, getCenteredX(textLines[0], fontType) - shiftDots);
             fullTspl += `TEXT ${nameSpecsX},40,${fontArgs},"${textLines[0]}"\r\n`;
-            fullTspl += `BARCODE ${barcodeX},72,"128",50,0,0,${narrow},${wide},"${sku}"\r\n`;
+            fullTspl += `BARCODE ${barcodeX},112,"128",40,0,0,${narrow},${wide},"${sku}"\r\n`;
           }
-          // Line 5: Small product reference numbers
-          fullTspl += `TEXT ${skuX},136,"1",0,1,1,"${sku}"\r\n`;
         } else {
           // Line 1: Shop Name (bold, shifted 2mm left)
           fullTspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
@@ -1903,18 +1901,16 @@ async function handlePrintBarcode(body) {
             const line2X = Math.max(0, getCenteredX(textLines[1], fontType) - shiftDots);
             fullTspl += `TEXT ${line1X},32,${fontArgs},"${textLines[0]}"\r\n`;
             fullTspl += `TEXT ${line2X},50,${fontArgs},"${textLines[1]}"\r\n`;
-            fullTspl += `BARCODE ${barcodeX},70,"128",32,0,0,${narrow},${wide},"${sku}"\r\n`;
+            fullTspl += `BARCODE ${barcodeX},110,"128",24,0,0,${narrow},${wide},"${sku}"\r\n`;
           } else {
             const nameSpecsX = Math.max(0, getCenteredX(textLines[0], fontType) - shiftDots);
             fullTspl += `TEXT ${nameSpecsX},36,${fontArgs},"${textLines[0]}"\r\n`;
-            fullTspl += `BARCODE ${barcodeX},62,"128",38,0,0,${narrow},${wide},"${sku}"\r\n`;
+            fullTspl += `BARCODE ${barcodeX},102,"128",28,0,0,${narrow},${wide},"${sku}"\r\n`;
           }
-          // Line 5: Small product reference numbers
-          fullTspl += `TEXT ${skuX},104,"1",0,1,1,"${sku}"\r\n`;
-          // Line 6: Price in large font 4
+          // Price in large font 4
           const priceText = tsplText(fmt(product.price), 20);
           const priceX = getCenteredX(priceText, '4');
-          fullTspl += `TEXT ${priceX},124,"4",0,1,1,"${priceText}"\r\n`;
+          fullTspl += `TEXT ${priceX},140,"4",0,1,1,"${priceText}"\r\n`;
         }
 
         fullTspl += 'PRINT 1,1\r\n';
