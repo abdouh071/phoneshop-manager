@@ -772,7 +772,7 @@ export function buildLabelsHTML(products: {
     return `
       <div class="ticket-label" style="box-sizing:border-box;width:50mm;height:20mm;max-height:20mm;background:#fff;border:1px solid #94a3b8;border-radius:2px;padding:0.6mm 1mm;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.12);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
         <div style="font-weight:700;font-size:11px;letter-spacing:0.3px;text-transform:uppercase;line-height:1;margin-top:0.4mm;transform:translateX(-2mm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">${escapeHtml(activeStoreName)}</div>
-        <div style="border-top:1.5px solid #000;width:100%;margin:1mm 0 1.2mm 0;"></div>
+        <div style="border-top:1.5px solid #000;width:100%;margin:1mm 0 1mm 0;"></div>
         ${linesHtml}
         <div style="margin-top:${p.hidePrice ? (textLines.length > 1 ? '5.4mm' : '5.8mm') : '5.4mm'};display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;width:100%;">
           <div style="display:flex;justify-content:center;align-items:center;max-width:34mm;overflow:hidden;">${barcodeSvg}</div>
