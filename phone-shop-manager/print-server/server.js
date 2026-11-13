@@ -284,6 +284,19 @@ function tsplText(value, maxLen = 60) {
 }
 
 /**
+ * The parts sticker shows only the name and the FIRST compatible device; the
+ * remaining devices stay registered and searchable in the app but never reach
+ * the label. Legacy parts without the list keep their whole model string.
+ */
+function partsLabelText(product) {
+  const firstDevice = Array.isArray(product.compatibleModels)
+    ? product.compatibleModels.find((m) => String(m || '').trim())
+    : undefined;
+  const modelPart = firstDevice || (product.model || '');
+  return tsplText(`${product.name || ''}${modelPart ? ` ${modelPart}` : ''}`, 60);
+}
+
+/**
  * A TSPL field assembled from pieces that were sanitised individually: the
  * column padding carries the layout, so only the field-ending characters go.
  */
@@ -1948,7 +1961,7 @@ async function handlePrintBarcode(body) {
           fullTspl += `TEXT ${shopPartsX},6,"${shopFit.font}",0,1,1,"${shopFit.text}"\r\n`;
           fullTspl += 'BAR 0,30,400,2\r\n';
 
-          const partLines = wrapTsplToWidth(fullText, TSPL_FONT_2_WIDTH, TEXT_MAX_DOTS);
+          const partLines = wrapTsplToWidth(partsLabelText(product), TSPL_FONT_2_WIDTH, TEXT_MAX_DOTS);
           let lastBottom = 60;
           partLines.forEach((line, i) => {
             const y = 39 + i * 21;
@@ -2724,6 +2737,7 @@ module.exports = {
     tsplText,
     tsplField,
     tsplInt,
+    partsLabelText,
     wrapTsplToWidth,
     fitTsplLine,
     clampCopies,

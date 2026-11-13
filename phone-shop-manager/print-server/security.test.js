@@ -163,6 +163,27 @@ test('the photo product stays in the big font inside the 2mm-margin window', () 
   }
 });
 
+test('the parts sticker shows only the first compatible device', () => {
+  assert.equal(
+    internals.partsLabelText({ name: 'AF-INFINIX SMART', compatibleModels: ['7/A70', 'A60S', 'A50'] }),
+    'AF-INFINIX SMART 7/A70'
+  );
+});
+
+test('a legacy part without the list keeps its whole model string on the sticker', () => {
+  assert.equal(
+    internals.partsLabelText({ name: 'AF-INFINIX SMART', model: '7/A70/A60S/A50/A05S ORG 100%' }),
+    'AF-INFINIX SMART 7/A70/A60S/A50/A05S ORG 100%'
+  );
+});
+
+test('an empty first device falls through to the next non-empty one', () => {
+  assert.equal(
+    internals.partsLabelText({ name: 'CABLE', compatibleModels: ['', '  ', 'A50'] }),
+    'CABLE A50'
+  );
+});
+
 test('a ticket line that fits keeps the larger font 2', () => {
   assert.deepEqual(internals.fitTsplLine('CABLE', 356), { font: '2', text: 'CABLE' });
   assert.deepEqual(internals.fitTsplLine('', 356), { font: '2', text: '' });
