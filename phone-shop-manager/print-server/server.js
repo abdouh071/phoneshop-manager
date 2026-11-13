@@ -1976,11 +1976,11 @@ async function handlePrintBarcode(body) {
             fullTspl += `TEXT ${lineX},${y},"2",0,1,1,"${tsplText(line, 60)}"\r\n`;
             lastBottom = y + 20;
           });
-          // Shift barcode down 5mm (40 dots at 203 DPI) for all parts stickers.
+          // Shift barcode down 5mm (40 dots at 203 DPI) and left 5mm (40 dots) for all parts stickers.
           const barcodeY = (partLines.length > 1 ? lastBottom + 8 : 112) + 40;
           const barcodeH = 28;
           const partsBp = getBarcodeParams(sku);
-          const partsBarcodeX = TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - partsBp.width) / 2));
+          const partsBarcodeX = Math.max(0, TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - partsBp.width) / 2)) - 40);
           fullTspl += `BARCODE ${partsBarcodeX},${barcodeY},"128",${barcodeH},0,0,${partsBp.narrow},${partsBp.wide},"${sku}"\r\n`;
         } else {
           fullTspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
