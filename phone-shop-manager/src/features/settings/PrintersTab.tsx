@@ -712,7 +712,7 @@ export const PrintersTab: React.FC = () => {
                       {/* Black Separator Bar */}
                       <div style={{ width: '100%', height: '1.5px', backgroundColor: '#000', margin: '3px 0 3px 0' }} />
 
-                      {/* Dynamic Text in Selected Font (Shifted left 3mm, down 1.5mm) */}
+                      {/* Dynamic Text in Selected Font (Shifted left 1mm, down 1.5mm) */}
                       <div style={{
                         display: 'flex',
                         flexDirection: 'column',
@@ -724,7 +724,7 @@ export const PrintersTab: React.FC = () => {
                         letterSpacing: activeFont.cssStyle.letterSpacing || 'normal',
                         color: '#111',
                         lineHeight: 1.15,
-                        transform: 'translateX(-12px)',
+                        transform: 'translateX(-4px)',
                         marginTop: '4px',
                       }}>
                         {sampleType === 'part' ? (
@@ -755,7 +755,7 @@ export const PrintersTab: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Fixed Barcode at bottom (Shifted left 5mm) */}
+                      {/* Fixed Barcode at bottom (Shifted left 3mm) */}
                       <div style={{
                         position: 'absolute',
                         bottom: '4px',
@@ -765,7 +765,7 @@ export const PrintersTab: React.FC = () => {
                         flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        transform: 'translateX(-20px)',
+                        transform: 'translateX(-12px)',
                       }}>
                         <svg width="112" height="22" viewBox="0 0 112 22">
                           <rect x="0" y="0" width="2" height="22" fill="#000" />
