@@ -1969,7 +1969,8 @@ async function handlePrintBarcode(body) {
 
           const partLines = wrapTsplToWidth(partsLabelText(product), TSPL_FONT_2_WIDTH, TEXT_MAX_DOTS).slice(0, 3);
           partLines.forEach((line, i) => {
-            const y = 39 + i * 21;
+            // Shift text down by 1.5mm (12 dots at 203 DPI, 39 -> 51)
+            const y = 51 + i * 21;
             const lineW = line.length * TSPL_FONT_2_WIDTH;
             // Shift text above barcode left 3mm (24 dots at 203 DPI)
             const lineX = Math.max(0, TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - lineW) / 2)) - 24);
