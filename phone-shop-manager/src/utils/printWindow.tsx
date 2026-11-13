@@ -710,7 +710,7 @@ export function buildLabelsHTML(products: {
       if (specs.length === 0 && p.category) specs.push(p.category.replace('_', ' '));
     }
 
-    const isPart = p.category === 'repair_part';
+    const isPart = Boolean(p.category === 'repair_part' || p.hidePrice || p.sku?.toUpperCase().startsWith('PRT-'));
     let fullText = '';
     if (isPart) {
       // Remove dash between part name and first compatible device, separated by space
@@ -743,7 +743,7 @@ export function buildLabelsHTML(products: {
     }
 
     // Determine barcode height — compact so the label is not crowded
-    const barcodeH = p.hidePrice ? (textLines.length > 1 ? 14 : 17) : 11;
+    const barcodeH = isPart ? (textLines.length > 1 ? 14 : 17) : (p.hidePrice ? (textLines.length > 1 ? 14 : 17) : 11);
 
     const cleanSku = (p.sku || '').trim();
     const modules = (cleanSku.length + 3) * 11 + 2;
@@ -774,10 +774,10 @@ export function buildLabelsHTML(products: {
         <div style="font-weight:700;font-size:11px;letter-spacing:0.3px;text-transform:uppercase;line-height:1;margin-top:0.4mm;transform:translateX(-2mm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">${escapeHtml(activeStoreName)}</div>
         <div style="border-top:1.5px solid #000;width:100%;margin:1mm 0 1mm 0;"></div>
         ${linesHtml}
-        <div style="margin-top:${p.hidePrice ? (textLines.length > 1 ? '5.4mm' : '5.8mm') : '5.4mm'};display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;width:100%;">
+        <div style="margin-top:${isPart ? 'auto' : (p.hidePrice ? (textLines.length > 1 ? '5.4mm' : '5.8mm') : '5.4mm')};margin-bottom:${isPart ? '0.8mm' : '0'};display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;width:100%;">
           <div style="display:flex;justify-content:center;align-items:center;max-width:34mm;overflow:hidden;">${barcodeSvg}</div>
         </div>
-        ${!p.hidePrice ? `<div style="font-size:13px;font-weight:800;height:4mm;line-height:4mm;margin-top:0.6mm;letter-spacing:0.3px;">${formatCurrency(p.price)}</div>` : ''}
+        ${!isPart && !p.hidePrice ? `<div style="font-size:13px;font-weight:800;height:4mm;line-height:4mm;margin-top:0.6mm;letter-spacing:0.3px;">${formatCurrency(p.price)}</div>` : ''}
       </div>
     `;
   }).join('');

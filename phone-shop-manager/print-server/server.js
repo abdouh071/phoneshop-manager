@@ -1947,7 +1947,13 @@ async function handlePrintBarcode(body) {
         const shopX = Math.max(0, getCenteredX(shopTitle, '2') - 16);
         const { x: barcodeX, narrow, wide } = getBarcodeParams(sku);
 
-        if (product.hidePrice) {
+        const isPart = Boolean(
+          product.hidePrice ||
+          product.category === 'repair_part' ||
+          (product.sku && String(product.sku).toUpperCase().startsWith('PRT-'))
+        );
+
+        if (isPart) {
           // The 40mm parts stock sits inside the 50mm canvas, so the text keeps
           // a fixed blank margin on the left (2mm past the stock's edge) and
           // stays 2mm clear of the right edge. The font never shrinks: long
@@ -1970,10 +1976,9 @@ async function handlePrintBarcode(body) {
             fullTspl += `TEXT ${lineX},${y},"2",0,1,1,"${tsplText(line, 60)}"\r\n`;
             lastBottom = y + 20;
           });
-          // A wrapped name sits the barcode just below the text; a single short
-          // name keeps the lower, taller bar so the label stays balanced.
-          const barcodeY = partLines.length > 1 ? lastBottom + 8 : 112;
-          const barcodeH = partLines.length > 1 ? 28 : 40;
+          // Shift barcode down 5mm (40 dots at 203 DPI) for all parts stickers.
+          const barcodeY = (partLines.length > 1 ? lastBottom + 8 : 112) + 40;
+          const barcodeH = 28;
           const partsBp = getBarcodeParams(sku);
           const partsBarcodeX = TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - partsBp.width) / 2));
           fullTspl += `BARCODE ${partsBarcodeX},${barcodeY},"128",${barcodeH},0,0,${partsBp.narrow},${partsBp.wide},"${sku}"\r\n`;
