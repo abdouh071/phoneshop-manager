@@ -1967,17 +1967,16 @@ async function handlePrintBarcode(body) {
           fullTspl += `TEXT ${shopPartsX},6,"${shopFit.font}",0,1,1,"${shopFit.text}"\r\n`;
           fullTspl += 'BAR 0,30,400,2\r\n';
 
-          const partLines = wrapTsplToWidth(partsLabelText(product), TSPL_FONT_2_WIDTH, TEXT_MAX_DOTS);
-          let lastBottom = 60;
+          const partLines = wrapTsplToWidth(partsLabelText(product), TSPL_FONT_2_WIDTH, TEXT_MAX_DOTS).slice(0, 3);
           partLines.forEach((line, i) => {
             const y = 39 + i * 21;
             const lineW = line.length * TSPL_FONT_2_WIDTH;
             const lineX = TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - lineW) / 2));
             fullTspl += `TEXT ${lineX},${y},"2",0,1,1,"${tsplText(line, 60)}"\r\n`;
-            lastBottom = y + 20;
           });
-          // Shift barcode down 5mm (40 dots at 203 DPI) and left 5mm (40 dots) for all parts stickers.
-          const barcodeY = (partLines.length > 1 ? lastBottom + 8 : 112) + 40;
+          // Fixed barcode position: placed in its place (Y=128, H=28, ends at 156 dots on 160-dot label)
+          // whatever the text length, so long text never pushes it off the label.
+          const barcodeY = 128;
           const barcodeH = 28;
           const partsBp = getBarcodeParams(sku);
           const partsBarcodeX = Math.max(0, TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - partsBp.width) / 2)) - 40);

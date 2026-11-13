@@ -765,16 +765,17 @@ export function buildLabelsHTML(products: {
     const fontSize = isPart ? '9px' : '8px';
     const fontWeight = '400';
 
-    const linesHtml = textLines.map((line, idx) => `
+    const linesToRender = isPart ? textLines.slice(0, 3) : textLines;
+    const linesHtml = linesToRender.map((line, idx) => `
       <div style="font-size:${fontSize};font-weight:${fontWeight};color:#111;line-height:1.1;padding:0 2px;${idx > 0 ? 'margin-top:1.5mm;' : ''}transform:translateX(-${shiftMm}mm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${escapeHtml(line)}</div>
     `).join('');
 
     return `
-      <div class="ticket-label" style="box-sizing:border-box;width:50mm;height:20mm;max-height:20mm;background:#fff;border:1px solid #94a3b8;border-radius:2px;padding:0.6mm 1mm;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.12);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+      <div class="ticket-label" style="box-sizing:border-box;position:relative;width:50mm;height:20mm;max-height:20mm;background:#fff;border:1px solid #94a3b8;border-radius:2px;padding:0.6mm 1mm;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.12);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
         <div style="font-weight:700;font-size:11px;letter-spacing:0.3px;text-transform:uppercase;line-height:1;margin-top:0.4mm;transform:translateX(-2mm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">${escapeHtml(activeStoreName)}</div>
         <div style="border-top:1.5px solid #000;width:100%;margin:1mm 0 1mm 0;"></div>
         ${linesHtml}
-        <div style="margin-top:${isPart ? 'auto' : (p.hidePrice ? (textLines.length > 1 ? '5.4mm' : '5.8mm') : '5.4mm')};margin-bottom:${isPart ? '0.8mm' : '0'};transform:${isPart ? 'translateX(-5mm)' : 'none'};display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;width:100%;">
+        <div style="${isPart ? 'position:absolute;bottom:0.8mm;left:0;right:0;transform:translateX(-5mm);' : `margin-top:${p.hidePrice ? (textLines.length > 1 ? '5.4mm' : '5.8mm') : '5.4mm'};`}display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;width:100%;">
           <div style="display:flex;justify-content:center;align-items:center;max-width:34mm;overflow:hidden;">${barcodeSvg}</div>
         </div>
         ${!isPart && !p.hidePrice ? `<div style="font-size:13px;font-weight:800;height:4mm;line-height:4mm;margin-top:0.6mm;letter-spacing:0.3px;">${formatCurrency(p.price)}</div>` : ''}
