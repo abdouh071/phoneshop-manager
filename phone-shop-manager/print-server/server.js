@@ -1935,25 +1935,35 @@ async function handlePrintBarcode(body) {
         const { x: barcodeX, narrow, wide } = getBarcodeParams(sku);
 
         if (product.hidePrice) {
-          fullTspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
+          // The 40mm parts stock sits inside the 50mm canvas, so the text keeps
+          // a fixed blank margin on the left (2mm past the stock's edge) and
+          // stays 2mm clear of the right edge. The font never shrinks: long
+          // names wrap onto extra lines at the same large size instead.
+          const TEXT_START_X = 56;
+          const TEXT_MAX_DOTS = 304;
+
+          const shopFit = fitTsplLine(shopTitle, TEXT_MAX_DOTS);
+          const shopW = shopFit.text.length * (shopFit.font === '2' ? TSPL_FONT_2_WIDTH : TSPL_FONT_1_WIDTH);
+          const shopPartsX = TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - shopW) / 2));
+          fullTspl += `TEXT ${shopPartsX},6,"${shopFit.font}",0,1,1,"${shopFit.text}"\r\n`;
           fullTspl += 'BAR 0,30,400,2\r\n';
 
-          // Parts: larger type (font 2, 16 measured dots/char) wrapped to a safe
-          // physical width (368 dots = 400 minus a 2-char margin) so the name
-          // never reaches the sticker edge; every word is kept.
-          const partLines = wrapTsplToWidth(fullText, TSPL_FONT_2_WIDTH, 368);
+          const partLines = wrapTsplToWidth(fullText, TSPL_FONT_2_WIDTH, TEXT_MAX_DOTS);
           let lastBottom = 60;
           partLines.forEach((line, i) => {
-            const y = 40 + i * 24;
-            const lineX = Math.max(0, getCenteredX(line, '2'));
+            const y = 39 + i * 21;
+            const lineW = line.length * TSPL_FONT_2_WIDTH;
+            const lineX = TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - lineW) / 2));
             fullTspl += `TEXT ${lineX},${y},"2",0,1,1,"${tsplText(line, 60)}"\r\n`;
             lastBottom = y + 20;
           });
           // A wrapped name sits the barcode just below the text; a single short
           // name keeps the lower, taller bar so the label stays balanced.
           const barcodeY = partLines.length > 1 ? lastBottom + 8 : 112;
-          const barcodeH = partLines.length > 1 ? 32 : 40;
-          fullTspl += `BARCODE ${barcodeX},${barcodeY},"128",${barcodeH},0,0,${narrow},${wide},"${sku}"\r\n`;
+          const barcodeH = partLines.length > 1 ? 28 : 40;
+          const partsBp = getBarcodeParams(sku);
+          const partsBarcodeX = TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - partsBp.width) / 2));
+          fullTspl += `BARCODE ${partsBarcodeX},${barcodeY},"128",${barcodeH},0,0,${partsBp.narrow},${partsBp.wide},"${sku}"\r\n`;
         } else {
           fullTspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
           fullTspl += 'BAR 0,30,400,2\r\n';
