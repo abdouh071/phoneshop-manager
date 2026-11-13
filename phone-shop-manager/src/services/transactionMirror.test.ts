@@ -21,7 +21,7 @@ const fake = vi.hoisted(() => ({
   where: (...parts: unknown[]) => parts,
   limit: (n: number) => n,
   orderBy: (...parts: unknown[]) => parts,
-  getDocs: async () => ({ empty: true, size: 0, docs: [] }),
+  getDocs: vi.fn<() => Promise<{ empty: boolean; size: number; docs: { id: string; data: () => Record<string, unknown> }[] }>>(),
   addDoc: async (ref: { name: string }, data: Record<string, unknown>) => {
     fake.added.push({ collection: ref.name, data });
     return { id: `real_${fake.added.length}` };
@@ -68,6 +68,7 @@ describe('A sale missing its lines', () => {
     vi.stubGlobal('navigator', { onLine: false });
     localStorageMock.clear();
     fake.added.length = 0;
+    fake.getDocs.mockReset().mockResolvedValue({ empty: true, size: 0, docs: [] });
     inventoryService.savePendingProducts([]);
     inventoryService.saveLocalInventory([]);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -117,6 +118,31 @@ describe('A sale missing its lines', () => {
     localStorage.setItem(MIRROR_KEY, '{"truncated');
 
     expect(await transactionService.getAll()).toEqual([]);
+  });
+
+  it('mirrors fetched parts history without removing retail invoices or duplicating replayed sales', async () => {
+    vi.stubGlobal('navigator', { onLine: true });
+    seedMirror([
+      { id: 'retail', saleType: 'retail' },
+      { id: 'offline_parts', saleType: 'parts_b2b', idempotencyKey: 'same-sale' },
+      { id: 'offline_pending', saleType: 'parts_b2b', idempotencyKey: 'pending', date: '2026-11-13' },
+    ]);
+    fake.getDocs.mockResolvedValueOnce({ empty: false, size: 1, docs: [
+      { id: 'server', data: () => ({ saleType: 'parts_b2b', idempotencyKey: 'same-sale', date: '2026-11-12' }) },
+    ] });
+    const parts = await transactionService.getPartsTransactions({ allowLocalFallback: false });
+    expect(parts.map(tx => tx.id)).toEqual(['offline_pending', 'server']);
+    const mirror = JSON.parse(localStorage.getItem(MIRROR_KEY) || '[]');
+    expect(mirror.map((tx: { id: string }) => tx.id)).toEqual(['retail', 'offline_pending', 'server']);
+  });
+
+  it('exposes a failed strict parts refresh without erasing the offline mirror', async () => {
+    vi.stubGlobal('navigator', { onLine: true });
+    seedMirror([{ id: 'parts', saleType: 'parts_b2b' }]);
+    fake.getDocs.mockRejectedValueOnce(new Error('permission-denied'));
+    await expect(transactionService.getPartsTransactions({ allowLocalFallback: false })).rejects.toThrow('permission-denied');
+    vi.stubGlobal('navigator', { onLine: false });
+    expect((await transactionService.getPartsTransactions()).map(tx => tx.id)).toEqual(['parts']);
   });
 
   it('still re-points the other offline sales when one row lost its lines', async () => {

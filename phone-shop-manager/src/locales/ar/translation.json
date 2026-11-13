@@ -1505,7 +1505,33 @@
       "refund": "استرجاع",
       "unlockEditAction": "تعديل فاتورة قطع سابقة",
       "unlockRefundAction": "استرجاع فاتورة قطع سابقة"
-    }
+    },
+    "addPartModal": {
+      "partAdded": "تمت إضافة القطعة",
+      "partAddedDesc": "تمت إضافة {{name}} إلى المخزون.",
+      "labelNotPrinted": "لم تُطبع البطاقة",
+      "failedToAdd": "فشل إضافة القطعة"
+    },
+    "editModal": {
+      "missingFields": "حقول مطلوبة مفقودة",
+      "partUpdated": "تم تحديث القطعة",
+      "partUpdatedDesc": "تم تحديث {{name}}.",
+      "savedOffline": "حُفظ بدون اتصال",
+      "savedOfflineDesc": "{{name}} محفوظ على هذا الجهاز وسيُزامَن عند الاتصال.",
+      "savedRetrying": "لم يُحفظ على الخادم",
+      "savedRetryingDesc": "{{name}} محفوظ على هذا الجهاز وستتم المزامنة تلقائياً."
+    },
+    "restockModal": {
+      "noItemsSelected": "لا توجد عناصر محددة",
+      "selectItemsToOrder": "يرجى اختيار عنصر واحد على الأقل للطلب.",
+      "poCreated": "تم إنشاء أمر الشراء",
+      "poCreatedDesc": "تم إنشاء أمر شراء لـ {{count}} قطعة ({{units}} وحدة) بنجاح.",
+      "createPoFailed": "فشل إنشاء أمر الشراء.",
+      "selectItemsWhatsapp": "يرجى اختيار العناصر للإرسال عبر واتساب.",
+      "selectItemsExport": "يرجى اختيار العناصر للتصدير."
+    },
+    "insufficientStock": "مخزون غير كافٍ — ربما باعت محطة أخرى الوحدة الأخيرة.",
+    "insufficientStockTitle": "المخزون غير متاح"
   },
   "purchasing": {
     "title": "المشتريات",

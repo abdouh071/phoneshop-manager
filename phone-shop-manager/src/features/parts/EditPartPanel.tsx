@@ -51,7 +51,7 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, onClose }
 
   const handleSubmit = async () => {
     if (!form.name?.trim() || !form.model?.trim() || !form.price || !form.costPrice) {
-      toast.error('Missing Required Fields');
+      toast.error(t('parts.editModal.missingFields'));
       return;
     }
 
@@ -88,11 +88,11 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, onClose }
 
     const outcome = await updateProduct(product.id, updates);
     if (outcome === 'committed') {
-      toast.success('Part Updated', `${updates.name} has been updated.`);
+      toast.success(t('parts.editModal.partUpdated'), t('parts.editModal.partUpdatedDesc', { name: updates.name }));
     } else if (outcome === 'queued') {
-      toast.info('Saved offline', `${updates.name} is kept on this device and syncs when you reconnect.`);
+      toast.info(t('parts.editModal.savedOffline'), t('parts.editModal.savedOfflineDesc', { name: updates.name }));
     } else {
-      toast.warning('Not saved to the server', `${updates.name} is kept on this device and will retry syncing automatically.`);
+      toast.warning(t('parts.editModal.savedRetrying'), t('parts.editModal.savedRetryingDesc', { name: updates.name }));
     }
     onClose();
   };

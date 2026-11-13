@@ -202,7 +202,7 @@ export const RestockAssistantModal: React.FC<RestockAssistantModalProps> = ({
   const handleCreateOfficialPO = async () => {
     const selectedItems = Object.values(rows).filter(r => r.selected && r.orderQty > 0);
     if (selectedItems.length === 0) {
-      toast.error('No Items Selected', 'Please select at least one item to order.');
+      toast.error(t('parts.restockModal.noItemsSelected'), t('parts.restockModal.selectItemsToOrder'));
       return;
     }
 
@@ -231,12 +231,12 @@ export const RestockAssistantModal: React.FC<RestockAssistantModalProps> = ({
       });
 
       toast.success(
-        'Purchase Order Created',
-        `PO for ${selectedItems.length} parts (${metrics.totalUnitsToOrder} units) generated successfully.`
+        t('parts.restockModal.poCreated'),
+        t('parts.restockModal.poCreatedDesc', { count: selectedItems.length, units: metrics.totalUnitsToOrder })
       );
       onClose();
     } catch (err: unknown) {
-      toast.error('Error', errorMessage(err) || 'Failed to create Purchase Order.');
+      toast.error(t('parts.restockModal.noItemsSelected'), errorMessage(err) || t('parts.restockModal.createPoFailed'));
     } finally {
       setIsProcessing(false);
     }
@@ -246,7 +246,7 @@ export const RestockAssistantModal: React.FC<RestockAssistantModalProps> = ({
   const handleSendWhatsApp = () => {
     const selectedItems = Object.values(rows).filter(r => r.selected && r.orderQty > 0);
     if (selectedItems.length === 0) {
-      toast.error('No Items Selected', 'Please select items to send via WhatsApp.');
+      toast.error(t('parts.restockModal.noItemsSelected'), t('parts.restockModal.selectItemsWhatsapp'));
       return;
     }
 
@@ -279,7 +279,7 @@ Please check stock availability and confirm estimated dispatch time. Thank you!`
   const handleExportCSV = () => {
     const selectedItems = Object.values(rows).filter(r => r.selected && r.orderQty > 0);
     if (selectedItems.length === 0) {
-      toast.error('No Items Selected', 'Please select items to export.');
+      toast.error(t('parts.restockModal.noItemsSelected'), t('parts.restockModal.selectItemsExport'));
       return;
     }
 

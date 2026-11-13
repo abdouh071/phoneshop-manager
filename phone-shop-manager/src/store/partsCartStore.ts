@@ -22,6 +22,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { discountAmountOf, lineDiscountOf, unitPriceAfterDiscount } from '../utils/discountPolicy';
 import type { LineConcession } from '../utils/discountPolicy';
 import { saleOpeningPayments } from '../utils/debtPayments';
+import { errorMessage } from '../utils/errorUtils';
 
 const getInventoryProducts = () => {
   const { parts } = useInventoryStore.getState();
@@ -49,6 +50,12 @@ const foldLineConcessions = (items: CartItem[]): CartItem[] =>
 
 const STORAGE_KEY_PARTS_ACTIVE = 'parts_active_cart';
 const STORAGE_KEY_PARTS_SUSPENDED = 'parts_suspended_carts';
+
+const INVOICES_CACHE_TTL_MS = 60_000;
+let lastInvoicesFetchAt: number | null = null;
+let cachedInvoices: SaleTransaction[] | null = null;
+let invoicesSession: ReturnType<typeof useAuthStore.getState>['user'] | undefined;
+let invoicesRequest: Promise<void> | null = null;
 
 /**
  * What the basket discount is, kept as it was promised: a trade percentage stays a
@@ -161,9 +168,11 @@ export interface PartsCartState {
   discount: PartsBasketDiscount | null;
   suspendedCarts: SuspendedCart[];
   invoices: SaleTransaction[];
+  isLoadingInvoices: boolean;
+  invoicesError: string | null;
 
   // Actions
-  fetchInvoices: () => Promise<void>;
+  fetchInvoices: (opts?: { force?: boolean }) => Promise<void>;
   addToCart: (product: PhoneModel) => { success: boolean; reason?: 'out_of_stock' | 'max_reached'; availableStock?: number };
   removeFromCart: (productId: string) => void;
   updateQuantity: (productId: string, quantity: number) => { success: boolean; reason?: 'max_reached'; availableStock?: number };
@@ -216,16 +225,59 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
   discount: initialActive.discount,
   suspendedCarts: initialSuspended,
   invoices: [],
+  isLoadingInvoices: false,
+  invoicesError: null,
   isCheckingOut: false,
 
-  fetchInvoices: async () => {
-    try {
-      // Server-side query: strictly requests repair parts B2B invoices/sales only
-      const invoices = await transactionService.getPartsTransactions();
-      set({ invoices });
-    } catch (err) {
-      console.error('Failed to fetch parts invoices from server:', err);
+  fetchInvoices: (opts) => {
+    const session = useAuthStore.getState().user;
+    if (session !== invoicesSession) {
+      if (invoicesSession !== undefined && invoicesSession?.id !== session?.id) set({ invoices: [] });
+      invoicesSession = session;
+      lastInvoicesFetchAt = null;
+      cachedInvoices = null;
+      invoicesRequest = null;
     }
+    if (invoicesRequest) return invoicesRequest;
+    if (!opts?.force && cachedInvoices === get().invoices && lastInvoicesFetchAt !== null
+      && Date.now() - lastInvoicesFetchAt < INVOICES_CACHE_TTL_MS) return Promise.resolve();
+
+    const before = get().invoices;
+    set({ isLoadingInvoices: true, invoicesError: null });
+    const request = Promise.resolve().then(async () => {
+      try {
+        const fetched = await transactionService.getPartsTransactions({ allowLocalFallback: false });
+        if (invoicesRequest !== request || useAuthStore.getState().user !== session) return;
+        const current = get().invoices;
+        const offline = typeof navigator !== 'undefined' && !navigator.onLine;
+        let invoices = fetched;
+        if (current !== before || offline) {
+          const original = new Map(before.map(tx => [tx.id, tx]));
+          const currentIds = new Set(current.map(tx => tx.id));
+          const merged = new Map(fetched.filter(tx => !original.has(tx.id) || currentIds.has(tx.id)).map(tx => [tx.id, tx]));
+          // A slow read cannot undo a sale, edit, refund or offline-ID remap made while it was pending.
+          for (const tx of current) {
+            if (offline || original.get(tx.id) !== tx) merged.set(tx.id, tx);
+          }
+          invoices = [...merged.values()].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        }
+        cachedInvoices = invoices;
+        lastInvoicesFetchAt = current === before && !offline ? Date.now() : null;
+        set({ invoices });
+      } catch (err) {
+        if (invoicesRequest === request && useAuthStore.getState().user === session) {
+          lastInvoicesFetchAt = null;
+          set({ invoicesError: errorMessage(err) });
+        }
+      } finally {
+        if (invoicesRequest === request) {
+          invoicesRequest = null;
+          set({ isLoadingInvoices: false });
+        }
+      }
+    });
+    invoicesRequest = request;
+    return request;
   },
 
   fetchCarts: async () => {
@@ -302,7 +354,8 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
     }
 
     const updated = state.items.map(i =>
-      i.product.id === productId ? { ...i, quantity, unitPrice: undefined } : i
+      // Preserve any per-line concession (unitPrice) across quantity changes (#3 audit fix).
+      i.product.id === productId ? { ...i, quantity } : i
     );
     set({ items: updated });
     saveLocalActiveCart(updated, state.customerName, state.customerPhone, state.discount);
@@ -517,7 +570,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       // offline queue, and its failure aborts the checkout before anything is billed.
       await Promise.all(
         itemsSnapshot.map(item =>
-          useInventoryStore.getState().adjustStockByAsync(item.product.id, -item.quantity)
+          useInventoryStore.getState().adjustStockByAsyncForSale(item.product.id, -item.quantity)
         )
       );
 
@@ -532,6 +585,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       set(s => ({
         invoices: [saved, ...s.invoices],
       }));
+      lastInvoicesFetchAt = null;
 
       // Reset parts active cart
       set({
@@ -586,11 +640,21 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         : [];
 
       let createdDebtEntry: CustomerDebtEntry | undefined;
+      const itemsSummary = itemsSnapshot.map(i => `${i.quantity}x ${i.product.name} ${i.product.model}`).join(', ');
 
-      // 1. If chargedAmount > 0, post to Customer Debt Ledger (Problem 1 fix)
+      // 1. Deduct stock FIRST (atomic, idempotent via replayKey). The Firestore
+      //    transaction in commitStockDelta now rejects negative stock, closing the
+      //    two-terminal oversell window. Only proceed to billing if every unit moved.
+      await Promise.all(
+        itemsSnapshot.map(item =>
+          useInventoryStore.getState().adjustStockByAsyncForSale(item.product.id, -item.quantity)
+        )
+      );
+
+      // 2. Post to Customer Debt Ledger (only after stock is confirmed moved).
+      //    If debt creation fails, we reverse stock before re-throwing.
       if (chargedAmount > 0) {
         try {
-          const itemsSummary = itemsSnapshot.map(i => `${i.quantity}x ${i.product.name} ${i.product.model}`).join(', ');
           createdDebtEntry = await useCustomerStore.getState().addDebt({
             customerId: customer.id,
             customerName: customer.name,
@@ -609,20 +673,18 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
             allowCreditLimitOverride,
           });
         } catch (err) {
-          console.error('Failed to add debt for B2B checkout:', err);
-          throw err; // Problem 1 fix: Do not swallow debt failure, halt checkout before saving tx or deducting stock
+          // Compensate: return stock to shelf before surfacing the error.
+          await Promise.allSettled(
+            itemsSnapshot.map(item =>
+              useInventoryStore.getState().adjustStockByAsync(item.product.id, +item.quantity)
+            )
+          );
+          console.error('Failed to add debt for B2B checkout — stock reversed:', err);
+          throw err;
         }
       }
 
-      // The shelf must move before the invoice exists, and a stock write that cannot
-      // be made durable aborts the checkout before the invoice or the debt is billed.
-      await Promise.all(
-        itemsSnapshot.map(item =>
-          useInventoryStore.getState().adjustStockByAsync(item.product.id, -item.quantity)
-        )
-      );
-
-      // 2. Build and save SaleTransaction
+      // 3. Build and save SaleTransaction
       const txData: Omit<SaleTransaction, 'id'> = {
         date: now.toISOString(),
         items: itemsSnapshot,
@@ -663,6 +725,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       set(s => ({
         invoices: [saved, ...s.invoices],
       }));
+      lastInvoicesFetchAt = null;
 
       // 5. Reset parts active cart
       set({
@@ -677,7 +740,6 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       saveLocalActiveCart([], '', '', null);
 
       // 6. Double Audit Logging
-      const itemsSummary = itemsSnapshot.map(i => `${i.quantity}x ${i.product.name} ${i.product.model}`).join(', ');
       const settlementLabel =
         settlementType === 'paid_full'
           ? `Paid full (${formatCurrency(paidAmount)} ${paymentMethod.toUpperCase()})`

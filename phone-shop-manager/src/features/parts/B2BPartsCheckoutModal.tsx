@@ -14,6 +14,7 @@ import { usePrivacyStore } from '../../store/privacyStore';
 import type { Customer, PaymentMethod, SaleTransaction, CustomerDebtEntry } from '../../types';
 import styles from './B2BParts.module.css';
 import { errorMessage } from '../../utils/errorUtils';
+import { useTranslation } from 'react-i18next';
 
 interface B2BPartsCheckoutModalProps {
   isOpen: boolean;
@@ -41,6 +42,7 @@ export const B2BPartsCheckoutModal: React.FC<B2BPartsCheckoutModalProps> = ({
   const { getCustomerDebtTotal } = useCustomerStore();
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'admin';
+  const { t } = useTranslation();
   const toast = useToast();
 
   const total = getTotal();
@@ -121,7 +123,12 @@ export const B2BPartsCheckoutModal: React.FC<B2BPartsCheckoutModalProps> = ({
         onClose();
       }
     } catch (err: unknown) {
-      toast.error('Checkout Failed', errorMessage(err) || 'Could not complete B2B checkout');
+      const msg = errorMessage(err) || '';
+      if (msg.startsWith('INSUFFICIENT_STOCK')) {
+        toast.error(t('parts.insufficientStockTitle'), t('parts.insufficientStock'));
+      } else {
+        toast.error(t('parts.checkoutFailed'), msg || 'Could not complete B2B checkout');
+      }
     } finally {
       isSubmittingRef.current = false;
       setIsSubmitting(false);

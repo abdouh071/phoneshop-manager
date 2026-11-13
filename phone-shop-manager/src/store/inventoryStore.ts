@@ -84,6 +84,8 @@ interface InventoryState {
    * stock it consumes wait on this.
    */
   adjustStockByAsync: (id: string, delta: number) => Promise<PhoneModel>;
+  /** Like adjustStockByAsync but throws INSUFFICIENT_STOCK on oversell (for checkouts). */
+  adjustStockByAsyncForSale: (id: string, delta: number) => Promise<PhoneModel>;
   addProduct: (product: Omit<PhoneModel, 'id'>) => Promise<void>;
   addProductsBulk: (products: Omit<PhoneModel, 'id'>[]) => Promise<void>;
   updateProduct: (id: string, updates: Partial<Omit<PhoneModel, 'id'>>) => Promise<ProductWriteOutcome>;
@@ -269,6 +271,16 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
   adjustStockByAsync: async (id, delta) => {
     applyLocalStockDelta(set, id, delta);
     const updated = await inventoryService.adjustStockAsync(id, delta);
+    set(state => ({
+      products: state.products.map(p => p.id === id ? updated : p),
+      parts: state.parts.map(p => p.id === id ? updated : p),
+    }));
+    return updated;
+  },
+
+  adjustStockByAsyncForSale: async (id, delta) => {
+    applyLocalStockDelta(set, id, delta);
+    const { updated } = await inventoryService.applyStockDeltaForSale(id, delta);
     set(state => ({
       products: state.products.map(p => p.id === id ? updated : p),
       parts: state.parts.map(p => p.id === id ? updated : p),

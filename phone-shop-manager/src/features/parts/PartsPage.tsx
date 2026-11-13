@@ -1,216 +1,57 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Plus, Minus, Trash2, ShoppingCart, X, Package, AlertTriangle, ChevronDown, ChevronUp, ChevronRight, CornerDownRight, Eye, ClipboardList, TrendingUp, DollarSign, User, UserCheck, CheckCircle2, AlertCircle, XCircle, Store, Bell } from 'lucide-react';
-import { Button } from '../../components/ui/Button';
-import { SearchInput } from '../../components/ui/Input';
-import { Select } from '../../components/ui/Select';
-import { StockBadge } from '../../components/ui/Badge';
-import { Pagination } from '../../components/ui/Pagination';
-import { EmptyState } from '../../components/ui/EmptyState';
-import { useInventoryStore } from '../../store/inventoryStore';
-import { heldBasketDiscountOf, usePartsCartStore } from '../../store/partsCartStore';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useAuthStore } from '../../store/authStore';
-import { useToast } from '../../components/ui/Toast';
+import { AlertTriangle, Bell, ClipboardList, Package, Plus } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
-import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
-import {
-  DISCOUNT_APPROVAL_PERCENT,
-  discountAmountOf,
-  discountPercentOf,
-  lineDiscountOf,
-  requiresDiscountApproval,
-  requiresLineDiscountApproval,
-  unitPriceAfterDiscount,
-} from '../../utils/discountPolicy';
-import { usePrivacyStore } from '../../store/privacyStore';
-import { groupProductsByBaseModel } from '../../utils/productGrouping';
+import { Button } from '../../components/ui/Button';
+import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
+import { useToast } from '../../components/ui/Toast';
+import { useInventoryStore } from '../../store/inventoryStore';
+import { usePartsCartStore } from '../../store/partsCartStore';
+import { useCustomerStore } from '../../store/customerStore';
+import { useAuthStore } from '../../store/authStore';
+import { usePermissions } from '../../hooks/usePermissions';
+import { normalizeArabic } from '../../utils/normalizeText';
 import type { ProductGroup } from '../../utils/productGrouping';
-import type { PhoneModel, PaymentMethod, SuspendedCart } from '../../types';
-
-// Modals
-import { ReceiptModal } from '../pos/ReceiptModal';
+import type { Customer, PhoneModel } from '../../types';
 import { VariantSelectModal } from '../pos/VariantSelectModal';
 import { AddPartModal } from './AddPartModal';
 import { EditPartPanel } from './EditPartPanel';
 import { ProductDetailPanel } from '../inventory/ProductDetailPanel';
 import { WriteOffModal } from '../inventory/WriteOffModal';
-import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { PrintPartsLabelsModal } from './PrintPartsLabelsModal';
 import { RestockHistoryPanel } from '../inventory/RestockHistoryPanel';
 import { WriteOffLogPanel } from '../inventory/WriteOffLogPanel';
-import { useRestockHandler } from '../inventory/useRestockHandler';
-import { useBarcodeScanner } from './useBarcodeScanner';
-import { PartRowActions } from './PartRowActions';
-import { CustomerAutocompleteInput } from '../pos/CustomerAutocompleteInput';
-import { QuickAddShopModal } from './QuickAddShopModal';
-import { B2BPartsCheckoutModal } from './B2BPartsCheckoutModal';
-import { PartsInvoiceModal } from './PartsInvoiceModal';
-import { PartsInvoicesTab } from './PartsInvoicesTab';
 import { RestockAssistantModal } from './RestockAssistantModal';
 import { CustomerProfilePanel } from '../customers/CustomerProfilePanel';
-import { useCustomerStore } from '../../store/customerStore';
-import type { Customer, CustomerDebtEntry, SaleTransaction, CartItem } from '../../types';
-import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
-
+import { PartsInventoryTab } from './PartsInventoryTab';
+import { PartsPosTab } from './PartsPosTab';
+import { PartsInvoicesTab } from './PartsInvoicesTab';
+import { useBarcodeScanner } from './useBarcodeScanner';
 import styles from './Parts.module.css';
-import posStyles from '../pos/POS.module.css';
-import b2bStyles from './B2BParts.module.css';
-import { errorMessage } from '../../utils/errorUtils';
-import { normalizeArabic } from '../../utils/normalizeText';
-
-// ─── HELPER COMPONENTS & UTILS ───────────────────────────────────────────
-
-const margin = (p: PhoneModel) =>
-  p.price > 0 ? (((p.price - p.costPrice) / p.price) * 100) : 0;
-
-
-const ProductCard: React.FC<{ group: ProductGroup; onAdd: () => void }> = ({ group, onAdd }) => {
-  const metaText = (() => {
-    if (group.variants.length > 1) return `${group.variants.length} Variants`;
-    const v = group.variants[0];
-    const parts = [
-      v.storage && v.storage !== 'N/A' ? v.storage : null,
-      v.color && v.color !== 'N/A' ? v.color : null,
-    ].filter(Boolean);
-    return parts.join(' · ');
-  })();
-
-  return (
-    <div
-      className={[styles.productCard, group.stockStatus === 'out_of_stock' && styles.disabled].filter(Boolean).join(' ')}
-      onClick={group.stockStatus !== 'out_of_stock' ? onAdd : undefined}
-    >
-      <div className={styles.productCardTop}>
-        <div className={styles.productCardBrand}>{group.name[0]}</div>
-        <StockBadge status={group.stockStatus} />
-      </div>
-      <p className={styles.productCardName}>{group.name} {group.model}</p>
-      {metaText ? <p className={styles.productCardMeta}>{metaText}</p> : null}
-      <div className={styles.productCardStock}>
-        {group.totalStock > 0 ? (
-          <span>📦 {group.totalStock} units left</span>
-        ) : (
-          <span className={styles.maxReached}>⚠️ Out of stock</span>
-        )}
-      </div>
-      <p className={styles.productCardPrice}>
-        {group.variants.length === 1 
-          ? formatCurrency(group.variants[0].price) 
-          : `${formatCurrency(group.minPrice)} - ${formatCurrency(group.maxPrice)}`}
-      </p>
-      <button
-        type="button"
-        className={styles.addBtn}
-        disabled={group.stockStatus === 'out_of_stock'}
-        onClick={e => { e.stopPropagation(); onAdd(); }}
-      >
-        <Plus size={14} /> Add
-      </button>
-    </div>
-  );
-};
-
-const paymentMethods: { value: PaymentMethod; label: string }[] = [
-  { value: 'cash', label: '💵 Cash' },
-  { value: 'card', label: '💳 Card' },
-  { value: 'mobile', label: '📱 Mobile Pay' },
-];
-
-// ─── MAIN COMPONENT ──────────────────────────────────────────────────────
 
 export const PartsPage = () => {
   const { t } = useTranslation();
-  const { fetchParts, parts, isLoadingParts, error: partsError } = useInventoryStore();
-  const { items, addToCart, removeFromCart, updateQuantity, clearCart, setPayments, setCustomerName, setDiscount, setLineDiscount, checkout, customerName, discount, getSubtotal, getTotal, getItemCount, getLinesConcessionTotal, suspendedCarts, suspendCart, resumeCart, discardSuspendedCart, fetchCarts } = usePartsCartStore();
+  const { parts, fetchParts, isLoadingParts, error: partsError } = useInventoryStore(useShallow(s => ({
+    parts: s.parts, fetchParts: s.fetchParts, isLoadingParts: s.isLoadingParts, error: s.error,
+  })));
+  const addToCart = usePartsCartStore(s => s.addToCart);
+  const fetchCarts = usePartsCartStore(s => s.fetchCarts);
+  const itemCount = usePartsCartStore(s => s.items.reduce((sum, item) => sum + item.quantity, 0));
+  const { customers, fetchCustomers } = useCustomerStore(useShallow(s => ({
+    customers: s.customers, fetchCustomers: s.fetchCustomers,
+  })));
+  const user = useAuthStore(s => s.user);
   const permissions = usePermissions();
-  const { user } = useAuthStore();
-  const isAdmin = user?.role === 'admin';
-  const toast = useToast();
-
-  const [pendingDiscountValue, setPendingDiscountValue] = useState<number | null>(null);
-  const [showDiscountUnlock, setShowDiscountUnlock] = useState(false);
-
-  /** The number exactly as typed, per line. Re-deriving it from the line's price
-   *  lands on 99.99 where the cashier typed 100, which would rewrite the field
-   *  under their fingers. */
-  const [lineDiscountText, setLineDiscountText] = useState<Record<string, string>>({});
-  const [pendingLine, setPendingLine] = useState<{ productId: string; name: string; amount: number; percent: number } | null>(null);
-  const [showLineUnlock, setShowLineUnlock] = useState(false);
-
-  /** The basket promise seen from both sides, so the field can hold a wholesale
-   *  percentage while the cashier still reads the dinars it is worth today. */
-  const basketDiscountAmount = discount
-    ? discountAmountOf(getSubtotal(), { mode: discount.type, value: discount.value })
-    : 0;
-  const basketDiscountPercent = discount
-    ? discountPercentOf(getSubtotal(), { mode: discount.type, value: discount.value })
-    : 0;
-
-  /**
-   * One part's discount, judged by the same rule as the basket and as a corrected
-   * invoice: the share of what that line is worth. A cashier who types a lower
-   * "each" price instead is not measured here — the line total is, and the shelf
-   * price stays the shelf price, so the concession is written into the line.
-   */
-  const handleLineDiscount = (item: CartItem, raw: string) => {
-    const productId = item.product.id;
-    const forgetText = () =>
-      setLineDiscountText(prev => {
-        const next = { ...prev };
-        delete next[productId];
-        return next;
-      });
-
-    if (raw === '') {
-      forgetText();
-      setLineDiscount(productId, 0);
-      return;
-    }
-
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value <= 0) return;
-
-    const charged = unitPriceAfterDiscount(item.product.price, value, item.quantity);
-    const { percent } = lineDiscountOf(item.product.price, charged, item.quantity);
-    if (requiresLineDiscountApproval(isAdmin ? 'admin' : 'sales_agent', percent)) {
-      setPendingLine({
-        productId,
-        name: `${item.product.name} ${item.product.model || ''}`.trim(),
-        amount: value,
-        percent,
-      });
-      setShowLineUnlock(true);
-      return;
-    }
-
-    setLineDiscountText(prev => ({ ...prev, [productId]: raw }));
-    setLineDiscount(productId, value);
-  };
-
-  /** The quantity and a line's concession are measured against each other, so a
-   *  row that changes size goes back to its shelf price. */
-  const changeLineQuantity = (item: CartItem, quantity: number) => {
-    setLineDiscountText(prev => {
-      const next = { ...prev };
-      delete next[item.product.id];
-      return next;
-    });
-    updateQuantity(item.product.id, quantity);
-  };
-
+  const canEdit = user?.role === 'admin' || permissions.inventory_edit;
   const canViewCosts = user?.role === 'admin' || (permissions.inventory_edit && permissions.reports);
-  const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
-
+  const toast = useToast();
   const location = useLocation();
   const [activeTab, setActiveTab] = useState<'inventory' | 'pos' | 'invoices'>('inventory');
-
-  // Local isolated search query & sorting (completely separated from POS Page and Inventory Page)
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [sortKey, setSortKey] = useState<keyof PhoneModel>('name');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-
-  // Modals & Panels state
+  const [inventorySearch, setInventorySearch] = useState<{ query: string; key: string } | null>(null);
+  const [customerRequest, setCustomerRequest] = useState<{ customer: Customer; key: string } | null>(null);
+  const handledCustomerLink = useRef('');
+  const handledProductLink = useRef('');
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
   const [isRestockAssistantOpen, setIsRestockAssistantOpen] = useState(false);
@@ -219,1227 +60,163 @@ export const PartsPage = () => {
   const [editingProduct, setEditingProduct] = useState<PhoneModel | null>(null);
   const [detailProduct, setDetailProduct] = useState<PhoneModel | null>(null);
   const [writeOffProduct, setWriteOffProduct] = useState<PhoneModel | null>(null);
-  const [completedTx, setCompletedTx] = useState<SaleTransaction | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<ProductGroup | null>(null);
-  const [actionRequiringUnlock, setActionRequiringUnlock] = useState<{ name: string; callback: () => void } | null>(null);
-
-  // B2B State
-  const { customers, fetchCustomers, getCustomerDebtTotal } = useCustomerStore();
-  const [selectedB2BCustomer, setSelectedB2BCustomer] = useState<Customer | null>(null);
-  const [isQuickAddShopOpen, setIsQuickAddShopOpen] = useState(false);
-  const [isB2BCheckoutOpen, setIsB2BCheckoutOpen] = useState(false);
-  const [completedB2BTx, setCompletedB2BTx] = useState<{ transaction: SaleTransaction; debtEntry?: CustomerDebtEntry; invoiceNumber: string } | null>(null);
   const [profilePanelCustomer, setProfilePanelCustomer] = useState<Customer | null>(null);
+  const [actionRequiringUnlock, setActionRequiringUnlock] = useState<{ name: string; callback: () => void } | null>(null);
+  const lowStockCount = parts.filter(p => p.stockStatus === 'low_stock' || p.stockStatus === 'out_of_stock').length;
 
-  // Inventory Table State
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [restockingId, setRestockingId] = useState<string | null>(null);
-  const [restockAmt, setRestockAmt] = useState('');
-  const [restockMeta, setRestockMeta] = useState({ supplier: '', cost: '', note: '' });
-
-  // Load parts from server (where category == 'repair_part' from the beginning), carts & customers
-  useEffect(() => { fetchParts(); }, [fetchParts]);
-  useEffect(() => { fetchCarts(); }, [fetchCarts]);
-  useEffect(() => { fetchCustomers(); }, [fetchCustomers]);
-
-  // Handle deep links from Activity Log or Customer Profile (e.g. /parts?b2bCustomer=...)
+  const [initialLoading, setInitialLoading] = useState(true);
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const b2bCustId = params.get('b2bCustomer');
-    if (b2bCustId && customers.length > 0) {
-      const match = customers.find(c => c.id === b2bCustId);
-      if (match) {
-        setSelectedB2BCustomer(match);
-        setCustomerName(match.name);
-        setActiveTab('pos');
-      }
+    let mounted = true;
+    void fetchParts().finally(() => { if (mounted) setInitialLoading(false); });
+    return () => { mounted = false; };
+  }, [fetchParts]);
+  // Lazy-load carts & customers only when the POS tab is first opened (#4 audit fix).
+  // Saves 2 Firestore full-collection reads on the common inventory-only flow.
+  const posTabActivated = useRef(false);
+  useEffect(() => {
+    if (activeTab === 'pos' && !posTabActivated.current) {
+      posTabActivated.current = true;
+      fetchCarts();
+      fetchCustomers();
     }
-  }, [location.search, customers, setCustomerName]);
+  }, [activeTab, fetchCarts, fetchCustomers]);
 
-  // Handle deep links from Activity Log (e.g. /parts?search=Screen&focusId=...)
   useEffect(() => {
+    const key = `${location.key}:${location.search}`;
+    const id = new URLSearchParams(location.search).get('b2bCustomer');
+    if (!id) { handledCustomerLink.current = ''; return; }
+    if (handledCustomerLink.current === key) return;
+    const customer = customers.find(c => c.id === id);
+    if (customer) {
+      handledCustomerLink.current = key;
+      setCustomerRequest({ customer, key });
+      setActiveTab('pos');
+    }
+  }, [location.key, location.search, customers]);
+
+  useEffect(() => {
+    const key = `${location.key}:${location.search}`;
     const params = new URLSearchParams(location.search);
     const search = params.get('search');
     const focusId = params.get('focusId');
     const target = focusId || search;
-
-    if (search && !focusId) {
-      setSearchQuery(search);
-    }
-
-    if (!target || parts.length === 0) return;
-
+    if (!target) { handledProductLink.current = ''; return; }
+    if (handledProductLink.current === key) return;
+    if (search && !focusId) setInventorySearch({ query: search, key });
     const q = normalizeArabic(target);
     const match = parts.find(p => {
       const full = normalizeArabic([p.name, p.model].filter(Boolean).join(' '));
       const name = normalizeArabic(p.name);
       const sku = normalizeArabic(p.sku);
-      return (
-        p.id === target ||
-        (sku !== '' && sku === q) ||
-        (full !== '' && full.includes(q)) ||
-        (full !== '' && q.includes(full)) ||
-        (name !== '' && name.includes(q)) ||
-        (name !== '' && q.includes(name))
-      );
+      return p.id === target || (sku !== '' && sku === q) ||
+        (full !== '' && (full.includes(q) || q.includes(full))) ||
+        (name !== '' && (name.includes(q) || q.includes(name)));
     });
-
     if (match) {
+      handledProductLink.current = key;
       setActiveTab('inventory');
-      const timer = setTimeout(() => {
-        setDetailProduct(match);
-      }, 300);
-      return () => clearTimeout(timer);
+      setDetailProduct(match);
     }
-  }, [location.search, parts]);
+  }, [location.key, location.search, parts]);
 
-  const requirePermission = (actionName: string, callback: () => void) => {
-    if (user?.role === 'admin' || permissions.inventory_edit) {
-      callback();
-    } else {
-      setActionRequiringUnlock({ name: actionName, callback });
-    }
-  };
+  const requirePermission = useCallback((name: string, callback: () => void) => {
+    if (canEdit) callback();
+    else setActionRequiringUnlock({ name, callback });
+  }, [canEdit]);
+  const openRestockAssistant = useCallback(() => {
+    requirePermission(t('parts.unlockRestockAssistant'), () => setIsRestockAssistantOpen(true));
+  }, [requirePermission, t]);
+  const editProduct = useCallback((product: PhoneModel) => {
+    requirePermission(t('parts.unlockEdit'), () => setEditingProduct(product));
+  }, [requirePermission, t]);
+  const writeOff = useCallback((product: PhoneModel) => {
+    requirePermission(t('parts.unlockWriteOff'), () => setWriteOffProduct(product));
+  }, [requirePermission, t]);
 
-  // Hardware barcode scanner listener for Parts POS
-  const handleBarcodeInput = (sku: string) => {
+  useBarcodeScanner({ onScan: sku => {
     const part = parts.find(p => p.sku && p.sku.toLowerCase() === sku.toLowerCase());
-    if (part) {
-      const result = addToCart(part);
-      if (result.success) {
-        setActiveTab('pos');
-        toast.success(t('parts.addedToCart'), `${part.name} ${part.model} ${t('parts.addedViaBarcode')}`);
-      } else if (result.reason === 'out_of_stock') {
-        toast.error(t('parts.outOfStockToast'), `${part.name} ${part.model} ${t('parts.hasNoUnits')}`);
-      } else {
-        toast.warning('Stock Limit Reached', `Only ${result.availableStock} unit${result.availableStock === 1 ? '' : 's'} available.`);
-      }
+    if (!part) {
+      toast.error(t('parts.partNotFound'), t('parts.barcodeNotFound', { sku }));
+      return;
+    }
+    const result = addToCart(part);
+    if (result.success) {
+      setActiveTab('pos');
+      toast.success(t('parts.addedToCart'), `${part.name} ${part.model} ${t('parts.addedViaBarcode')}`);
+    } else if (result.reason === 'out_of_stock') {
+      toast.error(t('parts.outOfStockToast'), `${part.name} ${part.model} ${t('parts.hasNoUnits')}`);
     } else {
-      toast.error('Part Not Found', `No spare part found with SKU/barcode: ${sku}`);
+      toast.warning(t('parts.stockLimitReached'), t('parts.availableUnits', { count: result.availableStock }));
     }
-  };
-
-  useBarcodeScanner({ onScan: handleBarcodeInput });
-
-  // Filter products for Parts ONLY (isolated local filters)
-  // The server only returned repair parts from the beginning (no client category filter needed)
-  const rawFilteredProducts = useMemo(() => {
-    let p = parts;
-    if (statusFilter !== 'all') {
-      p = p.filter(prod => prod.stockStatus === statusFilter);
-    }
-    if (searchQuery.trim()) {
-      const words = normalizeArabic(searchQuery).trim().split(/\s+/);
-      p = p.filter(prod => {
-        const full = normalizeArabic([prod.name, prod.model, prod.sku, prod.location, prod.supplier, prod.notes].filter(Boolean).join(' '));
-        return words.every(w => full.includes(w));
-      });
-    }
-    return p;
-  }, [parts, statusFilter, searchQuery]);
-
-  const groups = useMemo(() => groupProductsByBaseModel(rawFilteredProducts), [rawFilteredProducts]);
-
-  // Sort groups
-  const sortedGroups = useMemo(() => {
-    return [...groups].sort((a, b) => {
-      let valA: string | number = (a[sortKey as keyof ProductGroup] ?? '') as string | number;
-      let valB: string | number = (b[sortKey as keyof ProductGroup] ?? '') as string | number;
-      if (sortKey === 'price') { valA = a.minPrice; valB = b.minPrice; }
-      if (sortKey === 'costPrice') { valA = a.minCost; valB = b.minCost; }
-      if (sortKey === 'stock') { valA = a.totalStock; valB = b.totalStock; }
-      if (valA < valB) return sortDir === 'asc' ? -1 : 1;
-      if (valA > valB) return sortDir === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }, [groups, sortKey, sortDir]);
-
-  // Pagination for Inventory
-  const totalPages = Math.ceil(sortedGroups.length / itemsPerPage);
-  const paginatedGroups = sortedGroups.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-
-  // Financials & Stock metrics
-  const totalInventoryValue = useMemo(() => {
-    return parts.reduce((sum, p) => sum + (p.costPrice || 0) * (p.stock || 0), 0);
-  }, [parts]);
-
-  const potentialRevenue = useMemo(() => {
-    return parts.reduce((sum, p) => sum + (p.price || 0) * (p.stock || 0), 0);
-  }, [parts]);
-
-  const lowStockCount = useMemo(() => {
-    return parts.filter(p => p.stockStatus === 'low_stock' || p.stockStatus === 'out_of_stock').length;
-  }, [parts]);
-
-  const handleSort = (key: keyof PhoneModel) => {
-    if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(key); setSortDir('asc'); }
-  };
-
-  const SortIcon = ({ col }: { col: keyof PhoneModel }) => {
-    if (sortKey !== col) return <span className={styles.sortNeutral}><ChevronUp size={12} /><ChevronDown size={12} /></span>;
-    return <span>{sortDir === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>;
-  };
-
-  const toggleExpand = (id: string) => {
-    setExpandedGroups(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  // Restock handler
-  const handleRestock = useRestockHandler(() => restockAmt, restockMeta, () => {
-    setRestockingId(null);
-    setRestockAmt('');
-    setRestockMeta({ supplier: '', note: '', cost: '' });
-  });
-
-  // POS State
-  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('cash');
-  const [isProcessing, setIsProcessing] = useState(false);
-  // Synchronous lock prevents duplicate submissions even on rapid multi-clicks
-  const checkoutLock = useRef(false);
-  const [showSuspended, setShowSuspended] = useState(false);
-  const [confirmClearCart, setConfirmClearCart] = useState(false);
-  const [discardTarget, setDiscardTarget] = useState<SuspendedCart | null>(null);
-
-  const handleCheckout = async () => {
-    if (items.length === 0 || isProcessing || checkoutLock.current) return;
-    checkoutLock.current = true;
-    setIsProcessing(true);
-    try {
-      const tx = await checkout();
-      setLineDiscountText({});
-      setCompletedTx(tx);
-    } catch (err: unknown) {
-      toast.error(t('parts.checkoutFailed'), errorMessage(err));
-    } finally {
-      setIsProcessing(false);
-      checkoutLock.current = false;
-    }
-  };
-
-  /** Keyboard access for the filterable KPI cards and sortable headers. */
-  const onCardKeyDown = (fn: () => void) => (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      fn();
-    }
-  };
-  const sortAria = (col: keyof PhoneModel) =>
-    sortKey === col ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
-  const onThKeyDown = (col: keyof PhoneModel) => (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') handleSort(col);
-  };
+  } });
 
   return (
     <div className={styles.page}>
-      {/* Modals & Dialogs */}
       <AddPartModal isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} />
       <EditPartPanel product={editingProduct} onClose={() => setEditingProduct(null)} />
-      <ProductDetailPanel product={detailProduct} onClose={() => setDetailProduct(null)} onEdit={(p) => { setDetailProduct(null); requirePermission('edit this product', () => setEditingProduct(p)); }} />
+      <ProductDetailPanel product={detailProduct} onClose={() => setDetailProduct(null)} onEdit={p => { setDetailProduct(null); editProduct(p); }} />
       <WriteOffModal product={writeOffProduct} onClose={() => setWriteOffProduct(null)} />
       <PrintPartsLabelsModal isOpen={isPrintOpen} onClose={() => setIsPrintOpen(false)} />
       <RestockHistoryPanel isOpen={isRestockLogOpen} onClose={() => setIsRestockLogOpen(false)} />
       <WriteOffLogPanel isOpen={isWriteOffLogOpen} onClose={() => setIsWriteOffLogOpen(false)} />
-
-      <ConfirmDialog
-        isOpen={confirmClearCart}
-        title={t('parts.clearCartTitle')}
-        message={t('parts.clearCartMsg')}
-        confirmLabel={t('parts.clearCartTitle')}
-        variant="danger"
-        onConfirm={() => { clearCart(); setLineDiscountText({}); setConfirmClearCart(false); }}
-        onCancel={() => setConfirmClearCart(false)}
-      />
-      <ConfirmDialog
-        isOpen={discardTarget !== null}
-        title={t('parts.discardHeldTitle')}
-        message={discardTarget
-          ? t('parts.discardHeldMsg', { name: discardTarget.customerName || t('parts.walkInCustomer'), count: discardTarget.items.reduce((s, i) => s + i.quantity, 0) })
-          : ''}
-        confirmLabel={t('parts.discard')}
-        variant="danger"
-        onConfirm={() => { if (discardTarget) discardSuspendedCart(discardTarget.id); setDiscardTarget(null); }}
-        onCancel={() => setDiscardTarget(null)}
-      />
-      
-      <AdminUnlockModal 
-        isOpen={actionRequiringUnlock !== null} 
-        onClose={() => setActionRequiringUnlock(null)} 
+      <RestockAssistantModal isOpen={isRestockAssistantOpen} onClose={() => setIsRestockAssistantOpen(false)} />
+      <AdminUnlockModal
+        isOpen={actionRequiringUnlock !== null}
+        onClose={() => setActionRequiringUnlock(null)}
         onSuccess={() => { actionRequiringUnlock?.callback(); setActionRequiringUnlock(null); }}
-        actionName={actionRequiringUnlock?.name} 
+        actionName={actionRequiringUnlock?.name}
       />
+      <CustomerProfilePanel customer={profilePanelCustomer} isOpen={!!profilePanelCustomer} onClose={() => setProfilePanelCustomer(null)} />
+      <VariantSelectModal group={selectedGroup} onClose={() => setSelectedGroup(null)} onSelect={variant => { addToCart(variant); setSelectedGroup(null); }} />
 
-      <AdminUnlockModal
-        isOpen={showDiscountUnlock}
-        onClose={() => {
-          setShowDiscountUnlock(false);
-          setPendingDiscountValue(null);
-        }}
-        onSuccess={() => {
-          setShowDiscountUnlock(false);
-          if (pendingDiscountValue !== null) {
-            setDiscount({ type: 'flat', value: pendingDiscountValue });
-            setPendingDiscountValue(null);
-            toast.success('Discount Authorized', 'Admin authorization verified.');
-          }
-        }}
-        // The dinars say nothing about depth on their own; an admin signing for 900 DA
-        // on a small basket is giving away far more than the number suggests.
-        actionName={`authorize parts discount of ${pendingDiscountValue ? formatCurrency(pendingDiscountValue) : ''}${
-          pendingDiscountValue
-            ? ` (${discountPercentOf(getSubtotal(), { mode: 'flat', value: pendingDiscountValue }).toFixed(1)}% of the basket)`
-            : ''
-        }`}
-      />
-
-      <AdminUnlockModal
-        isOpen={showLineUnlock}
-        onClose={() => {
-          setShowLineUnlock(false);
-          setPendingLine(null);
-        }}
-        onSuccess={() => {
-          setShowLineUnlock(false);
-          if (pendingLine) {
-            const { productId, amount } = pendingLine;
-            setLineDiscount(productId, amount);
-            setLineDiscountText(prev => ({ ...prev, [productId]: String(amount) }));
-            setPendingLine(null);
-            toast.success('Line Discount Authorized', 'Admin authorization verified.');
-          }
-        }}
-        // The share is the decision, not the dinars: 900 DA off a cable is a different
-        // act from 900 DA off a screen.
-        actionName={`authorize ${pendingLine ? `${pendingLine.percent.toFixed(1)}%` : ''} off "${pendingLine?.name ?? ''}" (${pendingLine ? formatCurrency(pendingLine.amount) : ''}) on a parts sale`}
-      />
-
-      <ReceiptModal
-        transaction={completedTx}
-        onClose={() => setCompletedTx(null)}
-      />
-
-      <QuickAddShopModal
-        isOpen={isQuickAddShopOpen}
-        onClose={() => setIsQuickAddShopOpen(false)}
-        onCustomerCreated={(newCust) => {
-          setSelectedB2BCustomer(newCust);
-          setCustomerName(newCust.name);
-          toast.success('B2B Account Attached', `${newCust.shopName || newCust.name} attached to cart.`);
-        }}
-      />
-
-      {selectedB2BCustomer && (
-        <B2BPartsCheckoutModal
-          isOpen={isB2BCheckoutOpen}
-          onClose={() => setIsB2BCheckoutOpen(false)}
-          customer={selectedB2BCustomer}
-          onSuccess={(result) => {
-            setCompletedB2BTx(result);
-            setSelectedB2BCustomer(null);
-          }}
-        />
-      )}
-
-      <PartsInvoiceModal
-        transaction={completedB2BTx?.transaction || null}
-        debtEntry={completedB2BTx?.debtEntry}
-        onClose={() => setCompletedB2BTx(null)}
-      />
-
-      <CustomerProfilePanel
-        customer={profilePanelCustomer}
-        isOpen={!!profilePanelCustomer}
-        onClose={() => setProfilePanelCustomer(null)}
-      />
-
-      <VariantSelectModal
-        group={selectedGroup}
-        onClose={() => setSelectedGroup(null)}
-        onSelect={(variant) => {
-          addToCart(variant);
-          setSelectedGroup(null);
-        }}
-      />
-
-      <RestockAssistantModal
-        isOpen={isRestockAssistantOpen}
-        onClose={() => setIsRestockAssistantOpen(false)}
-      />
-
-      {/* Warning Banner (matches Inventory style with 1-click filter) */}
-      {lowStockCount > 0 && activeTab === 'inventory' && (
-        <div className={styles.warningBanner}>
-          <div className={styles.warningLeft}>
-            <AlertTriangle size={18} />
-            <span><strong>Attention Needed:</strong> {lowStockCount} repair parts are running low or out of stock.</span>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <button
-              type="button"
-              className={styles.warningActionBtn}
-              onClick={() => requirePermission('open Restock Assistant', () => setIsRestockAssistantOpen(true))}
-              style={{ background: '#d97706', color: '#ffffff', borderColor: '#b45309', fontWeight: 700 }}
-            >
-              ⚡ Restock Assistant & PO
-            </button>
-            <button
-              type="button"
-              className={styles.warningActionBtn}
-              onClick={() => {
-                setStatusFilter(statusFilter === 'low_stock' ? 'all' : 'low_stock');
-                setCurrentPage(1);
-              }}
-            >
-              {statusFilter === 'low_stock' ? 'Show All Parts' : 'Filter Low Stock'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Modern Page Header */}
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>{t('parts.title', 'Parts Management')}</h1>
-          <p className={styles.subtitle}>{t('parts.partsAvailable', { count: parts.length })} · {t('parts.unitsInStock', { count: parts.reduce((s, p) => s + p.stock, 0) })}</p>
+          <h1 className={styles.title}>{t('parts.title')}</h1>
+          <p className={styles.subtitle}>
+            {initialLoading || isLoadingParts ? t('common.loading') : partsError && parts.length === 0 ? t('parts.loadFailed') :
+              `${t('parts.partsAvailable', { count: parts.length })} · ${t('parts.unitsInStock', { count: parts.reduce((s, p) => s + p.stock, 0) })}`}
+          </p>
         </div>
         <div className={styles.headerActions}>
-          <Button
-            variant={lowStockCount > 0 ? 'primary' : 'secondary'}
-            leftIcon={<Bell size={16} />}
-            onClick={() => requirePermission('open Restock Assistant', () => setIsRestockAssistantOpen(true))}
-            style={lowStockCount > 0 ? { background: '#d97706', borderColor: '#b45309' } : undefined}
-            title="Smart Restock Assistant & Supplier PO Generator"
-          >
-            {t('parts.restockAssistant', 'Restock Assistant')} {lowStockCount > 0 && `(${lowStockCount})`}
+          <Button variant={lowStockCount > 0 ? 'primary' : 'secondary'} leftIcon={<Bell size={16} />} onClick={openRestockAssistant}
+            style={lowStockCount > 0 ? { background: '#d97706', borderColor: '#b45309' } : undefined} title={t('parts.restockAssistantHelp')}>
+            {t('parts.restockAssistant')} {lowStockCount > 0 && `(${lowStockCount})`}
           </Button>
-          <Button variant="secondary" leftIcon={<ClipboardList size={16} />} onClick={() => requirePermission('view restock log', () => setIsRestockLogOpen(true))}>
-            {t('inventory.restockHistory', 'Restock Log')}
+          <Button variant="secondary" leftIcon={<ClipboardList size={16} />} onClick={() => requirePermission(t('parts.unlockRestockLog'), () => setIsRestockLogOpen(true))}>
+            {t('inventory.restockHistory')}
           </Button>
-          <Button variant="secondary" leftIcon={<AlertTriangle size={16} />} onClick={() => requirePermission('view write-off log', () => setIsWriteOffLogOpen(true))}>
-            {t('inventory.writeOffLog', 'Write-Off Log')}
+          <Button variant="secondary" leftIcon={<AlertTriangle size={16} />} onClick={() => requirePermission(t('parts.unlockWriteOffLog'), () => setIsWriteOffLogOpen(true))}>
+            {t('inventory.writeOffLog')}
           </Button>
-          <Button variant="secondary" leftIcon={<Package size={16} />} onClick={() => setIsPrintOpen(true)}>
-            {t('parts.printLabels', 'Print Labels')}
-          </Button>
-          <Button leftIcon={<Plus size={16} />} onClick={() => requirePermission('add a new part', () => setIsAddOpen(true))}>
-            {t('parts.addPart', 'Add Part')}
-          </Button>
+          <Button variant="secondary" leftIcon={<Package size={16} />} onClick={() => setIsPrintOpen(true)}>{t('parts.printLabels')}</Button>
+          <Button leftIcon={<Plus size={16} />} onClick={() => requirePermission(t('parts.unlockAdd'), () => setIsAddOpen(true))}>{t('parts.addPart')}</Button>
         </div>
       </div>
 
-      {/* Mode Tabs (Segmented Apple Pill style) */}
       <div className={styles.categoryTabs}>
-        <button
-          type="button"
-          className={[styles.categoryTab, activeTab === 'inventory' && styles.categoryTabActive].filter(Boolean).join(' ')}
-          onClick={() => setActiveTab('inventory')}
-        >
-          <span>📦 {t('parts.inventoryTab')}</span>
-          <span className={styles.tabCount}>{parts.length}</span>
+        <button type="button" className={[styles.categoryTab, activeTab === 'inventory' && styles.categoryTabActive].filter(Boolean).join(' ')}
+          aria-pressed={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')}>
+          <span>{t('parts.inventoryTab')}</span><span className={styles.tabCount}>{parts.length}</span>
         </button>
         {permissions.parts_sell && (
-          <button 
-            type="button"
-            className={[styles.categoryTab, activeTab === 'pos' && styles.categoryTabActive].filter(Boolean).join(' ')}
-            onClick={() => setActiveTab('pos')}
-          >
-            <span>🛒 {t('parts.posTab')}</span>
-            <span className={styles.tabCount}>{getItemCount() > 0 ? `${getItemCount()} in cart` : t('parts.posTab')}</span>
+          <button type="button" className={[styles.categoryTab, activeTab === 'pos' && styles.categoryTabActive].filter(Boolean).join(' ')}
+            aria-pressed={activeTab === 'pos'} onClick={() => setActiveTab('pos')}>
+            <span>{t('parts.posTab')}</span><span className={styles.tabCount}>{itemCount > 0 ? t('parts.inCart', { count: itemCount }) : t('parts.posTab')}</span>
           </button>
         )}
-        <button
-          type="button"
-          className={[styles.categoryTab, activeTab === 'invoices' && styles.categoryTabActive].filter(Boolean).join(' ')}
-          onClick={() => setActiveTab('invoices')}
-        >
-          <span>📄 {t('parts.invoicesTab')}</span>
-        </button>
+        <button type="button" className={[styles.categoryTab, activeTab === 'invoices' && styles.categoryTabActive].filter(Boolean).join(' ')}
+          aria-pressed={activeTab === 'invoices'} onClick={() => setActiveTab('invoices')}>{t('parts.invoicesTab')}</button>
       </div>
 
-      {activeTab === 'inventory' ? (
-        // ─── INVENTORY TAB ──────────────────────────────────────────────
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {/* Interactive 6-KPI Summary Grid */}
-          <div className={styles.summaryGrid}>
-            <div
-              className={[styles.summaryCard, statusFilter === 'all' && styles.summaryCardActive].filter(Boolean).join(' ')}
-              onClick={() => { setStatusFilter('all'); setCurrentPage(1); }}
-              onKeyDown={onCardKeyDown(() => { setStatusFilter('all'); setCurrentPage(1); })}
-              role="button"
-              tabIndex={0}
-              title="Click to view all parts"
-            >
-              <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>{t('parts.totalParts')}</span>
-                <div className={[styles.summaryIconWrap, styles.iconTotal].join(' ')}><Package size={16} /></div>
-              </div>
-              <p className={styles.summaryValue}>{parts.length}</p>
-            </div>
-
-            <div
-              className={[styles.summaryCard, statusFilter === 'in_stock' && styles.summaryCardActive].filter(Boolean).join(' ')}
-              onClick={() => { setStatusFilter(statusFilter === 'in_stock' ? 'all' : 'in_stock'); setCurrentPage(1); }}
-              onKeyDown={onCardKeyDown(() => { setStatusFilter(statusFilter === 'in_stock' ? 'all' : 'in_stock'); setCurrentPage(1); })}
-              role="button"
-              tabIndex={0}
-              title="Click to filter In Stock"
-            >
-              <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>{t('inventory.inStock')}</span>
-                <div className={[styles.summaryIconWrap, styles.iconInStock].join(' ')}><CheckCircle2 size={16} /></div>
-              </div>
-              <p className={styles.summaryValue} style={{ color: '#16a34a' }}>
-                {parts.filter(p => p.stockStatus === 'in_stock').length}
-              </p>
-            </div>
-
-            <div
-              className={[styles.summaryCard, statusFilter === 'low_stock' && styles.summaryCardActive].filter(Boolean).join(' ')}
-              onClick={() => { setStatusFilter(statusFilter === 'low_stock' ? 'all' : 'low_stock'); setCurrentPage(1); }}
-              onKeyDown={onCardKeyDown(() => { setStatusFilter(statusFilter === 'low_stock' ? 'all' : 'low_stock'); setCurrentPage(1); })}
-              role="button"
-              tabIndex={0}
-              title="Click to filter Low Stock"
-            >
-              <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>{t('inventory.lowStock')}</span>
-                <div className={[styles.summaryIconWrap, styles.iconLowStock].join(' ')}><AlertCircle size={16} /></div>
-              </div>
-              <p className={styles.summaryValue} style={{ color: '#d97706' }}>
-                {parts.filter(p => p.stockStatus === 'low_stock').length}
-              </p>
-            </div>
-
-            <div
-              className={[styles.summaryCard, statusFilter === 'out_of_stock' && styles.summaryCardActive].filter(Boolean).join(' ')}
-              onClick={() => { setStatusFilter(statusFilter === 'out_of_stock' ? 'all' : 'out_of_stock'); setCurrentPage(1); }}
-              onKeyDown={onCardKeyDown(() => { setStatusFilter(statusFilter === 'out_of_stock' ? 'all' : 'out_of_stock'); setCurrentPage(1); })}
-              role="button"
-              tabIndex={0}
-              title="Click to filter Out of Stock"
-            >
-              <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>{t('inventory.outOfStock')}</span>
-                <div className={[styles.summaryIconWrap, styles.iconOutStock].join(' ')}><XCircle size={16} /></div>
-              </div>
-              <p className={styles.summaryValue} style={{ color: '#dc2626' }}>
-                {parts.filter(p => p.stockStatus === 'out_of_stock').length}
-              </p>
-            </div>
-
-            {canViewCosts && (
-              <div className={styles.summaryCard} style={{ cursor: 'default' }}>
-                <div className={styles.summaryCardTop}>
-                  <span className={styles.summaryLabel}>{t('parts.costValuation')}</span>
-                  <div className={[styles.summaryIconWrap, styles.iconValuation].join(' ')}><DollarSign size={16} /></div>
-                </div>
-                <p className={styles.summaryValue}>{formatPrivateCurrency(totalInventoryValue)}</p>
-              </div>
-            )}
-
-            <div className={styles.summaryCard} style={{ cursor: 'default' }}>
-              <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>{t('parts.potentialRevenue')}</span>
-                <div className={[styles.summaryIconWrap, styles.iconRevenue].join(' ')}><TrendingUp size={16} /></div>
-              </div>
-              <p className={styles.summaryValue}>{formatCurrency(potentialRevenue)}</p>
-            </div>
-          </div>
-
-          {/* Catalog Table Card */}
-          <div className={styles.catalogCard}>
-            <div className={styles.tableHeader}>
-              <div className={styles.headerLeft}>
-                <h2 className={styles.tableTitle}>{t('parts.catalogTitle')}</h2>
-                <span className={styles.itemCountBadge}>{t('parts.modelsCount', { count: sortedGroups.length })}</span>
-              </div>
-              <div className={styles.headerActions}>
-                <Select
-                  options={[
-                    { value: 'all', label: t('parts.allStatus') },
-                    { value: 'in_stock', label: t('inventory.inStock') },
-                    { value: 'low_stock', label: t('inventory.lowStock') },
-                    { value: 'out_of_stock', label: t('inventory.outOfStock') },
-                  ]}
-                  value={statusFilter}
-                  onChange={(v) => { setStatusFilter(v); setCurrentPage(1); }}
-                />
-                <SearchInput
-                  value={searchQuery}
-                  onChange={(v) => { setSearchQuery(v); setCurrentPage(1); }}
-                  placeholder={t('parts.searchPlaceholder')}
-                  className={styles.search}
-                />
-              </div>
-            </div>
-
-            {partsError && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', marginBottom: '10px', borderRadius: '8px', background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: '13px' }}>
-                <AlertCircle size={16} />
-                <span style={{ flex: 1 }}>{partsError}</span>
-                <Button size="sm" variant="secondary" onClick={() => { fetchParts(); }}>{t('parts.retry')}</Button>
-              </div>
-            )}
-            {isLoadingParts && !partsError && (
-              <div style={{ padding: '12px 14px', fontSize: '13px', color: '#64748b' }}>{t('parts.loadingParts')}</div>
-            )}
-
-            <div className={styles.tableWrapper}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th style={{ width: 36 }}></th>
-                    <th className={styles.th} onClick={() => handleSort('name')} aria-sort={sortAria('name')} tabIndex={0} onKeyDown={onThKeyDown('name')}>
-                      {t('parts.partName')} <SortIcon col="name" />
-                    </th>
-                    <th className={styles.th} onClick={() => handleSort('sku')} aria-sort={sortAria('sku')} tabIndex={0} onKeyDown={onThKeyDown('sku')}>
-                      SKU <SortIcon col="sku" />
-                    </th>
-                    <th className={styles.th} onClick={() => handleSort('location')} aria-sort={sortAria('location')} tabIndex={0} onKeyDown={onThKeyDown('location')}>
-                      {t('parts.location')} <SortIcon col="location" />
-                    </th>
-                    {canViewCosts && (
-                      <th className={styles.th} onClick={() => handleSort('costPrice')} aria-sort={sortAria('costPrice')} tabIndex={0} onKeyDown={onThKeyDown('costPrice')}>
-                        {t('parts.buyPriceCost')} <SortIcon col="costPrice" />
-                      </th>
-                    )}
-                    <th className={styles.th} onClick={() => handleSort('price')} aria-sort={sortAria('price')} tabIndex={0} onKeyDown={onThKeyDown('price')}>
-                      {t('parts.sellPrice')} <SortIcon col="price" />
-                    </th>
-                    <th className={styles.th} onClick={() => handleSort('stock')} aria-sort={sortAria('stock')} tabIndex={0} onKeyDown={onThKeyDown('stock')}>
-                      {t('parts.stock')} <SortIcon col="stock" />
-                    </th>
-                    {canViewCosts && (
-                      <th className={styles.th}>{t('parts.margin')}</th>
-                    )}
-                    <th className={styles.th} onClick={() => handleSort('stockStatus')} aria-sort={sortAria('stockStatus')} tabIndex={0} onKeyDown={onThKeyDown('stockStatus')}>
-                      {t('parts.statusCol')} <SortIcon col="stockStatus" />
-                    </th>
-                    <th className={styles.th} style={{ textAlign: 'right' }}>{t('parts.actions')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedGroups.length === 0 ? (
-                    <tr>
-                      <td colSpan={canViewCosts ? 10 : 8} style={{ padding: '40px 20px', textAlign: 'center' }}>
-                        <EmptyState
-                          title={t('parts.noParts')}
-                          description={t('parts.noPartsDesc')}
-                        />
-                      </td>
-                    </tr>
-                  ) : paginatedGroups.map(group => {
-                    const isExpanded = expandedGroups.has(group.id);
-                    const isSingle = group.variants.length === 1;
-                    const single = group.variants[0];
-                    const singleMargin = isSingle ? margin(single) : null;
-                    
-                    return (
-                      <React.Fragment key={group.id}>
-                        <tr className={[styles.tr, styles.trGroup].join(' ')}>
-                          <td className={styles.td} onClick={() => !isSingle && toggleExpand(group.id)} style={{ cursor: !isSingle ? 'pointer' : 'default' }}>
-                            {!isSingle ? (isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />) : null}
-                          </td>
-                          <td className={styles.td} onClick={() => !isSingle ? toggleExpand(group.id) : null} style={{ cursor: !isSingle ? 'pointer' : 'default' }}>
-                            <div className={styles.productCell}>
-                              <div className={styles.productAvatar}>{group.name[0]}</div>
-                              <div>
-                                <p className={styles.productName}>{group.name} {group.model}</p>
-                                <div className={styles.productMeta}>
-                                  {!isSingle ? (
-                                    <span className={styles.tagPill}>{group.variants.length} Variants</span>
-                                  ) : (
-                                    <span>{single.color || 'Standard'}</span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                          <td className={styles.td}>
-                            {isSingle ? <code className={styles.sku}>{single.sku}</code> : <span style={{ color: 'var(--color-on-surface-variant)' }}>-</span>}
-                          </td>
-                          <td className={styles.td}>{isSingle ? single.location || '-' : '-'}</td>
-                          {canViewCosts && (
-                            <td className={styles.td} data-col="cost">
-                              <span data-privacy-cost className="privacy-cost">
-                                {isSingle
-                                  ? formatPrivateCurrency(single.costPrice)
-                                  : group.minCost === group.maxCost
-                                    ? formatPrivateCurrency(group.minCost)
-                                    : (isPrivacyActive ? '•••••' : `${formatCurrency(group.minCost)} - ${formatCurrency(group.maxCost)}`)}
-                              </span>
-                            </td>
-                          )}
-                          <td className={styles.td} style={{ fontWeight: 600 }}>
-                            {isSingle
-                              ? formatCurrency(single.price)
-                              : group.minPrice === group.maxPrice
-                                ? formatCurrency(group.minPrice)
-                                : `${formatCurrency(group.minPrice)} - ${formatCurrency(group.maxPrice)}`}
-                          </td>
-                          <td className={styles.td}>
-                            <strong>{group.totalStock}</strong> {t('parts.units', { count: group.totalStock })}
-                          </td>
-                          {canViewCosts && (
-                            <td className={styles.td} data-col="margin">
-                              {singleMargin !== null ? (
-                                <span data-privacy-cost className={[singleMargin >= 20 ? styles.marginGood : singleMargin >= 10 ? styles.marginOk : styles.marginBad, 'privacy-cost'].join(' ')}>
-                                  {isPrivacyActive ? '••%' : `${singleMargin.toFixed(1)}%`}
-                                </span>
-                              ) : '-'}
-                            </td>
-                          )}
-                          <td className={styles.td}><StockBadge status={group.stockStatus} /></td>
-                          <td className={styles.td} style={{ textAlign: 'right' }}>
-                            {isSingle && (() => {
-                              const v = single;
-                              return (
-                                <PartRowActions
-                                  product={v}
-                                  isRestocking={restockingId === v.id}
-                                  restockAmt={restockAmt}
-                                  restockCost={restockMeta.cost}
-                                  canViewCosts={canViewCosts}
-                                  onView={() => setDetailProduct(v)}
-                                  onEdit={() => requirePermission('edit this product', () => setEditingProduct(v))}
-                                  onRestockOpen={() => requirePermission('restock products', () => { setRestockingId(v.id); setRestockAmt(''); setRestockMeta({ supplier: '', cost: '', note: '' }); })}
-                                  onWriteOff={() => requirePermission('write off products', () => setWriteOffProduct(v))}
-                                  onRestockAmtChange={setRestockAmt}
-                                  onRestockCostChange={value => setRestockMeta(m => ({ ...m, cost: value }))}
-                                  onSaveRestock={() => handleRestock(v)}
-                                  onCancelRestock={() => { setRestockingId(null); setRestockAmt(''); }}
-                                />
-                              );
-                            })()}
-                          </td>
-                        </tr>
-                        
-                        {/* Variant Sub-Rows */}
-                        {isExpanded && group.variants.map(product => {
-                          const vMargin = margin(product);
-                          return (
-                            <tr key={product.id} className={[styles.tr, styles.trVariant].join(' ')}>
-                              <td className={styles.td}><CornerDownRight size={14} style={{ marginLeft: 8, opacity: 0.5 }} /></td>
-                              <td className={styles.td}><p className={styles.productName} style={{ paddingLeft: '8px' }}>{product.color || product.name}</p></td>
-                              <td className={styles.td}><code className={styles.sku}>{product.sku}</code></td>
-                              <td className={styles.td}>{product.location || '-'}</td>
-                              {canViewCosts && (
-                                <td className={styles.td} data-col="cost">
-                                  <span data-privacy-cost className="privacy-cost">
-                                    {formatPrivateCurrency(product.costPrice)}
-                                  </span>
-                                </td>
-                              )}
-                              <td className={styles.td} style={{ fontWeight: 600 }}>{formatCurrency(product.price)}</td>
-                              <td className={styles.td}>{t('parts.units', { count: product.stock })}</td>
-                              {canViewCosts && (
-                                <td className={styles.td} data-col="margin">
-                                  <span data-privacy-cost className={[vMargin >= 20 ? styles.marginGood : vMargin >= 10 ? styles.marginOk : styles.marginBad, 'privacy-cost'].join(' ')}>
-                                    {isPrivacyActive ? '••%' : `${vMargin.toFixed(1)}%`}
-                                  </span>
-                                </td>
-                              )}
-                              <td className={styles.td}><StockBadge status={product.stockStatus} /></td>
-                              <td className={styles.td} style={{ textAlign: 'right' }}>
-                                <PartRowActions
-                                  product={product}
-                                  isRestocking={restockingId === product.id}
-                                  restockAmt={restockAmt}
-                                  restockCost={restockMeta.cost}
-                                  canViewCosts={canViewCosts}
-                                  onView={() => setDetailProduct(product)}
-                                  onEdit={() => requirePermission('edit this product', () => setEditingProduct(product))}
-                                  onRestockOpen={() => requirePermission('restock products', () => { setRestockingId(product.id); setRestockAmt(''); setRestockMeta({ supplier: '', cost: '', note: '' }); })}
-                                  onWriteOff={() => requirePermission('write off products', () => setWriteOffProduct(product))}
-                                  onRestockAmtChange={setRestockAmt}
-                                  onRestockCostChange={value => setRestockMeta(m => ({ ...m, cost: value }))}
-                                  onSaveRestock={() => handleRestock(product)}
-                                  onCancelRestock={() => { setRestockingId(null); setRestockAmt(''); }}
-                                />
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {sortedGroups.length > 0 && (
-              <div style={{ padding: '12px 16px', borderTop: '1px solid #e2e8f0' }}>
-                <Pagination
-                  currentPage={currentPage}
-                  totalPages={totalPages}
-                  onPageChange={setCurrentPage}
-                  itemsPerPage={itemsPerPage}
-                  totalItems={sortedGroups.length}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      ) : activeTab === 'pos' ? (
-        // ─── POS TAB ────────────────────────────────────────────────────
-        <div className={styles.posContainer}>
-          <div className={styles.productsPanel}>
-            <div className={styles.catalogCard} style={{ padding: '12px 16px' }}>
-              <SearchInput
-                value={searchQuery}
-                onChange={setSearchQuery}
-                placeholder="Search parts to sell…"
-                className={styles.search}
-              />
-            </div>
-
-            <div className={styles.productsGrid}>
-              {groups.map(group => (
-                <ProductCard 
-                  key={group.id} 
-                  group={group} 
-                  onAdd={() => {
-                    if (group.variants.length === 1) {
-                      addToCart(group.variants[0]);
-                    } else {
-                      setSelectedGroup(group);
-                    }
-                  }} 
-                />
-              ))}
-            </div>
-          </div>
-          
-          {/* Cart Sidebar */}
-          <div className={posStyles.cartPanel}>
-            <div className={posStyles.cartHeader}>
-              <div className={posStyles.cartTitle}>
-                <ShoppingCart size={20} />
-                <span>{t('parts.cart')}</span>
-                {getItemCount() > 0 && (
-                  <span className={posStyles.cartCount}>{getItemCount()}</span>
-                )}
-                {suspendedCarts.length > 0 && (
-                  <button 
-                    className={posStyles.suspendedBadge} 
-                    onClick={() => setShowSuspended(!showSuspended)}
-                  >
-                    {t('parts.onHold', { count: suspendedCarts.length })}
-                  </button>
-                )}
-              </div>
-              {(items.length > 0 || customerName) && (
-                <button className={posStyles.clearBtn} onClick={() => setConfirmClearCart(true)}>
-                  {t('parts.clear')}
-                </button>
-              )}
-            </div>
-
-            {/* Attached B2B Account or Retail Customer Banner */}
-            {selectedB2BCustomer && !showSuspended ? (
-              <div className={b2bStyles.accountCard} style={{ margin: '8px 12px 0 12px' }}>
-                <div className={b2bStyles.accountCardHeader}>
-                  <div className={b2bStyles.accountTitleGroup}>
-                    <div className={b2bStyles.shopIconBadge}>
-                      <Store size={18} />
-                    </div>
-                    <div className={b2bStyles.shopInfo}>
-                      <span className={b2bStyles.shopName}>
-                        {selectedB2BCustomer.shopName || selectedB2BCustomer.name}
-                      </span>
-                      <span className={b2bStyles.ownerName}>
-                        {selectedB2BCustomer.name} · 📞 {selectedB2BCustomer.phone}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className={posStyles.detachCustomerBtn}
-                    onClick={() => {
-                      setSelectedB2BCustomer(null);
-                      setCustomerName('');
-                      toast.info(t('parts.b2bDetached'), t('parts.walkInMsg'));
-                    }}
-                    title="Detach commercial account"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}>
-                  <span style={{ color: '#64748b' }}>{t('parts.currentAccountDebt')}</span>
-                  <strong style={{ color: (getCustomerDebtTotal(selectedB2BCustomer.id) || selectedB2BCustomer.totalDebt || 0) > 0 ? '#dc2626' : '#16a34a' }}>
-                    {formatPrivateCurrency(getCustomerDebtTotal(selectedB2BCustomer.id) || selectedB2BCustomer.totalDebt || 0)}
-                  </strong>
-                </div>
-
-                <button
-                  type="button"
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#2563eb',
-                    fontSize: '11.5px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    padding: '2px 0 0 0',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}
-                  onClick={() => setProfilePanelCustomer(selectedB2BCustomer)}
-                >
-                  <Eye size={12} /> Open 360° Profile & Statement
-                </button>
-              </div>
-            ) : customerName && !showSuspended ? (
-              <div className={posStyles.attachedCustomerBanner}>
-                <div className={posStyles.attachedCustomerLeft}>
-                  <div className={posStyles.attachedCustomerAvatar}>
-                    <User size={14} />
-                  </div>
-                  <div className={posStyles.attachedCustomerInfo}>
-                    <span className={posStyles.attachedCustomerLabel}>Customer Attached</span>
-                    <span className={posStyles.attachedCustomerName}>{customerName}</span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className={posStyles.detachCustomerBtn}
-                  onClick={() => {
-                    setCustomerName('');
-                    setSelectedB2BCustomer(null);
-                    toast.info(t('parts.customerDetached'), t('parts.walkInCustomerMsg'));
-                  }}
-                  title="Detach customer"
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            ) : null}
-
-            {/* Held Carts Dropdown */}
-            {showSuspended && suspendedCarts.length > 0 && (
-              <div className={posStyles.suspendedList}>
-                <div className={posStyles.suspendedListHeader}>
-                  <span>{t('parts.heldCarts')}</span>
-                  <button onClick={() => setShowSuspended(false)}><X size={14} /></button>
-                </div>
-                {suspendedCarts.map((sc: SuspendedCart) => {
-                  const scItemsTotal = sc.items.reduce((s, i) => s + (i.unitPrice ?? i.product.price) * i.quantity, 0);
-                  const scFinalTotal = Math.max(0, scItemsTotal - heldBasketDiscountOf(sc.items, sc.discount));
-
-                  return (
-                    <div key={sc.id} className={posStyles.suspendedItem}>
-                      <div className={posStyles.suspendedItemInfo}>
-                        <span className={posStyles.suspendedCustomer}>{sc.customerName || t('parts.walkInCustomer')}</span>
-                        <span className={posStyles.suspendedMeta}>
-                          {sc.items.reduce((s, i) => s + i.quantity, 0)} items · {formatCurrency(scFinalTotal)}
-                        </span>
-                      </div>
-                      <div className={posStyles.suspendedActions}>
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            const res = resumeCart(sc.id);
-                            setLineDiscountText({});
-                            if (res.warnings && res.warnings.length > 0) {
-                              res.warnings.forEach(w => toast.warning(t('parts.stockLevelAlert'), w));
-                            }
-                            setShowSuspended(false);
-                          }}
-                        >
-                          {t('parts.resume')}
-                        </Button>
-                        <button className={posStyles.discardBtn} onClick={() => setDiscardTarget(sc)}>
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Cart Items List */}
-            <div className={posStyles.cartItems}>
-              {items.length === 0 ? (
-                <div className={posStyles.emptyCart}>
-                  {selectedB2BCustomer ? (
-                    <>
-                      <div className={posStyles.customerEmptyIconWrap} style={{ background: '#eff6ff', color: '#2563eb' }}>
-                        <Store size={30} />
-                      </div>
-                      <p className={posStyles.emptyCartTitle}>B2B Account Attached</p>
-                      <p className={posStyles.attachedCustomerHighlight}>
-                        {selectedB2BCustomer.shopName || selectedB2BCustomer.name}
-                      </p>
-                      <p className={posStyles.emptyCartSub}>Select repair parts to dispatch or charge to this account.</p>
-                    </>
-                  ) : customerName ? (
-                    <>
-                      <div className={posStyles.customerEmptyIconWrap}>
-                        <UserCheck size={30} />
-                      </div>
-                      <p className={posStyles.emptyCartTitle}>Customer Attached</p>
-                      <p className={posStyles.attachedCustomerHighlight}>{customerName}</p>
-                      <p className={posStyles.emptyCartSub}>Select parts from the catalog to add items to this sale.</p>
-                    </>
-                  ) : (
-                    <>
-                      <ShoppingCart size={40} className={posStyles.emptyCartIcon} />
-                      <p>Cart is empty</p>
-                      <span>Select parts from the grid to add to sale</span>
-                    </>
-                  )}
-                </div>
-              ) : (
-                items.map(item => {
-                  const charged = item.unitPrice ?? item.product.price;
-                  const concession = lineDiscountOf(item.product.price, charged, item.quantity);
-                  const gated = requiresLineDiscountApproval(isAdmin ? 'admin' : 'sales_agent', concession.percent);
-                  return (
-                  <div key={item.product.id} className={posStyles.cartItem}>
-                    <div className={posStyles.cartItemDetails}>
-                      <p className={posStyles.cartItemName}>{item.product.name} {item.product.model}</p>
-                      <p className={posStyles.cartItemPrice}>
-                        {formatCurrency(charged)} each
-                        {concession.granted > 0 && (
-                          <span title={gated ? `Above the ${DISCOUNT_APPROVAL_PERCENT}% a staff account may give on its own` : undefined}
-                            style={{ marginLeft: 6, fontWeight: 700, color: gated ? '#b45309' : '#dc2626' }}>
-                            −{concession.percent.toFixed(1)}%
-                          </span>
-                        )}
-                      </p>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={lineDiscountText[item.product.id] ?? (concession.granted > 0 ? String(Math.round(concession.granted * 100) / 100) : '')}
-                        onChange={e => handleLineDiscount(item, e.target.value)}
-                        placeholder={`Discount (max ${DISCOUNT_APPROVAL_PERCENT}%)`}
-                        aria-label={`Discount on ${item.product.name} ${item.product.model || ''}`.trim()}
-                        title={`Dinars off this line. Over ${DISCOUNT_APPROVAL_PERCENT}% of what it is worth needs an admin.`}
-                        style={{
-                          marginTop: 4,
-                          width: 110,
-                          padding: '3px 6px',
-                          fontSize: 12,
-                          borderRadius: 6,
-                          border: `1px solid ${gated ? '#f59e0b' : '#d1d5db'}`,
-                        }}
-                      />
-                    </div>
-                    <div className={posStyles.cartItemControls}>
-                      <button
-                        className={posStyles.qtyBtn}
-                        onClick={() => changeLineQuantity(item, item.quantity - 1)}
-                      >
-                        <Minus size={12} />
-                      </button>
-                      <span className={posStyles.qtyDisplay}>{item.quantity}</span>
-                      <button
-                        className={posStyles.qtyBtn}
-                        onClick={() => changeLineQuantity(item, item.quantity + 1)}
-                        disabled={item.quantity >= item.product.stock}
-                      >
-                        <Plus size={12} />
-                      </button>
-                      <button
-                        className={posStyles.deleteBtn}
-                        onClick={() => removeFromCart(item.product.id)}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                  );
-                })
-              )}
-            </div>
-
-            {/* Cart Footer */}
-            {items.length > 0 && (
-              <div className={posStyles.cartFooter}>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <div style={{ flex: 1 }}>
-                    <CustomerAutocompleteInput
-                      accountType="shop_repairer"
-                      placeholder="Search phone shop or repairer..."
-                      value={customerName}
-                      onChange={(name, cust) => {
-                        setCustomerName(name);
-                        if (cust) {
-                          setSelectedB2BCustomer(cust);
-                          if (cust.wholesaleDiscountPercent && cust.wholesaleDiscountPercent > 0) {
-                            setDiscount({ type: 'percent', value: cust.wholesaleDiscountPercent });
-                            toast.success('Wholesale Discount Applied', `${cust.wholesaleDiscountPercent}% discount applied for ${cust.shopName || cust.name}.`);
-                          }
-                        } else if (!name.trim()) {
-                          setSelectedB2BCustomer(null);
-                        }
-                      }}
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    style={{ height: '40px', padding: '0 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
-                    leftIcon={<Store size={14} />}
-                    onClick={() => setIsQuickAddShopOpen(true)}
-                    title="Register new B2B phone store / repairer account"
-                  >
-                    + Shop
-                  </Button>
-                </div>
-
-                <div className={posStyles.summaryRow}>
-                  <span>Subtotal</span>
-                  <span>{formatCurrency(getSubtotal())}</span>
-                </div>
-
-                {getLinesConcessionTotal() > 0 && (
-                  <div
-                    className={posStyles.summaryRow}
-                    title="These dinars are already off the line prices and the subtotal above — they are not taken off twice."
-                  >
-                    <span>Given away on lines</span>
-                    <span style={{ color: '#dc2626' }}>{formatCurrency(getLinesConcessionTotal())}</span>
-                  </div>
-                )}
-
-                <div className={posStyles.discountRow}>
-                  <span>{pendingDiscountValue === null && discount?.type === 'percent' ? 'Discount (%)' : 'Discount'}</span>
-                  <div className={posStyles.discountInputWrapper}>
-                    <input
-                      type="number"
-                      min="0"
-                      max={getSubtotal()}
-                      title={
-                        pendingDiscountValue === null && discount?.type === 'percent'
-                          ? `A promise of ${discount.value}% of the basket — it grows and shrinks with what is on the counter. Typing here replaces it with a number of dinars.`
-                          : `Dinars off the basket. ${DISCOUNT_APPROVAL_PERCENT}% of it or less; deeper needs an admin.`
-                      }
-                      value={pendingDiscountValue !== null ? pendingDiscountValue.toString() : (discount?.value ? discount.value.toString() : '')}
-                      onChange={e => {
-                        const raw = e.target.value;
-                        if (raw === '') {
-                          setPendingDiscountValue(null);
-                          setDiscount(null);
-                          return;
-                        }
-                        const v = Number(raw);
-                        // One rule for one shop: the share of the basket, not a number of
-                        // dinars, and the same threshold the till and the phone run.
-                        if (requiresDiscountApproval(isAdmin ? 'admin' : 'sales_agent', getSubtotal(), { mode: 'flat', value: v })) {
-                          setPendingDiscountValue(v);
-                          setShowDiscountUnlock(true);
-                        } else if (v > 0) {
-                          setPendingDiscountValue(null);
-                          setDiscount({ type: 'flat', value: v });
-                        } else {
-                          setPendingDiscountValue(null);
-                          setDiscount(null);
-                        }
-                      }}
-                      placeholder="0"
-                      className={posStyles.discountInput}
-                    />
-                  </div>
-                </div>
-
-                {basketDiscountAmount > 0 && (
-                  <div className={posStyles.totalRow} style={{ color: '#dc2626' }}>
-                    <span>Discount ({basketDiscountPercent.toFixed(1)}%)</span>
-                    <span>-{formatCurrency(basketDiscountAmount)}</span>
-                  </div>
-                )}
-
-                <div className={posStyles.totalRow}>
-                  <span>Total</span>
-                  <span className={posStyles.totalAmount}>{formatCurrency(getTotal())}</span>
-                </div>
-
-                {!selectedB2BCustomer ? (
-                  <div className={posStyles.paymentMethod}>
-                    <label>Walk-in Payment Method</label>
-                    <div className={posStyles.methodGrid}>
-                      {paymentMethods.map(method => (
-                        <button
-                          key={method.value}
-                          type="button"
-                          className={[
-                            posStyles.methodBtn,
-                            selectedMethod === method.value && posStyles.methodBtnActive
-                          ].filter(Boolean).join(' ')}
-                          onClick={() => {
-                            setSelectedMethod(method.value);
-                            setPayments([{ method: method.value, amount: getTotal() }]);
-                          }}
-                        >
-                          {method.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ background: '#f1f5f9', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Store size={14} style={{ color: '#2563eb' }} />
-                    <span>{t('parts.b2bSettlementNote')}</span>
-                  </div>
-                )}
-
-                <div className={posStyles.cartButtons}>
-                  <Button
-                    variant="secondary"
-                    onClick={() => { suspendCart(); setLineDiscountText({}); }}
-                    style={{ flex: '1' }}
-                  >
-                    {t('parts.holdCart')}
-                  </Button>
-                  
-                  {selectedB2BCustomer ? (
-                    <Button
-                      onClick={() => setIsB2BCheckoutOpen(true)}
-                      isLoading={isProcessing}
-                      disabled={isProcessing || items.length === 0}
-                      style={{ flex: '2', background: '#1d4ed8' }}
-                      leftIcon={<Store size={16} />}
-                    >
-                      {t('parts.processB2b', { total: formatCurrency(getTotal()) })}
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={handleCheckout}
-                      isLoading={isProcessing}
-                      disabled={isProcessing || items.length === 0}
-                      style={{ flex: '2' }}
-                    >
-                      {t('parts.checkout', { total: formatCurrency(getTotal()) })}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        /* ─── INVOICES & ORDERS TAB ──────────────────────────────────────── */
-        <PartsInvoicesTab
-          customers={customers}
-          onOpenCustomerProfile={(cust) => setProfilePanelCustomer(cust)}
-        />
-      )}
+      <div hidden={activeTab !== 'inventory'}>
+        <PartsInventoryTab initialLoading={initialLoading} canViewCosts={canViewCosts} searchRequest={inventorySearch} requirePermission={requirePermission}
+          onView={setDetailProduct} onEdit={editProduct} onWriteOff={writeOff} onRestockAssistant={openRestockAssistant} />
+      </div>
+      <div hidden={activeTab !== 'pos'}>
+        <PartsPosTab initialLoading={initialLoading} customerRequest={customerRequest} onSelectGroup={setSelectedGroup} onOpenCustomerProfile={setProfilePanelCustomer} />
+      </div>
+      {activeTab === 'invoices' && <PartsInvoicesTab customers={customers} onOpenCustomerProfile={setProfilePanelCustomer} />}
     </div>
   );
 };

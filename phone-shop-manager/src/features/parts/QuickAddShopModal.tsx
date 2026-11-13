@@ -54,7 +54,7 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
     onClose();
   };
 
-  const executeSubmit = async () => {
+  const executeSubmit = async (overrideCreditApproval = false) => {
     setIsSubmitting(true);
     setError(null);
 
@@ -101,7 +101,7 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
     }
 
     const limitNum = parseFloat(creditLimit);
-    if (!isNaN(limitNum) && limitNum > 0 && !isAdmin && !creditLimitApproved) {
+    if (!isNaN(limitNum) && limitNum > 0 && !isAdmin && !creditLimitApproved && !overrideCreditApproval) {
       setShowAdminUnlock(true);
       return;
     }
@@ -231,7 +231,8 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
         onSuccess={() => {
           setCreditLimitApproved(true);
           setShowAdminUnlock(false);
-          setTimeout(() => executeSubmit(), 100);
+          // Call directly with override flag instead of relying on setState + setTimeout (#5 audit fix).
+          void executeSubmit(true);
         }}
         actionName={t('parts.quickAdd.adminUnlockAction', {
           creditLimit,

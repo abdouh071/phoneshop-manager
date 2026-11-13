@@ -461,8 +461,15 @@ export const unifiedOfflineSyncService = {
           return realId ? { ...t, id: realId } : t;
         }),
       }));
+      const { usePartsCartStore } = await import('../store/partsCartStore');
+      usePartsCartStore.setState(state => ({
+        invoices: state.invoices.map(t => {
+          const realId = remapped.get(t.id);
+          return realId ? { ...t, id: realId } : t;
+        }),
+      }));
     } catch (e) {
-      console.warn('[UnifiedOfflineSync] Error updating cartStore:', e);
+      console.warn('[UnifiedOfflineSync] Error updating sale stores:', e);
     }
 
     return synced;

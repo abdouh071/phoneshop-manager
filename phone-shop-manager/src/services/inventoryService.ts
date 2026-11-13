@@ -142,7 +142,9 @@ const isLocalOnlyTarget = (id: string): boolean =>
 export const commitStockDelta = async (
   id: string,
   delta: number,
-  replayKey?: string
+  replayKey?: string,
+  /** Set to true for sale checkouts so an oversell attempt throws instead of clamping. */
+  throwOnOversell = false
 ): Promise<{ previousStock: number; stock: number; stockStatus: StockStatus }> =>
   withTimeout(
     runTransaction(db, async (tx) => {
@@ -163,6 +165,12 @@ export const commitStockDelta = async (
         };
       }
 
+      // Atomic oversell guard: for sale checkouts (throwOnOversell=true), throw if the
+      // server stock is insufficient so both debt and invoice are blocked before they write.
+      // For write-offs and manual adjustments the old Math.max clamping still applies.
+      if (throwOnOversell && delta < 0 && currentStock + delta < 0) {
+        throw new Error(`INSUFFICIENT_STOCK:${id}:requested=${Math.abs(delta)}:available=${currentStock}`);
+      }
       const nextStock = Math.max(0, currentStock + delta);
       const stockStatus = computeStockStatus(nextStock, threshold);
       tx.update(ref, {
@@ -501,6 +509,50 @@ export const inventoryService = {
       queueRelativeAdjustment();
       return { updated: updatedLocal, previousStock: currentStock, atomic: false };
     }
+  },
+
+  /**
+   * Like applyStockDelta but intended for point-of-sale checkouts. Passes
+   * `throwOnOversell=true` to commitStockDelta so the Firestore transaction
+   * rejects the write atomically when stock is insufficient, and re-throws
+   * INSUFFICIENT_STOCK errors instead of falling back to the offline queue.
+   */
+  applyStockDeltaForSale: async (
+    id: string,
+    delta: number
+  ): Promise<{ updated: PhoneModel; previousStock: number; atomic: boolean }> => {
+    const local = getLocalInventory();
+    const existing = local.find(p => p.id === id);
+    const currentStock = existing?.stock ?? 0;
+    const newStock = Math.max(0, currentStock + delta);
+    const threshold = existing?.lowStockThreshold ?? 1;
+    const stockStatus = computeStockStatus(newStock, threshold);
+    const updatedLocal: PhoneModel = existing
+      ? { ...existing, stock: newStock, stockStatus }
+      : ({ id, stock: newStock, stockStatus, name: 'Product' } as PhoneModel);
+
+    saveLocalInventory(local.map(p => p.id === id ? updatedLocal : p));
+
+    const replayKey = newIdempotencyKey('tx');
+
+    const queueRelativeAdjustment = (): void => {
+      savePendingStockAdjustments([
+        ...getPendingStockAdjustments(),
+        { id: replayKey, productId: id, delta, newStock, mode: 'relative', timestamp: new Date().toISOString() }
+      ]);
+    };
+
+    if (isLocalOnlyTarget(id)) {
+      queueRelativeAdjustment();
+      return { updated: updatedLocal, previousStock: currentStock, atomic: false };
+    }
+
+    // throwOnOversell=true: an INSUFFICIENT_STOCK error from the Firestore transaction
+    // propagates up and aborts the entire checkout before debt or invoice are created.
+    const authoritative = await commitStockDelta(id, delta, replayKey, true);
+    const reconciled: PhoneModel = { ...updatedLocal, stock: authoritative.stock, stockStatus: authoritative.stockStatus };
+    saveLocalInventory(getLocalInventory().map(p => (p.id === id ? reconciled : p)));
+    return { updated: reconciled, previousStock: authoritative.previousStock, atomic: true };
   },
 
   adjustStockAsync: async (id: string, delta: number): Promise<PhoneModel> => {

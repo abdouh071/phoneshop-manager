@@ -1505,7 +1505,33 @@
       "refund": "Refund",
       "unlockEditAction": "edit a past parts invoice",
       "unlockRefundAction": "refund a past parts invoice"
-    }
+    },
+    "addPartModal": {
+      "partAdded": "Part Added",
+      "partAddedDesc": "{{name}} has been added to inventory.",
+      "labelNotPrinted": "Label not printed",
+      "failedToAdd": "Failed to add part"
+    },
+    "editModal": {
+      "missingFields": "Missing Required Fields",
+      "partUpdated": "Part Updated",
+      "partUpdatedDesc": "{{name}} has been updated.",
+      "savedOffline": "Saved offline",
+      "savedOfflineDesc": "{{name}} is kept on this device and syncs when you reconnect.",
+      "savedRetrying": "Not saved to the server",
+      "savedRetryingDesc": "{{name}} is kept on this device and will retry syncing automatically."
+    },
+    "restockModal": {
+      "noItemsSelected": "No Items Selected",
+      "selectItemsToOrder": "Please select at least one item to order.",
+      "poCreated": "Purchase Order Created",
+      "poCreatedDesc": "PO for {{count}} parts ({{units}} units) generated successfully.",
+      "createPoFailed": "Failed to create Purchase Order.",
+      "selectItemsWhatsapp": "Please select items to send via WhatsApp.",
+      "selectItemsExport": "Please select items to export."
+    },
+    "insufficientStock": "Insufficient stock — another terminal may have just sold the last unit.",
+    "insufficientStockTitle": "Stock Unavailable"
   },
   "purchasing": {
     "title": "Purchasing",

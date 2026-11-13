@@ -1505,7 +1505,33 @@
       "refund": "Rembourser",
       "unlockEditAction": "modifier une ancienne facture de pièces",
       "unlockRefundAction": "rembourser une ancienne facture de pièces"
-    }
+    },
+    "addPartModal": {
+      "partAdded": "Pièce ajoutée",
+      "partAddedDesc": "{{name}} a été ajoutée à l'inventaire.",
+      "labelNotPrinted": "Étiquette non imprimée",
+      "failedToAdd": "Échec de l'ajout de la pièce"
+    },
+    "editModal": {
+      "missingFields": "Champs obligatoires manquants",
+      "partUpdated": "Pièce mise à jour",
+      "partUpdatedDesc": "{{name}} a été mise à jour.",
+      "savedOffline": "Enregistré hors ligne",
+      "savedOfflineDesc": "{{name}} est conservé sur cet appareil et synchronisé à la reconnexion.",
+      "savedRetrying": "Non enregistré sur le serveur",
+      "savedRetryingDesc": "{{name}} est conservé sur cet appareil et sera synchronisé automatiquement."
+    },
+    "restockModal": {
+      "noItemsSelected": "Aucun article sélectionné",
+      "selectItemsToOrder": "Veuillez sélectionner au moins un article à commander.",
+      "poCreated": "Bon de commande créé",
+      "poCreatedDesc": "BC pour {{count}} pièces ({{units}} unités) généré avec succès.",
+      "createPoFailed": "Échec de la création du bon de commande.",
+      "selectItemsWhatsapp": "Veuillez sélectionner les articles à envoyer via WhatsApp.",
+      "selectItemsExport": "Veuillez sélectionner les articles à exporter."
+    },
+    "insufficientStock": "Stock insuffisant — un autre terminal a peut-être vendu la dernière unité.",
+    "insufficientStockTitle": "Stock indisponible"
   },
   "purchasing": {
     "title": "Achats",

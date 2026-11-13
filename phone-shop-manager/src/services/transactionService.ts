@@ -81,7 +81,7 @@ export const transactionService = {
   },
 
   // Server-side query: strictly repair parts B2B invoices / sales only
-  getPartsTransactions: async (): Promise<SaleTransaction[]> => {
+  getPartsTransactions: async (options?: { allowLocalFallback?: boolean }): Promise<SaleTransaction[]> => {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       return getLocalTransactions().filter(t => t.saleType === 'parts_b2b');
     }
@@ -96,11 +96,16 @@ export const transactionService = {
         .map(d => docToTx(d.id, d.data() as Record<string, unknown>))
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-      const local = getLocalTransactions().filter(t => t.saleType === 'parts_b2b' && t.id.startsWith('offline_'));
+      const local = getLocalTransactions();
       const serverIds = new Set(items.map(i => i.id));
-      const merged = [...local.filter(l => !serverIds.has(l.id)), ...items];
+      const serverKeys = new Set(items.map(i => i.idempotencyKey).filter(Boolean));
+      const pending = local.filter(t => t.saleType === 'parts_b2b' && t.id.startsWith('offline_')
+        && !serverIds.has(t.id) && !(t.idempotencyKey && serverKeys.has(t.idempotencyKey)));
+      const merged = [...pending, ...items].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      saveLocalTransactions([...local.filter(t => t.saleType !== 'parts_b2b'), ...merged]);
       return merged;
     } catch (err) {
+      if (options?.allowLocalFallback === false) throw err;
       console.warn('Firestore parts transactions fetch failed, using local cache:', err);
       return getLocalTransactions().filter(t => t.saleType === 'parts_b2b');
     }

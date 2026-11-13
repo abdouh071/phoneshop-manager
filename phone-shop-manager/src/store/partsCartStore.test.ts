@@ -13,8 +13,8 @@
  * before the invoice exists, and a stock write that cannot be made durable aborts
  * the checkout before anything is billed.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { Customer, PhoneModel } from '../types';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { Customer, PhoneModel, SaleTransaction } from '../types';
 
 const captured = vi.hoisted(() => ({
   transactions: [] as Record<string, unknown>[],
@@ -25,6 +25,8 @@ const captured = vi.hoisted(() => ({
   /** The order of the awaited writes a checkout performs. */
   order: [] as string[],
   failStock: false,
+  user: { id: 'u1', name: 'Counter', role: 'admin' },
+  fetchInvoices: vi.fn<() => Promise<SaleTransaction[]>>(),
   /** What the till is handed when it asks for a reference. Real Firestore is not involved. */
   counter: { invoiceNumber: 'INV-PARTS-261104-0003', provisional: false } as {
     invoiceNumber: string;
@@ -43,7 +45,7 @@ vi.mock('../services/transactionService', () => ({
       captured.transactions.push(tx);
       return { ...tx, id: `tx_${captured.transactions.length}` };
     },
-    getPartsTransactions: async () => [],
+    getPartsTransactions: captured.fetchInvoices,
   },
 }));
 
@@ -64,7 +66,7 @@ vi.mock('../services/customerLogService', () => ({
 }));
 
 vi.mock('./authStore', () => ({
-  useAuthStore: { getState: () => ({ user: { id: 'u1', name: 'Counter', role: 'admin' } }) },
+  useAuthStore: { getState: () => ({ user: captured.user }) },
 }));
 
 vi.mock('./customerStore', () => ({
@@ -124,6 +126,13 @@ vi.mock('./inventoryStore', () => ({
         if (captured.failStock) throw new Error('stock write failed');
         return { id: productId, stock: 10 } as PhoneModel;
       },
+      // ForSale variant: same mock — also throws on failStock, closing the oversell test path.
+      adjustStockByAsyncForSale: async (productId: string, delta: number) => {
+        captured.order.push(`stock:${productId}:${delta}`);
+        captured.stockMoves.push({ productId, delta });
+        if (captured.failStock) throw new Error('stock write failed');
+        return { id: productId, stock: 10 } as PhoneModel;
+      },
     }),
   },
 }));
@@ -142,6 +151,7 @@ const emptyCart = () =>
   });
 
 beforeEach(() => {
+  vi.stubGlobal('navigator', { onLine: true });
   // The store mirrors the live cart to localStorage on every change.
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
@@ -153,6 +163,9 @@ beforeEach(() => {
   captured.recalculated.length = 0;
   captured.order.length = 0;
   captured.failStock = false;
+  captured.user = { id: 'u1', name: 'Counter', role: 'admin' };
+  captured.fetchInvoices.mockReset().mockResolvedValue([]);
+  usePartsCartStore.setState({ invoices: [], isLoadingInvoices: false, invoicesError: null });
   captured.counter = { invoiceNumber: 'INV-PARTS-261104-0003', provisional: false };
   emptyCart();
   (shelf as { price: number }).price = 300;
@@ -208,14 +221,19 @@ describe('a single part line discounted at the counter', () => {
     expect(usePartsCartStore.getState().getLinesConcessionTotal()).toBe(100);
   });
 
-  it('gives the concession back when the line changes size', () => {
+  it('preserves the per-unit concession when the line changes size', () => {
+    // Before: updateQuantity cleared unitPrice, losing the negotiated price.
+    // After fix (#3 audit): unitPrice survives quantity changes so the discount holds.
     cable(2);
     usePartsCartStore.getState().setLineDiscount(shelf.id, 100);
     usePartsCartStore.getState().updateQuantity(shelf.id, 4);
 
-    expect(usePartsCartStore.getState().items[0].unitPrice).toBeUndefined();
-    expect(usePartsCartStore.getState().getSubtotal()).toBe(1200);
-    expect(usePartsCartStore.getState().getLinesConcessionTotal()).toBe(0);
+    // unitPrice preserved from when it was set at qty=2:
+    // setLineDiscount(id, 100) distributes 100 across 2 units = 50/unit → 300-50 = 250 per unit.
+    // After updateQuantity(4), concession is still 50/unit, so unitPrice = 250 and
+    // concessionTotal = 4 × (300 - 250) = 200.
+    expect(usePartsCartStore.getState().items[0].unitPrice).toBe(250);
+    expect(usePartsCartStore.getState().getLinesConcessionTotal()).toBe(200);
   });
 
   it('cannot take a line below nothing', () => {
@@ -388,7 +406,8 @@ describe('partsCartStore checkout ordering', () => {
     });
 
     expect(result).not.toBeNull();
-    expect(captured.order).toEqual(['debt', 'stock:part_cable:-1', 'save']);
+    // Order fixed (#2 audit): stock deducted first, then debt posted, then invoice saved.
+    expect(captured.order).toEqual(['stock:part_cable:-1', 'debt', 'save']);
   });
 
   it('a failed deduction in the B2B path also aborts before the invoice', async () => {
@@ -406,6 +425,119 @@ describe('partsCartStore checkout ordering', () => {
       })
     ).rejects.toThrow('stock write failed');
     expect(captured.transactions).toHaveLength(0);
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe('parts invoice cache', () => {
+  const invoice = (id: string, total = 300) => ({
+    id, total, date: '2026-11-13T12:00:00Z', items: [], payments: [], saleType: 'parts_b2b', status: 'completed',
+  }) as SaleTransaction;
+
+  it('shares in-flight reads and reuses successful results for one minute', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    let resolve!: (rows: SaleTransaction[]) => void;
+    captured.fetchInvoices.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    const first = usePartsCartStore.getState().fetchInvoices();
+    const second = usePartsCartStore.getState().fetchInvoices();
+    expect(first).toBe(second);
+    await Promise.resolve();
+    expect(captured.fetchInvoices).toHaveBeenCalledTimes(1);
+    expect(usePartsCartStore.getState().isLoadingInvoices).toBe(true);
+    resolve([invoice('one')]);
+    await first;
+    await usePartsCartStore.getState().fetchInvoices();
+    expect(captured.fetchInvoices).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(60_000);
+    await usePartsCartStore.getState().fetchInvoices();
+    expect(captured.fetchInvoices).toHaveBeenCalledTimes(2);
+  });
+
+  it('starts TTL when a slow read succeeds, not when it starts', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    let resolve!: (rows: SaleTransaction[]) => void;
+    captured.fetchInvoices.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    const pending = usePartsCartStore.getState().fetchInvoices();
+    await Promise.resolve();
+    vi.setSystemTime(80_000);
+    resolve([]);
+    await pending;
+    vi.setSystemTime(100_000);
+    await usePartsCartStore.getState().fetchInvoices();
+    expect(captured.fetchInvoices).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps previous invoices on failure and permits immediate retry', async () => {
+    usePartsCartStore.setState({ invoices: [invoice('old')] });
+    captured.fetchInvoices.mockRejectedValueOnce(new Error('Connection failed'));
+    await usePartsCartStore.getState().fetchInvoices();
+    expect(usePartsCartStore.getState().invoices[0].id).toBe('old');
+    expect(usePartsCartStore.getState().invoicesError).toBe('Connection failed');
+    expect(usePartsCartStore.getState().isLoadingInvoices).toBe(false);
+    await usePartsCartStore.getState().fetchInvoices();
+    expect(captured.fetchInvoices).toHaveBeenCalledTimes(2);
+    expect(usePartsCartStore.getState().invoicesError).toBeNull();
+  });
+
+  it('allows an explicit refresh before expiry', async () => {
+    await usePartsCartStore.getState().fetchInvoices();
+    await usePartsCartStore.getState().fetchInvoices({ force: true });
+    expect(captured.fetchInvoices).toHaveBeenCalledTimes(2);
+  });
+
+  it('refreshes after invoice mutations rather than serving stale cached state', async () => {
+    await usePartsCartStore.getState().fetchInvoices();
+    usePartsCartStore.setState({ invoices: [invoice('local')] });
+    await usePartsCartStore.getState().fetchInvoices();
+    expect(captured.fetchInvoices).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves sales, refunds and removals made while a read is pending', async () => {
+    const old = invoice('old');
+    const removed = invoice('removed');
+    usePartsCartStore.setState({ invoices: [old, removed] });
+    let resolve!: (rows: SaleTransaction[]) => void;
+    captured.fetchInvoices.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    const pending = usePartsCartStore.getState().fetchInvoices();
+    await Promise.resolve();
+    const refunded = { ...old, status: 'refunded' as const };
+    const added = invoice('added');
+    usePartsCartStore.setState({ invoices: [added, refunded] });
+    resolve([old, removed, invoice('remote')]);
+    await pending;
+    expect(usePartsCartStore.getState().invoices).toEqual(expect.arrayContaining([added, refunded, invoice('remote')]));
+    expect(usePartsCartStore.getState().invoices.some(tx => tx.id === 'removed')).toBe(false);
+  });
+
+  it('does not let an old session overwrite the current session result', async () => {
+    let resolve!: (rows: SaleTransaction[]) => void;
+    captured.fetchInvoices.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    const oldRequest = usePartsCartStore.getState().fetchInvoices();
+    await Promise.resolve();
+    captured.user = { id: 'u2', name: 'Another counter', role: 'admin' };
+    captured.fetchInvoices.mockResolvedValueOnce([invoice('new-session')]);
+    await usePartsCartStore.getState().fetchInvoices();
+    resolve([invoice('old-session')]);
+    await oldRequest;
+    expect(usePartsCartStore.getState().invoices.map(tx => tx.id)).toEqual(['new-session']);
+  });
+
+  it('does not cache an offline fallback as a successful server read', async () => {
+    await usePartsCartStore.getState().fetchInvoices();
+    captured.fetchInvoices.mockClear();
+    vi.stubGlobal('navigator', { onLine: false });
+    usePartsCartStore.setState({ invoices: [invoice('old')] });
+    await usePartsCartStore.getState().fetchInvoices();
+    expect(usePartsCartStore.getState().invoices.map(tx => tx.id)).toEqual(['old']);
+    vi.stubGlobal('navigator', { onLine: true });
+    await usePartsCartStore.getState().fetchInvoices();
+    expect(captured.fetchInvoices).toHaveBeenCalledTimes(2);
   });
 });
 

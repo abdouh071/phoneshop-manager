@@ -53,7 +53,7 @@ export const PartRowActions: React.FC<PartRowActionsProps> = ({
           placeholder={t('parts.qty')}
           value={restockAmt}
           onChange={e => onRestockAmtChange(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Escape') onCancelRestock(); }}
+          onKeyDown={e => { if (e.key === 'Escape') onCancelRestock(); if (e.key === 'Enter') onSaveRestock(); }}
           className={styles.restockInput}
           style={{ width: '64px' }}
         />
@@ -63,6 +63,7 @@ export const PartRowActions: React.FC<PartRowActionsProps> = ({
             placeholder={t('parts.unitCost')}
             value={restockCost}
             onChange={e => onRestockCostChange(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Escape') onCancelRestock(); if (e.key === 'Enter') onSaveRestock(); }}
             className={styles.restockInput}
             style={{ width: '80px' }}
           />

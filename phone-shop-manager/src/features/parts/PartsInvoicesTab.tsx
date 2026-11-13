@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SearchInput } from '../../components/ui/Input';
-import { Printer, Store, User, FileText, Calendar, CheckCircle2, Clock, AlertCircle, FileEdit, RotateCcw } from 'lucide-react';
+import { Printer, Store, User, FileText, Calendar, CheckCircle2, Clock, AlertCircle, FileEdit, RotateCcw, RefreshCw, LockKeyhole } from 'lucide-react';
 import { usePartsCartStore } from '../../store/partsCartStore';
 import { useAuthStore } from '../../store/authStore';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -13,7 +13,7 @@ import { EditTransactionModal } from '../pos/EditTransactionModal';
 import { RefundModal } from '../pos/RefundModal';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { AccountStatementModal } from '../customers/AccountStatementModal';
-import './B2BParts.module.css';
+import styles from './PartsInvoicesTab.module.css';
 
 interface PartsInvoicesTabProps {
   onOpenCustomerProfile?: (customer: Customer) => void;
@@ -25,8 +25,11 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
   customers,
 }) => {
   const { t, i18n } = useTranslation();
-  const { invoices: partsTransactions, fetchInvoices } = usePartsCartStore();
-  const { user } = useAuthStore();
+  const partsTransactions = usePartsCartStore(state => state.invoices);
+  const fetchInvoices = usePartsCartStore(state => state.fetchInvoices);
+  const isLoadingInvoices = usePartsCartStore(state => state.isLoadingInvoices);
+  const invoicesError = usePartsCartStore(state => state.invoicesError);
+  const user = useAuthStore(state => state.user);
 
   React.useEffect(() => {
     fetchInvoices();
@@ -134,37 +137,38 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
     );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div className={styles.container}>
       {/* Metrics Summary Strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
-        <div style={{ background: '#ffffff', padding: '14px 18px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-          <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>{t('parts.invoices.totalOrders')}</span>
-          <p style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', margin: '4px 0 0 0' }}>{metrics.count}</p>
+      <div className={styles.metrics}>
+        <div className={styles.metricCard}>
+          <span className={styles.metricLabel}>{t('parts.invoices.totalOrders')}</span>
+          <p className={styles.metricValue}>{metrics.count}</p>
         </div>
-        <div style={{ background: '#ffffff', padding: '14px 18px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-          <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>{t('parts.invoices.grossVolume')}</span>
-          <p style={{ fontSize: '20px', fontWeight: 800, color: '#2563eb', margin: '4px 0 0 0' }}>{formatCurrency(metrics.totalRevenue)}</p>
+        <div className={styles.metricCard}>
+          <span className={styles.metricLabel}>{t('parts.invoices.grossVolume')}</span>
+          <p className={`${styles.metricValue} ${styles.metricRevenue}`}>{formatCurrency(metrics.totalRevenue)}</p>
         </div>
-        <div style={{ background: '#ffffff', padding: '14px 18px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-          <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>{t('parts.invoices.chargedToLedgers')}</span>
-          <p style={{ fontSize: '20px', fontWeight: 800, color: '#dc2626', margin: '4px 0 0 0' }}>{formatCurrency(metrics.totalChargedToLedger)}</p>
+        <div className={styles.metricCard}>
+          <span className={styles.metricLabel}>{t('parts.invoices.chargedToLedgers')}</span>
+          <p className={`${styles.metricValue} ${styles.metricCharged}`}>{formatCurrency(metrics.totalChargedToLedger)}</p>
         </div>
-        <div style={{ background: '#ffffff', padding: '14px 18px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-          <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>{t('parts.invoices.collectedUpfront')}</span>
-          <p style={{ fontSize: '20px', fontWeight: 800, color: '#16a34a', margin: '4px 0 0 0' }}>{formatCurrency(metrics.totalPaidCash)}</p>
+        <div className={styles.metricCard}>
+          <span className={styles.metricLabel}>{t('parts.invoices.collectedUpfront')}</span>
+          <p className={`${styles.metricValue} ${styles.metricCollected}`}>{formatCurrency(metrics.totalPaidCash)}</p>
         </div>
       </div>
 
       {/* Filter and Search Bar */}
-      <div style={{ display: 'flex', gap: '12px', alignItems: 'center', background: '#ffffff', padding: '12px 16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+      <div className={styles.toolbar}>
         <SearchInput
           value={searchQuery}
           onChange={setSearchQuery}
           placeholder={t('parts.invoices.searchPlaceholder')}
-          style={{ flex: 1 }}
+          aria-label={t('parts.invoices.searchPlaceholder')}
+          className={styles.search}
         />
 
-        <div style={{ display: 'flex', gap: '6px' }}>
+        <div className={styles.filters}>
           {([
             { id: 'all', label: t('parts.invoices.filterAll') },
             { id: 'paid_full', label: t('parts.invoices.filterPaidFull') },
@@ -174,133 +178,116 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
             <button
               key={tab.id}
               type="button"
-              style={{
-                padding: '7px 12px',
-                borderRadius: '8px',
-                fontSize: '12.5px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                border: settlementFilter === tab.id ? '1px solid #3b82f6' : '1px solid #e2e8f0',
-                background: settlementFilter === tab.id ? '#eff6ff' : '#f8fafc',
-                color: settlementFilter === tab.id ? '#1d4ed8' : '#64748b',
-                transition: 'all 0.15s ease',
-              }}
+              className={`${styles.filterButton} ${settlementFilter === tab.id ? styles.filterActive : ''}`}
+              aria-pressed={settlementFilter === tab.id}
               onClick={() => setSettlementFilter(tab.id)}
             >
               {tab.label}
             </button>
           ))}
         </div>
+
+        <button
+          type="button"
+          className={`${styles.actionButton} ${styles.refreshButton}`}
+          onClick={() => fetchInvoices({ force: true })}
+          disabled={isLoadingInvoices}
+          aria-busy={isLoadingInvoices}
+        >
+          <RefreshCw size={15} className={isLoadingInvoices ? styles.spinning : undefined} aria-hidden="true" />
+          <span>{t('common.refresh')}</span>
+        </button>
       </div>
 
-      {/* Invoices List */}
-      {filteredInvoices.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '60px 20px', background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-          <FileText size={48} style={{ color: '#cbd5e1', margin: '0 auto 12px auto' }} />
-          <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#334155' }}>{t('parts.invoices.emptyTitle')}</h3>
-          <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0 0' }}>
-            {searchQuery || settlementFilter !== 'all' ? t('parts.invoices.emptyFiltered') : t('parts.invoices.emptyDefault')}
-          </p>
+      {isLoadingInvoices && (
+        <div className={styles.loadingStatus} role="status">
+          <RefreshCw size={16} className={styles.spinning} aria-hidden="true" />
+          <span>{t('common.loading')}</span>
         </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      )}
+
+      {invoicesError && (
+        <div className={styles.errorAlert} role="alert">
+          <AlertCircle size={18} aria-hidden="true" />
+          <p className={styles.errorMessage}>{invoicesError}</p>
+          <button
+            type="button"
+            className={`${styles.actionButton} ${styles.retryButton}`}
+            onClick={() => fetchInvoices({ force: true })}
+            disabled={isLoadingInvoices}
+          >
+            {t('parts.retry')}
+          </button>
+        </div>
+      )}
+
+      {/* Invoices List */}
+      <div className={styles.invoiceList} aria-busy={isLoadingInvoices}>
+        {filteredInvoices.length === 0 && !isLoadingInvoices && !invoicesError && (
+          <div className={styles.emptyState}>
+            <FileText size={48} className={styles.emptyIcon} aria-hidden="true" />
+            <h3 className={styles.emptyTitle}>{t('parts.invoices.emptyTitle')}</h3>
+            <p className={styles.emptyDescription}>
+              {searchQuery || settlementFilter !== 'all' ? t('parts.invoices.emptyFiltered') : t('parts.invoices.emptyDefault')}
+            </p>
+          </div>
+        )}
           {filteredInvoices.map(tx => {
             const isRefunded = tx.status === 'refunded';
             const settlement = tx.accountSettlement;
             const buyerName = tx.shopName || tx.customerName || t('parts.walkInCustomer');
             const isB2B = Boolean(tx.shopName || (tx.accountSettlement && tx.accountSettlement.type !== 'paid_full'));
-            const matchedCust = customers.find(c => c.id === tx.customerId || (c.name ?? '').toLowerCase().trim() === (tx.customerName || '').toLowerCase().trim());
+            const matchedCust = tx.customerId ? customers.find(c => c.id === tx.customerId) : undefined;
 
             return (
-              <div
-                key={tx.id}
-                style={{
-                  background: '#ffffff',
-                  borderRadius: '12px',
-                  border: '1px solid #e2e8f0',
-                  padding: '16px 20px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-                  transition: 'border-color 0.15s ease',
-                }}
-              >
+              <div key={tx.id} className={styles.invoiceCard}>
                 {/* Header Row: Invoice # + Date + Total */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: '14px', color: '#0f172a', background: '#f1f5f9', padding: '3px 8px', borderRadius: '6px' }}>
+                <div className={styles.invoiceHeader}>
+                  <div className={styles.invoiceMeta}>
+                    <span className={styles.invoiceNumber}>
                       #{tx.invoiceNumber || tx.id.slice(-8).toUpperCase()}
                     </span>
-                    <span style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <Calendar size={13} /> {formatDate(tx.date)}
+                    <span className={styles.invoiceDate}>
+                      <Calendar size={13} aria-hidden="true" /> {formatDate(tx.date)}
                     </span>
                     {tx.processedByName && (
-                      <span style={{ fontSize: '12px', color: '#64748b' }}>
+                      <span className={styles.processedBy}>
                         {t('common.by')} <strong>{tx.processedByName}</strong>
                       </span>
                     )}
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ textAlign: 'right' }}>
-                      <span style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>{formatCurrency(tx.total)}</span>
-                      {discountsGivenOf(tx) > 0 && (
-                        <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>
-                          {t('parts.invoices.discount', { amount: formatCurrency(discountsGivenOf(tx)) })}
-                        </div>
-                      )}
-                    </div>
+                  <div className={styles.invoiceAmount}>
+                    <span className={styles.invoiceTotal}>{formatCurrency(tx.total)}</span>
+                    {discountsGivenOf(tx) > 0 && (
+                      <div className={styles.discount}>
+                        {t('parts.invoices.discount', { amount: formatCurrency(discountsGivenOf(tx)) })}
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* Buyer & Settlement Info Row */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', padding: '10px 14px', borderRadius: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{
-                      width: '32px',
-                      height: '32px',
-                      borderRadius: '8px',
-                      background: isB2B ? '#eff6ff' : '#f1f5f9',
-                      color: isB2B ? '#2563eb' : '#64748b',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}>
-                      {isB2B ? <Store size={18} /> : <User size={18} />}
+                <div className={styles.buyerRow}>
+                  <div className={styles.buyer}>
+                    <div className={`${styles.buyerIcon} ${isB2B ? styles.buyerIconB2B : ''}`}>
+                      {isB2B ? <Store size={18} aria-hidden="true" /> : <User size={18} aria-hidden="true" />}
                     </div>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontWeight: 700, fontSize: '13.5px', color: '#1e293b' }}>{buyerName}</span>
+                    <div className={styles.buyerDetails}>
+                      <div className={styles.buyerHeading}>
+                        <span className={styles.buyerName}>{buyerName}</span>
                         {matchedCust && (
-                          <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                          <div className={styles.accountActions}>
                             <button
                               type="button"
-                              style={{
-                                fontSize: '11px',
-                                color: '#2563eb',
-                                background: 'transparent',
-                                border: 'none',
-                                cursor: 'pointer',
-                                fontWeight: 600,
-                                textDecoration: 'underline'
-                              }}
+                              className={styles.accountLink}
                               onClick={() => onOpenCustomerProfile && onOpenCustomerProfile(matchedCust)}
                             >
                               {t('parts.invoices.viewAccount')}
                             </button>
                             <button
                               type="button"
-                              style={{
-                                fontSize: '11px',
-                                color: '#0f172a',
-                                background: '#f1f5f9',
-                                border: '1px solid #cbd5e1',
-                                borderRadius: '4px',
-                                padding: '1px 6px',
-                                cursor: 'pointer',
-                                fontWeight: 600,
-                              }}
+                              className={styles.statementButton}
                               onClick={() => setStatementCustomer(matchedCust)}
                               title={t('parts.invoices.statementTooltip')}
                             >
@@ -310,46 +297,39 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
                         )}
                       </div>
                       {tx.shopName && tx.customerName && (
-                        <span style={{ fontSize: '11.5px', color: '#64748b' }}>{t('parts.invoices.contact', { name: tx.customerName })}</span>
+                        <span className={styles.contact}>{t('parts.invoices.contact', { name: tx.customerName })}</span>
                       )}
                     </div>
                   </div>
 
                   {/* Settlement Pill */}
-                  <div>
+                  <div className={styles.settlement}>
                     {!settlement || settlement.type === 'paid_full' ? (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 700, color: '#16a34a', background: '#dcfce7', padding: '4px 10px', borderRadius: '20px' }}>
-                        <CheckCircle2 size={13} /> {t('parts.invoices.paidFull', { methods: tx.payments.map(p => p.method.toUpperCase()).join('+') || t('parts.invoices.cash') })}
+                      <span className={`${styles.settlementPill} ${styles.settlementPaid}`}>
+                        <CheckCircle2 size={13} aria-hidden="true" /> {t('parts.invoices.paidFull', { methods: tx.payments.map(p => p.method.toUpperCase()).join('+') || t('parts.invoices.cash') })}
                       </span>
                     ) : settlement.type === 'charged_to_account' ? (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 700, color: '#dc2626', background: '#fee2e2', padding: '4px 10px', borderRadius: '20px' }}>
-                        <AlertCircle size={13} /> {t('parts.invoices.chargedToAccount', { amount: formatCurrency(settlement.chargedAmount) })}
+                      <span className={`${styles.settlementPill} ${styles.settlementCharged}`}>
+                        <AlertCircle size={13} aria-hidden="true" /> {t('parts.invoices.chargedToAccount', { amount: formatCurrency(settlement.chargedAmount) })}
                       </span>
                     ) : (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 700, color: '#d97706', background: '#fef3c7', padding: '4px 10px', borderRadius: '20px' }}>
-                        <Clock size={13} /> {t('parts.invoices.partialSplit', { paid: formatCurrency(settlement.paidAmount), charged: formatCurrency(settlement.chargedAmount) })}
+                      <span className={`${styles.settlementPill} ${styles.settlementPartial}`}>
+                        <Clock size={13} aria-hidden="true" /> {t('parts.invoices.partialSplit', { paid: formatCurrency(settlement.paidAmount), charged: formatCurrency(settlement.chargedAmount) })}
                       </span>
                     )}
                   </div>
                 </div>
 
                 {/* Items List & Actions Row */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                <div className={styles.invoiceFooter}>
+                  <div className={styles.items}>
                     {tx.items.map((item, idx) => {
                       const returned = Boolean(item.isReturn);
                       return (
                         <span
                           key={idx}
                           title={returned ? t('parts.invoices.returnedTooltip') : undefined}
-                          style={{
-                            fontSize: '11.5px',
-                            background: returned ? '#fee2e2' : '#f1f5f9',
-                            color: returned ? '#b91c1c' : '#334155',
-                            padding: '3px 8px',
-                            borderRadius: '6px',
-                            fontWeight: 600,
-                          }}
+                          className={`${styles.itemChip} ${returned ? styles.itemReturned : ''}`}
                         >
                           {returned ? '−' : ''}
                           {Math.trunc(Number(item.quantity) || 0)}× {item.product?.name} {item.product?.model}
@@ -358,89 +338,46 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
                     })}
                   </div>
 
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <div className={styles.invoiceActions}>
                     <button
                       type="button"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        background: '#eff6ff',
-                        color: '#1d4ed8',
-                        border: '1px solid #bfdbfe',
-                        padding: '6px 14px',
-                        borderRadius: '8px',
-                        fontSize: '12.5px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                        whiteSpace: 'nowrap',
-                      }}
+                      className={`${styles.actionButton} ${styles.printButton}`}
                       onClick={() => setSelectedInvoice(tx)}
                       title={t('parts.invoices.printTooltip')}
                     >
-                      <Printer size={14} />
+                      <Printer size={14} aria-hidden="true" />
                       <span>{t('common.print')}</span>
                     </button>
 
                     <button
                       type="button"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '5px',
-                        background: '#f8fafc',
-                        color: isRefunded ? '#94a3b8' : '#334155',
-                        border: '1px solid #cbd5e1',
-                        padding: '6px 12px',
-                        borderRadius: '8px',
-                        fontSize: '12.5px',
-                        fontWeight: 600,
-                        cursor: isRefunded ? 'not-allowed' : 'pointer',
-                        transition: 'all 0.15s ease',
-                        whiteSpace: 'nowrap',
-                      }}
+                      className={`${styles.actionButton} ${styles.editButton}`}
                       onClick={() => handleEditClick(tx)}
                       disabled={isRefunded}
                       title={isRefunded ? t('parts.invoices.refundedTooltip') : !canEditDirectly(tx) ? t('parts.invoices.requiresAdminEdit') : t('parts.invoices.editTooltip')}
                     >
-                      <FileEdit size={14} />
+                      <FileEdit size={14} aria-hidden="true" />
                       <span>{t('common.edit')}</span>
-                      {!canEditDirectly(tx) && !isRefunded && <span style={{ fontSize: '10px' }}>🔒</span>}
+                      {!canEditDirectly(tx) && !isRefunded && <LockKeyhole size={10} aria-hidden="true" />}
                     </button>
 
                     <button
                       type="button"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '5px',
-                        background: '#fff1f2',
-                        color: isRefunded ? '#fda4af' : '#e11d48',
-                        border: '1px solid #fecdd3',
-                        padding: '6px 12px',
-                        borderRadius: '8px',
-                        fontSize: '12.5px',
-                        fontWeight: 600,
-                        cursor: isRefunded ? 'not-allowed' : 'pointer',
-                        transition: 'all 0.15s ease',
-                        whiteSpace: 'nowrap',
-                      }}
+                      className={`${styles.actionButton} ${styles.refundButton}`}
                       onClick={() => handleRefundClick(tx)}
                       disabled={isRefunded}
                       title={isRefunded ? t('parts.invoices.alreadyRefunded') : !canEditDirectly(tx) ? t('parts.invoices.requiresAdminRefund') : t('parts.invoices.refundTooltip')}
                     >
-                      <RotateCcw size={13} />
+                      <RotateCcw size={13} aria-hidden="true" />
                       <span>{t('parts.invoices.refund')}</span>
-                      {!canEditDirectly(tx) && !isRefunded && <span style={{ fontSize: '10px' }}>🔒</span>}
+                      {!canEditDirectly(tx) && !isRefunded && <LockKeyhole size={10} aria-hidden="true" />}
                     </button>
                   </div>
                 </div>
               </div>
             );
           })}
-        </div>
-      )}
+      </div>
 
       {/* Invoice Modal */}
       <PartsInvoiceModal
@@ -453,7 +390,7 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
         isOpen={!!txToEdit}
         onClose={() => {
           setTxToEdit(null);
-          fetchInvoices();
+          fetchInvoices({ force: true });
         }}
         transaction={txToEdit}
       />
@@ -463,7 +400,7 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
         isOpen={!!txToRefund}
         onClose={() => {
           setTxToRefund(null);
-          fetchInvoices();
+          fetchInvoices({ force: true });
         }}
         transaction={txToRefund}
       />

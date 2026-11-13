@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../../components/ui/Modal';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
 import { Input, TextArea } from '../../components/ui/Input';
 import { useInventoryStore } from '../../store/inventoryStore';
@@ -80,6 +81,7 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
   const canViewCosts = user?.role === 'admin' || (permissions.inventory_edit && permissions.reports);
   const symbol = getCurrencySymbol(currency);
   const { addProduct, parts } = useInventoryStore();
+  const { t } = useTranslation();
   const toast = useToast();
 
   const [form, setForm] = useState<FormData>(() => INITIAL);
@@ -167,7 +169,7 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
     
     try {
       await addProduct(product);
-      toast.success('Part Added', `${product.name} has been added to inventory.`);
+      toast.success(t('parts.addPartModal.partAdded'), t('parts.addPartModal.partAddedDesc', { name: product.name }));
       
       if (printBarcode) {
         const tempProduct = { ...product, id: 'temp-' + Date.now(), hidePrice: true };
@@ -175,7 +177,7 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
         if (result.method === 'direct' && result.error) {
           // The part is saved; only the label is missing. Say so instead of
           // letting a part reach the shelf with no barcode on it.
-          toast.error('Label not printed', result.error);
+          toast.error(t('parts.addPartModal.labelNotPrinted'), result.error);
         } else if (result.method === 'browser') {
           const html = buildLabelsHTML([tempProduct], storeName);
           openPrintWindow(html, 'Part Label');
@@ -183,7 +185,7 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
       }
       onClose();
     } catch (err) {
-      toast.error('Failed to add part');
+      toast.error(t('parts.addPartModal.failedToAdd'));
     } finally {
       setIsSubmitting(false);
     }
