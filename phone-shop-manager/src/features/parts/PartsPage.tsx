@@ -119,7 +119,7 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
 
 export const PartsPage = () => {
   const { t } = useTranslation();
-  const { fetchParts, parts } = useInventoryStore();
+  const { fetchParts, parts, isLoadingParts, error: partsError } = useInventoryStore();
   const { items, addToCart, removeFromCart, updateQuantity, clearCart, setPayments, setCustomerName, setDiscount, setLineDiscount, checkout, customerName, discount, getSubtotal, getTotal, getItemCount, getLinesConcessionTotal, suspendedCarts, suspendCart, resumeCart, discardSuspendedCart, fetchCarts } = usePartsCartStore();
   const permissions = usePermissions();
   const { user } = useAuthStore();
@@ -453,6 +453,19 @@ export const PartsPage = () => {
     }
   };
 
+  /** Keyboard access for the filterable KPI cards and sortable headers. */
+  const onCardKeyDown = (fn: () => void) => (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fn();
+    }
+  };
+  const sortAria = (col: keyof PhoneModel) =>
+    sortKey === col ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const onThKeyDown = (col: keyof PhoneModel) => (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') handleSort(col);
+  };
+
   return (
     <div className={styles.page}>
       {/* Modals & Dialogs */}
@@ -687,6 +700,9 @@ export const PartsPage = () => {
             <div
               className={[styles.summaryCard, statusFilter === 'all' && styles.summaryCardActive].filter(Boolean).join(' ')}
               onClick={() => { setStatusFilter('all'); setCurrentPage(1); }}
+              onKeyDown={onCardKeyDown(() => { setStatusFilter('all'); setCurrentPage(1); })}
+              role="button"
+              tabIndex={0}
               title="Click to view all parts"
             >
               <div className={styles.summaryCardTop}>
@@ -699,6 +715,9 @@ export const PartsPage = () => {
             <div
               className={[styles.summaryCard, statusFilter === 'in_stock' && styles.summaryCardActive].filter(Boolean).join(' ')}
               onClick={() => { setStatusFilter(statusFilter === 'in_stock' ? 'all' : 'in_stock'); setCurrentPage(1); }}
+              onKeyDown={onCardKeyDown(() => { setStatusFilter(statusFilter === 'in_stock' ? 'all' : 'in_stock'); setCurrentPage(1); })}
+              role="button"
+              tabIndex={0}
               title="Click to filter In Stock"
             >
               <div className={styles.summaryCardTop}>
@@ -713,6 +732,9 @@ export const PartsPage = () => {
             <div
               className={[styles.summaryCard, statusFilter === 'low_stock' && styles.summaryCardActive].filter(Boolean).join(' ')}
               onClick={() => { setStatusFilter(statusFilter === 'low_stock' ? 'all' : 'low_stock'); setCurrentPage(1); }}
+              onKeyDown={onCardKeyDown(() => { setStatusFilter(statusFilter === 'low_stock' ? 'all' : 'low_stock'); setCurrentPage(1); })}
+              role="button"
+              tabIndex={0}
               title="Click to filter Low Stock"
             >
               <div className={styles.summaryCardTop}>
@@ -727,6 +749,9 @@ export const PartsPage = () => {
             <div
               className={[styles.summaryCard, statusFilter === 'out_of_stock' && styles.summaryCardActive].filter(Boolean).join(' ')}
               onClick={() => { setStatusFilter(statusFilter === 'out_of_stock' ? 'all' : 'out_of_stock'); setCurrentPage(1); }}
+              onKeyDown={onCardKeyDown(() => { setStatusFilter(statusFilter === 'out_of_stock' ? 'all' : 'out_of_stock'); setCurrentPage(1); })}
+              role="button"
+              tabIndex={0}
               title="Click to filter Out of Stock"
             >
               <div className={styles.summaryCardTop}>
@@ -784,35 +809,46 @@ export const PartsPage = () => {
               </div>
             </div>
 
+            {partsError && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', marginBottom: '10px', borderRadius: '8px', background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: '13px' }}>
+                <AlertCircle size={16} />
+                <span style={{ flex: 1 }}>{partsError}</span>
+                <Button size="sm" variant="secondary" onClick={() => { fetchParts(); }}>Retry</Button>
+              </div>
+            )}
+            {isLoadingParts && !partsError && (
+              <div style={{ padding: '12px 14px', fontSize: '13px', color: '#64748b' }}>Loading parts…</div>
+            )}
+
             <div className={styles.tableWrapper}>
               <table className={styles.table}>
                 <thead>
                   <tr>
                     <th style={{ width: 36 }}></th>
-                    <th className={styles.th} onClick={() => handleSort('name')}>
+                    <th className={styles.th} onClick={() => handleSort('name')} aria-sort={sortAria('name')} tabIndex={0} onKeyDown={onThKeyDown('name')}>
                       Part Name <SortIcon col="name" />
                     </th>
-                    <th className={styles.th} onClick={() => handleSort('sku')}>
+                    <th className={styles.th} onClick={() => handleSort('sku')} aria-sort={sortAria('sku')} tabIndex={0} onKeyDown={onThKeyDown('sku')}>
                       SKU <SortIcon col="sku" />
                     </th>
-                    <th className={styles.th} onClick={() => handleSort('location')}>
+                    <th className={styles.th} onClick={() => handleSort('location')} aria-sort={sortAria('location')} tabIndex={0} onKeyDown={onThKeyDown('location')}>
                       Location <SortIcon col="location" />
                     </th>
                     {canViewCosts && (
-                      <th className={styles.th} onClick={() => handleSort('costPrice')}>
+                      <th className={styles.th} onClick={() => handleSort('costPrice')} aria-sort={sortAria('costPrice')} tabIndex={0} onKeyDown={onThKeyDown('costPrice')}>
                         Buy Price / Cost <SortIcon col="costPrice" />
                       </th>
                     )}
-                    <th className={styles.th} onClick={() => handleSort('price')}>
+                    <th className={styles.th} onClick={() => handleSort('price')} aria-sort={sortAria('price')} tabIndex={0} onKeyDown={onThKeyDown('price')}>
                       Sell Price <SortIcon col="price" />
                     </th>
-                    <th className={styles.th} onClick={() => handleSort('stock')}>
+                    <th className={styles.th} onClick={() => handleSort('stock')} aria-sort={sortAria('stock')} tabIndex={0} onKeyDown={onThKeyDown('stock')}>
                       Stock <SortIcon col="stock" />
                     </th>
                     {canViewCosts && (
                       <th className={styles.th}>Margin</th>
                     )}
-                    <th className={styles.th} onClick={() => handleSort('stockStatus')}>
+                    <th className={styles.th} onClick={() => handleSort('stockStatus')} aria-sort={sortAria('stockStatus')} tabIndex={0} onKeyDown={onThKeyDown('stockStatus')}>
                       Status <SortIcon col="stockStatus" />
                     </th>
                     <th className={styles.th} style={{ textAlign: 'right' }}>Actions</th>
