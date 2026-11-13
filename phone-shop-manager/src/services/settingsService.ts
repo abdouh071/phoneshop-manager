@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import type { LabelFontKey } from '../utils/labelFontConfig';
 
 export type ColorThemeKey = 'default' | 'cyan' | 'emerald' | 'purple' | 'amber';
 
@@ -28,6 +29,7 @@ export interface StoreSettings {
   // Hardware printer configuration
   receiptPaperWidth?: '80mm' | '58mm';
   autoCutReceipt?: boolean;
+  labelFont?: LabelFontKey;
 }
 
 const COLLECTION = 'settings';

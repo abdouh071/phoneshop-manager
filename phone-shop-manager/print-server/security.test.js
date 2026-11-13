@@ -146,6 +146,22 @@ test('a single word wider than the line is split across lines, never dropped', (
   assert.equal(lines.join(''), word);
 });
 
+test('all available label fonts resolve with safe heights and widths before the barcode', () => {
+  const fontKeys = ['1', '1x2', '2', '3', '4', '0'];
+  for (const key of fontKeys) {
+    const cfg = internals.getLabelFontConfig(key);
+    assert.ok(cfg, `Font config for ${key} must exist`);
+    assert.ok(cfg.charWidth > 0, 'charWidth must be positive');
+    assert.ok(cfg.lineHeight > 0, 'lineHeight must be positive');
+    assert.ok(cfg.maxLines >= 2 && cfg.maxLines <= 3, 'maxLines must be 2 or 3');
+    // Top line starts at startY, lowest possible line top is startY + (maxLines - 1) * lineHeight
+    const lowestLineTop = cfg.startY + (cfg.maxLines - 1) * cfg.lineHeight;
+    assert.ok(lowestLineTop < 128, `Lowest line top (${lowestLineTop}) for font ${key} must stay above barcode at Y=128`);
+  }
+  // Unknown font falls back to font 2
+  assert.equal(internals.getLabelFontConfig('unknown_font').id, '2');
+});
+
 test('a short name stays on one line and an empty name yields one blank line', () => {
   assert.deepEqual(internals.wrapTsplToWidth('CABLE', 16, 304), ['CABLE']);
   assert.deepEqual(internals.wrapTsplToWidth('', 16, 304), ['']);

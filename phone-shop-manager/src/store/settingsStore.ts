@@ -37,6 +37,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   weekStartDay: 0, // 0 = Sunday
   receiptPaperWidth: '80mm',
   autoCutReceipt: true,
+  labelFont: '2',
   isLoading: false,
   isInitialized: false,
   error: null,
@@ -73,6 +74,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         colorTheme: remoteSettings.colorTheme || 'default',
         technicianRates: remoteSettings.technicianRates || {},
         technicianProfitPercentage: remoteSettings.technicianProfitPercentage ?? DEFAULT_TECHNICIAN_PERCENT,
+        labelFont: remoteSettings.labelFont || '2',
         isLoading: false, 
         isInitialized: true 
       });
@@ -89,6 +91,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         colorTheme: remoteSettings.colorTheme || 'default',
         technicianRates: remoteSettings.technicianRates || {},
         technicianProfitPercentage: remoteSettings.technicianProfitPercentage ?? DEFAULT_TECHNICIAN_PERCENT,
+        labelFont: remoteSettings.labelFont || '2',
         isLoading: false, 
         isInitialized: true 
       });
@@ -115,6 +118,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         weekStartDay: get().weekStartDay ?? 0,
         receiptPaperWidth: get().receiptPaperWidth || '80mm',
         autoCutReceipt: get().autoCutReceipt ?? true,
+        labelFont: get().labelFont || '2',
       };
       await settingsService.updateSettings(defaults).catch(console.error);
       set({ isLoading: false, isInitialized: true });

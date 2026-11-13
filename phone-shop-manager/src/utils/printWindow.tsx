@@ -3,6 +3,7 @@ import JsBarcode from 'jsbarcode';
 import { formatCurrency, formatCurrencyWith } from './formatCurrency';
 import { escapeHtml } from './escapeHtml';
 import { useSettingsStore } from '../store/settingsStore';
+import { getLabelFontConfig } from './labelFontConfig';
 import type { RepairTicket } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
 import i18n from '../i18n';
@@ -379,9 +380,11 @@ export async function printRepairBothDirect(
 export async function printBarcodeDirect(
   products: unknown[],
   storeName: string,
-  currency: string
+  currency: string,
+  labelFont?: string
 ): Promise<{ method: 'direct' | 'browser'; error?: string }> {
-  const payload = { storeName, currency, products };
+  const activeFont = labelFont || useSettingsStore.getState().labelFont || '2';
+  const payload = { storeName, currency, products, labelFont: activeFont };
 
   // ── IPC path (Electron desktop) ──
   if (electronAPI?.printBarcode) {
@@ -682,19 +685,21 @@ export function buildReceiptHTML(transaction: {
  * Uses pure HTML/CSS (no React-barcode dependency in the print window).
  */
 export function buildLabelsHTML(products: {
-  id: string;
-  name: string;
-  model: string;
+  id?: string;
+  name?: string;
+  model?: string;
   sku: string;
-  price: number;
-  category: string;
+  price?: number;
+  category?: string;
   storage?: string;
   color?: string;
   location?: string;
   hidePrice?: boolean;
-}[], storeName?: string) {
-  const { storeName: defaultStoreName } = useSettingsStore.getState();
+}[], storeName?: string, fontPreference?: string) {
+  const { storeName: defaultStoreName, labelFont: defaultFont } = useSettingsStore.getState();
   const activeStoreName = storeName || defaultStoreName || 'PhoneShop Pro';
+  const activeFontKey = fontPreference || defaultFont || '2';
+  const fontConfig = getLabelFontConfig(activeFontKey);
   
 
   const labelsHTML = products.map(p => {
@@ -761,13 +766,15 @@ export function buildLabelsHTML(products: {
     });
     const barcodeSvg = svgNode.outerHTML;
 
-    // Font size: slightly smaller text for product names
-    const fontSize = isPart ? '9px' : '8px';
-    const fontWeight = '400';
+    const fontSize = fontConfig.cssStyle.fontSize;
+    const fontFamily = fontConfig.cssStyle.fontFamily;
+    const fontWeight = fontConfig.cssStyle.fontWeight;
+    const letterSpacing = fontConfig.cssStyle.letterSpacing ? `letter-spacing:${fontConfig.cssStyle.letterSpacing};` : '';
+    const transformScale = fontConfig.cssStyle.transform ? ` ${fontConfig.cssStyle.transform}` : '';
 
-    const linesToRender = isPart ? textLines.slice(0, 3) : textLines;
+    const linesToRender = isPart ? textLines.slice(0, fontConfig.maxLines) : textLines;
     const linesHtml = linesToRender.map((line, idx) => `
-      <div style="font-size:${fontSize};font-weight:${fontWeight};color:#111;line-height:1.1;padding:0 2px;${idx > 0 ? 'margin-top:1.5mm;' : (isPart ? 'margin-top:1.5mm;' : '')}transform:translateX(-${shiftMm}mm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${escapeHtml(line)}</div>
+      <div style="font-family:${fontFamily};font-size:${fontSize};font-weight:${fontWeight};${letterSpacing}color:#111;line-height:1.1;padding:0 2px;${idx > 0 ? 'margin-top:1.5mm;' : (isPart ? 'margin-top:1.5mm;' : '')}transform:translateX(-${shiftMm}mm)${transformScale};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${escapeHtml(line)}</div>
     `).join('');
 
     return `

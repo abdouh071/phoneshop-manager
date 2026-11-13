@@ -87,6 +87,84 @@ const LABEL_OFFSET_X = parseInt(process.env.LABEL_OFFSET_X || '0', 10);
 const TSPL_FONT_2_WIDTH = 16;
 const TSPL_FONT_1_WIDTH = 10;
 
+/**
+ * Hardware TSPL font definitions for 50x20mm thermal labels.
+ * Configured so every font balances character density, line height, and clearance
+ * before the fixed barcode at Y=128 dots.
+ */
+const LABEL_FONTS = {
+  '1': {
+    id: '1',
+    name: 'Font 1 — Compact (8×12)',
+    font: '1',
+    mulX: 1,
+    mulY: 1,
+    charWidth: TSPL_FONT_1_WIDTH, // 10
+    lineHeight: 16,
+    startY: 54,
+    maxLines: 3,
+  },
+  '1x2': {
+    id: '1x2',
+    name: 'Font 1 Tall — Condensed (8×24)',
+    font: '1',
+    mulX: 1,
+    mulY: 2,
+    charWidth: TSPL_FONT_1_WIDTH, // 10
+    lineHeight: 24,
+    startY: 51,
+    maxLines: 3,
+  },
+  '2': {
+    id: '2',
+    name: 'Font 2 — Standard (12×20)',
+    font: '2',
+    mulX: 1,
+    mulY: 1,
+    charWidth: TSPL_FONT_2_WIDTH, // 16
+    lineHeight: 21,
+    startY: 51,
+    maxLines: 3,
+  },
+  '3': {
+    id: '3',
+    name: 'Font 3 — Bold (16×24)',
+    font: '3',
+    mulX: 1,
+    mulY: 1,
+    charWidth: 20,
+    lineHeight: 25,
+    startY: 51,
+    maxLines: 2,
+  },
+  '4': {
+    id: '4',
+    name: 'Font 4 — Extra Large (24×32)',
+    font: '4',
+    mulX: 1,
+    mulY: 1,
+    charWidth: 24,
+    lineHeight: 32,
+    startY: 51,
+    maxLines: 2,
+  },
+  '0': {
+    id: '0',
+    name: 'Font 0 — Smooth Monotype Vector',
+    font: '0',
+    mulX: 1,
+    mulY: 1,
+    charWidth: 14,
+    lineHeight: 22,
+    startY: 51,
+    maxLines: 3,
+  },
+};
+
+function getLabelFontConfig(key) {
+  return LABEL_FONTS[String(key)] || LABEL_FONTS['2'];
+}
+
 /** Loopback unless the operator asks for the LAN; `0.0.0.0` was never a deliberate choice. */
 const LAN_MODE = flagFrom(process.env.PRINT_SERVER_LAN_MODE, false);
 const BIND_HOST = String(process.env.PRINT_SERVER_HOST || (LAN_MODE ? '0.0.0.0' : '127.0.0.1')).trim() || '127.0.0.1';
@@ -1892,7 +1970,7 @@ app.post('/print-low-stock-report', printRoute(handlePrintLowStockReport));
  */
 async function handlePrintBarcode(body) {
   try {
-    const { storeName, currency, products } = body || {};
+    const { storeName, currency, products, labelFont = '2' } = body || {};
 
     if (!products || !Array.isArray(products) || products.length === 0) {
       return { ok: false, status: 400, error: 'Missing products data' };
@@ -1905,6 +1983,7 @@ async function handlePrintBarcode(body) {
 
     if (isLabelPrinter(LABEL_PRINTER_NAME)) {
       let fullTspl = '';
+      const fontCfg = getLabelFontConfig(labelFont);
 
       for (const product of labelItems) {
         fullTspl += 'SIZE 50 mm, 20 mm\r\n';
@@ -1919,8 +1998,7 @@ async function handlePrintBarcode(body) {
         // Product Name: only product name + model (clean, bold, same size as store name)
         let fullText = tsplText(`${product.name || ''}${product.model ? ` ${product.model}` : ''}`, 60);
 
-        const fontType = '1';
-        const fontArgs = `"1",0,1,1`;
+        const fontType = fontCfg.font;
         const maxChars = 32;
         const shiftDots = 16; // 2mm margin alignment with store title
 
@@ -1967,14 +2045,14 @@ async function handlePrintBarcode(body) {
           fullTspl += `TEXT ${shopPartsX},6,"${shopFit.font}",0,1,1,"${shopFit.text}"\r\n`;
           fullTspl += 'BAR 0,30,400,2\r\n';
 
-          const partLines = wrapTsplToWidth(partsLabelText(product), TSPL_FONT_2_WIDTH, TEXT_MAX_DOTS).slice(0, 3);
+          const partLines = wrapTsplToWidth(partsLabelText(product), fontCfg.charWidth, TEXT_MAX_DOTS).slice(0, fontCfg.maxLines);
           partLines.forEach((line, i) => {
-            // Shift text down by 1.5mm (12 dots at 203 DPI, 39 -> 51)
-            const y = 51 + i * 21;
-            const lineW = line.length * TSPL_FONT_2_WIDTH;
+            // Shift text down by 1.5mm (tuned per font startY)
+            const y = fontCfg.startY + i * fontCfg.lineHeight;
+            const lineW = line.length * fontCfg.charWidth;
             // Shift text above barcode left 3mm (24 dots at 203 DPI)
             const lineX = Math.max(0, TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - lineW) / 2)) - 24);
-            fullTspl += `TEXT ${lineX},${y},"2",0,1,1,"${tsplText(line, 60)}"\r\n`;
+            fullTspl += `TEXT ${lineX},${y},"${fontCfg.font}",0,${fontCfg.mulX},${fontCfg.mulY},"${tsplText(line, 60)}"\r\n`;
           });
           // Fixed barcode position: placed in its place (Y=128, H=28, ends at 156 dots on 160-dot label)
           // whatever the text length, so long text never pushes it off the label.
@@ -1990,12 +2068,12 @@ async function handlePrintBarcode(body) {
           if (textLines.length > 1) {
             const line1X = Math.max(0, getCenteredX(textLines[0], fontType) - shiftDots);
             const line2X = Math.max(0, getCenteredX(textLines[1], fontType) - shiftDots);
-            fullTspl += `TEXT ${line1X},40,${fontArgs},"${textLines[0]}"\r\n`;
-            fullTspl += `TEXT ${line2X},64,${fontArgs},"${textLines[1]}"\r\n`;
+            fullTspl += `TEXT ${line1X},40,"${fontCfg.font}",0,${fontCfg.mulX},${fontCfg.mulY},"${textLines[0]}"\r\n`;
+            fullTspl += `TEXT ${line2X},${40 + Math.min(24, fontCfg.lineHeight)},"${fontCfg.font}",0,${fontCfg.mulX},${fontCfg.mulY},"${textLines[1]}"\r\n`;
             fullTspl += `BARCODE ${barcodeX},110,"128",24,0,0,${narrow},${wide},"${sku}"\r\n`;
           } else {
             const nameSpecsX = Math.max(0, getCenteredX(textLines[0], fontType) - shiftDots);
-            fullTspl += `TEXT ${nameSpecsX},40,${fontArgs},"${textLines[0]}"\r\n`;
+            fullTspl += `TEXT ${nameSpecsX},40,"${fontCfg.font}",0,${fontCfg.mulX},${fontCfg.mulY},"${textLines[0]}"\r\n`;
             fullTspl += `BARCODE ${barcodeX},102,"128",28,0,0,${narrow},${wide},"${sku}"\r\n`;
           }
           const priceText = tsplText(fmt(product.price), 20);
@@ -2746,6 +2824,8 @@ module.exports = {
     partsLabelText,
     wrapTsplToWidth,
     fitTsplLine,
+    LABEL_FONTS,
+    getLabelFontConfig,
     clampCopies,
     chooseSubstitutePrinter,
     isLabelPrinter,
