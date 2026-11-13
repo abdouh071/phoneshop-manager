@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Trash2, Printer } from 'lucide-react';
+import { Save, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
@@ -17,9 +17,6 @@ import { findCodeCollisions } from '../../utils/productCode';
 import { errorMessage } from '../../utils/errorUtils';
 import type { PhoneModel } from '../../types';
 import { ProfitMarginCalculator } from '../../components/ui/ProfitMarginCalculator';
-import { CompatibleModelsInput } from '../../components/inventory/CompatibleModelsInput';
-import { normalizeCompatibleModels, joinModels, modelsFromProduct } from '../../utils/compatibleModels';
-import { printBarcodeDirect, openPrintWindow, buildLabelsHTML } from '../../utils/printWindow';
 import styles from './PartModal.module.css';
 
 interface EditPartPanelProps {
@@ -28,30 +25,6 @@ interface EditPartPanelProps {
   onClose: () => void;
 }
 
-const COMMON_PART_NAMES = [
-  'OLED Screen Assembly',
-  'Incell Screen Assembly',
-  'Original Battery (OEM)',
-  'High Capacity Battery',
-  'Charging Port Flex',
-  'Rear Main Camera',
-  'Front Selfie Camera',
-  'Back Glass Panel',
-  'Earpiece Speaker',
-  'Loudspeaker Buzzer',
-  'Power & Volume Flex',
-];
-
-const BRAND_CHIPS = [
-  { name: 'Apple', icon: '🍏' },
-  { name: 'Samsung', icon: '📱' },
-  { name: 'Xiaomi', icon: '⚡' },
-  { name: 'Huawei', icon: '🔴' },
-  { name: 'Oppo', icon: '🟢' },
-  { name: 'Realme', icon: '🟡' },
-  { name: 'Google', icon: '🌐' },
-];
-
 export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, onClose }) => {
   const { t } = useTranslation();
   const { updateProduct, deleteProduct } = useInventoryStore();
@@ -59,11 +32,10 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
   const permissions = usePermissions();
   const { user } = useAuthStore();
   const canViewCosts = user?.role === 'admin' || (permissions.inventory_edit && permissions.reports);
-  const { currency, storeName } = useSettingsStore();
+  const { currency } = useSettingsStore();
   const symbol = getCurrencySymbol(currency);
 
   const [form, setForm] = useState<Partial<PhoneModel>>({});
-  const [compatibleModels, setCompatibleModels] = useState<string[]>(['']);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showAdminUnlock, setShowAdminUnlock] = useState(false);
@@ -71,7 +43,6 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
   useEffect(() => {
     if (product) {
       setForm(product);
-      setCompatibleModels(modelsFromProduct(product));
     }
   }, [product]);
 
@@ -82,38 +53,9 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
     setForm(prev => ({ ...prev, [key]: value }));
   };
 
-  const handleAddBrandChip = (brandName: string) => {
-    const list = [...compatibleModels];
-    const last = list[list.length - 1] ?? '';
-    if (!last.toLowerCase().includes(brandName.toLowerCase())) {
-      if (last.trim()) {
-        setCompatibleModels([...list, brandName]);
-      } else {
-        list[list.length - 1] = brandName;
-        setCompatibleModels([...list]);
-      }
-    }
-  };
-
-  const handleSubmit = async (printBarcode = false) => {
-    if (!form.name?.trim()) {
-      toast.error(t('parts.editModal.missingFields'), t('parts.editModal.missingName'));
-      return;
-    }
-
-    const normalizedModels = normalizeCompatibleModels(compatibleModels);
-    if (normalizedModels.length === 0) {
-      toast.error(t('parts.editModal.missingFields'), t('parts.editModal.missingModel'));
-      return;
-    }
-
-    if (!form.price || Number(form.price) <= 0) {
-      toast.error(t('parts.editModal.missingFields'), t('parts.editModal.missingSellPrice'));
-      return;
-    }
-
-    if (canViewCosts && (!form.costPrice || Number(form.costPrice) < 0)) {
-      toast.error(t('parts.editModal.missingFields'), t('parts.editModal.missingCostPrice'));
+  const handleSubmit = async () => {
+    if (!form.name?.trim() || !form.model?.trim() || !form.price || !form.costPrice) {
+      toast.error(t('parts.editModal.missingFields'));
       return;
     }
 
@@ -123,20 +65,16 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
     const updates: Partial<PhoneModel> = {
       ...form,
       name: form.name.trim(),
+      model: form.model.trim(),
       price: Number(form.price),
       costPrice: Number(form.costPrice) || 0,
       stock,
       lowStockThreshold: threshold,
       stockStatus: computeStockStatus(stock, threshold),
-      compatibleModels: normalizedModels,
-      model: joinModels(normalizedModels),
-      partNumber: form.partNumber?.trim() || undefined,
-      barcode: form.barcode?.trim() || undefined,
-      color: form.color?.trim() || undefined,
-      supplier: form.supplier?.trim() || undefined,
+      sku: form.sku?.trim() || undefined,
       location: form.location?.trim() || undefined,
+      supplier: form.supplier?.trim() || undefined,
       notes: form.notes?.trim() || undefined,
-      imageUrl: form.imageUrl?.trim() || undefined,
     };
 
     // SKU collision check
@@ -150,26 +88,8 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
       });
       if (collisions.length > 0) {
         toast.error(
-          t('parts.editModal.codeConflict'),
-          `${collisions[0]}. ${t('parts.editModal.codeConflictHint')}`
-        );
-        return;
-      }
-    }
-
-    // Barcode collision check
-    const nextBarcode = (updates.barcode || '').trim();
-    if (nextBarcode && nextBarcode !== (product.barcode || '')) {
-      const { products, parts } = useInventoryStore.getState();
-      const collisions = findCodeCollisions([...products, ...parts], {
-        id: product.id,
-        sku: updates.sku,
-        barcode: nextBarcode,
-      });
-      if (collisions.length > 0) {
-        toast.error(
-          t('parts.editModal.codeConflict'),
-          `${collisions[0]}. ${t('parts.editModal.codeConflictHint')}`
+          t('parts.editModal.codeConflict', 'Code Already on Another Product'),
+          `${collisions[0]}. ${t('parts.editModal.codeConflictHint', 'Give this part its own code, or one scan will sell two different items.')}`
         );
         return;
       }
@@ -185,18 +105,6 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
       } else {
         toast.warning(t('parts.editModal.savedRetrying'), t('parts.editModal.savedRetryingDesc', { name: updates.name }));
       }
-
-      if (printBarcode) {
-        const updatedItem = { ...product, ...updates } as PhoneModel;
-        const result = await printBarcodeDirect([updatedItem], storeName, currency);
-        if (result.method === 'direct' && result.error) {
-          toast.error(t('parts.addPartModal.labelNotPrinted'), result.error);
-        } else if (result.method === 'browser') {
-          const html = buildLabelsHTML([updatedItem], storeName);
-          openPrintWindow(html, 'Part Label');
-        }
-      }
-
       onClose();
     } catch (err) {
       toast.error(t('parts.editModal.savedRetrying'), errorMessage(err));
@@ -256,9 +164,9 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
 
       <ConfirmDialog
         isOpen={isDeleting}
-        title={t('parts.editModal.deleteTitle')}
-        message={t('parts.editModal.deleteMessage', { name: product.name })}
-        confirmLabel={t('parts.editModal.deleteConfirm')}
+        title={t('parts.editModal.deleteTitle', 'Delete Part?')}
+        message={t('parts.editModal.deleteMessage', { name: product.name, defaultValue: `Are you sure you want to delete ${product.name}? This action cannot be undone.` })}
+        confirmLabel={t('parts.editModal.deleteConfirm', 'Delete')}
         isDanger
         onConfirm={handleDelete}
         onCancel={() => setIsDeleting(false)}
@@ -267,164 +175,69 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
       <Modal
         isOpen={modalOpen}
         onClose={onClose}
-        title={t('parts.editModal.title')}
-        subtitle={`${product.name} — ${product.model || product.sku}`}
+        title={t('parts.editModal.title', 'Edit Part')}
         size="lg"
       >
         <div className={styles.formGrid}>
-
           {/* ── 1. Part Details ── */}
           <div className={styles.section}>
-            <h3 className={styles.sectionTitle}>{t('parts.editModal.sectionIdentity')}</h3>
-
-            {/* Quick Preset Part Names */}
-            <div>
-              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-on-surface-variant)', display: 'block', marginBottom: '6px' }}>
-                Quick Presets:
-              </span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-                {COMMON_PART_NAMES.map(presetName => (
-                  <button
-                    key={presetName}
-                    type="button"
-                    onClick={() => setField('name', presetName)}
-                    style={{
-                      fontSize: '11px',
-                      padding: '3px 8px',
-                      borderRadius: '6px',
-                      border: '1px solid #cbd5e1',
-                      background: form.name === presetName ? '#4f46e5' : 'var(--color-surface, #f8fafc)',
-                      color: form.name === presetName ? '#ffffff' : 'var(--color-on-surface, #334155)',
-                      cursor: 'pointer',
-                      fontWeight: 500,
-                    }}
-                  >
-                    {presetName}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ marginTop: '8px' }}>
-              <Input
-                label={`${t('parts.editModal.labelName')} *`}
-                value={form.name || ''}
-                onChange={e => setField('name', e.target.value)}
-                placeholder="e.g. OLED Screen Assembly"
-              />
-            </div>
-
-            <div style={{ marginTop: '12px' }}>
-              <CompatibleModelsInput
-                models={compatibleModels}
-                onChange={setCompatibleModels}
-                label={`${t('parts.editModal.labelCompatible')} *`}
-                placeholder="e.g. iPhone 14 Pro"
-                addLabel={t('parts.editModal.addDevice')}
-              />
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '8px' }}>
-                {BRAND_CHIPS.map(b => (
-                  <button
-                    key={b.name}
-                    type="button"
-                    onClick={() => handleAddBrandChip(b.name)}
-                    style={{
-                      fontSize: '10.5px',
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      border: '1px solid var(--color-border, #e2e8f0)',
-                      background: 'var(--color-surface, #ffffff)',
-                      color: 'var(--color-on-surface, #475569)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {b.icon} {b.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className={styles.grid2} style={{ marginTop: '14px' }}>
-              <Input
-                label={t('parts.editModal.labelPartNumber')}
-                value={form.partNumber || ''}
-                onChange={e => setField('partNumber', e.target.value)}
-                placeholder="e.g. 661-12345"
-              />
-              <Input
-                label={t('parts.editModal.labelColor')}
-                value={form.color || ''}
-                onChange={e => setField('color', e.target.value)}
-                placeholder="e.g. Black, Starlight"
-              />
-            </div>
-          </div>
-
-          {/* ── 2. Codes & Location ── */}
-          <div className={styles.section}>
-            <h3 className={styles.sectionTitle}>{t('parts.editModal.sectionCodes')}</h3>
+            <h3 className={styles.sectionTitle}>{t('parts.editModal.sectionIdentity', 'Part Details')}</h3>
             <div className={styles.grid2}>
               <Input
-                label={t('parts.editModal.labelSku')}
-                value={form.sku || ''}
-                onChange={e => setField('sku', e.target.value)}
-                placeholder="PRT-XXXX-XXX"
+                label={`${t('parts.editModal.labelName', 'Part Name')} *`}
+                value={form.name || ''}
+                onChange={e => setField('name', e.target.value)}
               />
               <Input
-                label={t('parts.editModal.labelBarcode')}
-                value={form.barcode || ''}
-                onChange={e => setField('barcode', e.target.value)}
-                placeholder="Scan or enter barcode"
+                label={`${t('parts.editModal.labelCompatible', 'Compatible Model(s)')} *`}
+                value={form.model || ''}
+                onChange={e => setField('model', e.target.value)}
               />
             </div>
-            <div className={styles.grid2} style={{ marginTop: '14px' }}>
+            <div className={styles.grid2}>
               <Input
-                label={t('parts.editModal.labelLocation')}
-                value={form.location || ''}
-                onChange={e => setField('location', e.target.value)}
-                placeholder="e.g. Shelf A3, Bin 7"
+                label={t('parts.editModal.labelSku', 'SKU / Barcode')}
+                value={form.sku || ''}
+                onChange={e => setField('sku', e.target.value)}
               />
               <Input
-                label={t('parts.editModal.labelSupplier')}
-                value={form.supplier || ''}
-                onChange={e => setField('supplier', e.target.value)}
-                placeholder="Supplier name"
+                label={t('parts.editModal.labelLocation', 'Bin / Location')}
+                value={form.location || ''}
+                onChange={e => setField('location', e.target.value)}
               />
             </div>
           </div>
 
-          {/* ── 3. Pricing & Stock ── */}
+          {/* ── 2. Pricing & Stock ── */}
           <div className={styles.section}>
-            <h3 className={styles.sectionTitle}>{t('parts.editModal.sectionPricing')}</h3>
+            <h3 className={styles.sectionTitle}>{t('parts.editModal.sectionPricing', 'Pricing & Stock')}</h3>
             <div className={styles.grid3}>
               {canViewCosts && (
                 <Input
                   className="privacy-cost-input"
-                  label={`${t('parts.editModal.labelCost')} (${symbol}) *`}
+                  label={`${t('parts.editModal.labelCost', 'Cost Price')} (${symbol}) *`}
                   type="number"
                   step="0.01"
-                  min="0"
                   value={form.costPrice?.toString() || ''}
                   onChange={e => setField('costPrice', e.target.value)}
                 />
               )}
               <Input
-                label={`${t('parts.editModal.labelSell')} (${symbol}) *`}
+                label={`${t('parts.editModal.labelSell', 'Sell Price')} (${symbol}) *`}
                 type="number"
                 step="0.01"
-                min="0"
                 value={form.price?.toString() || ''}
                 onChange={e => setField('price', e.target.value)}
               />
               <Input
-                label={t('parts.editModal.labelStock')}
+                label={`${t('parts.editModal.labelStock', 'Current Stock')} *`}
                 type="number"
-                min="0"
                 value={form.stock?.toString() || ''}
                 onChange={e => setField('stock', e.target.value)}
               />
             </div>
 
+            {/* Live Profit & Margin Breakdown — only for authorized staff */}
             {canViewCosts && (
               <div style={{ marginTop: '12px' }}>
                 <ProfitMarginCalculator
@@ -436,95 +249,61 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
               </div>
             )}
 
-            <div className={styles.grid2} style={{ marginTop: '14px' }}>
+            <div className={styles.grid2}>
               <Input
-                label={t('parts.editModal.labelThreshold')}
+                label={t('parts.editModal.labelThreshold', 'Low Stock Alert Threshold')}
                 type="number"
-                min="0"
                 value={form.lowStockThreshold?.toString() || ''}
                 onChange={e => setField('lowStockThreshold', e.target.value)}
               />
-              <div>
-                <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-on-surface)', display: 'block', marginBottom: '6px' }}>
-                  {t('parts.editModal.labelCondition')}
-                </label>
-                <select
-                  value={form.condition || ''}
-                  onChange={e => setField('condition', e.target.value || undefined)}
-                  style={{
-                    width: '100%',
-                    height: '42px',
-                    padding: '0 12px',
-                    borderRadius: '8px',
-                    border: '1.5px solid var(--color-border, #cbd5e1)',
-                    background: 'var(--color-surface, #ffffff)',
-                    color: 'var(--color-on-surface, #0f172a)',
-                    fontSize: '14px',
-                  }}
-                >
-                  <option value="">{t('parts.editModal.conditionAny')}</option>
-                  <option value="new">{t('parts.editModal.conditionNew')}</option>
-                  <option value="used">{t('parts.editModal.conditionUsed')}</option>
-                  <option value="refurbished">{t('parts.editModal.conditionRefurbished')}</option>
-                </select>
-              </div>
+              <Input
+                label={t('parts.editModal.labelSupplier', 'Supplier')}
+                value={form.supplier || ''}
+                onChange={e => setField('supplier', e.target.value)}
+              />
             </div>
           </div>
 
-          {/* ── 4. Additional Info ── */}
+          {/* ── 3. Additional Info ── */}
           <div className={styles.section}>
-            <h3 className={styles.sectionTitle}>{t('parts.editModal.sectionAdditional')}</h3>
-            <Input
-              label={t('parts.editModal.labelImageUrl')}
-              value={form.imageUrl || ''}
-              onChange={e => setField('imageUrl', e.target.value)}
-              placeholder="https://…"
-              style={{ marginBottom: '14px' }}
-            />
+            <h3 className={styles.sectionTitle}>{t('parts.editModal.sectionAdditional', 'Additional Info')}</h3>
             <TextArea
-              label={t('parts.editModal.labelNotes')}
-              rows={3}
+              label={t('parts.editModal.labelNotes', 'Notes')}
+              rows={4}
               value={form.notes || ''}
               onChange={e => setField('notes', e.target.value)}
-              placeholder={t('parts.editModal.notesPlaceholder')}
             />
           </div>
         </div>
 
-        {/* ── Modal Footer Actions ── */}
+        {/* ── Actions Footer ── */}
         <div className={styles.actions}>
           <Button
             variant="danger"
             size="sm"
+            leftIcon={<Trash2 size={16} />}
             onClick={requestDelete}
             disabled={isSubmitting}
-            leftIcon={<Trash2 size={16} />}
           >
-            {t('parts.editModal.deleteBtn')}
+            {t('parts.editModal.deleteBtn', 'Delete')}
           </Button>
 
           <div className={styles.actionRight}>
             <Button
               variant="ghost"
+              size="sm"
               onClick={onClose}
               disabled={isSubmitting}
             >
               {t('common.cancel', 'Cancel')}
             </Button>
             <Button
-              variant="secondary"
-              onClick={() => handleSubmit(true)}
-              disabled={isSubmitting}
-              leftIcon={<Printer size={16} />}
-            >
-              {t('parts.saveAndPrint', 'Save & Print Label')}
-            </Button>
-            <Button
-              onClick={() => handleSubmit(false)}
-              disabled={isSubmitting}
+              size="sm"
               leftIcon={<Save size={16} />}
+              onClick={handleSubmit}
+              disabled={isSubmitting}
             >
-              {isSubmitting ? t('common.saving', 'Saving...') : t('parts.editModal.saveBtn')}
+              {isSubmitting ? t('common.saving', 'Saving...') : t('parts.editModal.saveBtn', 'Save Changes')}
             </Button>
           </div>
         </div>
