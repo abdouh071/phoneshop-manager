@@ -9,7 +9,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useToast } from '../../components/ui/Toast';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import type { PhoneModel } from '../../types';
-import styles from '../inventory/ProductForm.module.css';
+import styles from './PartModal.module.css';
 import { useSettingsStore } from '../../store/settingsStore';
 import { printBarcodeDirect, openPrintWindow, buildLabelsHTML } from '../../utils/printWindow';
 import { getCurrencySymbol } from '../../utils/formatCurrency';
