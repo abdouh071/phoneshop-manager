@@ -40,6 +40,8 @@ import { PrintPartsLabelsModal } from './PrintPartsLabelsModal';
 import { RestockHistoryPanel } from '../inventory/RestockHistoryPanel';
 import { WriteOffLogPanel } from '../inventory/WriteOffLogPanel';
 import { useRestockHandler } from '../inventory/useRestockHandler';
+import { useBarcodeScanner } from './useBarcodeScanner';
+import { PartRowActions } from './PartRowActions';
 import { CustomerAutocompleteInput } from '../pos/CustomerAutocompleteInput';
 import { QuickAddShopModal } from './QuickAddShopModal';
 import { B2BPartsCheckoutModal } from './B2BPartsCheckoutModal';
@@ -302,10 +304,7 @@ export const PartsPage = () => {
     }
   };
 
-  // Hardware barcode scanner listener for Parts POS (Problem 9 fix)
-  const barcodeBuffer = useRef('');
-  const barcodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
+  // Hardware barcode scanner listener for Parts POS
   const handleBarcodeInput = (sku: string) => {
     const part = parts.find(p => p.sku && p.sku.toLowerCase() === sku.toLowerCase());
     if (part) {
@@ -323,34 +322,7 @@ export const PartsPage = () => {
     }
   };
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      const isInputFocused = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
-
-      if (!isInputFocused) {
-        if (e.key === 'Enter') {
-          if (barcodeBuffer.current.length > 3) {
-            handleBarcodeInput(barcodeBuffer.current);
-          }
-          barcodeBuffer.current = '';
-          if (barcodeTimer.current) clearTimeout(barcodeTimer.current);
-          return;
-        }
-
-        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-          barcodeBuffer.current += e.key;
-          if (barcodeTimer.current) clearTimeout(barcodeTimer.current);
-          barcodeTimer.current = setTimeout(() => {
-            barcodeBuffer.current = '';
-          }, 100);
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [parts, addToCart, toast]);
+  useBarcodeScanner({ onScan: handleBarcodeInput });
 
   // Filter products for Parts ONLY (isolated local filters)
   // The server only returned repair parts from the beginning (no client category filter needed)
@@ -929,47 +901,22 @@ export const PartsPage = () => {
                           <td className={styles.td} style={{ textAlign: 'right' }}>
                             {isSingle && (() => {
                               const v = single;
-                              return restockingId === v.id ? (
-                                <div className={styles.restockInline} style={{ justifyContent: 'flex-end' }}>
-                                  <input
-                                    autoFocus
-                                    type="number"
-                                    min="1"
-                                    placeholder={t('parts.qty')}
-                                    value={restockAmt}
-                                    onChange={e => setRestockAmt(e.target.value)}
-                                    onKeyDown={e => { if (e.key === 'Escape') { setRestockingId(null); setRestockAmt(''); } }}
-                                    className={styles.restockInput}
-                                    style={{ width: '64px' }}
-                                  />
-                                  {canViewCosts && (
-                                    <input
-                                      type="number"
-                                      placeholder={t('parts.unitCost')}
-                                      value={restockMeta.cost}
-                                      onChange={e => setRestockMeta(m => ({ ...m, cost: e.target.value }))}
-                                      className={styles.restockInput}
-                                      style={{ width: '80px' }}
-                                    />
-                                  )}
-                                  <Button size="sm" onClick={() => handleRestock(v)}>{t('parts.save')}</Button>
-                                  <Button size="sm" variant="ghost" onClick={() => { setRestockingId(null); setRestockAmt(''); }}>✕</Button>
-                                </div>
-                              ) : (
-                                <div className={styles.actionButtons} style={{ justifyContent: 'flex-end' }}>
-                                  <Button variant="ghost" size="sm" onClick={() => setDetailProduct(v)} title={t('parts.viewDetails')}>
-                                    <Eye size={15} />
-                                  </Button>
-                                  <Button variant="secondary" size="sm" onClick={() => requirePermission('edit this product', () => setEditingProduct(v))}>
-                                    {t('parts.edit')}
-                                  </Button>
-                                  <Button variant="secondary" size="sm" onClick={() => requirePermission('restock products', () => { setRestockingId(v.id); setRestockAmt(''); setRestockMeta({ supplier: '', cost: '', note: '' }); })}>
-                                    {t('parts.restock')}
-                                  </Button>
-                                  <Button variant="danger" size="sm" onClick={() => requirePermission('write off products', () => setWriteOffProduct(v))} disabled={v.stock === 0} title="Write-Off">
-                                    <AlertTriangle size={15} />
-                                  </Button>
-                                </div>
+                              return (
+                                <PartRowActions
+                                  product={v}
+                                  isRestocking={restockingId === v.id}
+                                  restockAmt={restockAmt}
+                                  restockCost={restockMeta.cost}
+                                  canViewCosts={canViewCosts}
+                                  onView={() => setDetailProduct(v)}
+                                  onEdit={() => requirePermission('edit this product', () => setEditingProduct(v))}
+                                  onRestockOpen={() => requirePermission('restock products', () => { setRestockingId(v.id); setRestockAmt(''); setRestockMeta({ supplier: '', cost: '', note: '' }); })}
+                                  onWriteOff={() => requirePermission('write off products', () => setWriteOffProduct(v))}
+                                  onRestockAmtChange={setRestockAmt}
+                                  onRestockCostChange={value => setRestockMeta(m => ({ ...m, cost: value }))}
+                                  onSaveRestock={() => handleRestock(v)}
+                                  onCancelRestock={() => { setRestockingId(null); setRestockAmt(''); }}
+                                />
                               );
                             })()}
                           </td>
@@ -1002,48 +949,21 @@ export const PartsPage = () => {
                               )}
                               <td className={styles.td}><StockBadge status={product.stockStatus} /></td>
                               <td className={styles.td} style={{ textAlign: 'right' }}>
-                                {restockingId === product.id ? (
-                                  <div className={styles.restockInline} style={{ justifyContent: 'flex-end' }}>
-                                    <input
-                                      autoFocus
-                                      type="number"
-                                      min="1"
-                                      placeholder={t('parts.qty')}
-                                      value={restockAmt}
-                                      onChange={e => setRestockAmt(e.target.value)}
-                                      onKeyDown={e => { if (e.key === 'Escape') { setRestockingId(null); setRestockAmt(''); } }}
-                                      className={styles.restockInput}
-                                      style={{ width: '64px' }}
-                                    />
-                                    {canViewCosts && (
-                                      <input
-                                        type="number"
-                                        placeholder={t('parts.unitCost')}
-                                        value={restockMeta.cost}
-                                        onChange={e => setRestockMeta(m => ({ ...m, cost: e.target.value }))}
-                                        className={styles.restockInput}
-                                        style={{ width: '80px' }}
-                                      />
-                                    )}
-                                    <Button size="sm" onClick={() => handleRestock(product)}>{t('parts.save')}</Button>
-                                    <Button size="sm" variant="ghost" onClick={() => { setRestockingId(null); setRestockAmt(''); }}>✕</Button>
-                                  </div>
-                                ) : (
-                                  <div className={styles.actionButtons} style={{ justifyContent: 'flex-end' }}>
-                                    <Button variant="ghost" size="sm" onClick={() => setDetailProduct(product)} title={t('parts.viewDetails')}>
-                                      <Eye size={15} />
-                                    </Button>
-                                    <Button variant="secondary" size="sm" onClick={() => requirePermission('edit this product', () => setEditingProduct(product))}>
-                                      {t('parts.edit')}
-                                    </Button>
-                                    <Button variant="secondary" size="sm" onClick={() => requirePermission('restock products', () => { setRestockingId(product.id); setRestockAmt(''); setRestockMeta({ supplier: '', cost: '', note: '' }); })}>
-                                      {t('parts.restock')}
-                                    </Button>
-                                    <Button variant="danger" size="sm" onClick={() => requirePermission('write off products', () => setWriteOffProduct(product))} disabled={product.stock === 0} title="Write-Off">
-                                      <AlertTriangle size={15} />
-                                    </Button>
-                                  </div>
-                                )}
+                                <PartRowActions
+                                  product={product}
+                                  isRestocking={restockingId === product.id}
+                                  restockAmt={restockAmt}
+                                  restockCost={restockMeta.cost}
+                                  canViewCosts={canViewCosts}
+                                  onView={() => setDetailProduct(product)}
+                                  onEdit={() => requirePermission('edit this product', () => setEditingProduct(product))}
+                                  onRestockOpen={() => requirePermission('restock products', () => { setRestockingId(product.id); setRestockAmt(''); setRestockMeta({ supplier: '', cost: '', note: '' }); })}
+                                  onWriteOff={() => requirePermission('write off products', () => setWriteOffProduct(product))}
+                                  onRestockAmtChange={setRestockAmt}
+                                  onRestockCostChange={value => setRestockMeta(m => ({ ...m, cost: value }))}
+                                  onSaveRestock={() => handleRestock(product)}
+                                  onCancelRestock={() => { setRestockingId(null); setRestockAmt(''); }}
+                                />
                               </td>
                             </tr>
                           );
