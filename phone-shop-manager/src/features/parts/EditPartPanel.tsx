@@ -16,6 +16,8 @@ import { findCodeCollisions } from '../../utils/productCode';
 import { errorMessage } from '../../utils/errorUtils';
 import type { PhoneModel } from '../../types';
 import { ProfitMarginCalculator } from '../../components/ui/ProfitMarginCalculator';
+import { CompatibleModelsInput } from '../../components/inventory/CompatibleModelsInput';
+import { normalizeCompatibleModels, joinModels, modelsFromProduct } from '../../utils/compatibleModels';
 import styles from '../inventory/ProductForm.module.css';
 
 interface EditPartPanelProps {
@@ -34,41 +36,71 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, onClose }
   const symbol = getCurrencySymbol(currency);
 
   const [form, setForm] = useState<Partial<PhoneModel>>({});
+  const [compatibleModels, setCompatibleModels] = useState<string[]>(['']);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showAdminUnlock, setShowAdminUnlock] = useState(false);
 
   useEffect(() => {
     if (product) {
       setForm(product);
+      setCompatibleModels(modelsFromProduct(product));
     }
   }, [product]);
 
   if (!product) return null;
 
-  const set = (key: keyof PhoneModel, value: unknown) => {
+  const setField = (key: keyof PhoneModel, value: unknown) => {
     setForm(prev => ({ ...prev, [key]: value }));
   };
 
   const handleSubmit = async () => {
-    if (!form.name?.trim() || !form.model?.trim() || !form.price || !form.costPrice) {
-      toast.error(t('parts.editModal.missingFields'));
+    if (!form.name?.trim()) {
+      toast.error(t('parts.editModal.missingFields'), t('parts.editModal.missingName'));
       return;
     }
 
-    const stock = Number(form.stock);
+    const normalizedModels = normalizeCompatibleModels(compatibleModels);
+    if (normalizedModels.length === 0) {
+      toast.error(t('parts.editModal.missingFields'), t('parts.editModal.missingModel'));
+      return;
+    }
+
+    if (!form.price || Number(form.price) <= 0) {
+      toast.error(t('parts.editModal.missingFields'), t('parts.editModal.missingSellPrice'));
+      return;
+    }
+
+    if (canViewCosts && (!form.costPrice || Number(form.costPrice) < 0)) {
+      toast.error(t('parts.editModal.missingFields'), t('parts.editModal.missingCostPrice'));
+      return;
+    }
+
+    const stock = Number(form.stock) || 0;
     const threshold = Number(form.lowStockThreshold) || 1;
 
     const updates: Partial<PhoneModel> = {
       ...form,
+      name: form.name.trim(),
       price: Number(form.price),
-      costPrice: Number(form.costPrice),
+      costPrice: Number(form.costPrice) || 0,
       stock,
       lowStockThreshold: threshold,
       stockStatus: computeStockStatus(stock, threshold),
+      // Compatible models: both legacy `model` (joined) and new array
+      compatibleModels: normalizedModels,
+      model: joinModels(normalizedModels),
+      // Sanitise optional strings
+      brand: form.brand?.trim() || undefined,
+      partNumber: form.partNumber?.trim() || undefined,
+      barcode: form.barcode?.trim() || undefined,
+      color: form.color?.trim() || undefined,
+      supplier: form.supplier?.trim() || undefined,
+      location: form.location?.trim() || undefined,
+      notes: form.notes?.trim() || undefined,
+      imageUrl: form.imageUrl?.trim() || undefined,
     };
 
-    // The "SKU / Barcode" field is editable here, and a code saved on two rows makes
-    // every later scan answer to whichever came first — the wrong item sold in silence.
+    // SKU collision check
     const nextSku = (updates.sku || '').trim();
     if (nextSku && nextSku.toUpperCase() !== (product.sku || '').toUpperCase()) {
       const { products, parts } = useInventoryStore.getState();
@@ -79,8 +111,26 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, onClose }
       });
       if (collisions.length > 0) {
         toast.error(
-          'Code Already on Another Product',
-          `${collisions[0]}. Give this part its own code, or one scan will sell two different items.`
+          t('parts.editModal.codeConflict'),
+          `${collisions[0]}. ${t('parts.editModal.codeConflictHint')}`
+        );
+        return;
+      }
+    }
+
+    // Barcode collision check (separate from SKU)
+    const nextBarcode = (updates.barcode || '').trim();
+    if (nextBarcode && nextBarcode !== (product.barcode || '')) {
+      const { products, parts } = useInventoryStore.getState();
+      const collisions = findCodeCollisions([...products, ...parts], {
+        id: product.id,
+        sku: updates.sku,
+        barcode: nextBarcode,
+      });
+      if (collisions.length > 0) {
+        toast.error(
+          t('parts.editModal.codeConflict'),
+          `${collisions[0]}. ${t('parts.editModal.codeConflictHint')}`
         );
         return;
       }
@@ -104,7 +154,6 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, onClose }
       if (outcome === 'committed') {
         toast.success(t('inventory.deletedTitle'), t('inventory.deletedDesc', { name: label }));
       } else if (outcome === 'queued') {
-        // The server document is still there; only this till stopped showing it.
         toast.info(t('inventory.deleteQueuedTitle'), t('inventory.deleteQueuedDesc', { name: label }));
       } else {
         toast.error(t('inventory.deleteFailedTitle'), t('inventory.deleteFailedDesc', { name: label }));
@@ -149,69 +198,206 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, onClose }
 
       <ConfirmDialog
         isOpen={isDeleting}
-        title="Delete Part?"
-        message={`Are you sure you want to delete ${product.name}? This action cannot be undone.`}
-        confirmLabel="Delete"
+        title={t('parts.editModal.deleteTitle')}
+        message={t('parts.editModal.deleteMessage', { name: product.name })}
+        confirmLabel={t('parts.editModal.deleteConfirm')}
         isDanger
         onConfirm={handleDelete}
         onCancel={() => setIsDeleting(false)}
       />
 
+      {/* ── Header ── */}
       <div className={styles.slidePanelHeader}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <Button variant="ghost" size="sm" onClick={onClose}><X size={20} /></Button>
-          <h2 className={styles.sectionTitle} style={{ margin: 0 }}>Edit Part</h2>
+          <h2 className={styles.sectionTitle} style={{ margin: 0 }}>{t('parts.editModal.title')}</h2>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <Button variant="danger" size="sm" leftIcon={<Trash2 size={16} />} onClick={requestDelete}>Delete</Button>
-          <Button size="sm" leftIcon={<Save size={16} />} onClick={handleSubmit}>Save Changes</Button>
+          <Button variant="danger" size="sm" leftIcon={<Trash2 size={16} />} onClick={requestDelete}>
+            {t('parts.editModal.deleteBtn')}
+          </Button>
+          <Button size="sm" leftIcon={<Save size={16} />} onClick={handleSubmit}>
+            {t('parts.editModal.saveBtn')}
+          </Button>
         </div>
       </div>
 
+      {/* ── Body ── */}
       <div className={styles.slidePanelBody}>
+
+        {/* ── 1. Part Identity ── */}
         <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Part Details</h3>
+          <h3 className={styles.sectionTitle}>{t('parts.editModal.sectionIdentity')}</h3>
+
           <div className={styles.grid2}>
-            <Input label="Part Name *" value={form.name || ''} onChange={e => set('name', e.target.value)} />
-            <Input label="Compatible Model(s) *" value={form.model || ''} onChange={e => set('model', e.target.value)} />
+            <Input
+              label={`${t('parts.editModal.labelName')} *`}
+              value={form.name || ''}
+              onChange={e => setField('name', e.target.value)}
+              placeholder="e.g. Screen Assembly"
+            />
+            <Input
+              label={t('parts.editModal.labelBrand')}
+              value={form.brand || ''}
+              onChange={e => setField('brand', e.target.value)}
+              placeholder="e.g. OEM, Apple, Samsung"
+            />
           </div>
+
+          <div style={{ marginTop: '16px' }}>
+            <CompatibleModelsInput
+              models={compatibleModels}
+              onChange={setCompatibleModels}
+              label={`${t('parts.editModal.labelCompatible')} *`}
+              placeholder="e.g. iPhone 14 Pro"
+              addLabel={t('parts.editModal.addDevice')}
+            />
+          </div>
+
           <div className={styles.grid2} style={{ marginTop: '16px' }}>
-            <Input label="SKU / Barcode" value={form.sku || ''} onChange={e => set('sku', e.target.value)} />
-            <Input label="Bin / Location" value={form.location || ''} onChange={e => set('location', e.target.value)} />
+            <Input
+              label={t('parts.editModal.labelPartNumber')}
+              value={form.partNumber || ''}
+              onChange={e => setField('partNumber', e.target.value)}
+              placeholder="e.g. 661-12345"
+            />
+            <Input
+              label={t('parts.editModal.labelColor')}
+              value={form.color || ''}
+              onChange={e => setField('color', e.target.value)}
+              placeholder="e.g. Black, Starlight"
+            />
           </div>
         </div>
 
+        {/* ── 2. Codes & Location ── */}
         <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Pricing & Stock</h3>
+          <h3 className={styles.sectionTitle}>{t('parts.editModal.sectionCodes')}</h3>
+          <div className={styles.grid2}>
+            <Input
+              label={t('parts.editModal.labelSku')}
+              value={form.sku || ''}
+              onChange={e => setField('sku', e.target.value)}
+              placeholder="SKU-XXXXXXX"
+            />
+            <Input
+              label={t('parts.editModal.labelBarcode')}
+              value={form.barcode || ''}
+              onChange={e => setField('barcode', e.target.value)}
+              placeholder="Scan or enter barcode"
+            />
+          </div>
+          <div className={styles.grid2} style={{ marginTop: '16px' }}>
+            <Input
+              label={t('parts.editModal.labelLocation')}
+              value={form.location || ''}
+              onChange={e => setField('location', e.target.value)}
+              placeholder="e.g. Shelf A3, Bin 7"
+            />
+            <Input
+              label={t('parts.editModal.labelSupplier')}
+              value={form.supplier || ''}
+              onChange={e => setField('supplier', e.target.value)}
+              placeholder="Supplier name"
+            />
+          </div>
+        </div>
+
+        {/* ── 3. Pricing & Stock ── */}
+        <div className={styles.section}>
+          <h3 className={styles.sectionTitle}>{t('parts.editModal.sectionPricing')}</h3>
           <div className={styles.grid3}>
             {canViewCosts && (
-              <Input className="privacy-cost-input" label={`Cost Price (${symbol}) *`} type="number" step="0.01" value={form.costPrice?.toString() || ''} onChange={e => set('costPrice', e.target.value)} />
+              <Input
+                className="privacy-cost-input"
+                label={`${t('parts.editModal.labelCost')} (${symbol}) *`}
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.costPrice?.toString() || ''}
+                onChange={e => setField('costPrice', e.target.value)}
+              />
             )}
-            <Input label={`Sell Price (${symbol}) *`} type="number" step="0.01" value={form.price?.toString() || ''} onChange={e => set('price', e.target.value)} />
-            <Input label="Current Stock *" type="number" value={form.stock?.toString() || ''} onChange={e => set('stock', e.target.value)} />
+            <Input
+              label={`${t('parts.editModal.labelSell')} (${symbol}) *`}
+              type="number"
+              step="0.01"
+              min="0"
+              value={form.price?.toString() || ''}
+              onChange={e => setField('price', e.target.value)}
+            />
+            <Input
+              label={t('parts.editModal.labelStock')}
+              type="number"
+              min="0"
+              value={form.stock?.toString() || ''}
+              onChange={e => setField('stock', e.target.value)}
+            />
           </div>
 
-          {/* Live Profit & Margin Breakdown — only for authorized staff */}
           {canViewCosts && (
             <div style={{ marginTop: '12px' }}>
               <ProfitMarginCalculator
-                costPrice={form.costPrice || 0}
-                sellPrice={form.price || 0}
-                stock={form.stock || 0}
-                onApplySellPrice={(suggested) => set('price', suggested)}
+                costPrice={Number(form.costPrice) || 0}
+                sellPrice={Number(form.price) || 0}
+                stock={Number(form.stock) || 0}
+                onApplySellPrice={(suggested) => setField('price', suggested)}
               />
             </div>
           )}
 
           <div className={styles.grid2} style={{ marginTop: '16px' }}>
-            <Input label="Low Stock Alert Threshold" type="number" value={form.lowStockThreshold?.toString() || ''} onChange={e => set('lowStockThreshold', e.target.value)} />
-            <Input label="Supplier" value={form.supplier || ''} onChange={e => set('supplier', e.target.value)} />
+            <Input
+              label={t('parts.editModal.labelThreshold')}
+              type="number"
+              min="0"
+              value={form.lowStockThreshold?.toString() || ''}
+              onChange={e => setField('lowStockThreshold', e.target.value)}
+            />
+            <div>
+              <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-on-surface)', display: 'block', marginBottom: '6px' }}>
+                {t('parts.editModal.labelCondition')}
+              </label>
+              <select
+                value={form.condition || ''}
+                onChange={e => setField('condition', e.target.value || undefined)}
+                style={{
+                  width: '100%',
+                  height: '42px',
+                  padding: '0 12px',
+                  borderRadius: '8px',
+                  border: '1.5px solid var(--color-border)',
+                  background: 'var(--color-surface)',
+                  color: 'var(--color-on-surface)',
+                  fontSize: '14px',
+                }}
+              >
+                <option value="">{t('parts.editModal.conditionAny')}</option>
+                <option value="new">{t('parts.editModal.conditionNew')}</option>
+                <option value="used">{t('parts.editModal.conditionUsed')}</option>
+                <option value="refurbished">{t('parts.editModal.conditionRefurbished')}</option>
+              </select>
+            </div>
           </div>
         </div>
 
+        {/* ── 4. Additional Info ── */}
         <div className={styles.section}>
-          <h3 className={styles.sectionTitle}>Additional Info</h3>
-          <TextArea label="Notes" rows={4} value={form.notes || ''} onChange={e => set('notes', e.target.value)} />
+          <h3 className={styles.sectionTitle}>{t('parts.editModal.sectionAdditional')}</h3>
+          <Input
+            label={t('parts.editModal.labelImageUrl')}
+            value={form.imageUrl || ''}
+            onChange={e => setField('imageUrl', e.target.value)}
+            placeholder="https://…"
+            style={{ marginBottom: '16px' }}
+          />
+          <TextArea
+            label={t('parts.editModal.labelNotes')}
+            rows={4}
+            value={form.notes || ''}
+            onChange={e => setField('notes', e.target.value)}
+            placeholder={t('parts.editModal.notesPlaceholder')}
+          />
         </div>
       </div>
     </div>
