@@ -76,7 +76,9 @@ const PORT = intFrom(process.env.PORT, 3355, 1, 65535);
 const PRINTER_NAME = process.env.PRINTER_NAME || 'Printer_POS_80';
 const LABEL_PRINTER_NAME = process.env.LABEL_PRINTER_NAME || 'Xprinter_XP_420B';
 const HAS_CUTTER = process.env.HAS_CUTTER !== 'false'; // default true
-const LABEL_OFFSET_X = parseInt(process.env.LABEL_OFFSET_X || '12', 10); // dots to shift left to compensate for printer's built-in left margin
+// Measured 2026-11-13 with the probe label: the XP-420B prints text at x=0 flush
+// with the physical label edge, so there is no built-in margin to compensate for.
+const LABEL_OFFSET_X = parseInt(process.env.LABEL_OFFSET_X || '0', 10);
 
 // Measured on the Xprinter XP-420B with a probe label (2026-11-13): 25 digits of
 // font "2" span the full 400-dot label and 30 digits of font "1" span ~300 dots.
