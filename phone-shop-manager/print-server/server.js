@@ -1009,6 +1009,21 @@ function wrapTsplToWidth(text, charWidth, maxDots) {
 }
 
 /**
+ * Fit a single ticket line inside a physical dot width: keep the larger font
+ * (2, 12 dots/char) when the text fits, otherwise drop to font 1 (8 dots/char)
+ * and cap at the width. A long name/issue keeps every letter in smaller type
+ * instead of running off the right edge and losing the last glyph mid-letter.
+ */
+function fitTsplLine(text, maxDots) {
+  const clean = text || '';
+  if (clean.length * 12 <= maxDots) {
+    return { font: '2', text: clean };
+  }
+  const maxChars = Math.max(1, Math.floor(maxDots / 8));
+  return { font: '1', text: clean.slice(0, maxChars) };
+}
+
+/**
  * Format a two-column row: left-aligned name, right-aligned price
  * Total width = 42 chars for 80mm paper
  */
@@ -1296,16 +1311,24 @@ async function handlePrintRepairLabel(body) {
       
       const { x: barcodeX, narrow, wide } = getBarcodeParams(ticketNum);
 
+      // Text starts at x=12 on a 400-dot label shifted by REFERENCE 32; 336 dots
+      // is the proven-safe extent of the phone-name line, ending short of the edge.
+      const TICKET_TEXT_MAX_DOTS = 336;
+
       // Line 1: Phone Name & Phone Number
-      tspl += `TEXT 12,6,"2",0,1,1,"${tsplText(phoneHeader, 28)}"\r\n`;
+      const line1 = fitTsplLine(tsplText(phoneHeader, 28), TICKET_TEXT_MAX_DOTS);
+      tspl += `TEXT 12,6,"${line1.font}",0,1,1,"${line1.text}"\r\n`;
       // Divider
       tspl += 'BAR 0,28,400,1\r\n';
       // Line 2: Customer Name (up 1mm)
-      tspl += `TEXT 12,34,"2",0,1,1,"${tsplText(`${t('client', 'Client')} : ${custName}`, 48)}"\r\n`;
+      const line2 = fitTsplLine(tsplText(`${t('client', 'Client')} : ${custName}`, 48), TICKET_TEXT_MAX_DOTS);
+      tspl += `TEXT 12,34,"${line2.font}",0,1,1,"${line2.text}"\r\n`;
       // Line 3: Problem Description (down 1mm)
-      tspl += `TEXT 12,60,"2",0,1,1,"${tsplText(`${t('issue', 'Issue')} : ${issueDesc || t('diagnostic', 'Diagnostic')}`, 52)}"\r\n`;
+      const line3 = fitTsplLine(tsplText(`${t('issue', 'Issue')} : ${issueDesc || t('diagnostic', 'Diagnostic')}`, 52), TICKET_TEXT_MAX_DOTS);
+      tspl += `TEXT 12,60,"${line3.font}",0,1,1,"${line3.text}"\r\n`;
       // Line 4: Price & Deposit (down 2mm)
-      tspl += `TEXT 12,86,"2",0,1,1,"${tsplText(priceText, 44)}"\r\n`;
+      const line4 = fitTsplLine(tsplText(priceText, 44), TICKET_TEXT_MAX_DOTS);
+      tspl += `TEXT 12,86,"${line4.font}",0,1,1,"${line4.text}"\r\n`;
       // Line 5: Barcode (down 1mm)
       tspl += `BARCODE ${barcodeX},110,"128",38,0,0,${narrow},${wide},"${tsplText(ticketNum, 24)}"\r\n`;
       // Line 6: Ticket reference text (down 1mm)
@@ -2681,6 +2704,7 @@ module.exports = {
     tsplField,
     tsplInt,
     wrapTsplToWidth,
+    fitTsplLine,
     clampCopies,
     chooseSubstitutePrinter,
     isLabelPrinter,

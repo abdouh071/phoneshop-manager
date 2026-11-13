@@ -151,6 +151,36 @@ test('a short name stays on one line and an empty name yields one blank line', (
   assert.deepEqual(internals.wrapTsplToWidth('', 12, 288), ['']);
 });
 
+test('a ticket line that fits keeps the larger font 2', () => {
+  assert.deepEqual(internals.fitTsplLine('CABLE', 336), { font: '2', text: 'CABLE' });
+  assert.deepEqual(internals.fitTsplLine('', 336), { font: '2', text: '' });
+  // 28 chars x 12 dots = 336, exactly the safe extent of the phone-name line.
+  const edge = 'A'.repeat(28);
+  assert.deepEqual(internals.fitTsplLine(edge, 336), { font: '2', text: edge });
+});
+
+test('a ticket line too wide for font 2 drops to font 1 and keeps every letter', () => {
+  const name = 'A'.repeat(29); // 29 x 12 = 348 > 336, but 29 x 8 = 232 fits
+  const fitted = internals.fitTsplLine(name, 336);
+  assert.equal(fitted.font, '1');
+  assert.equal(fitted.text, name);
+});
+
+test('a very long ticket line is capped so no glyph reaches the right edge', () => {
+  const fitted = internals.fitTsplLine('A'.repeat(50), 336);
+  assert.equal(fitted.font, '1');
+  assert.equal(fitted.text, 'A'.repeat(42)); // floor(336 / 8)
+  assert.ok(fitted.text.length * 8 <= 336);
+});
+
+test('every fitted ticket line stays inside the safe dot width at its own font', () => {
+  for (let len = 0; len <= 60; len++) {
+    const fitted = internals.fitTsplLine('X'.repeat(len), 336);
+    const charWidth = fitted.font === '2' ? 12 : 8;
+    assert.ok(fitted.text.length * charWidth <= 336, `len ${len}`);
+  }
+});
+
 test('an oversized PNG is refused before it is decoded', () => {
   const header = Buffer.alloc(24);
   header.writeUInt32BE(0x89504e47, 0);
