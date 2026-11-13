@@ -122,7 +122,7 @@ const LABEL_FONTS = {
     mulX: 1,
     mulY: 1,
     charWidth: TSPL_FONT_2_WIDTH, // 16
-    lineHeight: 20, // 0.8mm inter-line margin (6.4 dots at 203 DPI)
+    lineHeight: 21,
     startY: 51,
     maxLines: 3,
   },
