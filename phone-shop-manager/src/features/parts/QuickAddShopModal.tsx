@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Store, AlertCircle } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
@@ -34,6 +35,7 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
   const [showAdminUnlock, setShowAdminUnlock] = useState(false);
   const [creditLimitApproved, setCreditLimitApproved] = useState(false);
 
+  const { t } = useTranslation();
   const { addCustomer } = useCustomerStore();
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'admin';
@@ -69,14 +71,14 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
       });
 
       toast.success(
-        'B2B Account Registered',
-        `${shopName} (${contactName}) has been opened as an active commercial account.`
+        t('parts.quickAdd.registeredTitle'),
+        t('parts.quickAdd.registeredBody', { shopName, contactName })
       );
 
       onCustomerCreated(newCustomer);
       handleClose();
     } catch (err: unknown) {
-      setError(errorMessage(err) || 'Failed to create shop account.');
+      setError(errorMessage(err) || t('parts.quickAdd.submitFailed'));
     } finally {
       setIsSubmitting(false);
     }
@@ -85,16 +87,16 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
   const handleSubmit = async () => {
     if (isSubmitting) return;
     if (!shopName.trim()) {
-      setError('Please provide the phone shop or business name (e.g. "AP Phone").');
+      setError(t('parts.quickAdd.errorShopName'));
       return;
     }
     if (!contactName.trim()) {
-      setError('Please provide the technician or owner name.');
+      setError(t('parts.quickAdd.errorContactName'));
       return;
     }
     const phoneDigits = phone.replace(/\D/g, '');
     if (!phone.trim() || phoneDigits.length < 7) {
-      setError('Please enter a valid phone number (at least 7 digits).');
+      setError(t('parts.quickAdd.errorPhone'));
       return;
     }
 
@@ -111,16 +113,16 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title="Open New Shop / Repairer Account"
-      subtitle="Register a phone store or repair technician for parts sales & credit ledger"
+      title={t('parts.quickAdd.quickAddTitle')}
+      subtitle={t('parts.quickAdd.quickAddSubtitle')}
       size="md"
       footer={
         <>
           <Button variant="ghost" onClick={handleClose} disabled={isSubmitting}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button onClick={handleSubmit} isLoading={isSubmitting} leftIcon={<Store size={16} />}>
-            Open Account & Attach
+            {t('parts.quickAdd.openAccountButton')}
           </Button>
         </>
       }
@@ -148,8 +150,8 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
           <Input
-            label="Shop / Business Name *"
-            placeholder="e.g. AP Phone, QuickFix"
+            label={t('parts.quickAdd.shopNameLabel')}
+            placeholder={t('parts.quickAdd.shopNamePlaceholder')}
             value={shopName}
             onChange={e => {
               setShopName(e.target.value);
@@ -159,8 +161,8 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
           />
 
           <Input
-            label="Owner / Contact Person *"
-            placeholder="e.g. Ahmed Benali"
+            label={t('parts.quickAdd.contactNameLabel')}
+            placeholder={t('parts.quickAdd.contactNamePlaceholder')}
             value={contactName}
             onChange={e => {
               setContactName(e.target.value);
@@ -171,8 +173,8 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
           <Input
-            label="Phone Number *"
-            placeholder="e.g. 0550 12 34 56"
+            label={t('parts.quickAdd.phoneLabel')}
+            placeholder={t('parts.quickAdd.phonePlaceholder')}
             value={phone}
             onChange={e => {
               setPhone(e.target.value);
@@ -182,10 +184,10 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <Input
-              label="Credit Limit (DZD Optional)"
+              label={t('parts.quickAdd.creditLimitLabel')}
               type="number"
               min="0"
-              placeholder="e.g. 50000"
+              placeholder={t('parts.quickAdd.creditLimitPlaceholder')}
               value={creditLimit}
               onChange={e => {
                 setCreditLimit(e.target.value);
@@ -195,11 +197,11 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
             {parseFloat(creditLimit) > 0 && (
               creditLimitApproved ? (
                 <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>
-                  ✓ Admin override approved
+                  {t('parts.quickAdd.adminOverrideApproved')}
                 </span>
               ) : !isAdmin && (
                 <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: 500 }}>
-                  🔒 Admin approval required to assign credit limit
+                  {t('parts.quickAdd.adminApprovalRequired')}
                 </span>
               )
             )}
@@ -207,16 +209,16 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
         </div>
 
         <Input
-          label="Email Address (Optional)"
-          placeholder="e.g. contact@apphone.com"
+          label={t('parts.quickAdd.emailLabel')}
+          placeholder={t('parts.quickAdd.emailPlaceholder')}
           type="email"
           value={email}
           onChange={e => setEmail(e.target.value)}
         />
 
         <Textarea
-          label="Commercial Notes / Location (Optional)"
-          placeholder="e.g. Store located in Bab Ezzouar, discounts agreed on bulk screens"
+          label={t('parts.quickAdd.notesLabel')}
+          placeholder={t('parts.quickAdd.notesPlaceholder')}
           value={notes}
           onChange={e => setNotes(e.target.value)}
           rows={2}
@@ -231,7 +233,10 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
           setShowAdminUnlock(false);
           setTimeout(() => executeSubmit(), 100);
         }}
-        actionName={`grant credit limit of ${creditLimit} DZD to ${shopName || 'new B2B account'}`}
+        actionName={t('parts.quickAdd.adminUnlockAction', {
+          creditLimit,
+          shop: shopName || t('parts.quickAdd.newB2BAccount'),
+        })}
       />
     </Modal>
   );
