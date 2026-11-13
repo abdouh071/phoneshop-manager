@@ -229,18 +229,12 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, onClose }
         <div className={styles.section}>
           <h3 className={styles.sectionTitle}>{t('parts.editModal.sectionIdentity')}</h3>
 
-          <div className={styles.grid2}>
+          <div>
             <Input
               label={`${t('parts.editModal.labelName')} *`}
               value={form.name || ''}
               onChange={e => setField('name', e.target.value)}
               placeholder="e.g. Screen Assembly"
-            />
-            <Input
-              label={t('parts.editModal.labelBrand')}
-              value={form.brand || ''}
-              onChange={e => setField('brand', e.target.value)}
-              placeholder="e.g. OEM, Apple, Samsung"
             />
           </div>
 
