@@ -312,9 +312,9 @@ export const PartsPage = () => {
       const result = addToCart(part);
       if (result.success) {
         setActiveTab('pos');
-        toast.success('Added to Cart', `${part.name} ${part.model} added via barcode.`);
+        toast.success(t('parts.addedToCart'), `${part.name} ${part.model} ${t('parts.addedViaBarcode')}`);
       } else if (result.reason === 'out_of_stock') {
-        toast.error('Out of Stock', `${part.name} ${part.model} has no units left.`);
+        toast.error(t('parts.outOfStockToast'), `${part.name} ${part.model} ${t('parts.hasNoUnits')}`);
       } else {
         toast.warning('Stock Limit Reached', `Only ${result.availableStock} unit${result.availableStock === 1 ? '' : 's'} available.`);
       }
@@ -446,7 +446,7 @@ export const PartsPage = () => {
       setLineDiscountText({});
       setCompletedTx(tx);
     } catch (err: unknown) {
-      toast.error('Checkout failed', errorMessage(err));
+      toast.error(t('parts.checkoutFailed'), errorMessage(err));
     } finally {
       setIsProcessing(false);
       checkoutLock.current = false;
@@ -479,20 +479,20 @@ export const PartsPage = () => {
 
       <ConfirmDialog
         isOpen={confirmClearCart}
-        title="Clear Cart"
-        message="This removes every item from the current sale. Continue?"
-        confirmLabel="Clear Cart"
+        title={t('parts.clearCartTitle')}
+        message={t('parts.clearCartMsg')}
+        confirmLabel={t('parts.clearCartTitle')}
         variant="danger"
         onConfirm={() => { clearCart(); setLineDiscountText({}); setConfirmClearCart(false); }}
         onCancel={() => setConfirmClearCart(false)}
       />
       <ConfirmDialog
         isOpen={discardTarget !== null}
-        title="Discard Held Cart"
+        title={t('parts.discardHeldTitle')}
         message={discardTarget
-          ? `Discard the held cart for ${discardTarget.customerName || 'Walk-in Customer'} (${discardTarget.items.reduce((s, i) => s + i.quantity, 0)} items)? This cannot be undone.`
+          ? t('parts.discardHeldMsg', { name: discardTarget.customerName || t('parts.walkInCustomer'), count: discardTarget.items.reduce((s, i) => s + i.quantity, 0) })
           : ''}
-        confirmLabel="Discard"
+        confirmLabel={t('parts.discard')}
         variant="danger"
         onConfirm={() => { if (discardTarget) discardSuspendedCart(discardTarget.id); setDiscardTarget(null); }}
         onCancel={() => setDiscardTarget(null)}
@@ -636,7 +636,7 @@ export const PartsPage = () => {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>{t('parts.title', 'Parts Management')}</h1>
-          <p className={styles.subtitle}>{parts.length} parts available · {parts.reduce((s, p) => s + p.stock, 0)} units in stock</p>
+          <p className={styles.subtitle}>{t('parts.partsAvailable', { count: parts.length })} · {t('parts.unitsInStock', { count: parts.reduce((s, p) => s + p.stock, 0) })}</p>
         </div>
         <div className={styles.headerActions}>
           <Button
@@ -670,7 +670,7 @@ export const PartsPage = () => {
           className={[styles.categoryTab, activeTab === 'inventory' && styles.categoryTabActive].filter(Boolean).join(' ')}
           onClick={() => setActiveTab('inventory')}
         >
-          <span>📦 {t('parts.title', 'Parts Inventory')}</span>
+          <span>📦 {t('parts.inventoryTab')}</span>
           <span className={styles.tabCount}>{parts.length}</span>
         </button>
         {permissions.parts_sell && (
@@ -679,8 +679,8 @@ export const PartsPage = () => {
             className={[styles.categoryTab, activeTab === 'pos' && styles.categoryTabActive].filter(Boolean).join(' ')}
             onClick={() => setActiveTab('pos')}
           >
-            <span>🛒 {t('sidebar.pos', 'Sell Parts (POS)')}</span>
-            <span className={styles.tabCount}>{getItemCount() > 0 ? `${getItemCount()} in cart` : 'POS'}</span>
+            <span>🛒 {t('parts.posTab')}</span>
+            <span className={styles.tabCount}>{getItemCount() > 0 ? `${getItemCount()} in cart` : t('parts.posTab')}</span>
           </button>
         )}
         <button
@@ -688,7 +688,7 @@ export const PartsPage = () => {
           className={[styles.categoryTab, activeTab === 'invoices' && styles.categoryTabActive].filter(Boolean).join(' ')}
           onClick={() => setActiveTab('invoices')}
         >
-          <span>📄 Invoices & Orders</span>
+          <span>📄 {t('parts.invoicesTab')}</span>
         </button>
       </div>
 
@@ -706,7 +706,7 @@ export const PartsPage = () => {
               title="Click to view all parts"
             >
               <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>Total Parts</span>
+                <span className={styles.summaryLabel}>{t('parts.totalParts')}</span>
                 <div className={[styles.summaryIconWrap, styles.iconTotal].join(' ')}><Package size={16} /></div>
               </div>
               <p className={styles.summaryValue}>{parts.length}</p>
@@ -721,7 +721,7 @@ export const PartsPage = () => {
               title="Click to filter In Stock"
             >
               <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>In Stock</span>
+                <span className={styles.summaryLabel}>{t('inventory.inStock')}</span>
                 <div className={[styles.summaryIconWrap, styles.iconInStock].join(' ')}><CheckCircle2 size={16} /></div>
               </div>
               <p className={styles.summaryValue} style={{ color: '#16a34a' }}>
@@ -738,7 +738,7 @@ export const PartsPage = () => {
               title="Click to filter Low Stock"
             >
               <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>Low Stock</span>
+                <span className={styles.summaryLabel}>{t('inventory.lowStock')}</span>
                 <div className={[styles.summaryIconWrap, styles.iconLowStock].join(' ')}><AlertCircle size={16} /></div>
               </div>
               <p className={styles.summaryValue} style={{ color: '#d97706' }}>
@@ -755,7 +755,7 @@ export const PartsPage = () => {
               title="Click to filter Out of Stock"
             >
               <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>Out of Stock</span>
+                <span className={styles.summaryLabel}>{t('inventory.outOfStock')}</span>
                 <div className={[styles.summaryIconWrap, styles.iconOutStock].join(' ')}><XCircle size={16} /></div>
               </div>
               <p className={styles.summaryValue} style={{ color: '#dc2626' }}>
@@ -766,7 +766,7 @@ export const PartsPage = () => {
             {canViewCosts && (
               <div className={styles.summaryCard} style={{ cursor: 'default' }}>
                 <div className={styles.summaryCardTop}>
-                  <span className={styles.summaryLabel}>Cost Valuation</span>
+                  <span className={styles.summaryLabel}>{t('parts.costValuation')}</span>
                   <div className={[styles.summaryIconWrap, styles.iconValuation].join(' ')}><DollarSign size={16} /></div>
                 </div>
                 <p className={styles.summaryValue}>{formatPrivateCurrency(totalInventoryValue)}</p>
@@ -775,7 +775,7 @@ export const PartsPage = () => {
 
             <div className={styles.summaryCard} style={{ cursor: 'default' }}>
               <div className={styles.summaryCardTop}>
-                <span className={styles.summaryLabel}>Potential Revenue</span>
+                <span className={styles.summaryLabel}>{t('parts.potentialRevenue')}</span>
                 <div className={[styles.summaryIconWrap, styles.iconRevenue].join(' ')}><TrendingUp size={16} /></div>
               </div>
               <p className={styles.summaryValue}>{formatCurrency(potentialRevenue)}</p>
@@ -786,16 +786,16 @@ export const PartsPage = () => {
           <div className={styles.catalogCard}>
             <div className={styles.tableHeader}>
               <div className={styles.headerLeft}>
-                <h2 className={styles.tableTitle}>Parts Catalog</h2>
-                <span className={styles.itemCountBadge}>{sortedGroups.length} models</span>
+                <h2 className={styles.tableTitle}>{t('parts.catalogTitle')}</h2>
+                <span className={styles.itemCountBadge}>{t('parts.modelsCount', { count: sortedGroups.length })}</span>
               </div>
               <div className={styles.headerActions}>
                 <Select
                   options={[
-                    { value: 'all', label: 'All Status' },
-                    { value: 'in_stock', label: 'In Stock' },
-                    { value: 'low_stock', label: 'Low Stock' },
-                    { value: 'out_of_stock', label: 'Out of Stock' },
+                    { value: 'all', label: t('parts.allStatus') },
+                    { value: 'in_stock', label: t('inventory.inStock') },
+                    { value: 'low_stock', label: t('inventory.lowStock') },
+                    { value: 'out_of_stock', label: t('inventory.outOfStock') },
                   ]}
                   value={statusFilter}
                   onChange={(v) => { setStatusFilter(v); setCurrentPage(1); }}
@@ -803,7 +803,7 @@ export const PartsPage = () => {
                 <SearchInput
                   value={searchQuery}
                   onChange={(v) => { setSearchQuery(v); setCurrentPage(1); }}
-                  placeholder="Search parts, SKU, location..."
+                  placeholder={t('parts.searchPlaceholder')}
                   className={styles.search}
                 />
               </div>
@@ -813,11 +813,11 @@ export const PartsPage = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', marginBottom: '10px', borderRadius: '8px', background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: '13px' }}>
                 <AlertCircle size={16} />
                 <span style={{ flex: 1 }}>{partsError}</span>
-                <Button size="sm" variant="secondary" onClick={() => { fetchParts(); }}>Retry</Button>
+                <Button size="sm" variant="secondary" onClick={() => { fetchParts(); }}>{t('parts.retry')}</Button>
               </div>
             )}
             {isLoadingParts && !partsError && (
-              <div style={{ padding: '12px 14px', fontSize: '13px', color: '#64748b' }}>Loading parts…</div>
+              <div style={{ padding: '12px 14px', fontSize: '13px', color: '#64748b' }}>{t('parts.loadingParts')}</div>
             )}
 
             <div className={styles.tableWrapper}>
@@ -826,32 +826,32 @@ export const PartsPage = () => {
                   <tr>
                     <th style={{ width: 36 }}></th>
                     <th className={styles.th} onClick={() => handleSort('name')} aria-sort={sortAria('name')} tabIndex={0} onKeyDown={onThKeyDown('name')}>
-                      Part Name <SortIcon col="name" />
+                      {t('parts.partName')} <SortIcon col="name" />
                     </th>
                     <th className={styles.th} onClick={() => handleSort('sku')} aria-sort={sortAria('sku')} tabIndex={0} onKeyDown={onThKeyDown('sku')}>
                       SKU <SortIcon col="sku" />
                     </th>
                     <th className={styles.th} onClick={() => handleSort('location')} aria-sort={sortAria('location')} tabIndex={0} onKeyDown={onThKeyDown('location')}>
-                      Location <SortIcon col="location" />
+                      {t('parts.location')} <SortIcon col="location" />
                     </th>
                     {canViewCosts && (
                       <th className={styles.th} onClick={() => handleSort('costPrice')} aria-sort={sortAria('costPrice')} tabIndex={0} onKeyDown={onThKeyDown('costPrice')}>
-                        Buy Price / Cost <SortIcon col="costPrice" />
+                        {t('parts.buyPriceCost')} <SortIcon col="costPrice" />
                       </th>
                     )}
                     <th className={styles.th} onClick={() => handleSort('price')} aria-sort={sortAria('price')} tabIndex={0} onKeyDown={onThKeyDown('price')}>
-                      Sell Price <SortIcon col="price" />
+                      {t('parts.sellPrice')} <SortIcon col="price" />
                     </th>
                     <th className={styles.th} onClick={() => handleSort('stock')} aria-sort={sortAria('stock')} tabIndex={0} onKeyDown={onThKeyDown('stock')}>
-                      Stock <SortIcon col="stock" />
+                      {t('parts.stock')} <SortIcon col="stock" />
                     </th>
                     {canViewCosts && (
-                      <th className={styles.th}>Margin</th>
+                      <th className={styles.th}>{t('parts.margin')}</th>
                     )}
                     <th className={styles.th} onClick={() => handleSort('stockStatus')} aria-sort={sortAria('stockStatus')} tabIndex={0} onKeyDown={onThKeyDown('stockStatus')}>
-                      Status <SortIcon col="stockStatus" />
+                      {t('parts.statusCol')} <SortIcon col="stockStatus" />
                     </th>
-                    <th className={styles.th} style={{ textAlign: 'right' }}>Actions</th>
+                    <th className={styles.th} style={{ textAlign: 'right' }}>{t('parts.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -859,8 +859,8 @@ export const PartsPage = () => {
                     <tr>
                       <td colSpan={canViewCosts ? 10 : 8} style={{ padding: '40px 20px', textAlign: 'center' }}>
                         <EmptyState
-                          title="No repair parts found"
-                          description="Click 'Add Part' in the header to register new repair inventory."
+                          title={t('parts.noParts')}
+                          description={t('parts.noPartsDesc')}
                         />
                       </td>
                     </tr>
@@ -914,7 +914,7 @@ export const PartsPage = () => {
                                 : `${formatCurrency(group.minPrice)} - ${formatCurrency(group.maxPrice)}`}
                           </td>
                           <td className={styles.td}>
-                            <strong>{group.totalStock}</strong> units
+                            <strong>{group.totalStock}</strong> {t('parts.units', { count: group.totalStock })}
                           </td>
                           {canViewCosts && (
                             <td className={styles.td} data-col="margin">
@@ -935,7 +935,7 @@ export const PartsPage = () => {
                                     autoFocus
                                     type="number"
                                     min="1"
-                                    placeholder="Qty *"
+                                    placeholder={t('parts.qty')}
                                     value={restockAmt}
                                     onChange={e => setRestockAmt(e.target.value)}
                                     onKeyDown={e => { if (e.key === 'Escape') { setRestockingId(null); setRestockAmt(''); } }}
@@ -945,26 +945,26 @@ export const PartsPage = () => {
                                   {canViewCosts && (
                                     <input
                                       type="number"
-                                      placeholder="Unit cost"
+                                      placeholder={t('parts.unitCost')}
                                       value={restockMeta.cost}
                                       onChange={e => setRestockMeta(m => ({ ...m, cost: e.target.value }))}
                                       className={styles.restockInput}
                                       style={{ width: '80px' }}
                                     />
                                   )}
-                                  <Button size="sm" onClick={() => handleRestock(v)}>Save</Button>
+                                  <Button size="sm" onClick={() => handleRestock(v)}>{t('parts.save')}</Button>
                                   <Button size="sm" variant="ghost" onClick={() => { setRestockingId(null); setRestockAmt(''); }}>✕</Button>
                                 </div>
                               ) : (
                                 <div className={styles.actionButtons} style={{ justifyContent: 'flex-end' }}>
-                                  <Button variant="ghost" size="sm" onClick={() => setDetailProduct(v)} title="View Details">
+                                  <Button variant="ghost" size="sm" onClick={() => setDetailProduct(v)} title={t('parts.viewDetails')}>
                                     <Eye size={15} />
                                   </Button>
                                   <Button variant="secondary" size="sm" onClick={() => requirePermission('edit this product', () => setEditingProduct(v))}>
-                                    Edit
+                                    {t('parts.edit')}
                                   </Button>
                                   <Button variant="secondary" size="sm" onClick={() => requirePermission('restock products', () => { setRestockingId(v.id); setRestockAmt(''); setRestockMeta({ supplier: '', cost: '', note: '' }); })}>
-                                    + Restock
+                                    {t('parts.restock')}
                                   </Button>
                                   <Button variant="danger" size="sm" onClick={() => requirePermission('write off products', () => setWriteOffProduct(v))} disabled={v.stock === 0} title="Write-Off">
                                     <AlertTriangle size={15} />
@@ -992,7 +992,7 @@ export const PartsPage = () => {
                                 </td>
                               )}
                               <td className={styles.td} style={{ fontWeight: 600 }}>{formatCurrency(product.price)}</td>
-                              <td className={styles.td}>{product.stock} units</td>
+                              <td className={styles.td}>{t('parts.units', { count: product.stock })}</td>
                               {canViewCosts && (
                                 <td className={styles.td} data-col="margin">
                                   <span data-privacy-cost className={[vMargin >= 20 ? styles.marginGood : vMargin >= 10 ? styles.marginOk : styles.marginBad, 'privacy-cost'].join(' ')}>
@@ -1008,7 +1008,7 @@ export const PartsPage = () => {
                                       autoFocus
                                       type="number"
                                       min="1"
-                                      placeholder="Qty *"
+                                      placeholder={t('parts.qty')}
                                       value={restockAmt}
                                       onChange={e => setRestockAmt(e.target.value)}
                                       onKeyDown={e => { if (e.key === 'Escape') { setRestockingId(null); setRestockAmt(''); } }}
@@ -1018,26 +1018,26 @@ export const PartsPage = () => {
                                     {canViewCosts && (
                                       <input
                                         type="number"
-                                        placeholder="Unit cost"
+                                        placeholder={t('parts.unitCost')}
                                         value={restockMeta.cost}
                                         onChange={e => setRestockMeta(m => ({ ...m, cost: e.target.value }))}
                                         className={styles.restockInput}
                                         style={{ width: '80px' }}
                                       />
                                     )}
-                                    <Button size="sm" onClick={() => handleRestock(product)}>Save</Button>
+                                    <Button size="sm" onClick={() => handleRestock(product)}>{t('parts.save')}</Button>
                                     <Button size="sm" variant="ghost" onClick={() => { setRestockingId(null); setRestockAmt(''); }}>✕</Button>
                                   </div>
                                 ) : (
                                   <div className={styles.actionButtons} style={{ justifyContent: 'flex-end' }}>
-                                    <Button variant="ghost" size="sm" onClick={() => setDetailProduct(product)} title="View Details">
+                                    <Button variant="ghost" size="sm" onClick={() => setDetailProduct(product)} title={t('parts.viewDetails')}>
                                       <Eye size={15} />
                                     </Button>
                                     <Button variant="secondary" size="sm" onClick={() => requirePermission('edit this product', () => setEditingProduct(product))}>
-                                      Edit
+                                      {t('parts.edit')}
                                     </Button>
                                     <Button variant="secondary" size="sm" onClick={() => requirePermission('restock products', () => { setRestockingId(product.id); setRestockAmt(''); setRestockMeta({ supplier: '', cost: '', note: '' }); })}>
-                                      + Restock
+                                      {t('parts.restock')}
                                     </Button>
                                     <Button variant="danger" size="sm" onClick={() => requirePermission('write off products', () => setWriteOffProduct(product))} disabled={product.stock === 0} title="Write-Off">
                                       <AlertTriangle size={15} />
@@ -1103,7 +1103,7 @@ export const PartsPage = () => {
             <div className={posStyles.cartHeader}>
               <div className={posStyles.cartTitle}>
                 <ShoppingCart size={20} />
-                <span>Cart</span>
+                <span>{t('parts.cart')}</span>
                 {getItemCount() > 0 && (
                   <span className={posStyles.cartCount}>{getItemCount()}</span>
                 )}
@@ -1112,13 +1112,13 @@ export const PartsPage = () => {
                     className={posStyles.suspendedBadge} 
                     onClick={() => setShowSuspended(!showSuspended)}
                   >
-                    {suspendedCarts.length} on hold
+                    {t('parts.onHold', { count: suspendedCarts.length })}
                   </button>
                 )}
               </div>
               {(items.length > 0 || customerName) && (
                 <button className={posStyles.clearBtn} onClick={() => setConfirmClearCart(true)}>
-                  Clear
+                  {t('parts.clear')}
                 </button>
               )}
             </div>
@@ -1146,7 +1146,7 @@ export const PartsPage = () => {
                     onClick={() => {
                       setSelectedB2BCustomer(null);
                       setCustomerName('');
-                      toast.info('B2B Account Detached', 'Sale will proceed as walk-in buyer.');
+                      toast.info(t('parts.b2bDetached'), t('parts.walkInMsg'));
                     }}
                     title="Detach commercial account"
                   >
@@ -1155,7 +1155,7 @@ export const PartsPage = () => {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}>
-                  <span style={{ color: '#64748b' }}>Current Account Debt:</span>
+                  <span style={{ color: '#64748b' }}>{t('parts.currentAccountDebt')}</span>
                   <strong style={{ color: (getCustomerDebtTotal(selectedB2BCustomer.id) || selectedB2BCustomer.totalDebt || 0) > 0 ? '#dc2626' : '#16a34a' }}>
                     {formatPrivateCurrency(getCustomerDebtTotal(selectedB2BCustomer.id) || selectedB2BCustomer.totalDebt || 0)}
                   </strong>
@@ -1198,7 +1198,7 @@ export const PartsPage = () => {
                   onClick={() => {
                     setCustomerName('');
                     setSelectedB2BCustomer(null);
-                    toast.info('Customer Detached', 'Sale will proceed as walk-in customer.');
+                    toast.info(t('parts.customerDetached'), t('parts.walkInCustomerMsg'));
                   }}
                   title="Detach customer"
                 >
@@ -1211,7 +1211,7 @@ export const PartsPage = () => {
             {showSuspended && suspendedCarts.length > 0 && (
               <div className={posStyles.suspendedList}>
                 <div className={posStyles.suspendedListHeader}>
-                  <span>Held Carts</span>
+                  <span>{t('parts.heldCarts')}</span>
                   <button onClick={() => setShowSuspended(false)}><X size={14} /></button>
                 </div>
                 {suspendedCarts.map((sc: SuspendedCart) => {
@@ -1221,7 +1221,7 @@ export const PartsPage = () => {
                   return (
                     <div key={sc.id} className={posStyles.suspendedItem}>
                       <div className={posStyles.suspendedItemInfo}>
-                        <span className={posStyles.suspendedCustomer}>{sc.customerName || 'Walk-in Customer'}</span>
+                        <span className={posStyles.suspendedCustomer}>{sc.customerName || t('parts.walkInCustomer')}</span>
                         <span className={posStyles.suspendedMeta}>
                           {sc.items.reduce((s, i) => s + i.quantity, 0)} items · {formatCurrency(scFinalTotal)}
                         </span>
@@ -1233,12 +1233,12 @@ export const PartsPage = () => {
                             const res = resumeCart(sc.id);
                             setLineDiscountText({});
                             if (res.warnings && res.warnings.length > 0) {
-                              res.warnings.forEach(w => toast.warning('Stock Level Alert', w));
+                              res.warnings.forEach(w => toast.warning(t('parts.stockLevelAlert'), w));
                             }
                             setShowSuspended(false);
                           }}
                         >
-                          Resume
+                          {t('parts.resume')}
                         </Button>
                         <button className={posStyles.discardBtn} onClick={() => setDiscardTarget(sc)}>
                           <Trash2 size={14} />
@@ -1475,7 +1475,7 @@ export const PartsPage = () => {
                 ) : (
                   <div style={{ background: '#f1f5f9', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Store size={14} style={{ color: '#2563eb' }} />
-                    <span>B2B Settlement (Pay full, partial, or charge to ledger on checkout)</span>
+                    <span>{t('parts.b2bSettlementNote')}</span>
                   </div>
                 )}
 
@@ -1485,7 +1485,7 @@ export const PartsPage = () => {
                     onClick={() => { suspendCart(); setLineDiscountText({}); }}
                     style={{ flex: '1' }}
                   >
-                    Hold Cart
+                    {t('parts.holdCart')}
                   </Button>
                   
                   {selectedB2BCustomer ? (
@@ -1496,7 +1496,7 @@ export const PartsPage = () => {
                       style={{ flex: '2', background: '#1d4ed8' }}
                       leftIcon={<Store size={16} />}
                     >
-                      Process B2B Sale ({formatCurrency(getTotal())})
+                      {t('parts.processB2b', { total: formatCurrency(getTotal()) })}
                     </Button>
                   ) : (
                     <Button
@@ -1505,7 +1505,7 @@ export const PartsPage = () => {
                       disabled={isProcessing || items.length === 0}
                       style={{ flex: '2' }}
                     >
-                      Checkout ({formatCurrency(getTotal())})
+                      {t('parts.checkout', { total: formatCurrency(getTotal()) })}
                     </Button>
                   )}
                 </div>
