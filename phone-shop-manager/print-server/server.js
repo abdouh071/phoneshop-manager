@@ -1894,7 +1894,6 @@ async function handlePrintBarcode(body) {
       let fullTspl = '';
 
       for (const product of labelItems) {
-        fullTspl += 'SIZE 50 mm, 20 mm\r\n';
         fullTspl += 'GAP 2 mm, 0 mm\r\n';
         fullTspl += 'REFERENCE 0,0\r\n';
         fullTspl += 'DIRECTION 1\r\n';
@@ -1935,26 +1934,40 @@ async function handlePrintBarcode(body) {
         const { x: barcodeX, narrow, wide } = getBarcodeParams(sku);
 
         if (product.hidePrice) {
-          fullTspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
-          fullTspl += 'BAR 0,30,400,2\r\n';
+          // The parts roll is 40mm wide (320 dots), not the 50mm (400) the
+          // product labels use: a 50mm canvas laid on 40mm stock crops the edges.
+          // Text keeps a 2mm margin on each side, so it may use 36mm (288 dots).
+          fullTspl += 'SIZE 40 mm, 20 mm\r\n';
+          const TEXT_START_X = 16;
+          const TEXT_MAX_DOTS = 288;
 
-          // Parts: larger type (font 2, 16 measured dots/char) wrapped to a safe
-          // physical width (368 dots = 400 minus a 2-char margin) so the name
-          // never reaches the sticker edge; every word is kept.
-          const partLines = wrapTsplToWidth(fullText, TSPL_FONT_2_WIDTH, 368);
+          const shopFit = fitTsplLine(shopTitle, TEXT_MAX_DOTS);
+          const shopW = shopFit.text.length * (shopFit.font === '2' ? TSPL_FONT_2_WIDTH : TSPL_FONT_1_WIDTH);
+          const shopPartsX = TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - shopW) / 2));
+          fullTspl += `TEXT ${shopPartsX},6,"${shopFit.font}",0,1,1,"${shopFit.text}"\r\n`;
+          fullTspl += 'BAR 0,30,320,2\r\n';
+
+          // Wrap at the small-font width so a long model line (and a trailing
+          // 100%) keep their own lines, then shrink each line that cannot fit
+          // font 2. Every word stays whole and inside the 36mm window.
+          const partLines = wrapTsplToWidth(fullText, TSPL_FONT_1_WIDTH, 240);
           let lastBottom = 60;
           partLines.forEach((line, i) => {
             const y = 40 + i * 24;
-            const lineX = Math.max(0, getCenteredX(line, '2'));
-            fullTspl += `TEXT ${lineX},${y},"2",0,1,1,"${tsplText(line, 60)}"\r\n`;
-            lastBottom = y + 20;
+            const fit = fitTsplLine(tsplText(line, 60), TEXT_MAX_DOTS);
+            const lineW = fit.text.length * (fit.font === '2' ? TSPL_FONT_2_WIDTH : TSPL_FONT_1_WIDTH);
+            const lineX = TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - lineW) / 2));
+            fullTspl += `TEXT ${lineX},${y},"${fit.font}",0,1,1,"${fit.text}"\r\n`;
+            lastBottom = y + (fit.font === '2' ? 20 : 12);
           });
           // A wrapped name sits the barcode just below the text; a single short
           // name keeps the lower, taller bar so the label stays balanced.
           const barcodeY = partLines.length > 1 ? lastBottom + 8 : 112;
           const barcodeH = partLines.length > 1 ? 32 : 40;
-          fullTspl += `BARCODE ${barcodeX},${barcodeY},"128",${barcodeH},0,0,${narrow},${wide},"${sku}"\r\n`;
+          const { x: partsBarcodeX, narrow: partsNarrow, wide: partsWide } = getBarcodeParams(sku, 320);
+          fullTspl += `BARCODE ${partsBarcodeX},${barcodeY},"128",${barcodeH},0,0,${partsNarrow},${partsWide},"${sku}"\r\n`;
         } else {
+          fullTspl += 'SIZE 50 mm, 20 mm\r\n';
           fullTspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
           fullTspl += 'BAR 0,30,400,2\r\n';
 

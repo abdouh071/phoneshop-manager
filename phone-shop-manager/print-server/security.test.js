@@ -121,41 +121,48 @@ test('tsplInt never produces NaN in a command parameter', () => {
 
 test('a part name wraps to the width, keeping the model line then the remainder', () => {
   assert.deepEqual(
-    internals.wrapTsplToWidth('AF REDMI NOTE 8 PRO CHINE REDMI', 16, 368),
+    internals.wrapTsplToWidth('AF REDMI NOTE 8 PRO CHINE REDMI', 10, 240),
     ['AF REDMI NOTE 8 PRO', 'CHINE REDMI']
   );
 });
 
 test('every wrapped line stays inside the safe dot width', () => {
   const long = 'AFFICHEUR IPHONE 14 PRO MAX ORIGINAL CHINE REDMI NOTE 8 PRO';
-  for (const line of internals.wrapTsplToWidth(long, 16, 368)) {
-    assert.ok(line.length * 16 <= 368, line);
+  for (const line of internals.wrapTsplToWidth(long, 10, 240)) {
+    assert.ok(line.length * 10 <= 240, line);
   }
 });
 
 test('wrapping keeps every word of a long name instead of cutting the tail', () => {
   const long = 'AFFICHEUR IPHONE 14 PRO MAX ORIGINAL CHINE REDMI NOTE 8 PRO';
-  const lines = internals.wrapTsplToWidth(long, 16, 368);
+  const lines = internals.wrapTsplToWidth(long, 10, 240);
   assert.equal(lines.join(' '), long);
 });
 
 test('a single word wider than the line is split across lines, never dropped', () => {
   const word = 'A'.repeat(50);
-  const lines = internals.wrapTsplToWidth(word, 16, 368);
-  assert.deepEqual(lines, ['A'.repeat(23), 'A'.repeat(23), 'A'.repeat(4)]);
+  const lines = internals.wrapTsplToWidth(word, 10, 240);
+  assert.deepEqual(lines, ['A'.repeat(24), 'A'.repeat(24), 'A'.repeat(2)]);
   assert.equal(lines.join(''), word);
 });
 
 test('a short name stays on one line and an empty name yields one blank line', () => {
-  assert.deepEqual(internals.wrapTsplToWidth('CABLE', 16, 368), ['CABLE']);
-  assert.deepEqual(internals.wrapTsplToWidth('', 16, 368), ['']);
+  assert.deepEqual(internals.wrapTsplToWidth('CABLE', 10, 240), ['CABLE']);
+  assert.deepEqual(internals.wrapTsplToWidth('', 10, 240), ['']);
 });
 
-test('the photo product prints ORG fully inside the label', () => {
+test('the photo product keeps ORG whole inside the 40mm label text window', () => {
   const full = 'AF-INFINIX SMART 7/A70/A60S/A50/A05S ORG 100%';
-  const lines = internals.wrapTsplToWidth(full, 16, 368);
+  const lines = internals.wrapTsplToWidth(full, 10, 240);
   assert.deepEqual(lines, ['AF-INFINIX SMART', '7/A70/A60S/A50/A05S ORG', '100%']);
-  for (const line of lines) assert.ok(line.length * 16 <= 368, line);
+  for (const line of lines) {
+    const fit = internals.fitTsplLine(line, 288);
+    const w = fit.text.length * (fit.font === '2' ? 16 : 10);
+    assert.ok(w <= 288, line);
+    // 2mm margins: the line must sit between 16 and 304 dots (36mm window).
+    const x = 16 + Math.max(0, Math.floor((288 - w) / 2));
+    assert.ok(x >= 16 && x + w <= 304, line);
+  }
 });
 
 test('a ticket line that fits keeps the larger font 2', () => {
