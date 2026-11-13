@@ -11,6 +11,7 @@ import styles from './ProductDetail.module.css';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { getSubCategoryMeta } from '../../utils/accessorySubCategories';
+import { modelsFromProduct } from '../../utils/compatibleModels';
 
 interface ProductDetailPanelProps {
   product: PhoneModel | null;
@@ -65,6 +66,25 @@ export const ProductDetailPanel: React.FC<ProductDetailPanelProps> = ({ product,
                 )}
               </span>
             </div>
+            {modelsFromProduct(product).length > 1 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+                {modelsFromProduct(product).map((m) => (
+                  <span
+                    key={m}
+                    style={{
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      padding: '3px 10px',
+                      borderRadius: '999px',
+                      background: 'var(--color-surface-variant)',
+                      color: 'var(--color-on-surface-variant)',
+                    }}
+                  >
+                    {m}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

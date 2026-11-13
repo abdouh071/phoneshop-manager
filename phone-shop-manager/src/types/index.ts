@@ -14,6 +14,8 @@ export interface PhoneModel {
   id: string;
   name: string;
   model: string;
+  /** One entry per compatible device; the legacy `model` field stays the joined string. */
+  compatibleModels?: string[];
   brand?: string;
   storage?: string;
   color?: string;

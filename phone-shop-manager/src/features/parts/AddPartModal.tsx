@@ -14,6 +14,8 @@ import { printBarcodeDirect, openPrintWindow, buildLabelsHTML } from '../../util
 import { getCurrencySymbol } from '../../utils/formatCurrency';
 import { computeStockStatus } from '../../utils/stockStatus';
 import { ProfitMarginCalculator } from '../../components/ui/ProfitMarginCalculator';
+import { CompatibleModelsInput } from '../../components/inventory/CompatibleModelsInput';
+import { normalizeCompatibleModels, joinModels } from '../../utils/compatibleModels';
 
 interface AddPartModalProps {
   isOpen: boolean;
@@ -53,7 +55,7 @@ const BRAND_CHIPS = [
 
 type FormData = {
   name: string; 
-  model: string; 
+  models: string[]; 
   price: string; 
   costPrice: string; 
   stock: string; 
@@ -65,9 +67,11 @@ type FormData = {
 };
 
 const INITIAL: FormData = {
-  name: '', model: '', price: '', costPrice: '', stock: '', sku: '',
+  name: '', models: [''], price: '', costPrice: '', stock: '', sku: '',
   supplier: '', location: '', lowStockThreshold: '1', notes: '',
 };
+
+type FormErrors = { [K in keyof FormData]?: string };
 
 export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) => {
   const { storeName, currency } = useSettingsStore();
@@ -79,7 +83,7 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
   const toast = useToast();
 
   const [form, setForm] = useState<FormData>(() => INITIAL);
-  const [errors, setErrors] = useState<Partial<FormData>>({});
+  const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState<{product: PhoneModel, printBarcode?: boolean} | null>(null);
 
@@ -96,14 +100,21 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
     setErrors(e => ({ ...e, [key]: undefined }));
   };
 
+  const setModels = (models: string[]) => {
+    setForm(prev => ({ ...prev, models }));
+    setErrors(e => ({ ...e, models: undefined }));
+  };
+
+  const joinedModels = () => form.models.map(m => m.trim()).filter(Boolean).join(' ');
+
   const generateNewSKU = () => {
-    set('sku', generateSKU(form.name || 'PRT', form.model || 'GEN'));
+    set('sku', generateSKU(form.name || 'PRT', joinedModels() || 'GEN'));
   };
 
   const validate = (): boolean => {
-    const errs: Partial<FormData> = {};
+    const errs: FormErrors = {};
     if (!form.name.trim()) errs.name = 'Required';
-    if (!form.model.trim()) errs.model = 'Required';
+    if (!joinedModels()) errs.models = 'Required';
     if (!form.price || isNaN(Number(form.price)) || Number(form.price) <= 0) errs.price = 'Enter a valid price';
     if (!form.costPrice || isNaN(Number(form.costPrice)) || Number(form.costPrice) <= 0) errs.costPrice = 'Enter a valid cost';
     if (!form.stock || isNaN(Number(form.stock)) || Number(form.stock) < 0) errs.stock = 'Enter a valid quantity';
@@ -114,11 +125,14 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
   const handleSubmit = async (force: boolean = false, printBarcode: boolean = false) => {
     if (!validate()) return;
 
+    const models = normalizeCompatibleModels(form.models);
+    const model = joinModels(models);
+
     if (!force) {
       // Server already isolated parts — no need for category filter
       const duplicate = parts.find(p =>
         (p.name ?? '').toLowerCase().trim() === form.name.toLowerCase().trim() &&
-        (p.model ?? '').toLowerCase().trim() === form.model.toLowerCase().trim()
+        (p.model ?? '').toLowerCase().trim() === model.toLowerCase().trim()
       );
       if (duplicate) {
         setDuplicateWarning({ product: duplicate, printBarcode });
@@ -131,11 +145,12 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
     const threshold = Number(form.lowStockThreshold) || 1;
     
     // Auto generate SKU if empty
-    const finalSku = form.sku.trim() || generateSKU(form.name, form.model);
+    const finalSku = form.sku.trim() || generateSKU(form.name, model);
 
     const product: Omit<PhoneModel, 'id'> = {
       name: form.name.trim(), 
-      model: form.model.trim(), 
+      model, 
+      compatibleModels: models, 
       storage: 'N/A', // Parts don't have storage
       color: '',      // Parts usually don't have color, or it's in the name
       price: Number(form.price),
@@ -211,15 +226,24 @@ export const AddPartModal: React.FC<AddPartModalProps> = ({ isOpen, onClose }) =
           <div className={styles.grid2}>
             <Input label="Part Name *" placeholder="e.g. OLED Screen Assembly" value={form.name} onChange={e => set('name', e.target.value)} error={errors.name} />
             <div>
-              <Input label="Compatible Model(s) *" placeholder="e.g. iPhone 13 Pro" value={form.model} onChange={e => set('model', e.target.value)} error={errors.model} />
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+              <CompatibleModelsInput
+                models={form.models}
+                onChange={setModels}
+                error={errors.models}
+                label="Compatible Device(s) *"
+                placeholder="e.g. iPhone 13 Pro"
+              />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '8px' }}>
                 {BRAND_CHIPS.map(b => (
                   <button
                     key={b.name}
                     type="button"
                     onClick={() => {
-                      if (!form.model.includes(b.name)) {
-                        set('model', form.model ? `${b.name} ${form.model}` : b.name);
+                      if (!joinedModels().toLowerCase().includes(b.name.toLowerCase())) {
+                        const last = form.models[form.models.length - 1] ?? '';
+                        setModels(last.trim()
+                          ? [...form.models.slice(0, -1), `${last} ${b.name}`]
+                          : [...form.models.slice(0, -1), b.name]);
                       }
                     }}
                     style={{

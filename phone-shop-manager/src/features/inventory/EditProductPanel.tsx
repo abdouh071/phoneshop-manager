@@ -10,6 +10,8 @@ import { useToast } from '../../components/ui/Toast';
 import { useSettingsStore } from '../../store/settingsStore';
 import { getCurrencySymbol } from '../../utils/formatCurrency';
 import { ProfitMarginCalculator } from '../../components/ui/ProfitMarginCalculator';
+import { CompatibleModelsInput } from '../../components/inventory/CompatibleModelsInput';
+import { normalizeCompatibleModels, modelsFromProduct, joinModels } from '../../utils/compatibleModels';
 import type { PhoneModel, AccessorySubCategory } from '../../types';
 import { ACCESSORY_SUB_CATEGORY_OPTIONS } from '../../utils/accessorySubCategories';
 import styles from './ProductForm.module.css';
@@ -31,7 +33,7 @@ export const EditProductPanel: React.FC<EditProductPanelProps> = ({ product, onC
   const { currency } = useSettingsStore();
   const symbol = getCurrencySymbol(currency);
   const [name, setName] = useState('');
-  const [model, setModel] = useState('');
+  const [models, setModels] = useState<string[]>(['']);
   const [price, setPrice] = useState('');
   const [costPrice, setCostPrice] = useState('');
   const [stock, setStock] = useState('');
@@ -52,7 +54,7 @@ export const EditProductPanel: React.FC<EditProductPanelProps> = ({ product, onC
   useEffect(() => {
     if (product) {
       setName(product.name || '');
-      setModel(product.model || '');
+      setModels(modelsFromProduct(product));
       setPrice(product.price.toString());
       setCostPrice(product.costPrice.toString());
       setStock(product.stock.toString());
@@ -71,7 +73,8 @@ export const EditProductPanel: React.FC<EditProductPanelProps> = ({ product, onC
 
   const handleSave = async () => {
     const trimmedName = name.trim();
-    const trimmedModel = model.trim();
+    const normalized = normalizeCompatibleModels(models);
+    const trimmedModel = joinModels(normalized);
 
     if (!trimmedName) {
       toast.error('Invalid Name', 'Product name cannot be empty.');
@@ -105,6 +108,7 @@ export const EditProductPanel: React.FC<EditProductPanelProps> = ({ product, onC
     const outcome = await updateProduct(product.id, {
       name: trimmedName,
       model: trimmedModel,
+      compatibleModels: normalized,
       price: priceNum,
       costPrice: costNum,
       stock: stockNum,
@@ -149,7 +153,7 @@ export const EditProductPanel: React.FC<EditProductPanelProps> = ({ product, onC
         isOpen={!!product}
         onClose={onClose}
         title="Edit Product"
-        subtitle={`${name || product.name} ${model || product.model}${product.category !== 'accessory' && product.storage && product.storage.trim().toUpperCase() !== 'N/A' && product.storage.trim().toLowerCase() !== 'none' ? ` · ${product.storage}` : ''}`}
+        subtitle={`${name || product.name} ${joinModels(models) || product.model}${product.category !== 'accessory' && product.storage && product.storage.trim().toUpperCase() !== 'N/A' && product.storage.trim().toLowerCase() !== 'none' ? ` · ${product.storage}` : ''}`}
         width="md"
         footer={
           <>
@@ -168,11 +172,11 @@ export const EditProductPanel: React.FC<EditProductPanelProps> = ({ product, onC
               value={name}
               onChange={e => setName(e.target.value)}
             />
-            <Input
-              label="Model *"
+            <CompatibleModelsInput
+              models={models}
+              onChange={setModels}
+              label="Compatible Device(s) *"
               placeholder="e.g. iPhone 15 Pro, Charger 20W"
-              value={model}
-              onChange={e => setModel(e.target.value)}
             />
           </div>
 
