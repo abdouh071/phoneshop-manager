@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Plus, Minus, Trash2, ShoppingCart, X, Package, AlertTriangle, ChevronDown, ChevronUp, ChevronRight, CornerDownRight, Eye, ClipboardList, TrendingUp, DollarSign, User, UserCheck, CheckCircle2, AlertCircle, XCircle } from 'lucide-react';
+import { Plus, Minus, Trash2, ShoppingCart, X, Package, AlertTriangle, ChevronDown, ChevronUp, ChevronRight, CornerDownRight, Eye, ClipboardList, TrendingUp, DollarSign, User, UserCheck, CheckCircle2, AlertCircle, XCircle, Store, Bell } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { SearchInput } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
@@ -49,7 +49,7 @@ import { RestockAssistantModal } from './RestockAssistantModal';
 import { CustomerProfilePanel } from '../customers/CustomerProfilePanel';
 import { useCustomerStore } from '../../store/customerStore';
 import type { Customer, CustomerDebtEntry, SaleTransaction, CartItem } from '../../types';
-import { Store, Bell } from 'lucide-react';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 
 import styles from './Parts.module.css';
 import posStyles from '../pos/POS.module.css';
@@ -120,7 +120,6 @@ const paymentMethods: { value: PaymentMethod; label: string }[] = [
 export const PartsPage = () => {
   const { t } = useTranslation();
   const { fetchParts, parts } = useInventoryStore();
-  const partsOnly = parts;
   const { items, addToCart, removeFromCart, updateQuantity, clearCart, setPayments, setCustomerName, setDiscount, setLineDiscount, checkout, customerName, discount, getSubtotal, getTotal, getItemCount, getLinesConcessionTotal, suspendedCarts, suspendCart, resumeCart, discardSuspendedCart, fetchCarts } = usePartsCartStore();
   const permissions = usePermissions();
   const { user } = useAuthStore();
@@ -392,16 +391,16 @@ export const PartsPage = () => {
 
   // Financials & Stock metrics
   const totalInventoryValue = useMemo(() => {
-    return partsOnly.reduce((sum, p) => sum + (p.costPrice || 0) * (p.stock || 0), 0);
-  }, [partsOnly]);
+    return parts.reduce((sum, p) => sum + (p.costPrice || 0) * (p.stock || 0), 0);
+  }, [parts]);
 
   const potentialRevenue = useMemo(() => {
-    return partsOnly.reduce((sum, p) => sum + (p.price || 0) * (p.stock || 0), 0);
-  }, [partsOnly]);
+    return parts.reduce((sum, p) => sum + (p.price || 0) * (p.stock || 0), 0);
+  }, [parts]);
 
   const lowStockCount = useMemo(() => {
-    return partsOnly.filter(p => p.stockStatus === 'low_stock' || p.stockStatus === 'out_of_stock').length;
-  }, [partsOnly]);
+    return parts.filter(p => p.stockStatus === 'low_stock' || p.stockStatus === 'out_of_stock').length;
+  }, [parts]);
 
   const handleSort = (key: keyof PhoneModel) => {
     if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
@@ -431,11 +430,12 @@ export const PartsPage = () => {
 
   // POS State
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('cash');
-  const [, setAmountPaid] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   // Synchronous lock prevents duplicate submissions even on rapid multi-clicks
   const checkoutLock = useRef(false);
   const [showSuspended, setShowSuspended] = useState(false);
+  const [confirmClearCart, setConfirmClearCart] = useState(false);
+  const [discardTarget, setDiscardTarget] = useState<SuspendedCart | null>(null);
 
   const handleCheckout = async () => {
     if (items.length === 0 || isProcessing || checkoutLock.current) return;
@@ -445,7 +445,6 @@ export const PartsPage = () => {
       const tx = await checkout();
       setLineDiscountText({});
       setCompletedTx(tx);
-      setAmountPaid('');
     } catch (err: unknown) {
       toast.error('Checkout failed', errorMessage(err));
     } finally {
@@ -464,6 +463,27 @@ export const PartsPage = () => {
       <PrintPartsLabelsModal isOpen={isPrintOpen} onClose={() => setIsPrintOpen(false)} />
       <RestockHistoryPanel isOpen={isRestockLogOpen} onClose={() => setIsRestockLogOpen(false)} />
       <WriteOffLogPanel isOpen={isWriteOffLogOpen} onClose={() => setIsWriteOffLogOpen(false)} />
+
+      <ConfirmDialog
+        isOpen={confirmClearCart}
+        title="Clear Cart"
+        message="This removes every item from the current sale. Continue?"
+        confirmLabel="Clear Cart"
+        variant="danger"
+        onConfirm={() => { clearCart(); setLineDiscountText({}); setConfirmClearCart(false); }}
+        onCancel={() => setConfirmClearCart(false)}
+      />
+      <ConfirmDialog
+        isOpen={discardTarget !== null}
+        title="Discard Held Cart"
+        message={discardTarget
+          ? `Discard the held cart for ${discardTarget.customerName || 'Walk-in Customer'} (${discardTarget.items.reduce((s, i) => s + i.quantity, 0)} items)? This cannot be undone.`
+          : ''}
+        confirmLabel="Discard"
+        variant="danger"
+        onConfirm={() => { if (discardTarget) discardSuspendedCart(discardTarget.id); setDiscardTarget(null); }}
+        onCancel={() => setDiscardTarget(null)}
+      />
       
       <AdminUnlockModal 
         isOpen={actionRequiringUnlock !== null} 
@@ -603,7 +623,7 @@ export const PartsPage = () => {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>{t('parts.title', 'Parts Management')}</h1>
-          <p className={styles.subtitle}>{partsOnly.length} parts available · {partsOnly.reduce((s, p) => s + p.stock, 0)} units in stock</p>
+          <p className={styles.subtitle}>{parts.length} parts available · {parts.reduce((s, p) => s + p.stock, 0)} units in stock</p>
         </div>
         <div className={styles.headerActions}>
           <Button
@@ -638,7 +658,7 @@ export const PartsPage = () => {
           onClick={() => setActiveTab('inventory')}
         >
           <span>📦 {t('parts.title', 'Parts Inventory')}</span>
-          <span className={styles.tabCount}>{partsOnly.length}</span>
+          <span className={styles.tabCount}>{parts.length}</span>
         </button>
         {permissions.parts_sell && (
           <button 
@@ -673,7 +693,7 @@ export const PartsPage = () => {
                 <span className={styles.summaryLabel}>Total Parts</span>
                 <div className={[styles.summaryIconWrap, styles.iconTotal].join(' ')}><Package size={16} /></div>
               </div>
-              <p className={styles.summaryValue}>{partsOnly.length}</p>
+              <p className={styles.summaryValue}>{parts.length}</p>
             </div>
 
             <div
@@ -686,7 +706,7 @@ export const PartsPage = () => {
                 <div className={[styles.summaryIconWrap, styles.iconInStock].join(' ')}><CheckCircle2 size={16} /></div>
               </div>
               <p className={styles.summaryValue} style={{ color: '#16a34a' }}>
-                {partsOnly.filter(p => p.stockStatus === 'in_stock').length}
+                {parts.filter(p => p.stockStatus === 'in_stock').length}
               </p>
             </div>
 
@@ -700,7 +720,7 @@ export const PartsPage = () => {
                 <div className={[styles.summaryIconWrap, styles.iconLowStock].join(' ')}><AlertCircle size={16} /></div>
               </div>
               <p className={styles.summaryValue} style={{ color: '#d97706' }}>
-                {partsOnly.filter(p => p.stockStatus === 'low_stock').length}
+                {parts.filter(p => p.stockStatus === 'low_stock').length}
               </p>
             </div>
 
@@ -714,7 +734,7 @@ export const PartsPage = () => {
                 <div className={[styles.summaryIconWrap, styles.iconOutStock].join(' ')}><XCircle size={16} /></div>
               </div>
               <p className={styles.summaryValue} style={{ color: '#dc2626' }}>
-                {partsOnly.filter(p => p.stockStatus === 'out_of_stock').length}
+                {parts.filter(p => p.stockStatus === 'out_of_stock').length}
               </p>
             </div>
 
@@ -907,7 +927,7 @@ export const PartsPage = () => {
                                   <Button variant="secondary" size="sm" onClick={() => requirePermission('edit this product', () => setEditingProduct(v))}>
                                     Edit
                                   </Button>
-                                  <Button variant="secondary" size="sm" onClick={() => requirePermission('restock products', () => { setRestockingId(v.id); setRestockAmt(''); })}>
+                                  <Button variant="secondary" size="sm" onClick={() => requirePermission('restock products', () => { setRestockingId(v.id); setRestockAmt(''); setRestockMeta({ supplier: '', cost: '', note: '' }); })}>
                                     + Restock
                                   </Button>
                                   <Button variant="danger" size="sm" onClick={() => requirePermission('write off products', () => setWriteOffProduct(v))} disabled={v.stock === 0} title="Write-Off">
@@ -980,7 +1000,7 @@ export const PartsPage = () => {
                                     <Button variant="secondary" size="sm" onClick={() => requirePermission('edit this product', () => setEditingProduct(product))}>
                                       Edit
                                     </Button>
-                                    <Button variant="secondary" size="sm" onClick={() => requirePermission('restock products', () => { setRestockingId(product.id); setRestockAmt(''); })}>
+                                    <Button variant="secondary" size="sm" onClick={() => requirePermission('restock products', () => { setRestockingId(product.id); setRestockAmt(''); setRestockMeta({ supplier: '', cost: '', note: '' }); })}>
                                       + Restock
                                     </Button>
                                     <Button variant="danger" size="sm" onClick={() => requirePermission('write off products', () => setWriteOffProduct(product))} disabled={product.stock === 0} title="Write-Off">
@@ -1061,7 +1081,7 @@ export const PartsPage = () => {
                 )}
               </div>
               {(items.length > 0 || customerName) && (
-                <button className={posStyles.clearBtn} onClick={() => { clearCart(); setLineDiscountText({}); }}>
+                <button className={posStyles.clearBtn} onClick={() => setConfirmClearCart(true)}>
                   Clear
                 </button>
               )}
@@ -1184,7 +1204,7 @@ export const PartsPage = () => {
                         >
                           Resume
                         </Button>
-                        <button className={posStyles.discardBtn} onClick={() => discardSuspendedCart(sc.id)}>
+                        <button className={posStyles.discardBtn} onClick={() => setDiscardTarget(sc)}>
                           <Trash2 size={14} />
                         </button>
                       </div>
@@ -1436,6 +1456,7 @@ export const PartsPage = () => {
                     <Button
                       onClick={() => setIsB2BCheckoutOpen(true)}
                       isLoading={isProcessing}
+                      disabled={isProcessing || items.length === 0}
                       style={{ flex: '2', background: '#1d4ed8' }}
                       leftIcon={<Store size={16} />}
                     >

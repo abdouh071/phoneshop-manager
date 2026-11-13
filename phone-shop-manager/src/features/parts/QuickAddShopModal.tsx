@@ -83,6 +83,7 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
   };
 
   const handleSubmit = async () => {
+    if (isSubmitting) return;
     if (!shopName.trim()) {
       setError('Please provide the phone shop or business name (e.g. "AP Phone").');
       return;
