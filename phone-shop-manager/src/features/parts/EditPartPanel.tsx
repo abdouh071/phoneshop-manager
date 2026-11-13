@@ -17,6 +17,8 @@ import { findCodeCollisions } from '../../utils/productCode';
 import { errorMessage } from '../../utils/errorUtils';
 import type { PhoneModel } from '../../types';
 import { ProfitMarginCalculator } from '../../components/ui/ProfitMarginCalculator';
+import { CompatibleModelsInput } from '../../components/inventory/CompatibleModelsInput';
+import { normalizeCompatibleModels, joinModels, modelsFromProduct } from '../../utils/compatibleModels';
 import styles from './PartModal.module.css';
 
 interface EditPartPanelProps {
@@ -36,6 +38,7 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
   const symbol = getCurrencySymbol(currency);
 
   const [form, setForm] = useState<Partial<PhoneModel>>({});
+  const [compatibleModels, setCompatibleModels] = useState<string[]>(['']);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showAdminUnlock, setShowAdminUnlock] = useState(false);
@@ -43,6 +46,7 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
   useEffect(() => {
     if (product) {
       setForm(product);
+      setCompatibleModels(modelsFromProduct(product));
     }
   }, [product]);
 
@@ -54,7 +58,8 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
   };
 
   const handleSubmit = async () => {
-    if (!form.name?.trim() || !form.model?.trim() || !form.price || !form.costPrice) {
+    const normalizedModels = normalizeCompatibleModels(compatibleModels);
+    if (!form.name?.trim() || normalizedModels.length === 0 || !form.price || !form.costPrice) {
       toast.error(t('parts.editModal.missingFields'));
       return;
     }
@@ -65,7 +70,8 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
     const updates: Partial<PhoneModel> = {
       ...form,
       name: form.name.trim(),
-      model: form.model.trim(),
+      model: joinModels(normalizedModels),
+      compatibleModels: normalizedModels,
       price: Number(form.price),
       costPrice: Number(form.costPrice) || 0,
       stock,
@@ -182,19 +188,23 @@ export const EditPartPanel: React.FC<EditPartPanelProps> = ({ product, isOpen, o
           {/* ── 1. Part Details ── */}
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>{t('parts.editModal.sectionIdentity', 'Part Details')}</h3>
-            <div className={styles.grid2}>
+            <div>
               <Input
                 label={`${t('parts.editModal.labelName', 'Part Name')} *`}
                 value={form.name || ''}
                 onChange={e => setField('name', e.target.value)}
               />
-              <Input
-                label={`${t('parts.editModal.labelCompatible', 'Compatible Model(s)')} *`}
-                value={form.model || ''}
-                onChange={e => setField('model', e.target.value)}
+            </div>
+            <div style={{ marginTop: '12px' }}>
+              <CompatibleModelsInput
+                models={compatibleModels}
+                onChange={setCompatibleModels}
+                label={`${t('parts.editModal.labelCompatible', 'Compatible Device(s)')} *`}
+                placeholder="e.g. iPhone 14 Pro"
+                addLabel={t('parts.editModal.addDevice', 'Add another device')}
               />
             </div>
-            <div className={styles.grid2}>
+            <div className={styles.grid2} style={{ marginTop: '12px' }}>
               <Input
                 label={t('parts.editModal.labelSku', 'SKU / Barcode')}
                 value={form.sku || ''}
