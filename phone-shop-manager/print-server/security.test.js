@@ -119,6 +119,38 @@ test('tsplInt never produces NaN in a command parameter', () => {
   assert.equal(internals.tsplInt('-99', 8, 1, 100), 1);
 });
 
+test('a part name wraps to the width, keeping the model line then the remainder', () => {
+  assert.deepEqual(
+    internals.wrapTsplToWidth('AF REDMI NOTE 8 PRO CHINE REDMI', 12, 288),
+    ['AF REDMI NOTE 8 PRO', 'CHINE REDMI']
+  );
+});
+
+test('every wrapped line stays inside the safe dot width', () => {
+  const long = 'AFFICHEUR IPHONE 14 PRO MAX ORIGINAL CHINE REDMI NOTE 8 PRO';
+  for (const line of internals.wrapTsplToWidth(long, 12, 288)) {
+    assert.ok(line.length * 12 <= 288, line);
+  }
+});
+
+test('wrapping keeps every word of a long name instead of cutting the tail', () => {
+  const long = 'AFFICHEUR IPHONE 14 PRO MAX ORIGINAL CHINE REDMI NOTE 8 PRO';
+  const lines = internals.wrapTsplToWidth(long, 12, 288);
+  assert.equal(lines.join(' '), long);
+});
+
+test('a single word wider than the line is split across lines, never dropped', () => {
+  const word = 'A'.repeat(50);
+  const lines = internals.wrapTsplToWidth(word, 12, 288);
+  assert.deepEqual(lines, ['A'.repeat(24), 'A'.repeat(24), 'A'.repeat(2)]);
+  assert.equal(lines.join(''), word);
+});
+
+test('a short name stays on one line and an empty name yields one blank line', () => {
+  assert.deepEqual(internals.wrapTsplToWidth('CABLE', 12, 288), ['CABLE']);
+  assert.deepEqual(internals.wrapTsplToWidth('', 12, 288), ['']);
+});
+
 test('an oversized PNG is refused before it is decoded', () => {
   const header = Buffer.alloc(24);
   header.writeUInt32BE(0x89504e47, 0);

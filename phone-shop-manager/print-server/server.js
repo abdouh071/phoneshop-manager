@@ -980,6 +980,35 @@ function getBarcodeParams(sku, totalWidth = 400) {
 }
 
 /**
+ * Word-wrap a label line to a physical dot width so no glyph reaches the sticker
+ * edge and loses letters. Keeps every word: a single word wider than the line is
+ * split across lines rather than dropped, unlike a character cap that cuts the tail.
+ */
+function wrapTsplToWidth(text, charWidth, maxDots) {
+  const maxChars = Math.max(1, Math.floor(maxDots / charWidth));
+  const lines = [];
+  let cur = '';
+  for (const word of (text || '').split(' ')) {
+    if (!word) continue;
+    let rest = word;
+    while (rest.length > maxChars) {
+      if (cur) { lines.push(cur); cur = ''; }
+      lines.push(rest.slice(0, maxChars));
+      rest = rest.slice(maxChars);
+    }
+    const test = cur ? `${cur} ${rest}` : rest;
+    if (test.length <= maxChars) {
+      cur = test;
+    } else {
+      if (cur) lines.push(cur);
+      cur = rest;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines.length ? lines : [''];
+}
+
+/**
  * Format a two-column row: left-aligned name, right-aligned price
  * Total width = 42 chars for 80mm paper
  */
@@ -1876,17 +1905,21 @@ async function handlePrintBarcode(body) {
           fullTspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
           fullTspl += 'BAR 0,30,400,2\r\n';
 
-          if (textLines.length > 1) {
-            const line1X = Math.max(0, getCenteredX(textLines[0], fontType) - shiftDots);
-            const line2X = Math.max(0, getCenteredX(textLines[1], fontType) - shiftDots);
-            fullTspl += `TEXT ${line1X},40,${fontArgs},"${textLines[0]}"\r\n`;
-            fullTspl += `TEXT ${line2X},64,${fontArgs},"${textLines[1]}"\r\n`;
-            fullTspl += `BARCODE ${barcodeX},122,"128",32,0,0,${narrow},${wide},"${sku}"\r\n`;
-          } else {
-            const nameSpecsX = Math.max(0, getCenteredX(textLines[0], fontType) - shiftDots);
-            fullTspl += `TEXT ${nameSpecsX},40,${fontArgs},"${textLines[0]}"\r\n`;
-            fullTspl += `BARCODE ${barcodeX},112,"128",40,0,0,${narrow},${wide},"${sku}"\r\n`;
-          }
+          // Parts: larger type (font 2, 12 dots/char) wrapped to a safe physical
+          // width so the name never reaches the sticker edge; every word is kept.
+          const partLines = wrapTsplToWidth(fullText, 12, 288);
+          let lastBottom = 60;
+          partLines.forEach((line, i) => {
+            const y = 40 + i * 24;
+            const lineX = Math.max(0, getCenteredX(line, '2'));
+            fullTspl += `TEXT ${lineX},${y},"2",0,1,1,"${tsplText(line, 60)}"\r\n`;
+            lastBottom = y + 20;
+          });
+          // A wrapped name sits the barcode just below the text; a single short
+          // name keeps the lower, taller bar so the label stays balanced.
+          const barcodeY = partLines.length > 1 ? lastBottom + 8 : 112;
+          const barcodeH = partLines.length > 1 ? 32 : 40;
+          fullTspl += `BARCODE ${barcodeX},${barcodeY},"128",${barcodeH},0,0,${narrow},${wide},"${sku}"\r\n`;
         } else {
           fullTspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
           fullTspl += 'BAR 0,30,400,2\r\n';
@@ -2647,6 +2680,7 @@ module.exports = {
     tsplText,
     tsplField,
     tsplInt,
+    wrapTsplToWidth,
     clampCopies,
     chooseSubstitutePrinter,
     isLabelPrinter,
