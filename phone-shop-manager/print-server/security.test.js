@@ -121,63 +121,70 @@ test('tsplInt never produces NaN in a command parameter', () => {
 
 test('a part name wraps to the width, keeping the model line then the remainder', () => {
   assert.deepEqual(
-    internals.wrapTsplToWidth('AF REDMI NOTE 8 PRO CHINE REDMI', 12, 288),
+    internals.wrapTsplToWidth('AF REDMI NOTE 8 PRO CHINE REDMI', 16, 368),
     ['AF REDMI NOTE 8 PRO', 'CHINE REDMI']
   );
 });
 
 test('every wrapped line stays inside the safe dot width', () => {
   const long = 'AFFICHEUR IPHONE 14 PRO MAX ORIGINAL CHINE REDMI NOTE 8 PRO';
-  for (const line of internals.wrapTsplToWidth(long, 12, 288)) {
-    assert.ok(line.length * 12 <= 288, line);
+  for (const line of internals.wrapTsplToWidth(long, 16, 368)) {
+    assert.ok(line.length * 16 <= 368, line);
   }
 });
 
 test('wrapping keeps every word of a long name instead of cutting the tail', () => {
   const long = 'AFFICHEUR IPHONE 14 PRO MAX ORIGINAL CHINE REDMI NOTE 8 PRO';
-  const lines = internals.wrapTsplToWidth(long, 12, 288);
+  const lines = internals.wrapTsplToWidth(long, 16, 368);
   assert.equal(lines.join(' '), long);
 });
 
 test('a single word wider than the line is split across lines, never dropped', () => {
   const word = 'A'.repeat(50);
-  const lines = internals.wrapTsplToWidth(word, 12, 288);
-  assert.deepEqual(lines, ['A'.repeat(24), 'A'.repeat(24), 'A'.repeat(2)]);
+  const lines = internals.wrapTsplToWidth(word, 16, 368);
+  assert.deepEqual(lines, ['A'.repeat(23), 'A'.repeat(23), 'A'.repeat(4)]);
   assert.equal(lines.join(''), word);
 });
 
 test('a short name stays on one line and an empty name yields one blank line', () => {
-  assert.deepEqual(internals.wrapTsplToWidth('CABLE', 12, 288), ['CABLE']);
-  assert.deepEqual(internals.wrapTsplToWidth('', 12, 288), ['']);
+  assert.deepEqual(internals.wrapTsplToWidth('CABLE', 16, 368), ['CABLE']);
+  assert.deepEqual(internals.wrapTsplToWidth('', 16, 368), ['']);
+});
+
+test('the photo product prints ORG fully inside the label', () => {
+  const full = 'AF-INFINIX SMART 7/A70/A60S/A50/A05S ORG 100%';
+  const lines = internals.wrapTsplToWidth(full, 16, 368);
+  assert.deepEqual(lines, ['AF-INFINIX SMART', '7/A70/A60S/A50/A05S ORG', '100%']);
+  for (const line of lines) assert.ok(line.length * 16 <= 368, line);
 });
 
 test('a ticket line that fits keeps the larger font 2', () => {
-  assert.deepEqual(internals.fitTsplLine('CABLE', 336), { font: '2', text: 'CABLE' });
-  assert.deepEqual(internals.fitTsplLine('', 336), { font: '2', text: '' });
-  // 28 chars x 12 dots = 336, exactly the safe extent of the phone-name line.
-  const edge = 'A'.repeat(28);
-  assert.deepEqual(internals.fitTsplLine(edge, 336), { font: '2', text: edge });
+  assert.deepEqual(internals.fitTsplLine('CABLE', 356), { font: '2', text: 'CABLE' });
+  assert.deepEqual(internals.fitTsplLine('', 356), { font: '2', text: '' });
+  // 22 chars x 16 measured dots = 352, the widest line font 2 may occupy.
+  const edge = 'A'.repeat(22);
+  assert.deepEqual(internals.fitTsplLine(edge, 356), { font: '2', text: edge });
 });
 
 test('a ticket line too wide for font 2 drops to font 1 and keeps every letter', () => {
-  const name = 'A'.repeat(29); // 29 x 12 = 348 > 336, but 29 x 8 = 232 fits
-  const fitted = internals.fitTsplLine(name, 336);
+  const name = 'A'.repeat(29); // 29 x 16 = 464 > 356, but 29 x 10 = 290 fits
+  const fitted = internals.fitTsplLine(name, 356);
   assert.equal(fitted.font, '1');
   assert.equal(fitted.text, name);
 });
 
 test('a very long ticket line is capped so no glyph reaches the right edge', () => {
-  const fitted = internals.fitTsplLine('A'.repeat(50), 336);
+  const fitted = internals.fitTsplLine('A'.repeat(50), 356);
   assert.equal(fitted.font, '1');
-  assert.equal(fitted.text, 'A'.repeat(42)); // floor(336 / 8)
-  assert.ok(fitted.text.length * 8 <= 336);
+  assert.equal(fitted.text, 'A'.repeat(35)); // floor(356 / 10)
+  assert.ok(fitted.text.length * 10 <= 356);
 });
 
 test('every fitted ticket line stays inside the safe dot width at its own font', () => {
   for (let len = 0; len <= 60; len++) {
-    const fitted = internals.fitTsplLine('X'.repeat(len), 336);
-    const charWidth = fitted.font === '2' ? 12 : 8;
-    assert.ok(fitted.text.length * charWidth <= 336, `len ${len}`);
+    const fitted = internals.fitTsplLine('X'.repeat(len), 356);
+    const charWidth = fitted.font === '2' ? 16 : 10;
+    assert.ok(fitted.text.length * charWidth <= 356, `len ${len}`);
   }
 });
 

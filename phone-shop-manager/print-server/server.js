@@ -78,6 +78,13 @@ const LABEL_PRINTER_NAME = process.env.LABEL_PRINTER_NAME || 'Xprinter_XP_420B';
 const HAS_CUTTER = process.env.HAS_CUTTER !== 'false'; // default true
 const LABEL_OFFSET_X = parseInt(process.env.LABEL_OFFSET_X || '12', 10); // dots to shift left to compensate for printer's built-in left margin
 
+// Measured on the Xprinter XP-420B with a probe label (2026-11-13): 25 digits of
+// font "2" span the full 400-dot label and 30 digits of font "1" span ~300 dots.
+// The firmware renders both fonts wider than the nominal TSPL sizes (12 and 8),
+// so every width calculation must use these real values or lines clip at the edge.
+const TSPL_FONT_2_WIDTH = 16;
+const TSPL_FONT_1_WIDTH = 10;
+
 /** Loopback unless the operator asks for the LAN; `0.0.0.0` was never a deliberate choice. */
 const LAN_MODE = flagFrom(process.env.PRINT_SERVER_LAN_MODE, false);
 const BIND_HOST = String(process.env.PRINT_SERVER_HOST || (LAN_MODE ? '0.0.0.0' : '127.0.0.1')).trim() || '127.0.0.1';
@@ -943,7 +950,7 @@ function padLeft(text, width) {
 // Calculate centered X position on 400-dot-wide label (50mm)
 // Subtracts LABEL_OFFSET_X to compensate for the printer's physical left margin
 function getCenteredX(text, font = '2', totalWidth = 400) {
-  const charWidth = font === '5' ? 32 : font === '4' ? 24 : font === '3' ? 16 : font === '2' ? 12 : font === '0' ? 10 : font === '1' ? 8 : 12;
+  const charWidth = font === '5' ? 32 : font === '4' ? 24 : font === '3' ? 16 : font === '2' ? TSPL_FONT_2_WIDTH : font === '0' ? 10 : font === '1' ? TSPL_FONT_1_WIDTH : TSPL_FONT_2_WIDTH;
   const textWidth = (text || '').length * charWidth;
   return Math.max(0, Math.floor((totalWidth - textWidth) / 2) - LABEL_OFFSET_X);
 }
@@ -1010,16 +1017,17 @@ function wrapTsplToWidth(text, charWidth, maxDots) {
 
 /**
  * Fit a single ticket line inside a physical dot width: keep the larger font
- * (2, 12 dots/char) when the text fits, otherwise drop to font 1 (8 dots/char)
- * and cap at the width. A long name/issue keeps every letter in smaller type
- * instead of running off the right edge and losing the last glyph mid-letter.
+ * (2, 16 measured dots/char) when the text fits, otherwise drop to font 1
+ * (10 measured dots/char) and cap at the width. A long name/issue keeps every
+ * letter in smaller type instead of running off the right edge and losing the
+ * last glyph mid-letter.
  */
 function fitTsplLine(text, maxDots) {
   const clean = text || '';
-  if (clean.length * 12 <= maxDots) {
+  if (clean.length * TSPL_FONT_2_WIDTH <= maxDots) {
     return { font: '2', text: clean };
   }
-  const maxChars = Math.max(1, Math.floor(maxDots / 8));
+  const maxChars = Math.max(1, Math.floor(maxDots / TSPL_FONT_1_WIDTH));
   return { font: '1', text: clean.slice(0, maxChars) };
 }
 
@@ -1311,9 +1319,9 @@ async function handlePrintRepairLabel(body) {
       
       const { x: barcodeX, narrow, wide } = getBarcodeParams(ticketNum);
 
-      // Text starts at x=12 on a 400-dot label shifted by REFERENCE 32; 336 dots
-      // is the proven-safe extent of the phone-name line, ending short of the edge.
-      const TICKET_TEXT_MAX_DOTS = 336;
+      // Text starts at x=12 on a 400-dot label shifted by REFERENCE 32 (368 usable
+      // ref dots), so 356 dots is the widest a line may be before it reaches the edge.
+      const TICKET_TEXT_MAX_DOTS = 356;
 
       // Line 1: Phone Name & Phone Number
       const line1 = fitTsplLine(tsplText(phoneHeader, 28), TICKET_TEXT_MAX_DOTS);
@@ -1928,9 +1936,10 @@ async function handlePrintBarcode(body) {
           fullTspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
           fullTspl += 'BAR 0,30,400,2\r\n';
 
-          // Parts: larger type (font 2, 12 dots/char) wrapped to a safe physical
-          // width so the name never reaches the sticker edge; every word is kept.
-          const partLines = wrapTsplToWidth(fullText, 12, 288);
+          // Parts: larger type (font 2, 16 measured dots/char) wrapped to a safe
+          // physical width (368 dots = 400 minus a 2-char margin) so the name
+          // never reaches the sticker edge; every word is kept.
+          const partLines = wrapTsplToWidth(fullText, TSPL_FONT_2_WIDTH, 368);
           let lastBottom = 60;
           partLines.forEach((line, i) => {
             const y = 40 + i * 24;
@@ -2083,15 +2092,15 @@ async function handlePrintCustomTicket(body) {
 
         // Font selection & line metrics
         let fontType = '2';
-        let charW = 12;
+        let charW = TSPL_FONT_2_WIDTH;
         let charH = 18;
         let lineSpacing = 2;
         const reqSize = ticketData.fontSize || 'auto';
 
         if (reqSize === 'normal') {
-          fontType = '1'; charW = 8; charH = 14; lineSpacing = 2;
+          fontType = '1'; charW = TSPL_FONT_1_WIDTH; charH = 14; lineSpacing = 2;
         } else if (reqSize === 'large') {
-          fontType = '2'; charW = 12; charH = 18; lineSpacing = 2;
+          fontType = '2'; charW = TSPL_FONT_2_WIDTH; charH = 18; lineSpacing = 2;
         } else if (reqSize === 'huge') {
           fontType = '3'; charW = 16; charH = 22; lineSpacing = 3;
         } else if (reqSize === 'giant') {
@@ -2105,9 +2114,9 @@ async function handlePrintCustomTicket(body) {
           } else if (rawLines.length <= 2 && maxLineLen <= 12) {
             fontType = '3'; charW = 16; charH = 22; lineSpacing = 3;
           } else if (rawLines.length <= 3 && maxLineLen <= 22) {
-            fontType = '2'; charW = 12; charH = 18; lineSpacing = 2;
+            fontType = '2'; charW = TSPL_FONT_2_WIDTH; charH = 18; lineSpacing = 2;
           } else {
-            fontType = '1'; charW = 8; charH = 14; lineSpacing = 2;
+            fontType = '1'; charW = TSPL_FONT_1_WIDTH; charH = 14; lineSpacing = 2;
           }
         }
 
