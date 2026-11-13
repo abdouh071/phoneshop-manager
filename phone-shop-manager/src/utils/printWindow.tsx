@@ -721,7 +721,7 @@ export function buildLabelsHTML(products: {
     }
 
     const isLong = fullText.length > (isPart ? 20 : 28);
-    const shiftMm = isLong ? 6 : 5;
+    const shiftMm = isPart ? (isLong ? 9 : 8) : (isLong ? 6 : 5);
     const maxChars = isPart ? 26 : 34;
 
     let textLines: string[] = [];

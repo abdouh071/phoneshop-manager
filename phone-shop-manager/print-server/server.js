@@ -1971,7 +1971,8 @@ async function handlePrintBarcode(body) {
           partLines.forEach((line, i) => {
             const y = 39 + i * 21;
             const lineW = line.length * TSPL_FONT_2_WIDTH;
-            const lineX = TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - lineW) / 2));
+            // Shift text above barcode left 3mm (24 dots at 203 DPI)
+            const lineX = Math.max(0, TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - lineW) / 2)) - 24);
             fullTspl += `TEXT ${lineX},${y},"2",0,1,1,"${tsplText(line, 60)}"\r\n`;
           });
           // Fixed barcode position: placed in its place (Y=128, H=28, ends at 156 dots on 160-dot label)
