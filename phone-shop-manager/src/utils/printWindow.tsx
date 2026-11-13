@@ -774,7 +774,7 @@ export function buildLabelsHTML(products: {
 
     const linesToRender = isPart ? textLines.slice(0, fontConfig.maxLines) : textLines;
     const linesHtml = linesToRender.map((line, idx) => `
-      <div style="font-family:${fontFamily};font-size:${fontSize};font-weight:${fontWeight};${letterSpacing}color:#111;line-height:1.1;padding:0 2px;${idx > 0 ? 'margin-top:1.5mm;' : (isPart ? 'margin-top:1.5mm;' : '')}transform:translateX(-${shiftMm}mm)${transformScale};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${escapeHtml(line)}</div>
+      <div style="font-family:${fontFamily};font-size:${fontSize};font-weight:${fontWeight};${letterSpacing}color:#111;line-height:1.1;padding:0 2px;${idx > 0 ? 'margin-top:0.8mm;' : (isPart ? 'margin-top:1.5mm;' : '')}transform:translateX(-${shiftMm}mm)${transformScale};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:center;">${escapeHtml(line)}</div>
     `).join('');
 
     return `

@@ -36,7 +36,7 @@ export const AVAILABLE_LABEL_FONTS: LabelFontConfig[] = [
     mulX: 1,
     mulY: 1,
     charWidth: 16,
-    lineHeight: 21,
+    lineHeight: 20,
     maxLines: 3,
     cssStyle: {
       fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
@@ -155,3 +155,4 @@ export const AVAILABLE_LABEL_FONTS: LabelFontConfig[] = [
 export function getLabelFontConfig(key?: string): LabelFontConfig {
   return AVAILABLE_LABEL_FONTS.find((f) => f.key === key) || AVAILABLE_LABEL_FONTS[0];
 }
+

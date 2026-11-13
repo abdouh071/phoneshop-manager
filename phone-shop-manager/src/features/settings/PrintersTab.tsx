@@ -733,12 +733,12 @@ export const PrintersTab: React.FC = () => {
                               AFFICHEUR OLED IP 13 PRO
                             </div>
                             {activeFont.maxLines >= 2 && (
-                              <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', marginTop: '2px' }}>
+                              <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', marginTop: '0.8mm' }}>
                                 ORIGINAL CHINE
                               </div>
                             )}
                             {activeFont.maxLines >= 3 && (
-                              <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', marginTop: '2px', opacity: 0.85, fontSize: '90%' }}>
+                              <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', marginTop: '0.8mm', opacity: 0.85, fontSize: '90%' }}>
                                 COMPATIBLE: A2638
                               </div>
                             )}
@@ -748,7 +748,7 @@ export const PrintersTab: React.FC = () => {
                             <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
                               COQUE SILICONE MAGSAFE
                             </div>
-                            <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', marginTop: '2px' }}>
+                            <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', marginTop: '0.8mm' }}>
                               IPHONE 14 PRO - NOIR
                             </div>
                           </>
