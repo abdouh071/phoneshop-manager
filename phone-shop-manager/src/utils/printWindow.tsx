@@ -726,8 +726,8 @@ export function buildLabelsHTML(products: {
     }
 
     const isLong = fullText.length > (isPart ? 20 : 28);
-    // Shifted right 3mm in all prints: parts 7/6 -> 4/3, non-parts 4/3 -> 1/0
-    const shiftMm = isPart ? (isLong ? 4 : 3) : (isLong ? 1 : 0);
+    // Shifted right another 3mm in all prints: parts 4/3 -> 1/0, non-parts 1/0 -> -2/-3
+    const shiftMm = isPart ? (isLong ? 1 : 0) : (isLong ? -2 : -3);
     const maxChars = isPart ? 26 : 34;
 
     let textLines: string[] = [];
@@ -783,10 +783,10 @@ export function buildLabelsHTML(products: {
         <div style="font-weight:700;font-size:11px;letter-spacing:0.3px;text-transform:uppercase;line-height:1;margin-top:0.4mm;transform:translateX(-2mm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">${escapeHtml(activeStoreName)}</div>
         <div style="border-top:1.5px solid #000;width:100%;margin:1mm 0 1mm 0;"></div>
         ${linesHtml}
-        <div style="${isPart ? 'position:absolute;bottom:0.8mm;left:0;right:0;transform:translateX(0mm);' : `margin-top:${p.hidePrice ? (textLines.length > 1 ? '5.4mm' : '5.8mm') : '5.4mm'};transform:translateX(3mm);`}display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;width:100%;">
+        <div style="${isPart ? 'position:absolute;bottom:0.8mm;left:0;right:0;transform:translateX(3mm);' : `margin-top:${p.hidePrice ? (textLines.length > 1 ? '5.4mm' : '5.8mm') : '5.4mm'};transform:translateX(6mm);`}display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;width:100%;">
           <div style="display:flex;justify-content:center;align-items:center;max-width:34mm;overflow:hidden;">${barcodeSvg}</div>
         </div>
-        ${!isPart && !p.hidePrice ? `<div style="font-size:13px;font-weight:800;height:4mm;line-height:4mm;margin-top:0.6mm;letter-spacing:0.3px;transform:translateX(3mm);">${formatCurrency(p.price)}</div>` : ''}
+        ${!isPart && !p.hidePrice ? `<div style="font-size:13px;font-weight:800;height:4mm;line-height:4mm;margin-top:0.6mm;letter-spacing:0.3px;transform:translateX(6mm);">${formatCurrency(p.price)}</div>` : ''}
       </div>
     `;
   }).join('');
