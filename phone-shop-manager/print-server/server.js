@@ -2050,25 +2050,25 @@ async function handlePrintBarcode(body) {
             // Shift text down by 1.5mm (tuned per font startY)
             const y = fontCfg.startY + i * fontCfg.lineHeight;
             const lineW = line.length * fontCfg.charWidth;
-            // Shift text above barcode: moved right another 3mm (+24 dots: +16 -> +40)
-            const lineX = Math.max(0, TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - lineW) / 2)) + 40);
+            // Shift text above barcode: moved left 2mm (-16 dots: +40 -> +24)
+            const lineX = Math.max(0, TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - lineW) / 2)) + 24);
             fullTspl += `TEXT ${lineX},${y},"${fontCfg.font}",0,${fontCfg.mulX},${fontCfg.mulY},"${tsplText(line, 60)}"\r\n`;
           });
           // Fixed barcode position: placed in its place (Y=128, H=28, ends at 156 dots on 160-dot label)
           // whatever the text length, so long text never pushes it off the label.
-          // Moved right another 3mm (+24 dots: 0 -> +24).
+          // Moved left 2mm (-16 dots: +24 -> +8).
           const barcodeY = 128;
           const barcodeH = 28;
           const partsBp = getBarcodeParams(sku);
-          const partsBarcodeX = Math.max(0, TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - partsBp.width) / 2)) + 24);
+          const partsBarcodeX = Math.max(0, TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - partsBp.width) / 2)) + 8);
           fullTspl += `BARCODE ${partsBarcodeX},${barcodeY},"128",${barcodeH},0,0,${partsBp.narrow},${partsBp.wide},"${sku}"\r\n`;
         } else {
           fullTspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
           fullTspl += 'BAR 0,30,400,2\r\n';
 
-          // Shift text and barcode right by another 3mm (+24 dots: prodShiftDots -8 -> -32, prodBarcodeX +24 -> +48)
-          const prodShiftDots = -32;
-          const prodBarcodeX = Math.max(20, barcodeX + 48);
+          // Shift text and barcode left by 2mm (-16 dots: prodShiftDots -32 -> -16, prodBarcodeX +48 -> +32)
+          const prodShiftDots = -16;
+          const prodBarcodeX = Math.max(20, barcodeX + 32);
 
           if (textLines.length > 1) {
             const line1X = Math.max(0, getCenteredX(textLines[0], fontType) - prodShiftDots);
@@ -2082,7 +2082,7 @@ async function handlePrintBarcode(body) {
             fullTspl += `BARCODE ${prodBarcodeX},102,"128",28,0,0,${narrow},${wide},"${sku}"\r\n`;
           }
           const priceText = tsplText(fmt(product.price), 20);
-          const priceX = Math.max(0, getCenteredX(priceText, '4') + 48);
+          const priceX = Math.max(0, getCenteredX(priceText, '4') + 32);
           fullTspl += `TEXT ${priceX},140,"4",0,1,1,"${priceText}"\r\n`;
         }
 

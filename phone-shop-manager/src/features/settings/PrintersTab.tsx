@@ -724,7 +724,7 @@ export const PrintersTab: React.FC = () => {
                         letterSpacing: activeFont.cssStyle.letterSpacing || 'normal',
                         color: '#111',
                         lineHeight: 1.15,
-                        transform: 'translateX(20px)',
+                        transform: 'translateX(12px)',
                         marginTop: '4px',
                       }}>
                         {sampleType === 'part' ? (
@@ -765,7 +765,7 @@ export const PrintersTab: React.FC = () => {
                         flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        transform: 'translateX(12px)',
+                        transform: 'translateX(4px)',
                       }}>
                         <svg width="112" height="22" viewBox="0 0 112 22">
                           <rect x="0" y="0" width="2" height="22" fill="#000" />
