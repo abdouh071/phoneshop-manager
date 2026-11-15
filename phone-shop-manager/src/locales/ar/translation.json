@@ -1623,7 +1623,20 @@
     "deletePartConfirmTitle": "حذف القطعة",
     "deletePartConfirmMsg": "هل أنت متأكد من حذف \"{{name}}\" نهائيًا؟ لا يمكن التراجع عن هذا الإجراء.",
     "deletePartBtn": "حذف القطعة",
-    "unlockDelete": "حذف قطعة غيار"
+    "unlockDelete": "حذف قطعة غيار",
+    "exportInvoice": "تصدير فاتورة",
+    "exportInvoiceTitle": "تصدير فاتورة قطع الغيار التجارية",
+    "exportInvoiceSubtitle": "تصدير جميع قطع الغيار كفاتورة تجارية / كشف أسعار رسمي دون أي خصم من المخزون.",
+    "exportNoDeductNotice": "تصدير للمخزون فقط: هذه الفاتورة لا تخصم أي قطع من المخزون ولا تسجل أي عملية بيع.",
+    "issuedToClient": "صادرة إلى (الزبون / المحل):",
+    "customClient": "زبون جملة / مخصص",
+    "clientName": "اسم الزبون / المحل:",
+    "stockScope": "نطاق القطع:",
+    "allParts": "كل قطع الغيار",
+    "priceBasis": "أساس السعر:",
+    "printInvoiceDoc": "طباعة الفاتورة",
+    "totalUnits": "إجمالي الوحدات في المخزن",
+    "exportedSuccess": "تم تصدير الفاتورة كملف CSV بنجاح!"
   },
   "purchasing": {
     "title": "المشتريات",

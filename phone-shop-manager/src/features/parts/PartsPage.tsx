@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { AlertTriangle, Bell, ClipboardList, Package, Plus } from 'lucide-react';
+import { AlertTriangle, Bell, ClipboardList, FileText, Package, Plus } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
@@ -21,6 +21,7 @@ import { EditPartPanel } from './EditPartPanel';
 import { ProductDetailPanel } from '../inventory/ProductDetailPanel';
 import { WriteOffModal } from '../inventory/WriteOffModal';
 import { PrintPartsLabelsModal } from './PrintPartsLabelsModal';
+import { ExportPartsInvoiceModal } from './ExportPartsInvoiceModal';
 import { RestockHistoryPanel } from '../inventory/RestockHistoryPanel';
 import { WriteOffLogPanel } from '../inventory/WriteOffLogPanel';
 import { RestockAssistantModal } from './RestockAssistantModal';
@@ -55,6 +56,7 @@ export const PartsPage = () => {
   const handledProductLink = useRef('');
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
+  const [isExportInvoiceOpen, setIsExportInvoiceOpen] = useState(false);
   const [isRestockAssistantOpen, setIsRestockAssistantOpen] = useState(false);
   const [isRestockLogOpen, setIsRestockLogOpen] = useState(false);
   const [isWriteOffLogOpen, setIsWriteOffLogOpen] = useState(false);
@@ -189,6 +191,7 @@ export const PartsPage = () => {
         isDestructive
       />
       <PrintPartsLabelsModal isOpen={isPrintOpen} onClose={() => setIsPrintOpen(false)} />
+      <ExportPartsInvoiceModal isOpen={isExportInvoiceOpen} onClose={() => setIsExportInvoiceOpen(false)} parts={parts} canViewCosts={canViewCosts} />
       <RestockHistoryPanel isOpen={isRestockLogOpen} onClose={() => setIsRestockLogOpen(false)} />
       <WriteOffLogPanel isOpen={isWriteOffLogOpen} onClose={() => setIsWriteOffLogOpen(false)} />
       <RestockAssistantModal isOpen={isRestockAssistantOpen} onClose={() => setIsRestockAssistantOpen(false)} />
@@ -219,6 +222,9 @@ export const PartsPage = () => {
           </Button>
           <Button variant="secondary" leftIcon={<AlertTriangle size={16} />} onClick={() => requirePermission(t('parts.unlockWriteOffLog'), () => setIsWriteOffLogOpen(true))}>
             {t('inventory.writeOffLog')}
+          </Button>
+          <Button variant="secondary" leftIcon={<FileText size={16} />} onClick={() => setIsExportInvoiceOpen(true)}>
+            {t('parts.exportInvoice', 'Export Invoice')}
           </Button>
           <Button variant="secondary" leftIcon={<Package size={16} />} onClick={() => setIsPrintOpen(true)}>{t('parts.printLabels')}</Button>
           <Button leftIcon={<Plus size={16} />} onClick={() => requirePermission(t('parts.unlockAdd'), () => setIsAddOpen(true))}>{t('parts.addPart')}</Button>

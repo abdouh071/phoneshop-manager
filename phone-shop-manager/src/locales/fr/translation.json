@@ -1623,7 +1623,20 @@
     "deletePartConfirmTitle": "Supprimer la pièce",
     "deletePartConfirmMsg": "Êtes-vous sûr de vouloir supprimer définitivement \"{{name}}\" ? Cette action est irréversible.",
     "deletePartBtn": "Supprimer la pièce",
-    "unlockDelete": "supprimer une pièce de rechange"
+    "unlockDelete": "supprimer une pièce de rechange",
+    "exportInvoice": "Exporter Facture",
+    "exportInvoiceTitle": "Exporter Facture Commerciale des Pièces",
+    "exportInvoiceSubtitle": "Exporter toutes les pièces sous forme de facture commerciale / devis. Aucune quantité n'est déduite du stock.",
+    "exportNoDeductNotice": "Export de stock uniquement : Cette facture ne déduit aucune pièce du stock et n'enregistre aucune vente.",
+    "issuedToClient": "Émise à (Client / Boutique) :",
+    "customClient": "Client de gros / Personnalisé",
+    "clientName": "Nom du client / Boutique :",
+    "stockScope": "Périmètre des pièces :",
+    "allParts": "Toutes les pièces",
+    "priceBasis": "Base de prix :",
+    "printInvoiceDoc": "Imprimer Facture",
+    "totalUnits": "Unités totales en stock",
+    "exportedSuccess": "Facture exportée en CSV avec succès !"
   },
   "purchasing": {
     "title": "Achats",

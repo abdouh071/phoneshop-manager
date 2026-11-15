@@ -1623,7 +1623,20 @@
     "deletePartConfirmTitle": "Delete Part",
     "deletePartConfirmMsg": "Are you sure you want to permanently delete \"{{name}}\"? This cannot be undone.",
     "deletePartBtn": "Delete Part",
-    "unlockDelete": "delete a repair part"
+    "unlockDelete": "delete a repair part",
+    "exportInvoice": "Export Invoice",
+    "exportInvoiceTitle": "Export Parts Commercial Invoice",
+    "exportInvoiceSubtitle": "Export all parts as a formal commercial invoice / quotation. No quantities are deducted from inventory.",
+    "exportNoDeductNotice": "Stock Export Only: This invoice does not deduct any parts from stock or record a sale.",
+    "issuedToClient": "Issued To (Client / Shop):",
+    "customClient": "Custom / Wholesale Client",
+    "clientName": "Client / Store Name:",
+    "stockScope": "Parts Scope:",
+    "allParts": "All Parts",
+    "priceBasis": "Price Basis:",
+    "printInvoiceDoc": "Print Invoice",
+    "totalUnits": "Total Units in Stock",
+    "exportedSuccess": "Invoice exported as CSV!"
   },
   "purchasing": {
     "title": "Purchasing",
