@@ -33,4 +33,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   printCustomTicket: (payload) => ipcRenderer.invoke('print:custom-ticket', payload),
   calibrateLabels: (payload) => ipcRenderer.invoke('print:calibrate-labels', payload),
   printLowStockReport: (payload) => ipcRenderer.invoke('print:low-stock-report', payload),
+  printPartsInvoice: (payload) => ipcRenderer.invoke('print:parts-invoice', payload),
 });

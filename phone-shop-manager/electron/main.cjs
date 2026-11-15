@@ -239,6 +239,7 @@ const PRINT_IPC_CHANNELS = [
   ['print:custom-ticket', 'handlePrintCustomTicket'],
   ['print:calibrate-labels', 'handleCalibrateLabels'],
   ['print:low-stock-report', 'handlePrintLowStockReport'],
+  ['print:parts-invoice', 'handlePrintPartsInvoice'],
 ];
 
 function registerPrintIpcHandlers() {

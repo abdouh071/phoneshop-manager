@@ -1982,3 +1982,155 @@ export async function printLowStockReportDirect(
   // If both IPC and HTTP failed, notify user with error toast — NEVER open browser dialog
   throw new Error('Print server unreachable. Please ensure the print server or desktop app is active.');
 }
+
+export interface PartsInvoicePrintPayload {
+  storeName?: string;
+  currency?: string;
+  recipient?: string;
+  invoiceRef?: string;
+  priceMode?: 'sell' | 'cost';
+  parts: {
+    name: string;
+    model?: string;
+    sku?: string;
+    location?: string;
+    quantity: number;
+    unitPrice: number;
+  }[];
+  totalUnits?: number;
+  totalAmount?: number;
+}
+
+/**
+ * Print Parts Commercial Inventory Invoice / Manifest directly to thermal printer via Print Server.
+ * Strictly uses Print Server / native IPC — NEVER triggers browser print dialog.
+ */
+export async function printPartsInvoiceDirect(
+  payload: PartsInvoicePrintPayload
+): Promise<{ method: 'direct'; error?: string }> {
+  // ── Tier 1: Electron IPC Dedicated (print:parts-invoice) ──
+  if (electronAPI?.printPartsInvoice) {
+    try {
+      const res = await callElectronPrint<PrintServerResult>(() => electronAPI.printPartsInvoice(payload));
+      if (res?.ok) return { method: 'direct' };
+      console.warn('[Print] IPC Parts Invoice error:', res?.error);
+    } catch (err) {
+      console.warn('[Print] IPC Parts Invoice failed:', err);
+    }
+  }
+
+  // ── Tier 2: Electron IPC Universal Fallback (print:receipt) ──
+  // Works inside currently running desktop app using the built-in receipt engine
+  if (electronAPI?.printReceipt) {
+    try {
+      const invoiceTransaction = {
+        id: payload.invoiceRef || `PRT-INV-${Date.now().toString().slice(-6)}`,
+        date: new Date().toISOString(),
+        customerName: payload.recipient || 'Commercial Wholesale Client',
+        processedByName: 'Stock Manifest / Quotation',
+        items: payload.parts.map((p, idx) => ({
+          quantity: p.quantity,
+          product: {
+            name: `${idx + 1}. ${p.name} ${p.model || ''}`.trim(),
+            model: [p.sku ? `SKU: ${p.sku}` : '', p.location ? `Loc: ${p.location}` : ''].filter(Boolean).join(' | '),
+            price: p.unitPrice,
+          },
+        })),
+        subtotal: payload.totalAmount || 0,
+        total: payload.totalAmount || 0,
+        payments: [
+          {
+            method: `STOCK MANIFEST (${payload.totalUnits || 0} UNITS)`,
+            amount: payload.totalAmount || 0,
+          },
+        ],
+      };
+
+      const receiptPayload = {
+        storeName: payload.storeName || 'PhoneShop Pro',
+        currency: payload.currency || 'DZD',
+        transaction: invoiceTransaction,
+        headerMessage: '*** PARTS INVENTORY INVOICE ***',
+        footerMessage: '* STOCK EXPORT ONLY - NO SALE *',
+        translations: getTranslations(),
+      };
+
+      const res = await callElectronPrint<PrintServerResult>(() => electronAPI.printReceipt(receiptPayload));
+      if (res?.ok) return { method: 'direct' };
+      console.warn('[Print] IPC Receipt fallback for parts invoice error:', res?.error);
+    } catch (err) {
+      console.warn('[Print] IPC Receipt fallback for parts invoice failed:', err);
+    }
+  }
+
+  // ── Tier 3: HTTP POST /print-parts-invoice ──
+  try {
+    const res = await fetch(`${PRINT_SERVER_URL}/print-parts-invoice`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+      body: JSON.stringify(payload),
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as PrintServerResult;
+      if (data.ok) return { method: 'direct' };
+      console.warn('[Print] /print-parts-invoice returned error:', data.error);
+    } else {
+      console.warn(`[Print] /print-parts-invoice returned ${res.status}`);
+    }
+  } catch (err) {
+    console.warn('[Print] /print-parts-invoice failed:', err);
+  }
+
+  // ── Tier 4: HTTP POST /print-receipt ──
+  try {
+    const invoiceTransaction = {
+      id: payload.invoiceRef || `PRT-INV-${Date.now().toString().slice(-6)}`,
+      date: new Date().toISOString(),
+      customerName: payload.recipient || 'Commercial Wholesale Client',
+      processedByName: 'Stock Manifest / Quotation',
+      items: payload.parts.map((p, idx) => ({
+        quantity: p.quantity,
+        product: {
+          name: `${idx + 1}. ${p.name} ${p.model || ''}`.trim(),
+          model: [p.sku ? `SKU: ${p.sku}` : '', p.location ? `Loc: ${p.location}` : ''].filter(Boolean).join(' | '),
+          price: p.unitPrice,
+        },
+      })),
+      subtotal: payload.totalAmount || 0,
+      total: payload.totalAmount || 0,
+      payments: [
+        {
+          method: `STOCK MANIFEST (${payload.totalUnits || 0} UNITS)`,
+          amount: payload.totalAmount || 0,
+        },
+      ],
+    };
+
+    const receiptPayload = {
+      storeName: payload.storeName || 'PhoneShop Pro',
+      currency: payload.currency || 'DZD',
+      transaction: invoiceTransaction,
+      headerMessage: '*** PARTS INVENTORY INVOICE ***',
+      footerMessage: '* STOCK EXPORT ONLY - NO SALE *',
+      translations: getTranslations(),
+    };
+
+    const res = await fetch(`${PRINT_SERVER_URL}/print-receipt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+      body: JSON.stringify(receiptPayload),
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as PrintServerResult;
+      if (data.ok) return { method: 'direct' };
+    }
+  } catch (err) {
+    console.warn('[Print] /print-receipt fallback failed:', err);
+  }
+
+  throw new Error('Print server unreachable. Please verify that the thermal printer and print server are active.');
+}

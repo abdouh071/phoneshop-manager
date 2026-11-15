@@ -1636,7 +1636,11 @@
     "priceBasis": "Base de prix :",
     "printInvoiceDoc": "Imprimer Facture",
     "totalUnits": "Unités totales en stock",
-    "exportedSuccess": "Facture exportée en CSV avec succès !"
+    "exportedSuccess": "Facture exportée en CSV avec succès !",
+    "printThermalInvoice": "Imprimer Facture (Thermique)",
+    "invoiceSentToPrinter": "Facture envoyée à l'imprimante",
+    "invoicePrintSuccess": "Facture commerciale des pièces imprimée directement sur l'imprimante thermique.",
+    "printFailed": "Échec de l'impression"
   },
   "purchasing": {
     "title": "Achats",

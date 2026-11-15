@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Printer, Download, Search, Info } from 'lucide-react';
+import { Printer, Download, Search, Info, FileText } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Select } from '../../components/ui/Select';
@@ -12,6 +12,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import { exportToCSV } from '../../utils/exportUtils';
 import { escapeHtml } from '../../utils/escapeHtml';
 import { normalizeArabic } from '../../utils/normalizeText';
+import { printPartsInvoiceDirect } from '../../utils/printWindow';
 import type { PhoneModel } from '../../types';
 import styles from './ExportPartsInvoiceModal.module.css';
 
@@ -39,6 +40,7 @@ export const ExportPartsInvoiceModal: React.FC<ExportPartsInvoiceModalProps> = (
   const [priceMode, setPriceMode] = useState<'sell' | 'cost'>('sell');
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_stock' | 'low_stock'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isPrinting, setIsPrinting] = useState(false);
 
   // Generate static reference once per modal opening
   const invoiceRef = useMemo(() => {
@@ -152,7 +154,49 @@ export const ExportPartsInvoiceModal: React.FC<ExportPartsInvoiceModalProps> = (
     toast.success(t('parts.exportedSuccess', 'Invoice exported as CSV!'));
   };
 
-  // Handle Full Document Print
+  // Handle Direct Thermal Print Server (strictly no browser dialog)
+  const handlePrintViaServer = async () => {
+    if (filteredParts.length === 0) {
+      toast.warning(t('common.noData', 'No parts to print'));
+      return;
+    }
+
+    setIsPrinting(true);
+    try {
+      await printPartsInvoiceDirect({
+        storeName: settings.storeName || 'PhoneShop Pro',
+        currency: settings.currency || 'DZD',
+        recipient,
+        invoiceRef,
+        priceMode,
+        parts: filteredParts.map(p => ({
+          name: p.name || '',
+          model: p.model || '',
+          sku: p.sku || '',
+          location: p.location || '',
+          quantity: Math.max(0, p.stock || 0),
+          unitPrice: priceMode === 'cost' ? (p.costPrice || 0) : (p.price || 0),
+        })),
+        totalUnits: totals.units,
+        totalAmount: totals.amount,
+      });
+
+      toast.success(
+        t('parts.invoiceSentToPrinter', 'Invoice Sent to Printer'),
+        t('parts.invoicePrintSuccess', 'Parts commercial invoice printed directly on thermal printer.')
+      );
+    } catch (err: unknown) {
+      console.error('Print server error:', err);
+      toast.error(
+        t('parts.printFailed', 'Print Failed'),
+        err instanceof Error ? err.message : 'Could not reach the print server.'
+      );
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
+  // Handle Full Document Print (PDF / Browser sheet)
   const handlePrintDocument = () => {
     if (filteredParts.length === 0) {
       toast.warning(t('common.noData', 'No parts to print'));
@@ -455,14 +499,22 @@ export const ExportPartsInvoiceModal: React.FC<ExportPartsInvoiceModalProps> = (
             <strong>{totals.lineCount}</strong> {t('parts.modelsCount', { count: totals.lineCount })} · <strong>{totals.units}</strong> {t('parts.units', { count: totals.units })} · Total: <strong>{formatCurrency(totals.amount)}</strong>
           </div>
           <div className={styles.footerRight}>
-            <Button variant="ghost" onClick={onClose}>
+            <Button variant="ghost" onClick={onClose} disabled={isPrinting}>
               {t('common.close', 'Close')}
             </Button>
-            <Button variant="secondary" leftIcon={<Download size={15} />} onClick={handleExportCSV}>
+            <Button variant="secondary" leftIcon={<Download size={15} />} onClick={handleExportCSV} disabled={isPrinting}>
               {t('common.exportCSV', 'Export CSV')}
             </Button>
-            <Button leftIcon={<Printer size={15} />} onClick={handlePrintDocument}>
-              {t('parts.printInvoiceDoc', 'Print Invoice')}
+            <Button variant="secondary" leftIcon={<FileText size={15} />} onClick={handlePrintDocument} disabled={isPrinting} title="A4 Document / Save as PDF">
+              PDF / A4
+            </Button>
+            <Button
+              leftIcon={<Printer size={15} />}
+              onClick={handlePrintViaServer}
+              isLoading={isPrinting}
+              disabled={isPrinting || filteredParts.length === 0}
+            >
+              {isPrinting ? t('common.printing', 'Printing...') : t('parts.printThermalInvoice', 'Print Invoice (Thermal)')}
             </Button>
           </div>
         </div>
@@ -659,3 +711,4 @@ export const ExportPartsInvoiceModal: React.FC<ExportPartsInvoiceModalProps> = (
     </Modal>
   );
 };
+

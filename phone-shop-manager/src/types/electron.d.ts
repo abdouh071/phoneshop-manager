@@ -32,6 +32,7 @@ declare global {
       printCustomTicket: (payload: unknown) => Promise<ElectronPrintResult>;
       calibrateLabels: (payload: unknown) => Promise<ElectronPrintResult>;
       printLowStockReport: (payload: unknown) => Promise<ElectronPrintResult>;
+      printPartsInvoice: (payload: unknown) => Promise<ElectronPrintResult>;
     };
   }
 }

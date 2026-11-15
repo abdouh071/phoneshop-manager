@@ -1951,6 +1951,145 @@ async function handlePrintLowStockReport(body) {
 app.post('/print-low-stock-report', printRoute(handlePrintLowStockReport));
 
 /**
+ * POST /print-parts-invoice — Print Parts Commercial Inventory Invoice / Manifest on ESC/POS thermal printer
+ */
+async function handlePrintPartsInvoice(body) {
+  try {
+    const {
+      storeName,
+      currency = 'DZD',
+      recipient = 'Commercial Wholesale Client',
+      invoiceRef,
+      priceMode = 'sell',
+      parts = [],
+      totalUnits = 0,
+      totalAmount = 0,
+    } = body || {};
+
+    if (!Array.isArray(parts) || parts.length === 0) {
+      return { ok: false, status: 400, error: 'No parts to print' };
+    }
+
+    const printer = createPrinter();
+    const fmt = (v) => formatCurrency(v, currency);
+
+    // ---- Store Header ----
+    printer.alignCenter();
+    printer.bold(true);
+    printer.setTextSize(1, 1);
+    printer.println(removeAccents(storeName || 'PhoneShop Pro'));
+    printer.bold(false);
+    printer.setTextNormal();
+
+    printer.println('Parts Wholesale & Service Hub');
+    printer.drawLine();
+
+    // ---- Title Badge ----
+    printer.bold(true);
+    printer.println('*** PARTS INVENTORY INVOICE ***');
+    printer.bold(false);
+
+    const ref = invoiceRef || `INV-PRT-${Date.now().toString().slice(-6)}`;
+    printer.println(`Ref: #${ref}`);
+    printer.println(formatDate(new Date().toISOString()));
+    printer.drawLine();
+
+    // ---- Parties ----
+    printer.alignLeft();
+    printer.println(twoColumnRow('Issued To:', removeAccents(recipient).substring(0, 24)));
+    printer.println(twoColumnRow('Type:', 'Stock Manifest'));
+    printer.println(twoColumnRow('Price Basis:', priceMode === 'cost' ? 'Cost Price' : 'Sell Price'));
+    printer.drawLine();
+
+    // ---- Items Header ----
+    printer.bold(true);
+    printer.println(twoColumnRow('Part Description', 'Total'));
+    printer.bold(false);
+    printer.drawLine();
+
+    let computedUnits = 0;
+    let computedTotal = 0;
+
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const qty = Math.max(0, Number(p.quantity) || 0);
+      const unitPrice = Number(p.unitPrice) || 0;
+      const lineTotal = qty * unitPrice;
+      computedUnits += qty;
+      computedTotal += lineTotal;
+
+      const partDesc = `${i + 1}. ${removeAccents(p.name || '')} ${removeAccents(p.model || '')}`.trim();
+      printer.bold(true);
+      printer.println(partDesc.substring(0, 42));
+      printer.bold(false);
+
+      let subLine = '';
+      if (p.sku) subLine += `SKU: ${p.sku} `;
+      if (p.location) subLine += `[${removeAccents(p.location)}] `;
+
+      const detail = `${qty}x @ ${fmt(unitPrice)}`;
+      if (subLine) {
+        printer.println(twoColumnRow(subLine.trim(), ''));
+      }
+      printer.println(twoColumnRow(`   ${detail}`, fmt(lineTotal)));
+
+      if (i < parts.length - 1) {
+        printer.drawLine();
+      }
+    }
+
+    printer.drawLine();
+
+    // ---- Totals & Summary ----
+    const finalUnits = totalUnits || computedUnits;
+    const finalAmount = totalAmount || computedTotal;
+
+    printer.alignLeft();
+    printer.println(twoColumnRow('Unique Models:', `${parts.length}`));
+    printer.println(twoColumnRow('Total Units in Stock:', `${finalUnits}`));
+    printer.drawLine();
+
+    printer.bold(true);
+    printer.setTextSize(1, 1);
+    printer.println(twoColumnRow('INVOICE TOTAL:', fmt(finalAmount)));
+    printer.setTextNormal();
+    printer.bold(false);
+    printer.drawLine();
+
+    // ---- Footer Notice ----
+    printer.alignCenter();
+    printer.bold(true);
+    printer.println('* STOCK EXPORT ONLY - NO SALE *');
+    printer.bold(false);
+    printer.println('No quantities deducted from stock.');
+    printer.println('Thank you for your business!');
+
+    // ---- Feed & Cut ----
+    printer.newLine();
+    printer.newLine();
+    printer.newLine();
+
+    if (HAS_CUTTER) {
+      printer.cut();
+    } else {
+      printer.newLine();
+      printer.newLine();
+    }
+
+    // ---- Execute Print ----
+    await executePrint(printer, PRINTER_NAME);
+    console.log(`[✓] Parts Commercial Invoice printed on ${PRINTER_NAME}`);
+
+    return { ok: true, message: 'Parts invoice printed successfully' };
+  } catch (err) {
+    console.error('[✗] Parts Invoice print failed:', err.message);
+    return printFailure(err);
+  }
+}
+
+app.post('/print-parts-invoice', printRoute(handlePrintPartsInvoice));
+
+/**
  * POST /print-barcode — Print product barcode labels
  * 
  * Body:
@@ -2813,6 +2952,7 @@ module.exports = {
   handlePrintCustomTicket,
   handleCalibrateLabels,
   handlePrintLowStockReport,
+  handlePrintPartsInvoice,
   // The Electron IPC path calls the handlers directly, so it never passes through
   // the HTTP body middleware. The shell must sanitise the payload itself.
   sanitizeIpcPayload: (payload) => sanitizePayload(payload, 'ipc'),

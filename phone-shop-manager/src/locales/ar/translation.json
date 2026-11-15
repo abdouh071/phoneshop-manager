@@ -1636,7 +1636,11 @@
     "priceBasis": "أساس السعر:",
     "printInvoiceDoc": "طباعة الفاتورة",
     "totalUnits": "إجمالي الوحدات في المخزن",
-    "exportedSuccess": "تم تصدير الفاتورة كملف CSV بنجاح!"
+    "exportedSuccess": "تم تصدير الفاتورة كملف CSV بنجاح!",
+    "printThermalInvoice": "طباعة الفاتورة (طابعة حرارية)",
+    "invoiceSentToPrinter": "تم إرسال الفاتورة إلى الطابعة",
+    "invoicePrintSuccess": "تمت طباعة فاتورة قطع الغيار مباشرة على الطابعة الحرارية.",
+    "printFailed": "فشلت الطباعة"
   },
   "purchasing": {
     "title": "المشتريات",

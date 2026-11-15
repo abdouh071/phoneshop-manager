@@ -1636,7 +1636,11 @@
     "priceBasis": "Price Basis:",
     "printInvoiceDoc": "Print Invoice",
     "totalUnits": "Total Units in Stock",
-    "exportedSuccess": "Invoice exported as CSV!"
+    "exportedSuccess": "Invoice exported as CSV!",
+    "printThermalInvoice": "Print Invoice (Thermal)",
+    "invoiceSentToPrinter": "Invoice Sent to Printer",
+    "invoicePrintSuccess": "Parts commercial invoice printed directly on thermal printer.",
+    "printFailed": "Print Failed"
   },
   "purchasing": {
     "title": "Purchasing",
