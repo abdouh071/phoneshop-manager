@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Eye } from 'lucide-react';
+import { AlertTriangle, Eye, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import type { PhoneModel } from '../../types';
 import styles from './Parts.module.css';
@@ -15,6 +15,7 @@ interface PartRowActionsProps {
   onEdit: () => void;
   onRestockOpen: () => void;
   onWriteOff: () => void;
+  onDelete: () => void;
   onRestockAmtChange: (value: string) => void;
   onRestockCostChange: (value: string) => void;
   onSaveRestock: () => void;
@@ -36,6 +37,7 @@ export const PartRowActions: React.FC<PartRowActionsProps> = ({
   onEdit,
   onRestockOpen,
   onWriteOff,
+  onDelete,
   onRestockAmtChange,
   onRestockCostChange,
   onSaveRestock,
@@ -85,8 +87,11 @@ export const PartRowActions: React.FC<PartRowActionsProps> = ({
       <Button variant="secondary" size="sm" onClick={onRestockOpen}>
         {t('parts.restock')}
       </Button>
-      <Button variant="danger" size="sm" onClick={onWriteOff} disabled={product.stock === 0} title="Write-Off">
+      <Button variant="danger" size="sm" onClick={onWriteOff} disabled={product.stock === 0} title={t('parts.writeOff')}>
         <AlertTriangle size={15} />
+      </Button>
+      <Button variant="danger" size="sm" onClick={onDelete} title={t('parts.deletePart')}>
+        <Trash2 size={15} />
       </Button>
     </div>
   );

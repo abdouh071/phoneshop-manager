@@ -1618,7 +1618,12 @@
     "variants": "Variants",
     "wholesaleDiscountApplied": "Wholesale Discount Applied",
     "wholesaleDiscountAppliedMsg": "{{percent}}% discount applied for {{name}}.",
-    "wholesaleDiscountHint": "A promise of {{percent}}% of the basket; it follows the basket total. Typing here replaces it with dinars."
+    "wholesaleDiscountHint": "A promise of {{percent}}% of the basket; it follows the basket total. Typing here replaces it with dinars.",
+    "deletePart": "Delete Part",
+    "deletePartConfirmTitle": "Delete Part",
+    "deletePartConfirmMsg": "Are you sure you want to permanently delete \"{{name}}\"? This cannot be undone.",
+    "deletePartBtn": "Delete Part",
+    "unlockDelete": "delete a repair part"
   },
   "purchasing": {
     "title": "Purchasing",

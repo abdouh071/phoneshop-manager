@@ -1618,7 +1618,12 @@
     "variants": "الطرازات",
     "wholesaleDiscountApplied": "تم تطبيق خصم الجملة",
     "wholesaleDiscountAppliedMsg": "تم تطبيق خصم {{percent}}% لصالح {{name}}.",
-    "wholesaleDiscountHint": "وعد بنسبة {{percent}}% من السلة؛ يتبع إجمالي السلة. الكتابة هنا تستبدله بالدنانير."
+    "wholesaleDiscountHint": "وعد بنسبة {{percent}}% من السلة؛ يتبع إجمالي السلة. الكتابة هنا تستبدله بالدنانير.",
+    "deletePart": "حذف القطعة",
+    "deletePartConfirmTitle": "حذف القطعة",
+    "deletePartConfirmMsg": "هل أنت متأكد من حذف \"{{name}}\" نهائيًا؟ لا يمكن التراجع عن هذا الإجراء.",
+    "deletePartBtn": "حذف القطعة",
+    "unlockDelete": "حذف قطعة غيار"
   },
   "purchasing": {
     "title": "المشتريات",

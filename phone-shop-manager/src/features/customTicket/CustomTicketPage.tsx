@@ -7,6 +7,7 @@ import {
   RotateCcw,
   Keyboard,
   Bookmark,
+  Type,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { useSettingsStore } from '../../store/settingsStore';
@@ -45,8 +46,10 @@ export const CustomTicketPage: React.FC = () => {
     fetchProducts();
   }, [fetchProducts]);
 
-  // Mode: specs (detailed slip) vs free_text (blank centered sticker)
-  const [activeMode, setActiveMode] = useState<TicketPrintMode>('specs');
+  // Mode: specs (detailed slip) vs free_text (blank centered sticker) vs quick_big (write & print box label)
+  const [activeMode, setActiveMode] = useState<TicketPrintMode | 'quick_big'>('specs');
+  const [quickText, setQuickText] = useState('');
+  const [isQuickPrinting, setIsQuickPrinting] = useState(false);
 
   // Active ticket form state (restored from localStorage draft if available)
   const [ticket, setTicket] = useState<CustomTicketData>(() => {
@@ -345,6 +348,53 @@ export const CustomTicketPage: React.FC = () => {
     await handleServerPrint();
   };
 
+  // Quick Big Box Label: one input, one button — straight to the label printer.
+  // Giant TSPL font, centered, wraps long text; no preview, no templates.
+  const handleQuickBigPrint = async () => {
+    const text = quickText.trim();
+    if (!text) {
+      toast.warning('Type Something First', 'Write the big text before printing.');
+      return;
+    }
+    if (!isOnline) {
+      toast.error(
+        'Print Server Offline',
+        'Cannot print: The local print server is not connected (http://localhost:3355). Please start it with "npm start" in the print-server folder.'
+      );
+      return;
+    }
+
+    setIsQuickPrinting(true);
+    try {
+      const quickTicket: CustomTicketData = {
+        ...PRESET_TEMPLATES[0].data,
+        format: 'sticker',
+        mode: 'free_text',
+        freeText: text,
+        fontSize: 'giant',
+        isBold: true,
+        textAlign: 'center',
+        stickerSize: '50x20',
+        showStoreNameOnSticker: false,
+        includeBarcode: false,
+        barcodeValue: '',
+        copies: 1,
+      };
+      const result = await printCustomTicketDirect(quickTicket, storeName, currencySymbol);
+      if (result.success) {
+        toast.success('Printed!', `Big label sent to ${labelPrinter || 'the label printer'}.`);
+        setQuickText('');
+      } else {
+        toast.error('Print Server Error', result.error || 'Failed to print big label via print server.');
+      }
+    } catch (err: unknown) {
+      console.error('[Quick Big Print Error]', err);
+      toast.error('Print Server Error', errorMessage(err) || 'Could not communicate with the print server.');
+    } finally {
+      setIsQuickPrinting(false);
+    }
+  };
+
   return (
     <div className={styles.page}>
       {/* Header Bar */}
@@ -418,6 +468,16 @@ export const CustomTicketPage: React.FC = () => {
           <Keyboard size={16} />
           <span>🏷️ Blank Sticker (Type & Center)</span>
           <span className={styles.centerBadge}>Exact Centered H & V</span>
+        </button>
+
+        <button
+          type="button"
+          className={[styles.modeTab, activeMode === 'quick_big' && styles.modeTabActive].filter(Boolean).join(' ')}
+          onClick={() => setActiveMode('quick_big')}
+        >
+          <Type size={16} />
+          <span>Big Box Label (Write & Print)</span>
+          <span className={styles.centerBadge}>Giant Text</span>
         </button>
       </div>
 

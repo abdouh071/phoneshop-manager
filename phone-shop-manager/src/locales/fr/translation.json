@@ -1618,7 +1618,12 @@
     "variants": "Variantes",
     "wholesaleDiscountApplied": "Remise de gros appliquée",
     "wholesaleDiscountAppliedMsg": "Remise de {{percent}}% appliquée pour {{name}}.",
-    "wholesaleDiscountHint": "Une promesse de {{percent}}% du panier ; elle suit le total du panier. Saisir ici la remplace par des dinars."
+    "wholesaleDiscountHint": "Une promesse de {{percent}}% du panier ; elle suit le total du panier. Saisir ici la remplace par des dinars.",
+    "deletePart": "Supprimer la pièce",
+    "deletePartConfirmTitle": "Supprimer la pièce",
+    "deletePartConfirmMsg": "Êtes-vous sûr de vouloir supprimer définitivement \"{{name}}\" ? Cette action est irréversible.",
+    "deletePartBtn": "Supprimer la pièce",
+    "unlockDelete": "supprimer une pièce de rechange"
   },
   "purchasing": {
     "title": "Achats",

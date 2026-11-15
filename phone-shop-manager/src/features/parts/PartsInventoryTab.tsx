@@ -43,11 +43,12 @@ interface PartsInventoryTabProps {
   onView: (product: PhoneModel) => void;
   onEdit: (product: PhoneModel) => void;
   onWriteOff: (product: PhoneModel) => void;
+  onDelete: (product: PhoneModel) => void;
   onRestockAssistant: () => void;
 }
 
 export const PartsInventoryTab = memo(function PartsInventoryTab({
-  initialLoading, canViewCosts, searchRequest, requirePermission, onView, onEdit, onWriteOff, onRestockAssistant,
+  initialLoading, canViewCosts, searchRequest, requirePermission, onView, onEdit, onWriteOff, onDelete, onRestockAssistant,
 }: PartsInventoryTabProps) {
   const { t, i18n } = useTranslation();
   const { parts, isLoadingParts, error, fetchParts } = useInventoryStore(useShallow(s => ({
@@ -119,7 +120,7 @@ export const PartsInventoryTab = memo(function PartsInventoryTab({
       onRestockOpen={() => requirePermission(t('parts.unlockRestock'), () => {
         setRestockingId(product.id); setRestockAmt(''); setRestockMeta({ supplier: '', cost: '', note: '' });
       })}
-      onWriteOff={() => onWriteOff(product)} onRestockAmtChange={setRestockAmt}
+      onWriteOff={() => onWriteOff(product)} onDelete={() => onDelete(product)} onRestockAmtChange={setRestockAmt}
       onRestockCostChange={value => setRestockMeta(m => ({ ...m, cost: value }))}
       onSaveRestock={() => handleRestock(product)} onCancelRestock={closeRestock} />
   );

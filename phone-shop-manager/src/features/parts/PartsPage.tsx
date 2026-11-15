@@ -5,6 +5,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useToast } from '../../components/ui/Toast';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { usePartsCartStore } from '../../store/partsCartStore';
@@ -32,8 +33,8 @@ import styles from './Parts.module.css';
 
 export const PartsPage = () => {
   const { t } = useTranslation();
-  const { parts, fetchParts, isLoadingParts, error: partsError } = useInventoryStore(useShallow(s => ({
-    parts: s.parts, fetchParts: s.fetchParts, isLoadingParts: s.isLoadingParts, error: s.error,
+  const { parts, fetchParts, isLoadingParts, error: partsError, deleteProduct } = useInventoryStore(useShallow(s => ({
+    parts: s.parts, fetchParts: s.fetchParts, isLoadingParts: s.isLoadingParts, error: s.error, deleteProduct: s.deleteProduct,
   })));
   const addToCart = usePartsCartStore(s => s.addToCart);
   const fetchCarts = usePartsCartStore(s => s.fetchCarts);
@@ -60,6 +61,8 @@ export const PartsPage = () => {
   const [editingProduct, setEditingProduct] = useState<PhoneModel | null>(null);
   const [detailProduct, setDetailProduct] = useState<PhoneModel | null>(null);
   const [writeOffProduct, setWriteOffProduct] = useState<PhoneModel | null>(null);
+  const [deletePartProduct, setDeletePartProduct] = useState<PhoneModel | null>(null);
+  const [isDeletingPart, setIsDeletingPart] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<ProductGroup | null>(null);
   const [profilePanelCustomer, setProfilePanelCustomer] = useState<Customer | null>(null);
   const [actionRequiringUnlock, setActionRequiringUnlock] = useState<{ name: string; callback: () => void } | null>(null);
@@ -133,6 +136,24 @@ export const PartsPage = () => {
   const writeOff = useCallback((product: PhoneModel) => {
     requirePermission(t('parts.unlockWriteOff'), () => setWriteOffProduct(product));
   }, [requirePermission, t]);
+  const requestDeletePart = useCallback((product: PhoneModel) => {
+    requirePermission(t('parts.unlockDelete'), () => setDeletePartProduct(product));
+  }, [requirePermission, t]);
+  const confirmDeletePart = useCallback(async () => {
+    if (!deletePartProduct) return;
+    setIsDeletingPart(true);
+    const label = `${deletePartProduct.name} ${deletePartProduct.model}`.trim();
+    const outcome = await deleteProduct(deletePartProduct.id);
+    setIsDeletingPart(false);
+    setDeletePartProduct(null);
+    if (outcome === 'committed') {
+      toast.success(t('inventory.deletedTitle'), t('inventory.deletedDesc', { name: label }));
+    } else if (outcome === 'queued') {
+      toast.info(t('inventory.deleteQueuedTitle'), t('inventory.deleteQueuedDesc', { name: label }));
+    } else {
+      toast.error(t('inventory.deleteFailedTitle'), t('inventory.deleteFailedDesc', { name: label }));
+    }
+  }, [deletePartProduct, deleteProduct, t, toast]);
 
   useBarcodeScanner({ onScan: sku => {
     const part = parts.find(p => p.sku && p.sku.toLowerCase() === sku.toLowerCase());
@@ -157,6 +178,16 @@ export const PartsPage = () => {
       <EditPartPanel product={editingProduct} onClose={() => setEditingProduct(null)} />
       <ProductDetailPanel product={detailProduct} onClose={() => setDetailProduct(null)} onEdit={p => { setDetailProduct(null); editProduct(p); }} />
       <WriteOffModal product={writeOffProduct} onClose={() => setWriteOffProduct(null)} />
+      <ConfirmDialog
+        isOpen={deletePartProduct !== null}
+        onClose={() => setDeletePartProduct(null)}
+        onConfirm={() => { void confirmDeletePart(); }}
+        title={t('parts.deletePartConfirmTitle')}
+        message={t('parts.deletePartConfirmMsg', { name: `${deletePartProduct?.name ?? ''} ${deletePartProduct?.model ?? ''}`.trim() })}
+        confirmLabel={t('parts.deletePartBtn')}
+        isLoading={isDeletingPart}
+        isDestructive
+      />
       <PrintPartsLabelsModal isOpen={isPrintOpen} onClose={() => setIsPrintOpen(false)} />
       <RestockHistoryPanel isOpen={isRestockLogOpen} onClose={() => setIsRestockLogOpen(false)} />
       <WriteOffLogPanel isOpen={isWriteOffLogOpen} onClose={() => setIsWriteOffLogOpen(false)} />
@@ -211,7 +242,7 @@ export const PartsPage = () => {
 
       <div hidden={activeTab !== 'inventory'}>
         <PartsInventoryTab initialLoading={initialLoading} canViewCosts={canViewCosts} searchRequest={inventorySearch} requirePermission={requirePermission}
-          onView={setDetailProduct} onEdit={editProduct} onWriteOff={writeOff} onRestockAssistant={openRestockAssistant} />
+          onView={setDetailProduct} onEdit={editProduct} onWriteOff={writeOff} onDelete={requestDeletePart} onRestockAssistant={openRestockAssistant} />
       </div>
       <div hidden={activeTab !== 'pos'}>
         <PartsPosTab initialLoading={initialLoading} customerRequest={customerRequest} onSelectGroup={setSelectedGroup} onOpenCustomerProfile={setProfilePanelCustomer} />
