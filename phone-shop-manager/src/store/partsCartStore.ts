@@ -281,16 +281,21 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
   },
 
   fetchCarts: async () => {
+    // Suspended carts are synced across terminals, while active draft carts remain strictly local.
+    // The service's reconcile already merges remote and local lists; the result is authoritative,
+    // even when empty, so a cart deleted on another till does not come back from our mirror.
+    const before = get().suspendedCarts;
     try {
-      // Problem 7 fix: Suspended carts are synced across terminals, while active draft carts remain strictly local
-      const suspended = await partsCartService.getAllSuspendedCarts();
-      const currentSuspended = get().suspendedCarts;
-      const finalSuspended = suspended && suspended.length > 0 ? suspended : currentSuspended;
-
-      set(state => ({
-        ...state,
-        suspendedCarts: finalSuspended,
-      }));
+      const suspended = await partsCartService.getAllSuspendedCarts(before);
+      // A hold/resume/discard made while this read was in flight must not be undone by it.
+      const current = get().suspendedCarts;
+      const merged = new Map(suspended.map(cart => [cart.id, cart]));
+      if (current !== before) for (const cart of current) merged.set(cart.id, cart);
+      const finalSuspended = [...merged.values()].sort(
+        (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
+      );
+      set({ suspendedCarts: finalSuspended });
+      saveLocalSuspendedCarts(finalSuspended);
     } catch (err) {
       console.error('Failed to fetch parts carts', err);
     }
@@ -560,6 +565,9 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         invoiceNumber,
         invoiceNumberProvisional: numberGuessed || undefined,
         status: 'completed',
+        // The shelf was moved before this invoice exists, so the offline sync
+        // must adopt the sale instead of healing (and re-deducting) its stock.
+        stockApplied: true,
         processedById: actor?.id,
         processedByName: actor?.name,
       };
@@ -568,11 +576,25 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       // crash must never describe stock the till still counts on the shelf. The
       // awaited form settles only when the delta is committed or parked in the
       // offline queue, and its failure aborts the checkout before anything is billed.
-      await Promise.all(
+      const stockResults = await Promise.allSettled(
         itemsSnapshot.map(item =>
           useInventoryStore.getState().adjustStockByAsyncForSale(item.product.id, -item.quantity)
         )
       );
+      const stockFailure = stockResults.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+      if (stockFailure) {
+        // Lines that committed before the failed one must come back, or a retry
+        // would deduct them twice from the same shelf.
+        const committed = itemsSnapshot.filter((_, i) => stockResults[i].status === 'fulfilled');
+        await Promise.allSettled(
+          committed.map(item =>
+            useInventoryStore.getState().adjustStockByAsync(item.product.id, +item.quantity)
+          )
+        );
+        // The failed lines applied their delta optimistically on this till; resync with the shelf.
+        void useInventoryStore.getState().fetchParts();
+        throw stockFailure.reason;
+      }
 
       const saved = await transactionService.save(txData);
 
@@ -645,11 +667,25 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       // 1. Deduct stock FIRST (atomic, idempotent via replayKey). The Firestore
       //    transaction in commitStockDelta now rejects negative stock, closing the
       //    two-terminal oversell window. Only proceed to billing if every unit moved.
-      await Promise.all(
+      const stockResults = await Promise.allSettled(
         itemsSnapshot.map(item =>
           useInventoryStore.getState().adjustStockByAsyncForSale(item.product.id, -item.quantity)
         )
       );
+      const stockFailure = stockResults.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+      if (stockFailure) {
+        // Lines that committed before the failed one must come back, or a retry
+        // would deduct them twice from the same shelf.
+        const committed = itemsSnapshot.filter((_, i) => stockResults[i].status === 'fulfilled');
+        await Promise.allSettled(
+          committed.map(item =>
+            useInventoryStore.getState().adjustStockByAsync(item.product.id, +item.quantity)
+          )
+        );
+        // The failed lines applied their delta optimistically on this till; resync with the shelf.
+        void useInventoryStore.getState().fetchParts();
+        throw stockFailure.reason;
+      }
 
       // 2. Post to Customer Debt Ledger (only after stock is confirmed moved).
       //    If debt creation fails, we reverse stock before re-throwing.
@@ -708,6 +744,9 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
           notes: notes || undefined,
         },
         status: 'completed',
+        // The shelf was moved before this invoice exists, so the offline sync
+        // must adopt the sale instead of healing (and re-deducting) its stock.
+        stockApplied: true,
         processedById: actor?.id,
         processedByName: actor?.name,
       };

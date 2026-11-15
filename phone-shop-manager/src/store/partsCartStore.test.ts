@@ -14,7 +14,7 @@
  * the checkout before anything is billed.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { Customer, PhoneModel, SaleTransaction } from '../types';
+import type { Customer, PhoneModel, SaleTransaction, SuspendedCart } from '../types';
 
 const captured = vi.hoisted(() => ({
   transactions: [] as Record<string, unknown>[],
@@ -25,8 +25,12 @@ const captured = vi.hoisted(() => ({
   /** The order of the awaited writes a checkout performs. */
   order: [] as string[],
   failStock: false,
+  /** Fail only this product's deduction, to exercise a partial multi-line checkout. */
+  failStockFor: null as string | null,
+  partsRefetches: 0,
   user: { id: 'u1', name: 'Counter', role: 'admin' },
   fetchInvoices: vi.fn<() => Promise<SaleTransaction[]>>(),
+  fetchSuspendedCarts: vi.fn<() => Promise<SuspendedCart[]>>(),
   /** What the till is handed when it asks for a reference. Real Firestore is not involved. */
   counter: { invoiceNumber: 'INV-PARTS-261104-0003', provisional: false } as {
     invoiceNumber: string;
@@ -53,7 +57,7 @@ vi.mock('../services/partsCartService', () => ({
   partsCartService: {
     saveSuspendedCart: async () => undefined,
     deleteSuspendedCart: async () => undefined,
-    getAllSuspendedCarts: async () => [],
+    getAllSuspendedCarts: captured.fetchSuspendedCarts,
   },
 }));
 
@@ -130,8 +134,11 @@ vi.mock('./inventoryStore', () => ({
       adjustStockByAsyncForSale: async (productId: string, delta: number) => {
         captured.order.push(`stock:${productId}:${delta}`);
         captured.stockMoves.push({ productId, delta });
-        if (captured.failStock) throw new Error('stock write failed');
+        if (captured.failStock || captured.failStockFor === productId) throw new Error('stock write failed');
         return { id: productId, stock: 10 } as PhoneModel;
+      },
+      fetchParts: async () => {
+        captured.partsRefetches++;
       },
     }),
   },
@@ -148,6 +155,7 @@ const emptyCart = () =>
     customerPhone: '',
     selectedCustomer: null,
     payments: [{ method: 'cash', amount: 0 }],
+    suspendedCarts: [],
   });
 
 beforeEach(() => {
@@ -163,8 +171,11 @@ beforeEach(() => {
   captured.recalculated.length = 0;
   captured.order.length = 0;
   captured.failStock = false;
+  captured.failStockFor = null;
+  captured.partsRefetches = 0;
   captured.user = { id: 'u1', name: 'Counter', role: 'admin' };
   captured.fetchInvoices.mockReset().mockResolvedValue([]);
+  captured.fetchSuspendedCarts.mockReset().mockResolvedValue([]);
   usePartsCartStore.setState({ invoices: [], isLoadingInvoices: false, invoicesError: null });
   captured.counter = { invoiceNumber: 'INV-PARTS-261104-0003', provisional: false };
   emptyCart();
@@ -384,6 +395,13 @@ describe('partsCartStore checkout ordering', () => {
     expect(captured.order).toEqual(['stock:part_cable:-2', 'stock:part_screen:-1', 'save']);
   });
 
+  it('stamps the written invoice as stock-applied so the sync adopts it instead of re-deducting', async () => {
+    cable(1);
+    await usePartsCartStore.getState().checkout();
+
+    expect(captured.transactions[0]).toMatchObject({ stockApplied: true });
+  });
+
   it('aborts before the write when a stock deduction cannot be made durable', async () => {
     cable(2);
     captured.failStock = true;
@@ -391,6 +409,17 @@ describe('partsCartStore checkout ordering', () => {
     await expect(usePartsCartStore.getState().checkout()).rejects.toThrow('stock write failed');
     expect(captured.order).toEqual(['stock:part_cable:-2']);
     expect(captured.transactions).toHaveLength(0);
+  });
+
+  it('gives committed lines back when a later line fails, and resyncs the shelf', async () => {
+    cable(1);
+    usePartsCartStore.getState().addToCart(screen);
+    captured.failStockFor = 'part_screen';
+
+    await expect(usePartsCartStore.getState().checkout()).rejects.toThrow('stock write failed');
+    expect(captured.order).toEqual(['stock:part_cable:-1', 'stock:part_screen:-1', 'stock:part_cable:1']);
+    expect(captured.transactions).toHaveLength(0);
+    expect(captured.partsRefetches).toBe(1);
   });
 
   it('keeps the B2B order: debt first, then the shelf, then the invoice', async () => {
@@ -408,6 +437,7 @@ describe('partsCartStore checkout ordering', () => {
     expect(result).not.toBeNull();
     // Order fixed (#2 audit): stock deducted first, then debt posted, then invoice saved.
     expect(captured.order).toEqual(['stock:part_cable:-1', 'debt', 'save']);
+    expect(captured.transactions[0]).toMatchObject({ stockApplied: true });
   });
 
   it('a failed deduction in the B2B path also aborts before the invoice', async () => {
@@ -425,6 +455,75 @@ describe('partsCartStore checkout ordering', () => {
       })
     ).rejects.toThrow('stock write failed');
     expect(captured.transactions).toHaveLength(0);
+  });
+
+  it('a failed B2B line gives the other lines back and never reaches the debt ledger', async () => {
+    cable(1);
+    usePartsCartStore.getState().addToCart(screen);
+    captured.failStockFor = 'part_screen';
+
+    const customer: Customer = { id: 'c1', name: 'Shop A', phone: '0550000000', shopName: 'Shop A' } as Customer;
+    await expect(
+      usePartsCartStore.getState().checkoutB2B({
+        customer,
+        settlementType: 'charged_to_account',
+        paidAmount: 0,
+        paymentMethod: 'cash',
+        chargedAmount: 9300,
+      })
+    ).rejects.toThrow('stock write failed');
+    expect(captured.order).toEqual(['stock:part_cable:-1', 'stock:part_screen:-1', 'stock:part_cable:1']);
+    expect(captured.order).not.toContain('debt');
+    expect(captured.transactions).toHaveLength(0);
+    expect(captured.partsRefetches).toBe(1);
+  });
+});
+
+describe('partsCartStore suspended carts sync', () => {
+  const staleCart = (): SuspendedCart => ({
+    id: 'parts_cart_stale',
+    items: [],
+    customerName: 'Shop X',
+    discount: null,
+    date: '2026-11-15T10:00:00Z',
+  });
+
+  it('hands its current carts to the service for reconciliation', async () => {
+    const stale = staleCart();
+    usePartsCartStore.setState({ suspendedCarts: [stale] });
+
+    await usePartsCartStore.getState().fetchCarts();
+
+    expect(captured.fetchSuspendedCarts).toHaveBeenCalledWith([stale]);
+  });
+
+  it('applies an empty authoritative list instead of keeping a stale local cart', async () => {
+    usePartsCartStore.setState({ suspendedCarts: [staleCart()] });
+    const removeItem = vi.fn();
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: { getItem: () => null, setItem: vi.fn(), removeItem },
+    });
+
+    await usePartsCartStore.getState().fetchCarts();
+
+    expect(usePartsCartStore.getState().suspendedCarts).toEqual([]);
+    expect(removeItem).toHaveBeenCalledWith('parts_suspended_carts');
+  });
+
+  it('keeps a cart held while the read was in flight', async () => {
+    let resolveRemote!: (carts: SuspendedCart[]) => void;
+    captured.fetchSuspendedCarts.mockReturnValueOnce(new Promise(resolve => { resolveRemote = resolve; }));
+
+    const fetchPromise = usePartsCartStore.getState().fetchCarts();
+    cable(1);
+    usePartsCartStore.getState().suspendCart();
+    resolveRemote([]);
+    await fetchPromise;
+
+    const held = usePartsCartStore.getState().suspendedCarts;
+    expect(held).toHaveLength(1);
+    expect(held[0].customerName).toBe('');
   });
 });
 
