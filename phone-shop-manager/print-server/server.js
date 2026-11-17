@@ -88,6 +88,44 @@ const TSPL_FONT_2_WIDTH = 16;
 const TSPL_FONT_1_WIDTH = 10;
 
 /**
+ * Wrap free-text the way the on-screen preview wraps it: by words, and a word
+ * longer than a whole line is split where the line ends — the browser's
+ * `word-break: break-word`. Without the hard split, a long unbroken string is
+ * handed to the printer as one over-long line and clips at the label's edge
+ * while the preview showed it wrapped.
+ */
+function wrapFreeTextLines(rawText, maxCharsPerLine) {
+  const wrappedLines = [];
+  const paragraphs = rawText ? String(rawText).split('\n') : [''];
+  for (const para of paragraphs) {
+    if (!para.trim()) {
+      wrappedLines.push('');
+      continue;
+    }
+    const words = para.split(' ');
+    let curLine = '';
+    for (const word of words) {
+      let remaining = word;
+      while (remaining.length > maxCharsPerLine) {
+        if (curLine) { wrappedLines.push(curLine); curLine = ''; }
+        wrappedLines.push(remaining.slice(0, maxCharsPerLine));
+        remaining = remaining.slice(maxCharsPerLine);
+      }
+      if (!remaining) continue;
+      const test = curLine ? `${curLine} ${remaining}` : remaining;
+      if (test.length <= maxCharsPerLine) {
+        curLine = test;
+      } else {
+        if (curLine) wrappedLines.push(curLine);
+        curLine = remaining;
+      }
+    }
+    if (curLine) wrappedLines.push(curLine);
+  }
+  return wrappedLines;
+}
+
+/**
  * Hardware TSPL font definitions for 50x20mm thermal labels.
  * Configured so every font balances character density, line height, and clearance
  * before the fixed barcode at Y=128 dots.
@@ -2373,28 +2411,12 @@ async function handlePrintCustomTicket(body) {
           }
         }
 
-        // Wrap words to fit totalW (leaving margin on sides)
+        // Wrap words to fit totalW (leaving margin on sides), the same way the
+        // on-screen preview wraps: by words, and a word longer than a whole line
+        // is split where the line ends (`word-break: break-word`) — otherwise the
+        // printer clips the overflow at the label's right edge.
         const maxCharsPerLine = Math.max(4, Math.floor((totalW - 32) / charW));
-        const wrappedLines = [];
-        const paragraphs = rawText ? rawText.split('\n') : [''];
-        for (const para of paragraphs) {
-          if (!para.trim()) {
-            wrappedLines.push('');
-            continue;
-          }
-          const words = para.split(' ');
-          let curLine = '';
-          for (const w of words) {
-            const test = curLine ? `${curLine} ${w}` : w;
-            if (test.length <= maxCharsPerLine) {
-              curLine = test;
-            } else {
-              if (curLine) wrappedLines.push(curLine);
-              curLine = w;
-            }
-          }
-          if (curLine) wrappedLines.push(curLine);
-        }
+        const wrappedLines = wrapFreeTextLines(rawText, maxCharsPerLine);
 
         // Preamble — strictly mirroring inventory label
         let tspl = '';
@@ -2425,6 +2447,7 @@ async function handlePrintCustomTicket(body) {
 
         // Centered Text Lines
         let lineY = startY;
+        let clippedLines = 0;
         for (const line of wrappedLines) {
           if (line && (lineY + charH <= maxSafeY - bottomReserved + 4)) {
             const cleanLine = tsplText(line, 60);
@@ -2437,6 +2460,8 @@ async function handlePrintCustomTicket(body) {
               lineX = Math.max(0, getCenteredX(cleanLine, fontType));
             }
             tspl += `TEXT ${lineX},${lineY},"${fontType}",0,1,1,"${cleanLine}"\r\n`;
+          } else if (line) {
+            clippedLines++;
           }
           lineY += charH + lineSpacing;
         }
@@ -2459,7 +2484,13 @@ async function handlePrintCustomTicket(body) {
 
         await executeTSPLPrint(tspl, LABEL_PRINTER_NAME);
         console.log(`[✓] Free-text sticker printed (${numCopies} copies, ${labelMm}mm) on ${LABEL_PRINTER_NAME}`);
-        return { ok: true, message: `Printed ${numCopies} sticker(s) on ${LABEL_PRINTER_NAME}` };
+        return {
+          ok: true,
+          message: `Printed ${numCopies} sticker(s) on ${LABEL_PRINTER_NAME}`,
+          warning: clippedLines > 0
+            ? `${clippedLines} line(s) did not fit on the ${labelMm}mm label and were not printed. Shorten the text or pick a smaller font.`
+            : undefined,
+        };
       }
 
       // ─── Spec-List Sticker (Mirroring Inventory Label Geometry) ──────────
@@ -2926,6 +2957,96 @@ function startServer(port) {
   });
 }
 
+// ============================================================
+// Big Box Label — Giant Single-Line Text (fills full sticker)
+// ============================================================
+/**
+ * Prints oversized text that fills as much of the 50×20mm label as possible.
+ * Uses TSPL TEXT command with dynamic mulX/mulY multipliers calculated from
+ * the character count so the output always fits width while maximising height.
+ *
+ * Label dimensions: 400 × 160 dots at 203 DPI (50mm × 20mm).
+ *
+ * Font "2" base glyph: 12 dots wide × 20 dots tall (real measured widths in
+ * TSPL_FONT_2_WIDTH = 16, so we use that for width calculations to avoid
+ * clipping at the right edge).
+ *
+ * Strategy:
+ *   1. Determine the number of characters N (capped at 20).
+ *   2. Available width  = 400 - LABEL_OFFSET_X
+ *   3. widthPerChar     = floor(availW / N)
+ *   4. mulX             = max(1, floor(widthPerChar / TSPL_FONT_2_WIDTH))  → capped at 10
+ *   5. mulY             = max(1, floor(160 / 20))                           → capped at 10
+ *      Then scale mulY down proportionally when mulX is small so the glyph
+ *      keeps a reasonable aspect ratio, but always fill height first for 1–3 chars.
+ *   6. Centre horizontally: X = floor((400 - N * mulX * TSPL_FONT_2_WIDTH) / 2) + LABEL_OFFSET_X
+ *   7. Centre vertically:   Y = floor((160 - mulY * 20) / 2)
+ */
+async function handlePrintBigBoxLabel(body) {
+  try {
+    const { text = '', copies = 1 } = body || {};
+
+    // Sanitise — keep printable ASCII only, strip control chars
+    const safeText = tsplText(String(text).replace(/[^\x20-\x7E]/g, '').trim(), 20);
+    if (!safeText) {
+      return { ok: false, status: 400, error: 'No text provided for Big Box Label' };
+    }
+
+    const numCopies = clampCopies(copies);
+    const N = safeText.length;
+
+    // Label constants
+    const LABEL_W = 400;              // dots
+    const LABEL_H = 160;              // dots
+    const BASE_W  = TSPL_FONT_2_WIDTH; // 16 dots — real rendered width of font "2" × 1
+    const BASE_H  = 20;               // dots — base height of font "2" × 1
+
+    const availW = LABEL_W - Math.max(0, LABEL_OFFSET_X);
+
+    // Multipliers (max height is 160 dots / 20 base = 8)
+    let mulX = Math.max(1, Math.min(10, Math.floor(availW / N / BASE_W)));
+    let mulY = Math.max(1, Math.min(8, Math.floor(LABEL_H / BASE_H)));
+
+    // For wide text (>5 chars), scale mulY to keep glyphs proportional
+    if (N > 5) {
+      mulY = Math.min(mulY, Math.max(1, mulX + 1));
+    }
+
+    // X: centre horizontally
+    const glyphW = mulX * BASE_W;
+    const totalW = N * glyphW;
+    const x = Math.max(0, Math.floor((LABEL_W - totalW) / 2)) + Math.max(0, LABEL_OFFSET_X);
+
+    // Y: centre vertically
+    const glyphH = mulY * BASE_H;
+    const y = Math.max(0, Math.floor((LABEL_H - glyphH) / 2));
+
+    let tspl = '';
+    tspl += 'SIZE 50 mm, 20 mm\r\n';
+    tspl += 'GAP 2 mm, 0 mm\r\n';
+    tspl += 'REFERENCE 0,0\r\n';
+    tspl += 'DIRECTION 1\r\n';
+    tspl += 'CLS\r\n';
+    tspl += `TEXT ${x},${y},"2",0,${mulX},${mulY},"${safeText}"\r\n`;
+    tspl += `PRINT ${numCopies},1\r\n`;
+    tspl += 'CLS\r\n';
+
+    console.log(`[BigBoxLabel] text="${safeText}" N=${N} mulX=${mulX} mulY=${mulY} x=${x} y=${y} copies=${numCopies}`);
+
+    await executeTSPLPrint(tspl, LABEL_PRINTER_NAME);
+
+    return {
+      ok: true,
+      message: `Big Box Label printed (${numCopies} cop${numCopies === 1 ? 'y' : 'ies'}) on ${LABEL_PRINTER_NAME}`,
+    };
+  } catch (err) {
+    console.error('[✗] Big Box Label print failed:', err.message);
+    return printFailure(err);
+  }
+}
+
+app.post('/print-big-box-label', printRoute(handlePrintBigBoxLabel));
+
 // Auto-start only when run directly (node server.js), not when require()'d by Electron
 if (require.main === module) {
   startServer().catch((err) => {
@@ -2953,6 +3074,7 @@ module.exports = {
   handleCalibrateLabels,
   handlePrintLowStockReport,
   handlePrintPartsInvoice,
+  handlePrintBigBoxLabel,
   // The Electron IPC path calls the handlers directly, so it never passes through
   // the HTTP body middleware. The shell must sanitise the payload itself.
   sanitizeIpcPayload: (payload) => sanitizePayload(payload, 'ipc'),
@@ -2966,6 +3088,7 @@ module.exports = {
     tsplText,
     tsplField,
     tsplInt,
+    wrapFreeTextLines,
     partsLabelText,
     wrapTsplToWidth,
     fitTsplLine,

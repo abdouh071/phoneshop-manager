@@ -25,7 +25,7 @@ function callElectronPrint<T>(fn: () => Promise<T>, timeoutMs = 12000): Promise<
   ]);
 }
 
-interface PrintServerResult { ok?: boolean; error?: string; message?: string; }
+interface PrintServerResult { ok?: boolean; error?: string; message?: string; warning?: string; }
 
 // Priority: Electron embedded server > env var > local hostname > fallback to localhost
 const PRINT_SERVER_URL = (() => {
@@ -786,7 +786,7 @@ export function buildLabelsHTML(products: {
         <div style="${isPart ? 'position:absolute;bottom:0.8mm;left:0;right:0;transform:translateX(1mm);' : `margin-top:${p.hidePrice ? (textLines.length > 1 ? '5.4mm' : '5.8mm') : '5.4mm'};transform:translateX(4mm);`}display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;width:100%;">
           <div style="display:flex;justify-content:center;align-items:center;max-width:34mm;overflow:hidden;">${barcodeSvg}</div>
         </div>
-        ${!isPart && !p.hidePrice ? `<div style="font-size:13px;font-weight:800;height:4mm;line-height:4mm;margin-top:0.6mm;letter-spacing:0.3px;transform:translateX(4mm);">${formatCurrency(p.price)}</div>` : ''}
+        ${!isPart && !p.hidePrice && p.price !== undefined ? `<div style="font-size:13px;font-weight:800;height:4mm;line-height:4mm;margin-top:0.6mm;letter-spacing:0.3px;transform:translateX(4mm);">${formatCurrency(p.price)}</div>` : ''}
       </div>
     `;
   }).join('');
@@ -1578,7 +1578,7 @@ export async function printCustomTicketDirect(
   currency: string = 'DZD',
   storeAddress?: string,
   storePhone?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; warning?: string }> {
   const payload = {
     storeName,
     currency,
@@ -1592,7 +1592,7 @@ export async function printCustomTicketDirect(
   if (electronAPI?.printCustomTicket) {
     try {
       const data = await callElectronPrint<PrintServerResult>(() => electronAPI.printCustomTicket(payload));
-      if (data?.ok) return { success: true };
+      if (data?.ok) return { success: true, warning: data.warning };
       return { success: false, error: data?.error || 'IPC print returned an error.' };
     } catch (e: unknown) {
       console.warn('[Print] IPC custom ticket failed:', e);
@@ -1611,7 +1611,7 @@ export async function printCustomTicketDirect(
 
     const data = (await res.json()) as PrintServerResult;
     if (data.ok) {
-      return { success: true };
+      return { success: true, warning: data.warning };
     }
     return { success: false, error: data.error || 'Print server returned an error.' };
   } catch (err: unknown) {
@@ -2133,4 +2133,50 @@ export async function printPartsInvoiceDirect(
   }
 
   throw new Error('Print server unreachable. Please verify that the thermal printer and print server are active.');
+}
+
+export interface BigBoxLabelPrintPayload {
+  text: string;
+  copies?: number;
+}
+
+/**
+ * Print Big Box Label (giant single character / short text) directly to the thermal
+ * label printer via Print Server or Electron IPC. Never uses browser dialog.
+ */
+export async function printBigBoxLabelDirect(
+  payload: BigBoxLabelPrintPayload
+): Promise<{ method: 'direct'; error?: string }> {
+  // ── Tier 1: Electron IPC (print:big-box-label) ──
+  if (electronAPI?.printBigBoxLabel) {
+    try {
+      const res = await callElectronPrint<PrintServerResult>(() => electronAPI.printBigBoxLabel(payload));
+      if (res?.ok) return { method: 'direct' };
+      console.warn('[Print] IPC Big Box Label error:', res?.error);
+      return { method: 'direct', error: res?.error };
+    } catch (err) {
+      console.warn('[Print] IPC Big Box Label failed:', err);
+      return { method: 'direct', error: err instanceof Error ? err.message : 'Print failed' };
+    }
+  }
+
+  // ── Tier 2: HTTP fetch /print-big-box-label ──
+  try {
+    const res = await fetch(`${PRINT_SERVER_URL}/print-big-box-label`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(6000),
+      body: JSON.stringify(payload),
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as PrintServerResult;
+      if (data.ok) return { method: 'direct' };
+      return { method: 'direct', error: data.error };
+    }
+  } catch (err) {
+    console.warn('[Print] HTTP Big Box Label failed:', err);
+  }
+
+  throw new Error('Print server unreachable. Please verify that the label printer (XP-420B) and print server are active.');
 }

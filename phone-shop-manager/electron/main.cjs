@@ -240,6 +240,7 @@ const PRINT_IPC_CHANNELS = [
   ['print:calibrate-labels', 'handleCalibrateLabels'],
   ['print:low-stock-report', 'handlePrintLowStockReport'],
   ['print:parts-invoice', 'handlePrintPartsInvoice'],
+  ['print:big-box-label', 'handlePrintBigBoxLabel'],
 ];
 
 function registerPrintIpcHandlers() {

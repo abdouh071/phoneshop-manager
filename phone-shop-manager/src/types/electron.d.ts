@@ -33,6 +33,7 @@ declare global {
       calibrateLabels: (payload: unknown) => Promise<ElectronPrintResult>;
       printLowStockReport: (payload: unknown) => Promise<ElectronPrintResult>;
       printPartsInvoice: (payload: unknown) => Promise<ElectronPrintResult>;
+      printBigBoxLabel: (payload: unknown) => Promise<ElectronPrintResult>;
     };
   }
 }
