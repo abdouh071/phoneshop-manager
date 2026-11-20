@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import styles from './Input.module.css';
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
@@ -36,19 +36,36 @@ Input.displayName = 'Input';
 interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
   value: string;
   onChange: (value: string) => void;
+  /** Called when the user clicks the × clear button. If omitted, no clear button is shown. */
+  onClear?: () => void;
   placeholder?: string;
   className?: string;
 }
 
-export const SearchInput: React.FC<SearchInputProps> = ({ value, onChange, placeholder = 'Search…', className, ...rest }) => (
-  <Input
-    leftIcon={<Search size={16} />}
-    value={value}
-    onChange={e => onChange(e.target.value)}
-    placeholder={placeholder}
-    className={className}
-    {...rest}
-  />
+export const SearchInput: React.FC<SearchInputProps> = ({ value, onChange, onClear, placeholder = 'Search…', className, ...rest }) => (
+  <div className={[styles.searchWrapper, className].filter(Boolean).join(' ')}>
+    <Input
+      type="search"
+      leftIcon={<Search size={16} />}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      data-search-input="true"
+      className={value && onClear ? styles.hasClearBtn : undefined}
+      {...rest}
+    />
+    {value && onClear && (
+      <button
+        type="button"
+        className={styles.clearBtn}
+        onClick={onClear}
+        aria-label="Clear search"
+        tabIndex={-1}
+      >
+        <X size={14} />
+      </button>
+    )}
+  </div>
 );
 
 interface TextAreaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {

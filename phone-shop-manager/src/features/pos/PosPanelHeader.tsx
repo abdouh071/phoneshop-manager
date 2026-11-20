@@ -81,6 +81,7 @@ export const PosPanelHeader: React.FC<PosPanelHeaderProps> = ({
           <SearchInput
             value={searchQuery}
             onChange={setSearchQuery}
+            onClear={() => setSearchQuery('')}
             placeholder={t('pos.searchProducts', 'Search products…')}
             className={styles.search}
           />

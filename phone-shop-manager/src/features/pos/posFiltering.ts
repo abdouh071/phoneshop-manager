@@ -2,6 +2,7 @@ import type { CartItem, PhoneModel, SuspendedCart } from '../../types';
 import type { ProductGroup } from '../../utils/productGrouping';
 import { computeStockStatus } from '../../utils/stockStatus';
 import { normalizeArabic } from '../../utils/normalizeText';
+import { searchAndRank } from '../../utils/searchUtils';
 
 // Pure POS catalog/cart computations extracted verbatim from POSPage.
 // Every function takes all inputs as arguments and is side-effect free;
@@ -9,13 +10,10 @@ import { normalizeArabic } from '../../utils/normalizeText';
 
 // Filter sales catalog using local POS search query (server excluded repair parts from the beginning)
 export const filterProductsBySearch = (allProducts: PhoneModel[], searchQuery: string): PhoneModel[] => {
-  const query = normalizeArabic(searchQuery);
-  if (!query) return allProducts;
-  const words = query.split(' ');
-  return allProducts.filter(p => {
-    const full = normalizeArabic([p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier, p.accessorySubCategory].filter(Boolean).join(' '));
-    return words.every(word => full.includes(word));
-  });
+  if (!normalizeArabic(searchQuery)) return allProducts;
+  return searchAndRank(allProducts, searchQuery, p =>
+    [p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier, p.accessorySubCategory].filter(Boolean) as string[]
+  );
 };
 
 // Build a map of productId → quantity already in cart

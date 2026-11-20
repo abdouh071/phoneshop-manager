@@ -104,6 +104,7 @@ export const PurchasingPage = () => {
             placeholder={activeTab === 'pos' ? "Search POs..." : "Search suppliers..."}
             value={searchQuery}
             onChange={setSearchQuery}
+            onClear={() => setSearchQuery('')}
           />
           {activeTab === 'pos' ? (
             <Button leftIcon={<Plus size={16} />} onClick={() => setIsPOBuilderOpen(true)}>

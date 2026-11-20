@@ -13,8 +13,9 @@ import { usePrivacyStore } from '../../store/privacyStore';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
 import { groupProductsByBaseModel } from '../../utils/productGrouping';
 import type { ProductGroup } from '../../utils/productGrouping';
-import { normalizeArabic } from '../../utils/normalizeText';
-import type { PhoneModel } from '../../types';
+import { searchAndRank } from '../../utils/searchUtils';
+import { useDebounce } from '../../hooks/useDebounce';
+import { HighlightText } from '../../components/ui/HighlightText';import type { PhoneModel } from '../../types';
 import { useRestockHandler } from '../inventory/useRestockHandler';
 import { PartRowActions } from './PartRowActions';
 import styles from './Parts.module.css';
@@ -57,6 +58,7 @@ export const PartsInventoryTab = memo(function PartsInventoryTab({
   const isLoading = initialLoading || isLoadingParts;
   const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebounce(searchQuery, 150);
   const [statusFilter, setStatusFilter] = useState<StockFilter>('all');
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -72,12 +74,16 @@ export const PartsInventoryTab = memo(function PartsInventoryTab({
   }, [searchRequest]);
 
   const groups = useMemo(() => {
-    const words = normalizeArabic(searchQuery).trim().split(/\s+/).filter(Boolean);
-    return groupProductsByBaseModel(parts.filter(p =>
-      (statusFilter === 'all' || p.stockStatus === statusFilter) &&
-      words.every(word => normalizeArabic([p.name, p.model, p.sku, p.location, p.supplier, p.notes].filter(Boolean).join(' ')).includes(word))
-    ));
-  }, [parts, searchQuery, statusFilter]);
+    // Apply ranked search with fuzzy tolerance, then filter by stock status
+    const searchFiltered = debouncedSearch.trim()
+      ? searchAndRank(parts, debouncedSearch, p =>
+          [p.name, p.model, p.sku, p.location, p.supplier, p.notes].filter(Boolean) as string[]
+        )
+      : parts;
+    return groupProductsByBaseModel(
+      searchFiltered.filter(p => statusFilter === 'all' || p.stockStatus === statusFilter)
+    );
+  }, [parts, debouncedSearch, statusFilter]);
   const sortedGroups = useMemo(() => [...groups].sort((a, b) => {
     const valueA = sortValue(a, sortKey);
     const valueB = sortValue(b, sortKey);
@@ -184,6 +190,7 @@ export const PartsInventoryTab = memo(function PartsInventoryTab({
               { value: 'low_stock', label: t('inventory.lowStock') }, { value: 'out_of_stock', label: t('inventory.outOfStock') },
             ]} value={statusFilter} onChange={v => filter(v as StockFilter)} />
             <SearchInput value={searchQuery} onChange={v => { setSearchQuery(v); setCurrentPage(1); }}
+              onClear={() => { setSearchQuery(''); setCurrentPage(1); }}
               aria-label={t('parts.searchPlaceholder')} placeholder={t('parts.searchPlaceholder')} className={styles.search} />
           </div>
         </div>
@@ -211,7 +218,7 @@ export const PartsInventoryTab = memo(function PartsInventoryTab({
                     <td className={styles.td}>{!isSingle && <button type="button" className={styles.expandButton} aria-expanded={isExpanded} aria-label={t('parts.toggleVariants', { name: `${group.name} ${group.model}` })} onClick={() => toggleExpand(group.id)}>{isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>}</td>
                     <td className={styles.td}><div className={styles.productCell}>
                       <div className={styles.productAvatar}>{group.name[0]}</div><div>
-                        <p className={styles.productName}>{group.name} {group.model}</p>
+                        <p className={styles.productName}><HighlightText text={`${group.name} ${group.model}`} query={debouncedSearch} /></p>
                         <div className={styles.productMeta}>{isSingle ? <span>{single.color || t('parts.standard')}</span> : <span className={styles.tagPill}>{t('parts.variantCount', { count: group.variants.length })}</span>}</div>
                       </div>
                     </div></td>

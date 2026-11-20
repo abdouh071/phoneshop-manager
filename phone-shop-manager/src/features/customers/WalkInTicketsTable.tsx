@@ -58,18 +58,10 @@ export const WalkInTicketsTable: React.FC<WalkInTicketsTableProps> = ({
                 <SearchInput
                   value={walkInSearch}
                   onChange={(v) => { setWalkInSearch(v); setWalkInPage(1); }}
+                  onClear={() => { setWalkInSearch(''); setWalkInPage(1); }}
                   placeholder={t('customers.walkinSearchPlaceholder', 'Search by client, device, problem, technician, ticket #…')}
                   className={styles.search}
                 />
-                {walkInSearch && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => { setWalkInSearch(''); setWalkInPage(1); }}
-                  >
-                    {t('customers.clear', 'Clear')}
-                  </Button>
-                )}
               </div>
             </div>
 

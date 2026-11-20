@@ -17,6 +17,7 @@ import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { useAuthStore } from '../../store/authStore';
 import { useToast } from '../../components/ui/Toast';
 import { useTranslation } from 'react-i18next';
+import { useDebounce } from '../../hooks/useDebounce';
 import type { RepairTicket, Customer } from '../../types';
 import styles from './Kanban.module.css';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -300,6 +301,8 @@ export const RepairsPage = () => {
   const { t } = useTranslation();
   const { fetchTickets, searchQuery, setSearchQuery, updateStatus, tickets, heldDrafts, resumeDraft, discardHeldDraft, statusFilter, setStatusFilter, findDuplicates, isLoading, error } = useRepairStore();
   const { customers, fetchCustomers } = useCustomerStore();
+  // Debounce for the main filteredTickets list (keeps autocomplete dropdown instant)
+  const debouncedSearchQuery = useDebounce(searchQuery, 150);
 
   // Deduplication & safe fusion state
   const detectedDuplicateTickets = useMemo(() => findDuplicates(), [tickets, findDuplicates]);
@@ -573,14 +576,14 @@ export const RepairsPage = () => {
     return Array.from(set);
   }, [uniqueTickets]);
 
-  // Filtered dataset — directly reactive to uniqueTickets, searchQuery, selectedTech, and statusFilter
+  // Filtered dataset — directly reactive to uniqueTickets, debouncedSearchQuery, selectedTech, and statusFilter
   const filtered = useMemo(() => {
     let list = uniqueTickets;
 
     // 1. Text Search Filter
-    if (searchQuery.trim()) {
-      const q = normalizeArabic(searchQuery);
-      const queryDigits = phoneQueryDigits(searchQuery);
+    if (debouncedSearchQuery.trim()) {
+      const q = normalizeArabic(debouncedSearchQuery);
+      const queryDigits = phoneQueryDigits(debouncedSearchQuery);
       const cleanQueryDigits = queryDigits ? normalizePhoneDigits(queryDigits) : '';
 
       list = list.filter(t =>
@@ -622,7 +625,7 @@ export const RepairsPage = () => {
     }
 
     return list;
-  }, [uniqueTickets, searchQuery, selectedTech, statusFilter]);
+  }, [uniqueTickets, debouncedSearchQuery, selectedTech, statusFilter]);
 
   const returnedTickets = filtered.filter(t => isTicketActiveReturnPending(t, uniqueTickets));
 
@@ -880,6 +883,11 @@ export const RepairsPage = () => {
               onChange={val => {
                 setSearchQuery(val);
                 setIsSearchOpen(val.trim().length > 0);
+                setSelectedIndex(0);
+              }}
+              onClear={() => {
+                setSearchQuery('');
+                setIsSearchOpen(false);
                 setSelectedIndex(0);
               }}
               onFocus={() => {

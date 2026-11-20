@@ -4,6 +4,7 @@ import { Eye, Trash2, TrendingUp, AlertTriangle, Package, Plus, ChevronDown, Che
 import '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { SearchInput } from '../../components/ui/Input';
+import { HighlightText } from '../../components/ui/HighlightText';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { Select } from '../../components/ui/Select';
 import { StockBadge } from '../../components/ui/Badge';
@@ -13,6 +14,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { useInventoryStore } from '../../store/inventoryStore';
 import { useAuthStore } from '../../store/authStore';
 import { usePermissions } from '../../hooks/usePermissions';
+import { useDebounce } from '../../hooks/useDebounce';
 import { useTranslation } from 'react-i18next';
 import { AddProductModal } from './AddProductModal';
 import { EditProductPanel } from './EditProductPanel';
@@ -34,6 +36,7 @@ import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrenc
 import { usePrivacyStore } from '../../store/privacyStore';
 import { ACCESSORY_SUB_CATEGORIES } from '../../utils/accessorySubCategories';
 import { normalizeArabic } from '../../utils/normalizeText';
+import { searchAndRank } from '../../utils/searchUtils';
 
 const margin = (p: PhoneModel) =>
   p.price > 0 ? (((p.price - p.costPrice) / p.price) * 100) : 0;
@@ -45,6 +48,8 @@ export const InventoryPage = () => {
   const { user } = useAuthStore();
   const permissions = usePermissions();
   const isPrivacyActive = usePrivacyStore(s => s.isPrivacyActive);
+  // Debounce prevents re-filtering on every keystroke (150 ms matches professional apps)
+  const debouncedSearchQuery = useDebounce(searchQuery, 150);
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
@@ -147,14 +152,14 @@ export const InventoryPage = () => {
   };
 
   const filtered = useMemo(() => {
-    return roleFilteredProducts.filter(p => {
-      let matchesSearch = true;
-      if (searchQuery.trim()) {
-        const words = normalizeArabic(searchQuery).trim().split(/\s+/);
-        const full = [p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier, p.accessorySubCategory].filter(Boolean).join(' ');
-        const normalizedFull = normalizeArabic(full);
-        matchesSearch = words.every(w => normalizedFull.includes(w));
-      }
+    // Apply ranked search (exact > prefix > word-prefix > substring > fuzzy)
+    const searchFiltered = debouncedSearchQuery.trim()
+      ? searchAndRank(roleFilteredProducts, debouncedSearchQuery, p =>
+          [p.name, p.model, p.sku, p.color, p.storage, p.location, p.supplier, p.accessorySubCategory].filter(Boolean) as string[]
+        )
+      : roleFilteredProducts;
+
+    return searchFiltered.filter(p => {
       const matchesStatus =
         statusFilter === 'all'
           ? true
@@ -166,9 +171,9 @@ export const InventoryPage = () => {
 
       const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
       const matchesSubCategory = categoryFilter !== 'accessory' || subCategoryFilter === 'all' || (p.accessorySubCategory || 'other') === subCategoryFilter;
-      return matchesSearch && matchesStatus && matchesCategory && matchesSubCategory;
+      return matchesStatus && matchesCategory && matchesSubCategory;
     });
-  }, [roleFilteredProducts, searchQuery, statusFilter, categoryFilter, subCategoryFilter]);
+  }, [roleFilteredProducts, debouncedSearchQuery, statusFilter, categoryFilter, subCategoryFilter]);
 
   const lowStockCount = useMemo(() => {
     return roleFilteredProducts.filter(p => isLowStock(p)).length;
@@ -588,6 +593,7 @@ export const InventoryPage = () => {
           <SearchInput
             value={searchQuery}
             onChange={(v) => { setSearchQuery(v); setCurrentPage(1); }}
+            onClear={() => { setSearchQuery(''); setCurrentPage(1); }}
             placeholder="Search model, SKU, storage, supplier..."
             className={styles.search}
           />
@@ -738,7 +744,7 @@ export const InventoryPage = () => {
                           <div className={styles.productCell}>
                             <div className={styles.productAvatar}>{group.name[0]}</div>
                             <div>
-                              <p className={styles.productName}>{group.name} {group.model}</p>
+                              <p className={styles.productName}><HighlightText text={`${group.name} ${group.model}`} query={debouncedSearchQuery} /></p>
                               <div className={styles.productMeta}>
                                 {!isSingle ? (
                                   <span className={styles.tagPill}>{group.variants.length} Variants</span>

@@ -27,6 +27,7 @@ import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { useAuthStore } from '../../store/authStore';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { useTranslation } from 'react-i18next';
+import { useDebounce } from '../../hooks/useDebounce';
 import type { Customer, RepairTicket } from '../../types';
 import { isShopCustomer, isRetailCustomer } from '../../types';
 import styles from './Customers.module.css';
@@ -56,6 +57,8 @@ export const CustomersPage = () => {
   const toast = useToast();
   const { user } = useAuthStore();
   const { t } = useTranslation();
+  // Debounce the search query so filtering only runs 150 ms after the user stops typing
+  const debouncedSearchQuery = useDebounce(searchQuery, 150);
   const [customerRequiringUnlock, setCustomerRequiringUnlock] = useState<Customer | null>(null);
 
   // Duplication detection
@@ -313,8 +316,8 @@ export const CustomersPage = () => {
 
   // ── Filtering ───────────────────────────────────────────────────────
   const filtered = useMemo(() => {
-    return filterCustomersDirectory({ allActiveCustomers, scopedCustomers, debts, searchQuery, activeFilter, customerTicketsMap });
-  }, [allActiveCustomers, scopedCustomers, debts, searchQuery, activeFilter, customerTicketsMap]);
+    return filterCustomersDirectory({ allActiveCustomers, scopedCustomers, debts, searchQuery: debouncedSearchQuery, activeFilter, customerTicketsMap });
+  }, [allActiveCustomers, scopedCustomers, debts, debouncedSearchQuery, activeFilter, customerTicketsMap]);
 
   // ── Sorting ─────────────────────────────────────────────────────────
   const sorted = useMemo(() => {

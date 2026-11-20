@@ -98,3 +98,50 @@
   border-color: var(--color-primary-container);
   box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.15);
 }
+
+/* ── SearchInput wrapper + clear button ───────────────────────────────── */
+.searchWrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+}
+
+.searchWrapper .wrapper {
+  width: 100%;
+}
+
+.clearBtn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-on-surface-variant);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border-radius: 50%;
+  opacity: 0.55;
+  transition: opacity 0.15s, background 0.15s;
+  z-index: 1;
+}
+
+.clearBtn:hover {
+  opacity: 1;
+  background: var(--color-surface-container-low);
+}
+
+/* When clear button is visible, give the input extra right padding */
+.hasClearBtn .input {
+  padding-right: 30px;
+}
+
+/* Hide the native "×" button that browsers render for type="search" */
+.input[type='search']::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}

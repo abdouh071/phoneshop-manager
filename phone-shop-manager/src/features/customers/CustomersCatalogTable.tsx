@@ -101,6 +101,7 @@ export const CustomersCatalogTable: React.FC<CustomersCatalogTableProps> = ({
           <SearchInput
             value={searchQuery}
             onChange={(v) => { setSearchQuery(v); setCurrentPage(1); }}
+            onClear={() => { setSearchQuery(''); setCurrentPage(1); }}
             placeholder={t('customers.searchPlaceholder', 'Search by name, phone, device (e.g. iPhone, Oppo), ticket #, IMEI…')}
             className={styles.search}
           />

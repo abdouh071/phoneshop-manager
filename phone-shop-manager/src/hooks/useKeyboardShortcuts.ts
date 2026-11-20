@@ -51,6 +51,19 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // "/" key — focus search when not already typing in an input
+      if (e.key === '/' && !isInputFocused) {
+        e.preventDefault();
+        const searchInput = document.querySelector<HTMLInputElement>(
+          'input[data-search-input], input[type="search"]'
+        );
+        if (searchInput) {
+          searchInput.focus();
+          searchInput.select();
+        }
+        return;
+      }
+
       // If user is already typing inside an input/textarea, do not intercept function keys
       if (isInputFocused) {
         if (e.key === 'Escape') {
