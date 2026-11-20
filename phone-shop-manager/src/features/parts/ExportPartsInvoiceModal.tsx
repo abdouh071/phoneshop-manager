@@ -11,7 +11,7 @@ import { useToast } from '../../components/ui/Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { exportToCSV } from '../../utils/exportUtils';
 import { escapeHtml } from '../../utils/escapeHtml';
-import { normalizeArabic } from '../../utils/normalizeText';
+import { searchAndRank } from '../../utils/searchUtils';
 import { printPartsInvoiceDirect } from '../../utils/printWindow';
 import type { PhoneModel } from '../../types';
 import styles from './ExportPartsInvoiceModal.module.css';
@@ -74,23 +74,20 @@ export const ExportPartsInvoiceModal: React.FC<ExportPartsInvoiceModalProps> = (
 
   // Filtered parts
   const filteredParts = useMemo(() => {
-    const query = normalizeArabic(searchQuery).trim().toLowerCase();
-    const words = query ? query.split(/\s+/) : [];
+    // Apply searchAndRank first (precision word-boundary matching), then stock filter
+    const searchFiltered = searchQuery.trim()
+      ? searchAndRank(parts, searchQuery, p =>
+          [p.name, p.model, p.sku, p.location, p.supplier].filter(Boolean) as string[]
+        )
+      : parts;
 
-    return parts.filter(p => {
+    return searchFiltered.filter(p => {
       // Stock status filter
       if (statusFilter === 'in_stock' && p.stock <= 0) return false;
       if (statusFilter === 'low_stock') {
         const threshold = p.lowStockThreshold ?? 1;
         if (p.stock > threshold) return false;
       }
-
-      // Search query filter
-      if (words.length > 0) {
-        const full = normalizeArabic([p.name, p.model, p.sku, p.location, p.supplier].filter(Boolean).join(' ')).toLowerCase();
-        if (!words.every(w => full.includes(w))) return false;
-      }
-
       return true;
     });
   }, [parts, statusFilter, searchQuery]);

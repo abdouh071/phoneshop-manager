@@ -10,6 +10,7 @@ import { useToast } from '../../components/ui/Toast';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { extractSuppliersFromInventory } from '../../utils/supplierUtils';
 import { normalizeArabic } from '../../utils/normalizeText';
+import { searchAndRank } from '../../utils/searchUtils';
 import type { PurchaseOrder, POItem, PhoneModel } from '../../types';
 import styles from './POBuilderModal.module.css';
 
@@ -178,11 +179,8 @@ export const POBuilderModal: React.FC<POBuilderModalProps> = ({ isOpen, onClose,
   };
 
   const allInventory = [...products, ...parts];
-  const searchNeedle = normalizeArabic(search);
-  const searchResults = searchNeedle === '' ? [] : allInventory.filter(p =>
-    normalizeArabic(p.name).includes(searchNeedle) ||
-    normalizeArabic(p.sku).includes(searchNeedle) ||
-    normalizeArabic(p.model).includes(searchNeedle)
+  const searchResults = !normalizeArabic(search) ? [] : searchAndRank(
+    allInventory, search, p => [p.name, p.model, p.sku].filter(Boolean) as string[]
   ).slice(0, 8);
 
   return (

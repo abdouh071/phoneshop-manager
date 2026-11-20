@@ -12,7 +12,6 @@ import { isPhoneMatch, formatStandardPhone, normalizePhoneDigits } from '../../u
 import { CustomerDuplicatePromptCard } from '../../components/customers/CustomerDuplicatePromptCard';
 import { BookOpen, AlertCircle, Store, User } from 'lucide-react';
 import styles from '../inventory/ProductForm.module.css';
-import { errorMessage } from '../../utils/errorUtils';
 
 interface AddCustomerModalProps {
   isOpen: boolean;
@@ -132,7 +131,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
     }
   }, [customerToEdit, isOpen, defaultAccountType, lockedAccountType]);
 
-  const set = (key: keyof FormData, value: string) => {
+  const set = (key: keyof FormData, value: any) => {
     setForm(prev => ({ ...prev, [key]: value }));
     setErrors(e => ({ ...e, [key]: undefined }));
   };
@@ -239,10 +238,10 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
       }
       
       handleClose();
-    } catch (err: unknown) {
+    } catch (err: any) {
       toast.error(
         t('customers.operationFailed', 'Operation Failed'),
-        errorMessage(err) || t('customers.saveCustomerError', 'Could not save customer.')
+        err.message || t('customers.saveCustomerError', 'Could not save customer.')
       );
     } finally {
       setIsSubmitting(false);
@@ -520,7 +519,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
               if (Object.keys(updates).length > 0) {
                 try {
                   await updateCustomer(matchedDuplicateCustomer.id, updates);
-                  currentCust = useCustomerStore.getState().customers.find(c => c.id === matchedDuplicateCustomer.id) ?? matchedDuplicateCustomer;
+                  currentCust = { ...matchedDuplicateCustomer, ...updates };
                   toast.success(t('customers.profileAutoEnrichedTitle', 'Profile Auto-Enriched'), t('customers.profileAutoEnrichedDesc', 'Enriched {{name}}\'s profile with new details.', { name: matchedDuplicateCustomer.name }));
                 } catch (e) {
                   console.warn('Failed to auto-enrich on use existing:', e);
@@ -573,8 +572,8 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
                 });
                 toast.success(t('customers.customerProfileUpdatedTitle', 'Customer Profile Updated'), t('customers.customerProfileUpdatedDesc', 'Updated {{name}}\'s profile.', { name: form.name.trim() }));
                 handleClose();
-              } catch (err: unknown) {
-                toast.error(t('customers.updateFailedTitle', 'Update Failed'), errorMessage(err) || 'Could not update customer');
+              } catch (err: any) {
+                toast.error(t('customers.updateFailedTitle', 'Update Failed'), err.message || 'Could not update customer');
               } finally {
                 setIsUpdatingExisting(false);
               }

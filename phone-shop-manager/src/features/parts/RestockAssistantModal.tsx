@@ -17,7 +17,7 @@ import { formatWhatsAppUrl } from '../../utils/phoneUtils';
 import type { PhoneModel, POItem } from '../../types';
 import styles from './RestockAssistant.module.css';
 import { errorMessage } from '../../utils/errorUtils';
-import { normalizeArabic } from '../../utils/normalizeText';
+import { searchAndRank } from '../../utils/searchUtils';
 
 interface RestockAssistantModalProps {
   isOpen: boolean;
@@ -138,6 +138,17 @@ export const RestockAssistantModal: React.FC<RestockAssistantModalProps> = ({
 
   // Filtered rows for display
   const displayedRows = useMemo(() => {
+    // Build a Set of product IDs that pass the search query (using the same
+    // precision logic as the rest of the app — numeric tokens require adjacency).
+    const searchPassIds: Set<string> = new Set();
+    if (searchQuery.trim()) {
+      searchAndRank(
+        Object.values(rows).map(r => r.product),
+        searchQuery,
+        p => [p.name, p.model, p.sku].filter(Boolean) as string[]
+      ).forEach(p => searchPassIds.add(p.id));
+    }
+
     return Object.values(rows).filter(r => {
       const p = r.product;
 
@@ -149,12 +160,8 @@ export const RestockAssistantModal: React.FC<RestockAssistantModalProps> = ({
       // Brand filter
       if (selectedBrand !== 'all' && p.brand !== selectedBrand) return false;
 
-      // Search query
-      if (searchQuery.trim()) {
-        const q = normalizeArabic(searchQuery);
-        const matchName = normalizeArabic([p.name, p.model, p.sku].filter(Boolean).join(' ')).includes(q);
-        if (!matchName) return false;
-      }
+      // Search query (precision-matched)
+      if (searchQuery.trim() && !searchPassIds.has(p.id)) return false;
 
       return true;
     }).sort((a, b) => {

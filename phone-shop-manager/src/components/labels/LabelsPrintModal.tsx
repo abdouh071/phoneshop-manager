@@ -7,6 +7,7 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { buildLabelsHTML, openPrintWindow, printBarcodeDirect } from '../../utils/printWindow';
 import type { PhoneModel } from '../../types';
 import { normalizeArabic } from '../../utils/normalizeText';
+import { searchAndRank } from '../../utils/searchUtils';
 
 export interface LabelQtyConfig {
   totalQty: number;
@@ -94,18 +95,22 @@ export const LabelsPrintModal: React.FC<LabelsPrintModalProps> = ({
   }, [isOpen]);
 
   const searchResults = useMemo(() => {
-    const query = normalizeArabic(searchQuery);
-    return items.filter(p => {
-      if (config[p.id]) return false;
-      if (!query) return true;
-      return searchFields(p).some(field => normalizeArabic(field).includes(query));
-    });
+    const available = items.filter(p => !config[p.id]);
+    if (!normalizeArabic(searchQuery)) return available;
+    return searchAndRank(
+      available,
+      searchQuery,
+      p => searchFields(p).filter((f): f is string => !!f)
+    );
   }, [searchQuery, items, config, searchFields]);
 
   const handleSelectAll = (useStockQty = false) => {
-    const query = normalizeArabic(searchQuery);
-    const targetItems = query
-      ? items.filter(p => searchFields(p).some(field => normalizeArabic(field).includes(query)))
+    const targetItems = normalizeArabic(searchQuery)
+      ? searchAndRank(
+          items,
+          searchQuery,
+          p => searchFields(p).filter((f): f is string => !!f)
+        )
       : items;
 
     if (targetItems.length === 0) return;

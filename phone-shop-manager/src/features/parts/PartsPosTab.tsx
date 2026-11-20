@@ -26,8 +26,9 @@ import {
 } from '../../utils/discountPolicy';
 import { groupProductsByBaseModel } from '../../utils/productGrouping';
 import type { ProductGroup } from '../../utils/productGrouping';
-import { normalizeArabic } from '../../utils/normalizeText';
+import { searchAndRank } from '../../utils/searchUtils';
 import { errorMessage } from '../../utils/errorUtils';
+import { offlineQueueMirror } from '../../services/offlineQueueMirror';
 import type { CartItem, Customer, CustomerDebtEntry, PaymentMethod, SaleTransaction, SuspendedCart } from '../../types';
 import { ReceiptModal } from '../pos/ReceiptModal';
 import { CustomerAutocompleteInput } from '../pos/CustomerAutocompleteInput';
@@ -89,7 +90,7 @@ export const PartsPosTab = memo(function PartsPosTab({
   })));
   const {
     items, customerName, selectedB2BCustomer, discount, suspendedCarts, isCheckingOut, selectedMethod,
-    subtotal, total, itemCount, linesConcessionTotal,
+    subtotal, total, itemCount, linesConcessionTotal, pendingCheckout, checkoutRecoveryError, refreshPendingCheckout, resolvePendingCheckout,
     addToCart, removeFromCart, updateQuantity, clearCart, setPayments, setCustomerName, setCustomerPhone,
     setSelectedB2BCustomer, setDiscount, setLineDiscount, checkout, suspendCart, resumeCart, discardSuspendedCart,
   } = usePartsCartStore(useShallow(s => ({
@@ -98,6 +99,8 @@ export const PartsPosTab = memo(function PartsPosTab({
     selectedMethod: s.payments[0]?.method ?? 'cash',
     subtotal: s.getSubtotal(), total: s.getTotal(), itemCount: s.getItemCount(),
     linesConcessionTotal: s.getLinesConcessionTotal(),
+    pendingCheckout: s.pendingCheckout, checkoutRecoveryError: s.checkoutRecoveryError,
+    refreshPendingCheckout: s.refreshPendingCheckout, resolvePendingCheckout: s.resolvePendingCheckout,
     addToCart: s.addToCart, removeFromCart: s.removeFromCart, updateQuantity: s.updateQuantity,
     clearCart: s.clearCart, setPayments: s.setPayments, setCustomerName: s.setCustomerName,
     setCustomerPhone: s.setCustomerPhone, setSelectedB2BCustomer: s.setSelectedCustomer,
@@ -105,6 +108,18 @@ export const PartsPosTab = memo(function PartsPosTab({
     suspendCart: s.suspendCart, resumeCart: s.resumeCart, discardSuspendedCart: s.discardSuspendedCart,
   })));
   const isAdmin = useAuthStore(s => s.user?.role === 'admin');
+  const actorId = useAuthStore(s => s.user?.id);
+  useEffect(() => {
+    refreshPendingCheckout();
+    const unsubscribe = offlineQueueMirror.onRestored(refreshPendingCheckout);
+    window.addEventListener('focus', refreshPendingCheckout);
+    window.addEventListener('storage', refreshPendingCheckout);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('focus', refreshPendingCheckout);
+      window.removeEventListener('storage', refreshPendingCheckout);
+    };
+  }, [actorId, refreshPendingCheckout]);
   // Re-render private amounts when privacy changes, without subscribing to the whole store.
   usePrivacyStore(s => s.isPrivacyActive);
   const currentAccountDebt = useCustomerStore(s => selectedB2BCustomer
@@ -158,11 +173,12 @@ export const PartsPosTab = memo(function PartsPosTab({
   }, [items]);
 
   const groups = useMemo(() => {
-    const words = normalizeArabic(searchQuery).trim().split(/\s+/).filter(Boolean);
-    return groupProductsByBaseModel(parts.filter(part => {
-      const searchable = normalizeArabic([part.name, part.model, part.sku, part.location, part.supplier, part.notes].filter(Boolean).join(' '));
-      return words.every(word => searchable.includes(word));
-    }));
+    const searchFiltered = searchQuery.trim()
+      ? searchAndRank(parts, searchQuery, p =>
+          [p.name, p.model, p.sku, p.location, p.supplier, p.notes].filter(Boolean) as string[]
+        )
+      : parts;
+    return groupProductsByBaseModel(searchFiltered);
   }, [parts, searchQuery]);
   const basketDiscountAmount = discount ? discountAmountOf(subtotal, { mode: discount.type, value: discount.value }) : 0;
   const basketDiscountPercent = discount ? discountPercentOf(subtotal, { mode: discount.type, value: discount.value }) : 0;
@@ -178,8 +194,6 @@ export const PartsPosTab = memo(function PartsPosTab({
     return next;
   });
   const resetDraftUi = () => {
-    setSelectedB2BCustomer(null);
-    setCustomerPhone('');
     setLineDiscountText({});
     setPendingDiscountValue(null);
     setShowDiscountUnlock(false);
@@ -272,6 +286,27 @@ export const PartsPosTab = memo(function PartsPosTab({
       } else {
         toast.error(t('parts.checkoutFailed'), msg);
       }
+    } finally {
+      setIsProcessing(false);
+      checkoutLock.current = false;
+    }
+  };
+
+  const handleResolveCheckout = async () => {
+    if (isBusy || checkoutLock.current) return;
+    checkoutLock.current = true;
+    setIsProcessing(true);
+    try {
+      const result = await resolvePendingCheckout();
+      if (result?.transaction) {
+        setCompletedB2BTx({ transaction: result.transaction, debtEntry: result.debtEntry, invoiceNumber: result.transaction.invoiceNumber || '' });
+        if (!usePartsCartStore.getState().items.length) resetDraftUi();
+        else toast.warning(t('parts.checkoutRecovered'), t('parts.checkoutDraftKept'));
+      } else if (result?.cancelled) {
+        toast.info(t('parts.checkoutCancelled'), t('parts.checkoutCancelledMsg'));
+      }
+    } catch (error) {
+      toast.error(t('parts.checkoutFailed'), errorMessage(error));
     } finally {
       setIsProcessing(false);
       checkoutLock.current = false;
@@ -392,6 +427,12 @@ export const PartsPosTab = memo(function PartsPosTab({
               <button type="button" className={posStyles.clearBtn} disabled={isBusy} onClick={() => setConfirmClearCart(true)}>{t('parts.clear')}</button>}
           </div>
 
+          {checkoutRecoveryError && <div role="alert" className={styles.warningBanner}>{t('parts.checkoutRecoveryError')}</div>}
+          {pendingCheckout && <div role="alert" className={styles.warningBanner} style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+            <strong>{t('parts.checkoutUnconfirmed', { invoice: pendingCheckout.transaction.invoiceNumber })}</strong>
+            <span>{t('parts.checkoutResolveInfo')}</span>
+            <Button size="sm" variant="secondary" disabled={isBusy} onClick={() => void handleResolveCheckout()}>{t('parts.checkoutResolve')}</Button>
+          </div>}
           {selectedB2BCustomer && !showSuspended ? (
             <div className={b2bStyles.accountCard} style={{ margin: '8px 12px 0' }}>
               <div className={b2bStyles.accountCardHeader}>
@@ -445,6 +486,9 @@ export const PartsPosTab = memo(function PartsPosTab({
                   <Button size="sm" disabled={isBusy} onClick={() => {
                     const result = resumeCart(cart.id);
                     if (result.success) resetDraftUi();
+                    if (result.requiresCustomerSelection) {
+                      toast.warning(t('parts.heldCustomerSelectionTitle'), t('parts.heldCustomerSelectionRequired'));
+                    }
                     result.warnings?.forEach(warning => toast.warning(t('parts.stockLevelAlert'), warning));
                   }}>{t('parts.resume')}</Button>
                   <button type="button" className={posStyles.removeBtn} aria-label={t('parts.discardHeldTitle')}
@@ -549,10 +593,10 @@ export const PartsPosTab = memo(function PartsPosTab({
             </div>}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               <Button variant="secondary" disabled={isBusy} onClick={() => { suspendCart(); resetDraftUi(); }} style={{ flex: 1 }}>{t('parts.holdCart')}</Button>
-              {selectedB2BCustomer ? <Button onClick={() => setIsB2BCheckoutOpen(true)} isLoading={isBusy} disabled={isBusy}
+              {selectedB2BCustomer ? <Button onClick={() => setIsB2BCheckoutOpen(true)} isLoading={isBusy} disabled={isBusy || Boolean(checkoutRecoveryError)}
                 style={{ flex: 2, background: '#1d4ed8' }} leftIcon={<Store size={16} />}>
                 {t('parts.processB2b', { total: formatCurrency(total) })}
-              </Button> : <Button onClick={handleCheckout} isLoading={isBusy} disabled={isBusy} style={{ flex: 2 }}>
+              </Button> : <Button onClick={handleCheckout} isLoading={isBusy} disabled={isBusy || Boolean(checkoutRecoveryError)} style={{ flex: 2 }}>
                 {t('parts.checkout', { total: formatCurrency(total) })}
               </Button>}
             </div>

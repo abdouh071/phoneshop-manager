@@ -21,7 +21,7 @@ import type { CustomTicketData, TicketPrintMode } from './customTicketTypes';
 import type { PhoneModel } from '../../types';
 import styles from './CustomTicket.module.css';
 import { errorMessage } from '../../utils/errorUtils';
-import { normalizeArabic } from '../../utils/normalizeText';
+import { searchAndRank } from '../../utils/searchUtils';
 import { PRESET_TEMPLATES } from './presetTemplates';
 import type { UserTemplate } from './ticketPrintTypes';
 import { DeviceDetailsCard } from './DeviceDetailsCard';
@@ -50,6 +50,7 @@ export const CustomTicketPage: React.FC = () => {
   const [activeMode, setActiveMode] = useState<TicketPrintMode | 'quick_big'>('specs');
   const [quickText, setQuickText] = useState('');
   const [isQuickPrinting, setIsQuickPrinting] = useState(false);
+  const [quickPreviewTicket, setQuickPreviewTicket] = useState<CustomTicketData | null>(null);
 
   // Active ticket form state (restored from localStorage draft if available)
   const [ticket, setTicket] = useState<CustomTicketData>(() => {
@@ -277,14 +278,9 @@ export const CustomTicketPage: React.FC = () => {
   // Filter inventory items for modal
   const filteredProducts = useMemo(() => {
     if (!inventorySearch.trim()) return products.slice(0, 25);
-    const q = normalizeArabic(inventorySearch);
-    return products.filter(
-      p =>
-        normalizeArabic(p.name).includes(q) ||
-        normalizeArabic(p.model).includes(q) ||
-        normalizeArabic(p.sku).includes(q) ||
-        normalizeArabic(p.storage).includes(q) ||
-        normalizeArabic(p.color).includes(q)
+    return searchAndRank(
+      products, inventorySearch, p =>
+        [p.name, p.model, p.sku, p.storage, p.color].filter(Boolean) as string[]
     ).slice(0, 30);
   }, [products, inventorySearch]);
 
@@ -313,10 +309,14 @@ export const CustomTicketPage: React.FC = () => {
 
       if (result.success) {
         const destPrinter = ticket.format === 'sticker' ? (labelPrinter || 'Label Printer') : (printer || 'Thermal Printer');
-        toast.success(
-          'Printed Successfully! 🖨️',
-          `Sent ${ticket.copies || 1} cop${(ticket.copies || 1) > 1 ? 'ies' : 'y'} directly to ${destPrinter} via Print Server.`
-        );
+        if (result.warning) {
+          toast.warning('Printed, with text cut off', result.warning);
+        } else {
+          toast.success(
+            'Printed Successfully! 🖨️',
+            `Sent ${ticket.copies || 1} cop${(ticket.copies || 1) > 1 ? 'ies' : 'y'} directly to ${destPrinter} via Print Server.`
+          );
+        }
       } else {
         toast.error('Print Server Error', result.error || 'Failed to print ticket via print server.');
       }
@@ -348,42 +348,60 @@ export const CustomTicketPage: React.FC = () => {
     await handleServerPrint();
   };
 
-  // Quick Big Box Label: one input, one button — straight to the label printer.
-  // Giant TSPL font, centered, wraps long text; no preview, no templates.
-  const handleQuickBigPrint = async () => {
+  // Quick Big Box Label: one input, one button → preview → print. No templates.
+  const buildQuickTicket = (text: string): CustomTicketData => ({
+    ...PRESET_TEMPLATES[0].data,
+    format: 'sticker',
+    mode: 'free_text',
+    freeText: text,
+    fontSize: 'giant',
+    isBold: true,
+    textAlign: 'center',
+    stickerSize: '50x20',
+    showStoreNameOnSticker: false,
+    includeBarcode: false,
+    barcodeValue: '',
+    copies: 1,
+  });
+
+  // The preview modal edits its ticket via a SetStateAction; route those edits onto the snapshot.
+  const setQuickPreviewTicketSafe: React.Dispatch<React.SetStateAction<CustomTicketData>> = updater => {
+    setQuickPreviewTicket(prev =>
+      prev === null ? prev : typeof updater === 'function' ? updater(prev) : updater
+    );
+  };
+
+  const handleQuickBigPrintClick = () => {
     const text = quickText.trim();
     if (!text) {
       toast.warning('Type Something First', 'Write the big text before printing.');
       return;
     }
-    if (!isOnline) {
-      toast.error(
-        'Print Server Offline',
-        'Cannot print: The local print server is not connected (http://localhost:3355). Please start it with "npm start" in the print-server folder.'
-      );
-      return;
-    }
+    setQuickPreviewTicket(buildQuickTicket(text));
+  };
 
+  const handleQuickBrowserPrint = () => {
+    if (!quickPreviewTicket) return;
+    openPrintWindow(
+      buildCustomTicketHTML(quickPreviewTicket, storeName, currencySymbol),
+      'Big Box Label'
+    );
+    setQuickPreviewTicket(null);
+  };
+
+  const handleQuickConfirmPrint = async () => {
+    if (!quickPreviewTicket) return;
     setIsQuickPrinting(true);
     try {
-      const quickTicket: CustomTicketData = {
-        ...PRESET_TEMPLATES[0].data,
-        format: 'sticker',
-        mode: 'free_text',
-        freeText: text,
-        fontSize: 'giant',
-        isBold: true,
-        textAlign: 'center',
-        stickerSize: '50x20',
-        showStoreNameOnSticker: false,
-        includeBarcode: false,
-        barcodeValue: '',
-        copies: 1,
-      };
-      const result = await printCustomTicketDirect(quickTicket, storeName, currencySymbol);
+      const result = await printCustomTicketDirect(quickPreviewTicket, storeName, currencySymbol);
       if (result.success) {
-        toast.success('Printed!', `Big label sent to ${labelPrinter || 'the label printer'}.`);
+        if (result.warning) {
+          toast.warning('Printed, with text cut off', result.warning);
+        } else {
+          toast.success('Printed!', `Big label sent to ${labelPrinter || 'the label printer'}.`);
+        }
         setQuickText('');
+        setQuickPreviewTicket(null);
       } else {
         toast.error('Print Server Error', result.error || 'Failed to print big label via print server.');
       }
@@ -538,74 +556,122 @@ export const CustomTicketPage: React.FC = () => {
 
       {/* Main Two-Column Layout */}
       <div className={styles.layout}>
-        {/* Left: Input Form Controls */}
-        <div className={styles.formSection}>
-          {activeMode === 'free_text' ? (
-            <>
-              {/* Card 1: Keyboard Typing Studio */}
-              <StickerTextInputCard
-                ticket={ticket}
-                setTicket={setTicket}
-                blankStickerOverflowWarning={blankStickerOverflowWarning}
-              />
+        {activeMode === 'quick_big' ? (
+          /* Quick Big Box Label: one input, one print button — nothing else. */
+          <div className={styles.quickBigWrap}>
+            <div className={`${styles.card} ${styles.quickBigCard}`}>
+              <div className={styles.cardHeader}>
+                <div className={styles.cardTitle}>
+                  <Type size={16} />
+                  <span>Write &amp; Print — Big Box Label</span>
+                </div>
+                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
+                  {(quickText || '').split('\n').filter(Boolean).length} lines · {(quickText || '').length} chars
+                </span>
+              </div>
 
-              {/* Card 2: Typography & Formatting */}
-              <StickerTypographyCard
-                ticket={ticket}
-                setTicket={setTicket}
-                storeName={storeName}
+              <label className={styles.label} htmlFor="quick-big-text" style={{ display: 'block', marginBottom: '6px' }}>
+                The text prints as one big centered label in giant font. Short text prints biggest; long text wraps onto more lines.
+              </label>
+              <textarea
+                id="quick-big-text"
+                rows={3}
+                maxLength={200}
+                className={styles.quickBigTextarea}
+                value={quickText}
+                onChange={e => setQuickText(e.target.value)}
+                placeholder={'e.g.\nIPHONE 15 SCREENS'}
+                autoFocus
               />
-            </>
-          ) : (
-            <>
-              {/* Card 1: Ticket Header & Formatting */}
-              <SlipHeaderCard
-                ticket={ticket}
-                setTicket={setTicket}
-              />
+              <p className={styles.quickBigHint}>
+                {quickText.trim()
+                  ? 'Long lines wrap automatically — keep it short for the biggest letters.'
+                  : 'Around 14 giant characters fit per line on the label.'}
+              </p>
 
-              {/* Card 2: Core Device Specifications */}
-              <DeviceDetailsCard
-                ticket={ticket}
-                setTicket={setTicket}
-                currencySymbol={currencySymbol}
-                setIsInventoryModalOpen={setIsInventoryModalOpen}
-              />
+              <Button
+                className={styles.quickBigPrintBtn}
+                leftIcon={<Printer size={18} />}
+                isLoading={isQuickPrinting}
+                disabled={isQuickPrinting || !quickText.trim()}
+                onClick={handleQuickBigPrintClick}
+              >
+                Preview &amp; Print
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Left: Input Form Controls */}
+            <div className={styles.formSection}>
+              {activeMode === 'free_text' ? (
+                <>
+                  {/* Card 1: Keyboard Typing Studio */}
+                  <StickerTextInputCard
+                    ticket={ticket}
+                    setTicket={setTicket}
+                    blankStickerOverflowWarning={blankStickerOverflowWarning}
+                  />
 
-              {/* Card 3: Custom Key-Value Spec Lines */}
-              <SpecLinesCard
-                ticket={ticket}
-                handleAddSpec={handleAddSpec}
-                handleUpdateSpec={handleUpdateSpec}
-                handleRemoveSpec={handleRemoveSpec}
-              />
+                  {/* Card 2: Typography & Formatting */}
+                  <StickerTypographyCard
+                    ticket={ticket}
+                    setTicket={setTicket}
+                    storeName={storeName}
+                  />
+                </>
+              ) : (
+                <>
+                  {/* Card 1: Ticket Header & Formatting */}
+                  <SlipHeaderCard
+                    ticket={ticket}
+                    setTicket={setTicket}
+                  />
 
-              {/* Card 4: Free-form Notes & Barcode */}
-              <NotesBarcodeCard
-                ticket={ticket}
-                setTicket={setTicket}
-              />
-            </>
-          )}
-        </div>
+                  {/* Card 2: Core Device Specifications */}
+                  <DeviceDetailsCard
+                    ticket={ticket}
+                    setTicket={setTicket}
+                    currencySymbol={currencySymbol}
+                    setIsInventoryModalOpen={setIsInventoryModalOpen}
+                  />
 
-        {/* Right: Live Visual Slip Preview & Print Cockpit */}
-        <LivePreviewPanel
-          ticket={ticket}
-          setTicket={setTicket}
-          storeName={storeName}
-          currencySymbol={currencySymbol}
-          livePreviewHtml={livePreviewHtml}
-          isOnline={isOnline}
-          printer={printer}
-          labelPrinter={labelPrinter}
-          isPrinting={isPrinting}
-          isCalibrating={isCalibrating}
-          handleCalibrateSensor={handleCalibrateSensor}
-          handlePrintAction={handlePrintAction}
-          handleSelectPreset={handleSelectPreset}
-          toast={toast}
-        />
+                  {/* Card 3: Custom Key-Value Spec Lines */}
+                  <SpecLinesCard
+                    ticket={ticket}
+                    handleAddSpec={handleAddSpec}
+                    handleUpdateSpec={handleUpdateSpec}
+                    handleRemoveSpec={handleRemoveSpec}
+                  />
+
+                  {/* Card 4: Free-form Notes & Barcode */}
+                  <NotesBarcodeCard
+                    ticket={ticket}
+                    setTicket={setTicket}
+                  />
+                </>
+              )}
+            </div>
+
+            {/* Right: Live Visual Slip Preview & Print Cockpit */}
+            <LivePreviewPanel
+              ticket={ticket}
+              setTicket={setTicket}
+              storeName={storeName}
+              currencySymbol={currencySymbol}
+              livePreviewHtml={livePreviewHtml}
+              isOnline={isOnline}
+              printer={printer}
+              labelPrinter={labelPrinter}
+              isPrinting={isPrinting}
+              isCalibrating={isCalibrating}
+              handleCalibrateSensor={handleCalibrateSensor}
+              handlePrintAction={handlePrintAction}
+              handleSelectPreset={handleSelectPreset}
+              toast={toast}
+            />
+          </>
+        )}
       </div>
 
       {/* Inventory Search & Auto-Fill Modal */}
@@ -633,6 +699,23 @@ export const CustomTicketPage: React.FC = () => {
           setShowPrintPreview={setShowPrintPreview}
           handleBrowserPrint={handleBrowserPrint}
           handleConfirmPrint={handleConfirmPrint}
+        />
+      )}
+
+      {/* ── Quick Big Box Label Preview (same modal, snapshot ticket) ──────── */}
+      {quickPreviewTicket && (
+        <UniversalPrintPreviewModal
+          ticket={quickPreviewTicket}
+          setTicket={setQuickPreviewTicketSafe}
+          storeName={storeName}
+          currencySymbol={currencySymbol}
+          isOnline={isOnline}
+          printer={printer}
+          labelPrinter={labelPrinter}
+          isPrinting={isQuickPrinting}
+          setShowPrintPreview={() => setQuickPreviewTicket(null)}
+          handleBrowserPrint={handleQuickBrowserPrint}
+          handleConfirmPrint={handleQuickConfirmPrint}
         />
       )}
 
