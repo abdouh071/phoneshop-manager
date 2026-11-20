@@ -612,3 +612,59 @@
   word-break: break-word;
   max-width: 100%;
 }
+
+/* ── Quick Big Box Label (Write & Print) ─────────────────────────────── */
+
+.quickBigWrap {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.quickBigCard {
+  max-width: 680px;
+  width: 100%;
+  padding: 28px;
+}
+
+.quickBigTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  padding: 16px 18px;
+  border: 1px solid var(--color-outline, #cbd5e1);
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--color-on-surface, #0f172a);
+  resize: vertical;
+  transition: border-color 0.15s ease;
+}
+
+.quickBigTextarea:focus {
+  outline: 2px solid var(--color-primary, #4f46e5);
+  outline-offset: 2px;
+  border-color: transparent;
+}
+
+.quickBigTextarea::placeholder {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.quickBigHint {
+  margin: 10px 0 18px;
+  color: #64748b;
+  font-size: 12px;
+  text-align: center;
+}
+
+.quickBigPrintBtn {
+  width: 100%;
+  min-height: 54px;
+  font-size: 17px;
+  font-weight: 700;
+}

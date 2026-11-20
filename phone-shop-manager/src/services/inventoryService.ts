@@ -26,17 +26,6 @@ const LOCAL_STORAGE_KEY = 'offline_inventory';
 const PENDING_PRODUCTS_KEY = 'offline_pending_products';
 const PENDING_STOCK_ADJUSTMENTS_KEY = 'offline_pending_stock_adjustments';
 
-/** Stock writes are read-modify-write; the transaction budget is wider than a plain write's. */
-const STOCK_TX_TIMEOUT_MS = 2000;
-
-/**
- * How many replay keys a product document carries. The list rides along in the write that
- * moves the shelf, so it costs no extra read — but it cannot grow without bound on a model
- * the shop sells all day. A replay follows its own write within one sync pass, so the keys
- * that matter are always the newest ones.
- */
-const STOCK_REPLAY_KEYS_KEPT = 40;
-
 export interface PendingStockAdjustment {
   /**
    * Also the replay key: minted before the first attempt and stamped on the product by the
@@ -106,23 +95,15 @@ const savePendingProducts = (products: PhoneModel[]): void => {
 };
 
 const getPendingStockAdjustments = (): PendingStockAdjustment[] => {
-  try {
-    const raw = localStorage.getItem(PENDING_STOCK_ADJUSTMENTS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+  const raw = localStorage.getItem(PENDING_STOCK_ADJUSTMENTS_KEY);
+  const pending = raw ? JSON.parse(raw) : [];
+  if (!Array.isArray(pending)) throw new Error('Stock recovery data is unreadable. Do not repeat the adjustment.');
+  return pending;
 };
 
 const savePendingStockAdjustments = (adjustments: PendingStockAdjustment[]): void => {
   const raw = JSON.stringify(adjustments);
-  try {
-    localStorage.setItem(PENDING_STOCK_ADJUSTMENTS_KEY, raw);
-  } catch (err) {
-    console.error('Failed to save pending stock adjustments to local storage', err);
-  }
-  // A queued delta is the one piece of offline inventory data that cannot be rebuilt: the
-  // server never saw it, so if the local copy goes, the stock change goes with it.
+  localStorage.setItem(PENDING_STOCK_ADJUSTMENTS_KEY, raw);
   offlineQueueMirror.write(PENDING_STOCK_ADJUSTMENTS_KEY, raw);
 };
 
@@ -130,61 +111,36 @@ const savePendingStockAdjustments = (adjustments: PendingStockAdjustment[]): voi
 const isLocalOnlyTarget = (id: string): boolean =>
   (typeof navigator !== 'undefined' && !navigator.onLine) || id.startsWith('offline_');
 
-/**
- * Read the SERVER document and write `current + delta` inside one Firestore transaction.
- * Concurrent tills selling the same model therefore serialize instead of last-write-wins.
- * Throws on timeout or contention — callers fall back to the pending queue.
- *
- * `replayKey` names this movement. It is stamped in the same transaction that applies it,
- * so a write the server committed while the caller heard a timeout is recognised when the
- * queue replays it: the shelf moves once, not once per attempt.
- */
 export const commitStockDelta = async (
   id: string,
   delta: number,
-  replayKey?: string,
-  /** Set to true for sale checkouts so an oversell attempt throws instead of clamping. */
-  throwOnOversell = false
-): Promise<{ previousStock: number; stock: number; stockStatus: StockStatus }> =>
-  withTimeout(
-    runTransaction(db, async (tx) => {
-      const ref = doc(db, COLLECTION, id);
-      const snap = await tx.get(ref);
-      const data = snap.exists() ? (snap.data() as Record<string, unknown>) : {};
-      const currentStock = typeof data.stock === 'number' ? data.stock : 0;
-      const threshold = typeof data.lowStockThreshold === 'number' ? data.lowStockThreshold : 1;
-      // Read fresh on every attempt: Firestore re-runs this callback when the document
-      // moves underneath it, and a list carried over from the last attempt would be stale.
-      const stamped = Array.isArray(data.appliedStockKeys) ? (data.appliedStockKeys as unknown[]) : [];
-
-      if (replayKey && stamped.includes(replayKey)) {
-        return {
-          previousStock: currentStock,
-          stock: currentStock,
-          stockStatus: computeStockStatus(currentStock, threshold),
-        };
-      }
-
-      // Atomic oversell guard: for sale checkouts (throwOnOversell=true), throw if the
-      // server stock is insufficient so both debt and invoice are blocked before they write.
-      // For write-offs and manual adjustments the old Math.max clamping still applies.
-      if (throwOnOversell && delta < 0 && currentStock + delta < 0) {
-        throw new Error(`INSUFFICIENT_STOCK:${id}:requested=${Math.abs(delta)}:available=${currentStock}`);
-      }
-      const nextStock = Math.max(0, currentStock + delta);
-      const stockStatus = computeStockStatus(nextStock, threshold);
-      tx.update(ref, {
-        stock: nextStock,
-        stockStatus,
-        ...(replayKey
-          ? { appliedStockKeys: [...stamped, replayKey].slice(-STOCK_REPLAY_KEYS_KEPT) }
-          : {}),
-      });
-      return { previousStock: currentStock, stock: nextStock, stockStatus };
-    }),
-    STOCK_TX_TIMEOUT_MS,
-    'stockTransaction'
-  );
+  replayKey: string,
+): Promise<{ previousStock: number; stock: number; stockStatus: StockStatus }> => {
+  if (!Number.isSafeInteger(delta) || !replayKey?.trim()) throw new Error('A stock movement needs an integer delta and a stable operation ID.');
+  return runTransaction(db, async tx => {
+    const ref = doc(db, COLLECTION, id);
+    const receiptRef = doc(db, 'operation_receipts', `stock_${encodeURIComponent(replayKey)}`);
+    const snap = await tx.get(ref);
+    const receipt = await tx.get(receiptRef);
+    if (!snap.exists()) throw new Error(`Product no longer exists: ${id}`);
+    const data = snap.data();
+    const currentStock = data.stock;
+    if (!Number.isSafeInteger(currentStock) || currentStock < 0) throw new Error(`Invalid stock balance: ${id}`);
+    const threshold = typeof data.lowStockThreshold === 'number' ? data.lowStockThreshold : 1;
+    if (receipt.exists()) {
+      if (receipt.data().productId !== id || receipt.data().delta !== delta) throw new Error('This stock operation ID already names a different movement.');
+      return { previousStock: currentStock, stock: currentStock, stockStatus: computeStockStatus(currentStock, threshold) };
+    }
+    // Keep recognizing existing queued movements written by older builds.
+    const adopted = Array.isArray(data.appliedStockKeys) && data.appliedStockKeys.includes(replayKey);
+    const nextStock = adopted ? currentStock : Math.max(0, currentStock + delta);
+    if (!Number.isSafeInteger(nextStock)) throw new Error(`Invalid stock balance: ${id}`);
+    const stockStatus = computeStockStatus(nextStock, threshold);
+    if (!adopted) tx.update(ref, { stock: nextStock, stockStatus });
+    tx.set(receiptRef, { kind: 'stock', productId: id, delta, previousStock: currentStock, stock: nextStock, createdAt: new Date().toISOString() });
+    return { previousStock: currentStock, stock: nextStock, stockStatus };
+  });
+};
 
 /** A sale's shelf movement needs a wider budget than one product: it reads the invoice
  *  and every line it carries before it can commit. */
@@ -245,6 +201,7 @@ export const commitSaleStockEffects = async (
         return;
       }
 
+      const stockWrites: { ref: ReturnType<typeof doc>; stock: number; stockStatus: StockStatus }[] = [];
       for (const { productId, delta } of deltas) {
         let ref = doc(db, COLLECTION, productId);
         let snap = await tx.get(ref);
@@ -261,10 +218,13 @@ export const commitSaleStockEffects = async (
         const threshold = typeof data.lowStockThreshold === 'number' ? data.lowStockThreshold : 1;
         const stock = Math.max(0, previousStock + delta);
         const stockStatus = computeStockStatus(stock, threshold);
-        tx.update(ref, { stock, stockStatus });
+        stockWrites.push({ ref, stock, stockStatus });
         applied.push({ productId, previousStock, stock, stockStatus });
       }
 
+      for (const { ref, stock, stockStatus } of stockWrites) {
+        tx.update(ref, { stock, stockStatus });
+      }
       tx.update(saleRef, { stockApplied: true });
     }),
     SALE_STOCK_TX_TIMEOUT_MS,
@@ -477,25 +437,16 @@ export const inventoryService = {
       ? { ...existing, stock: newStock, stockStatus }
       : ({ id, stock: newStock, stockStatus, name: 'Product' } as PhoneModel);
 
-    // Update local storage mirror immediately
+    if (!Number.isSafeInteger(delta)) throw new Error('A stock movement needs an integer delta.');
+    const replayKey = newIdempotencyKey('tx');
+    // Persist before submission so restarting during a commit cannot lose its identity.
+    savePendingStockAdjustments([
+      ...getPendingStockAdjustments(),
+      { id: replayKey, productId: id, delta, newStock, mode: 'relative', timestamp: new Date().toISOString() },
+    ]);
     saveLocalInventory(local.map(p => p.id === id ? updatedLocal : p));
 
-    // Minted before the attempt, not at the replay: the transaction stamps this key on the
-    // product, so a commit the till never heard about is recognised when the queue resends it.
-    const replayKey = newIdempotencyKey('tx');
-
-    // One entry per movement. Folding two deltas for the same product into one entry leaves
-    // a single key naming both, and the replay cannot tell the one the server already took
-    // from the one it never saw.
-    const queueRelativeAdjustment = (): void => {
-      savePendingStockAdjustments([
-        ...getPendingStockAdjustments(),
-        { id: replayKey, productId: id, delta, newStock, mode: 'relative', timestamp: new Date().toISOString() }
-      ]);
-    };
-
     if (isLocalOnlyTarget(id)) {
-      queueRelativeAdjustment();
       return { updated: updatedLocal, previousStock: currentStock, atomic: false };
     }
 
@@ -503,56 +454,12 @@ export const inventoryService = {
       const authoritative = await commitStockDelta(id, delta, replayKey);
       const reconciled: PhoneModel = { ...updatedLocal, stock: authoritative.stock, stockStatus: authoritative.stockStatus };
       saveLocalInventory(getLocalInventory().map(p => (p.id === id ? reconciled : p)));
+      savePendingStockAdjustments(getPendingStockAdjustments().filter(entry => entry.id !== replayKey));
       return { updated: reconciled, previousStock: authoritative.previousStock, atomic: true };
     } catch (err) {
       console.warn(`Firestore applyStockDelta failed for ${id}, queued for sync:`, err);
-      queueRelativeAdjustment();
       return { updated: updatedLocal, previousStock: currentStock, atomic: false };
     }
-  },
-
-  /**
-   * Like applyStockDelta but intended for point-of-sale checkouts. Passes
-   * `throwOnOversell=true` to commitStockDelta so the Firestore transaction
-   * rejects the write atomically when stock is insufficient, and re-throws
-   * INSUFFICIENT_STOCK errors instead of falling back to the offline queue.
-   */
-  applyStockDeltaForSale: async (
-    id: string,
-    delta: number
-  ): Promise<{ updated: PhoneModel; previousStock: number; atomic: boolean }> => {
-    const local = getLocalInventory();
-    const existing = local.find(p => p.id === id);
-    const currentStock = existing?.stock ?? 0;
-    const newStock = Math.max(0, currentStock + delta);
-    const threshold = existing?.lowStockThreshold ?? 1;
-    const stockStatus = computeStockStatus(newStock, threshold);
-    const updatedLocal: PhoneModel = existing
-      ? { ...existing, stock: newStock, stockStatus }
-      : ({ id, stock: newStock, stockStatus, name: 'Product' } as PhoneModel);
-
-    saveLocalInventory(local.map(p => p.id === id ? updatedLocal : p));
-
-    const replayKey = newIdempotencyKey('tx');
-
-    const queueRelativeAdjustment = (): void => {
-      savePendingStockAdjustments([
-        ...getPendingStockAdjustments(),
-        { id: replayKey, productId: id, delta, newStock, mode: 'relative', timestamp: new Date().toISOString() }
-      ]);
-    };
-
-    if (isLocalOnlyTarget(id)) {
-      queueRelativeAdjustment();
-      return { updated: updatedLocal, previousStock: currentStock, atomic: false };
-    }
-
-    // throwOnOversell=true: an INSUFFICIENT_STOCK error from the Firestore transaction
-    // propagates up and aborts the entire checkout before debt or invoice are created.
-    const authoritative = await commitStockDelta(id, delta, replayKey, true);
-    const reconciled: PhoneModel = { ...updatedLocal, stock: authoritative.stock, stockStatus: authoritative.stockStatus };
-    saveLocalInventory(getLocalInventory().map(p => (p.id === id ? reconciled : p)));
-    return { updated: reconciled, previousStock: authoritative.previousStock, atomic: true };
   },
 
   adjustStockAsync: async (id: string, delta: number): Promise<PhoneModel> => {

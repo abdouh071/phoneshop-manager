@@ -57,7 +57,9 @@
     "signIn": "دخول",
     "showPassword": "إظهار كلمة المرور",
     "staysSignedIn": "يبقى هذا الهاتف تسجيل دخولك، ويمكنك طلب البصمة بدلاً من ذلك.",
-    "poweredBy": "مدعوم من Auto-Manager"
+    "poweredBy": "مدعوم من Auto-Manager",
+    "signInBiometrics": "تسجيل الدخول بالبصمة",
+    "orPassword": "أو تسجيل الدخول بكلمة المرور"
   },
   "sidebar": {
     "mainMenu": "القائمة الرئيسية",
@@ -115,14 +117,38 @@
     "totalCount": "المجموع",
     "loadError": "فشل تحميل التذاكر.",
     "empty": {
-      "all": { "title": "كل شيء منجز!", "sub": "لا توجد تذاكر إصلاح بعد." },
-      "my_repairs": { "title": "لا شيء مسند إليك", "sub": "لا توجد تذاكر مسندة إليك حالياً." },
-      "others_repairs": { "title": "لا إصلاحات للآخرين", "sub": "لا تذاكر مسندة إلى تقنيين آخرين." },
-      "unassigned": { "title": "كلها مسندة!", "sub": "كل تذكرة لها تقني." },
-      "pending": { "title": "لا تذاكر معلقة", "sub": "تم استلام جميع التذاكر." },
-      "in_progress": { "title": "لا إصلاح جارٍ", "sub": "لا توجد إصلاحات نشطة حالياً." },
-      "ready": { "title": "لا تذاكر جاهزة", "sub": "لا شيء بانتظار استلام العميل." },
-      "other": { "title": "لا توجد تذاكر", "sub": "لا توجد تذاكر مطابقة لهذا الفلتر." }
+      "all": {
+        "title": "كل شيء منجز!",
+        "sub": "لا توجد تذاكر إصلاح بعد."
+      },
+      "my_repairs": {
+        "title": "لا شيء مسند إليك",
+        "sub": "لا توجد تذاكر مسندة إليك حالياً."
+      },
+      "others_repairs": {
+        "title": "لا إصلاحات للآخرين",
+        "sub": "لا تذاكر مسندة إلى تقنيين آخرين."
+      },
+      "unassigned": {
+        "title": "كلها مسندة!",
+        "sub": "كل تذكرة لها تقني."
+      },
+      "pending": {
+        "title": "لا تذاكر معلقة",
+        "sub": "تم استلام جميع التذاكر."
+      },
+      "in_progress": {
+        "title": "لا إصلاح جارٍ",
+        "sub": "لا توجد إصلاحات نشطة حالياً."
+      },
+      "ready": {
+        "title": "لا تذاكر جاهزة",
+        "sub": "لا شيء بانتظار استلام العميل."
+      },
+      "other": {
+        "title": "لا توجد تذاكر",
+        "sub": "لا توجد تذاكر مطابقة لهذا الفلتر."
+      }
     }
   },
   "ticketDetail": {
@@ -195,7 +221,19 @@
     "fullySettled": "تم تسديده بالكامل. لا يوجد دين.",
     "notesLabel": "ملاحظات التسوية (اختياري)",
     "notesPlaceholder": "مثال: دفع نقدا",
-    "completeHandover": "إتمام التسليم"
+    "completeHandover": "إتمام التسليم",
+    "assignedTech": "الفني المعيّن",
+    "changeTech": "تغيير",
+    "assignedToDevice": "مسند لهذا الجهاز",
+    "tapToAssign": "اضغط لتعيين فني",
+    "noTechAssigned": "غير معيّن",
+    "assignTechTitle": "تعيين فني",
+    "assignTechSub": "اختر عضو من فريق الإصلاح أو اترك دون تعيين.",
+    "unassigned": "غير معيّن",
+    "clearAssignment": "إلغاء التعيين",
+    "techUpdatedTitle": "تم تحديث الفني",
+    "techAssignedBody": "{{name}} مُعيَّن الآن لهذا الإصلاح.",
+    "techUnassignedBody": "التذكرة غير مُعيَّنة الآن."
   },
   "newTicket": {
     "remarksPlaceholder": "مثال: ظهر مخدوش، درج الشريحة مفقود، مؤشر الماء وردي",
@@ -242,7 +280,12 @@
     "security": "الأمان",
     "biometricTitle": "فتح القفل بالبصمة",
     "biometricBody": "يبقى هذا الهاتف مسجّلًا بالدخول، ويطلب بصمتك أو وجهك بعد نحو ٥ دقائق من الابتعاد.",
-    "biometricUnavailable": "لا توجد بصمة أو تعريف وجه على هذا الهاتف، فلا شيء ليُطلب."
+    "biometricUnavailable": "لا توجد بصمة أو تعريف وجه على هذا الهاتف، فلا شيء ليُطلب.",
+    "biometricSetupNotice": "قم بإعداده عند تسجيل الدخول — سجّل خروجاً ثم دخولاً لتسجيل البصمة.",
+    "biometricLoginEnabled": "تسجيل الدخول بالبصمة مفعّل",
+    "biometricLoginDisabled": "تسجيل الدخول بالبصمة معطّل",
+    "disableBiometrics": "تعطيل البصمة",
+    "enableBiometrics": "تفعيل تسجيل الدخول بالبصمة"
   },
   "ticket": {
     "repairTicket": "تذكرة تصليح",
@@ -380,7 +423,7 @@
     "noProductsSearch": "لا توجد منتجات مطابقة لبحثك.",
     "addFirstProduct": "أضف أول منتج في المخزون من الأسفل.",
     "addProduct": "إضافة منتج",
-    "adjust":     {
+    "adjust": {
       "title": "تعديل كمية المخزون",
       "currentStock": "المخزون الحالي:",
       "units": "{{units}} وحدة",
@@ -392,21 +435,21 @@
       "unconfirmed": "لم يجب الخادم في الوقت المحدد. قد يكون العدد محفوظًا بالفعل — تحقق من المنتج قبل إدخاله مرة أخرى.",
       "submit": "تحديث المخزون ({{units}} وحدة)"
     },
-    "reasons":     {
+    "reasons": {
       "restock": "إعادة تعبئة / وصول شحنة",
       "return": "إرجاع أو استبدال من العميل",
       "count": "تصحيح جرد المخزون",
       "damaged": "تالف / معيب",
       "shrinkage": "ضياع / عجز"
     },
-    "category":     {
+    "category": {
       "accessory": "إكسسوار",
       "smartphone": "هاتف",
       "tablet": "لوحي",
       "repair_part": "قطعة غيار",
       "wearable": "قابل للارتداء"
     },
-    "add":     {
+    "add": {
       "title": "إضافة منتج جديد",
       "name": "اسم المنتج *",
       "namePlaceholder": "مثال: غلاف سيليكون iPhone 15",
@@ -419,16 +462,38 @@
       "lowStockAlert": "تنبيه المخزون المنخفض",
       "barcode": "باركود / SKU (اختياري)",
       "barcodePlaceholder": "يُنشأ تلقائياً إذا كان فارغاً",
-      "save": "حفظ المنتج في المخزون"
+      "save": "حفظ المنتج في المخزون",
+      "partName": "اسم القطعة *",
+      "partNamePlaceholder": "مثال: شاشة iPhone 12 OLED",
+      "compatibleModel": "الموديل المتوافق",
+      "compatibleModelPlaceholder": "مثال: iPhone 12 / 12 Pro",
+      "partSkuPlaceholder": "PRT-xxxxxx تلقائي إذا تُرك فارغاً"
     },
-    "edit":     {
+    "edit": {
       "title": "تعديل أسعار المنتج",
       "threshold": "حد تنبيه المخزون المنخفض",
       "reasonForAdmin": "لماذا؟ يُرسل للمدير (اختياري)",
       "reasonPlaceholder": "مثال: المورّد رفع التكلفة",
       "save": "حفظ التغييرات",
       "askAdmin": "اطلب موافقة مدير"
-    }
+    },
+    "modeProducts": "المنتجات",
+    "modeParts": "قطع الغيار",
+    "partsTitle": "مخزون قطع الغيار",
+    "partsAll": "جميع القطع",
+    "partsScreens": "شاشات / LCD",
+    "partsBatteries": "بطاريات",
+    "partsPorts": "منافذ الشحن",
+    "partsCameras": "كاميرات",
+    "partsOther": "قطع أخرى",
+    "searchPartsPlaceholder": "ابحث عن قطعة، نموذج، موقع...",
+    "addPartTitle": "إضافة قطعة غيار",
+    "addPart": "إضافة قطعة غيار",
+    "savePart": "حفظ القطعة",
+    "noPartsFound": "لا توجد قطع غيار",
+    "addFirstPart": "أضف أول قطعة غيار أدناه.",
+    "partCreated": "تمت إضافة القطعة",
+    "catWearables": "الأجهزة القابلة للارتداء"
   },
   "pos": {
     "outOfStockBody": "لا توجد وحدات متاحة من {{name}}.",
@@ -703,6 +768,8 @@
     "notMatched": "لم يتم التعرّف عليها. حاول مجددًا.",
     "usePassword": "الدخول بكلمة المرور بدلاً من ذلك",
     "enablePrompt": "أكّد بصمتك أو وجهك لتفعيل هذا",
-    "enableFailed": "لم يقبل الهاتف البصمة."
+    "enableFailed": "لم يقبل الهاتف البصمة.",
+    "registerTitle": "تفعيل تسجيل الدخول بالبصمة؟",
+    "registerMessage": "استخدم بصمتك أو وجهك لتسجيل الدخول في المرة القادمة دون إدخال كلمة المرور."
   }
 }

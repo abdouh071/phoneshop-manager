@@ -175,8 +175,31 @@ export const InventoryPage = () => {
     });
   }, [roleFilteredProducts, debouncedSearchQuery, statusFilter, categoryFilter, subCategoryFilter]);
 
-  const lowStockCount = useMemo(() => {
-    return roleFilteredProducts.filter(p => isLowStock(p)).length;
+  const outOfStockCount = useMemo(() => {
+    return roleFilteredProducts.filter(p => p.stock === 0 || p.stockStatus === 'out_of_stock').length;
+  }, [roleFilteredProducts]);
+
+  const lowStockOnlyCount = useMemo(() => {
+    return roleFilteredProducts.filter(p => isLowStock(p) && p.stock > 0).length;
+  }, [roleFilteredProducts]);
+
+  // Top 2 most critical items for the banner (out of stock first, then highest deficit)
+  const topCriticalItems = useMemo(() => {
+    const critical = roleFilteredProducts
+      .filter(p => p.stock === 0 || p.stockStatus === 'out_of_stock')
+      .slice(0, 2);
+    if (critical.length < 2) {
+      const lowOnly = roleFilteredProducts
+        .filter(p => isLowStock(p) && p.stock > 0)
+        .sort((a, b) => {
+          const defA = (a.lowStockThreshold || 1) - a.stock;
+          const defB = (b.lowStockThreshold || 1) - b.stock;
+          return defB - defA;
+        })
+        .slice(0, 2 - critical.length);
+      return [...critical, ...lowOnly];
+    }
+    return critical;
   }, [roleFilteredProducts]);
 
   const sortedGroups = useMemo(() => {
@@ -338,35 +361,69 @@ export const InventoryPage = () => {
       <WriteOffModal product={writeOffProduct} onClose={() => setWriteOffProduct(null)} />
       <BulkImportModal isOpen={isBulkImportOpen} onClose={() => setIsBulkImportOpen(false)} />
 
-      {/* Warning Banner with 1-Click Action */}
-      {lowStockCount > 0 && (
-        <div className={styles.warningBanner}>
-          <div className={styles.warningLeft}>
-            <AlertTriangle size={18} />
-            <span><strong>Attention Needed:</strong> {lowStockCount} products are running low on stock or sold out.</span>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <button
-              type="button"
-              className={styles.warningActionBtn}
-              onClick={() => {
-                setStatusFilter(statusFilter === 'low_stock' ? 'all' : 'low_stock');
-                setCurrentPage(1);
-              }}
-            >
-              {statusFilter === 'low_stock' ? 'Show All Products' : 'Filter Low Stock'}
-            </button>
-            <button
-              type="button"
-              className={styles.warningActionBtn}
-              onClick={() => handleOpenExportLowStock()}
-              style={{ background: '#d97706', borderColor: '#d97706', color: '#ffffff' }}
-              title="Export low stock products with category filters"
-            >
-              <FileSpreadsheet size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
-              Export Low Stock
-            </button>
-          </div>
+      {/* Professional 2-Tier Stock Alert Banner */}
+      {(outOfStockCount > 0 || lowStockOnlyCount > 0) && (
+        <div className={styles.stockAlertBanner}>
+          {/* Critical row — out of stock */}
+          {outOfStockCount > 0 && (
+            <div className={styles.stockAlertRow} style={{ background: 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)', borderColor: '#fca5a5' }}>
+              <div className={styles.stockAlertLeft}>
+                <XCircle size={16} style={{ color: '#dc2626', flexShrink: 0 }} />
+                <span style={{ color: '#991b1b', fontWeight: 700, fontSize: '13px' }}>
+                  CRITICAL — {outOfStockCount} item{outOfStockCount !== 1 ? 's' : ''} out of stock
+                </span>
+                {topCriticalItems.filter(p => p.stock === 0 || p.stockStatus === 'out_of_stock').map(p => (
+                  <span key={p.id} style={{ fontSize: '12px', color: '#b91c1c', background: '#fecaca', padding: '1px 7px', borderRadius: '8px', fontWeight: 600 }}>
+                    {p.name} {p.model}
+                  </span>
+                ))}
+              </div>
+              <button
+                type="button"
+                className={styles.alertActionBtn}
+                style={{ background: '#dc2626', borderColor: '#dc2626', color: '#fff' }}
+                onClick={() => { setStatusFilter('out_of_stock'); setCurrentPage(1); }}
+              >
+                View Critical →
+              </button>
+            </div>
+          )}
+
+          {/* Warning row — low stock (stock > 0 but ≤ threshold) */}
+          {lowStockOnlyCount > 0 && (
+            <div className={styles.stockAlertRow} style={{ background: 'linear-gradient(135deg, #fefce8 0%, #fef3c7 100%)', borderColor: '#fde68a' }}>
+              <div className={styles.stockAlertLeft}>
+                <AlertTriangle size={16} style={{ color: '#d97706', flexShrink: 0 }} />
+                <span style={{ color: '#92400e', fontWeight: 700, fontSize: '13px' }}>
+                  LOW STOCK — {lowStockOnlyCount} item{lowStockOnlyCount !== 1 ? 's' : ''} need reorder
+                </span>
+                {topCriticalItems.filter(p => p.stock > 0 && isLowStock(p)).map(p => (
+                  <span key={p.id} style={{ fontSize: '12px', color: '#92400e', background: '#fde68a', padding: '1px 7px', borderRadius: '8px', fontWeight: 600 }}>
+                    {p.name} {p.model} ({p.stock} left)
+                  </span>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  type="button"
+                  className={styles.alertActionBtn}
+                  style={{ background: '#fff', borderColor: '#d97706', color: '#92400e' }}
+                  onClick={() => { setStatusFilter('low_stock'); setCurrentPage(1); }}
+                >
+                  View Low Stock
+                </button>
+                <button
+                  type="button"
+                  className={styles.alertActionBtn}
+                  style={{ background: '#d97706', borderColor: '#d97706', color: '#fff' }}
+                  onClick={() => handleOpenExportLowStock()}
+                >
+                  <FileSpreadsheet size={13} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                  Export Report
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -504,28 +561,28 @@ export const InventoryPage = () => {
         <div
           className={[styles.summaryCard, statusFilter === 'low_stock' && styles.summaryCardActive].filter(Boolean).join(' ')}
           onClick={() => { setStatusFilter(statusFilter === 'low_stock' ? 'all' : 'low_stock'); setCurrentPage(1); }}
-          title="Click to filter Low Stock"
+          title="Click to filter: Needs Reorder (stock > 0 but ≤ threshold)"
         >
           <div className={styles.summaryCardTop}>
-            <span className={styles.summaryLabel}>Low Stock</span>
+            <span className={styles.summaryLabel}>Needs Reorder</span>
             <div className={[styles.summaryIconWrap, styles.iconLowStock].join(' ')}><AlertCircle size={16} /></div>
           </div>
           <p className={styles.summaryValue} style={{ color: '#d97706' }}>
-            {roleFilteredProducts.filter(p => isLowStock(p)).length}
+            {lowStockOnlyCount}
           </p>
         </div>
 
         <div
           className={[styles.summaryCard, statusFilter === 'out_of_stock' && styles.summaryCardActive].filter(Boolean).join(' ')}
           onClick={() => { setStatusFilter(statusFilter === 'out_of_stock' ? 'all' : 'out_of_stock'); setCurrentPage(1); }}
-          title="Click to filter Out of Stock"
+          title="Click to filter Out of Stock (Critical)"
         >
           <div className={styles.summaryCardTop}>
             <span className={styles.summaryLabel}>Out of Stock</span>
             <div className={[styles.summaryIconWrap, styles.iconOutStock].join(' ')}><XCircle size={16} /></div>
           </div>
           <p className={styles.summaryValue} style={{ color: '#dc2626' }}>
-            {roleFilteredProducts.filter(p => p.stockStatus === 'out_of_stock').length}
+            {outOfStockCount}
           </p>
         </div>
 

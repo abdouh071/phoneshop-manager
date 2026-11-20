@@ -8,4 +8,4 @@ if ! java -version >/dev/null 2>&1; then
     fi
   done
 fi
-exec firebase emulators:exec --only firestore --project demo-phoneshop-rules "node scripts/verify-firestore-rules.mjs"
+exec firebase emulators:exec --only firestore --project demo-phoneshop-rules "node scripts/verify-firestore-rules.mjs && npm test -- src/services/financialEmulator.test.ts"

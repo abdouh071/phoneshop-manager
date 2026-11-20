@@ -1,38 +1,52 @@
 /**
- * A device lock for a phone that now remembers who signed in.
+ * Device lock and biometric login management.
  *
- * The flag lives in AsyncStorage, never in the Firestore profile: it belongs to
- * the hands holding the phone, not to the account, and two technicians sharing a
- * counter phone can each decide for their own device. Nothing biometric is read
- * or stored here — the operating system answers yes or no.
+ * Biometrics are used for quick and secure login (signing in easily next time if you
+ * log out or reinstall) rather than blocking the user on every app launch.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
+import { Alert } from 'react-native';
 import { create } from 'zustand';
 import i18n from '../i18n';
-import { biometricLockAvailable, lockDueAfterPause } from '../utils/deviceLock';
-import { useAuthStore } from './authStore';
+import { biometricLockAvailable } from '../utils/deviceLock';
 
 const REQUIRED_KEY = '@lock_biometric_required';
 const LEFT_AT_KEY = '@lock_last_left_at';
+const BIOMETRIC_LOGIN_KEY = '@biometric_login_enabled';
+const BIOMETRIC_CREDS_KEY = '@biometric_login_creds';
+const BIOMETRIC_PROMPT_DONE_KEY = '@biometric_prompt_done';
+
+export interface BiometricCredentials {
+  email: string;
+  password?: string;
+  name?: string;
+  savedAt: string;
+}
 
 interface LockState {
-  /** This phone asks for a biometric when the app comes back to life. */
   required: boolean;
-  /** The phone can honour the setting: sensor present, biometric enrolled. */
   canEnable: boolean;
   isLocked: boolean;
-  /** The native prompt is on screen; the unlock button must not double-fire. */
   isAuthenticating: boolean;
   error: string | null;
+  // Biometric Login State
+  isBiometricLoginEnabled: boolean;
+  savedBiometricEmail: string | null;
+  savedBiometricName: string | null;
   hydrate: (hadRestoredSession: boolean) => Promise<void>;
   refreshAvailability: () => Promise<void>;
   setRequired: (on: boolean) => Promise<boolean>;
   markLeft: () => Promise<void>;
   markReturned: () => Promise<void>;
-  /** Signing off always ends the lock — the login screen must be reachable. */
   clearLock: () => void;
   unlock: () => Promise<boolean>;
+  // Biometric Login Methods
+  registerBiometrics: (email: string, password: string, name?: string) => Promise<boolean>;
+  disableBiometrics: () => Promise<void>;
+  promptRegisterBiometricsIfNeeded: (email: string, password: string, name?: string) => Promise<void>;
+  getBiometricCredentials: () => Promise<BiometricCredentials | null>;
+  authenticateForLogin: () => Promise<BiometricCredentials | null>;
 }
 
 const readRequired = async (): Promise<boolean> => {
@@ -45,8 +59,6 @@ const askPhone = async (promptMessage: string): Promise<boolean> => {
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage,
       cancelLabel: i18n.t('common.cancel', 'Cancel'),
-      // The device PIN is not what this is asking for; the way out is our own
-      // "sign in with a password" button, which says what it costs.
       disableDeviceFallback: true,
       biometricsSecurityLevel: 'strong',
     });
@@ -56,11 +68,6 @@ const askPhone = async (promptMessage: string): Promise<boolean> => {
   }
 };
 
-/**
- * Whether this phone could honour the setting. A build that predates the native
- * module, or a ROM that refuses the query, answers "no" rather than throwing —
- * the alternative is an app that cannot open its own Settings screen.
- */
 const probeAvailability = async (): Promise<boolean> => {
   try {
     const [hasSensor, hasEnrolled] = await Promise.all([
@@ -79,27 +86,48 @@ export const useLockStore = create<LockState>((set, get) => ({
   isLocked: false,
   isAuthenticating: false,
   error: null,
+  isBiometricLoginEnabled: false,
+  savedBiometricEmail: null,
+  savedBiometricName: null,
 
-  // Runs once, when Firebase has said whether a session came back. A technician
-  // who just typed their password is not asked for a fingerprint as well.
-  hydrate: async (hadRestoredSession) => {
-    const [required, canEnable] = await Promise.all([readRequired(), probeAvailability()]);
-    // A phone that lost its enrolled fingerprint mid-week must not lock its own
-    // user out of the till; the setting dies with the biometric instead.
-    if (required && !canEnable) {
-      await AsyncStorage.removeItem(REQUIRED_KEY).catch(() => undefined);
-      set({ required: false, canEnable, isLocked: false });
-      return;
+  // Hydrate settings without locking out the user on normal app open.
+  hydrate: async (_hadRestoredSession) => {
+    const [canEnable, bioEnabledRaw, credsRaw] = await Promise.all([
+      probeAvailability(),
+      AsyncStorage.getItem(BIOMETRIC_LOGIN_KEY).catch(() => null),
+      AsyncStorage.getItem(BIOMETRIC_CREDS_KEY).catch(() => null),
+    ]);
+
+    let savedEmail: string | null = null;
+    let savedName: string | null = null;
+    if (credsRaw) {
+      try {
+        const parsed = JSON.parse(credsRaw) as BiometricCredentials;
+        savedEmail = parsed.email || null;
+        savedName = parsed.name || null;
+      } catch {
+        // ignore malformed
+      }
     }
-    set({ required, canEnable, isLocked: required && hadRestoredSession });
+
+    const isBiometricLoginEnabled = bioEnabledRaw === '1' && canEnable && Boolean(savedEmail);
+
+    // Keep isLocked false on startup so active sessions enter smoothly without
+    // annoying the user with biometric prompt on every single launch.
+    set({
+      required: false,
+      canEnable,
+      isLocked: false,
+      isBiometricLoginEnabled,
+      savedBiometricEmail: savedEmail,
+      savedBiometricName: savedName,
+    });
   },
 
   refreshAvailability: async () => {
     set({ canEnable: await probeAvailability() });
   },
 
-  // Turning it on is itself proof that the phone answers, so a half-configured
-  // device cannot lock its owner out on the next cold start.
   setRequired: async (on) => {
     if (on) {
       const confirmed = await askPhone(i18n.t('lock.enablePrompt', 'Confirm your fingerprint or face to turn this on'));
@@ -118,17 +146,10 @@ export const useLockStore = create<LockState>((set, get) => ({
   },
 
   markReturned: async () => {
-    if (!get().required) return;
-    const raw = await AsyncStorage.getItem(LEFT_AT_KEY).catch(() => null);
+    // Opening the app or switching back from background does NOT lock the app.
     await AsyncStorage.removeItem(LEFT_AT_KEY).catch(() => undefined);
-    const lastLeftAt = raw === null ? null : Number(raw);
-    const signedIn = useAuthStore.getState().isAuthenticated;
-    if (signedIn && lockDueAfterPause(lastLeftAt, Date.now())) set({ isLocked: true });
   },
 
-  // A signed-out phone has nothing to protect. Whichever way the session ended
-  // — this overlay's link, the Settings button, an expired credential — the
-  // login screen has to be visible.
   clearLock: () => {
     set({ isLocked: false, isAuthenticating: false, error: null });
   },
@@ -144,5 +165,108 @@ export const useLockStore = create<LockState>((set, get) => ({
     }
     set({ isAuthenticating: false, error: i18n.t('lock.notMatched', 'That did not match. Try again.') });
     return false;
+  },
+
+  // Register biometrics for login
+  registerBiometrics: async (email: string, password: string, name?: string) => {
+    const canEnable = await probeAvailability();
+    if (!canEnable) {
+      set({ error: i18n.t('lock.unavailable', 'Biometrics not available on this device.') });
+      return false;
+    }
+
+    const confirmed = await askPhone(i18n.t('lock.registerPrompt', 'Verify your fingerprint or face to register biometric login'));
+    if (!confirmed) {
+      set({ error: i18n.t('lock.enableFailed', 'Your phone did not accept the biometric.') });
+      return false;
+    }
+
+    const creds: BiometricCredentials = {
+      email: email.trim(),
+      password,
+      name,
+      savedAt: new Date().toISOString(),
+    };
+
+    await Promise.all([
+      AsyncStorage.setItem(BIOMETRIC_CREDS_KEY, JSON.stringify(creds)),
+      AsyncStorage.setItem(BIOMETRIC_LOGIN_KEY, '1'),
+      AsyncStorage.setItem(BIOMETRIC_PROMPT_DONE_KEY, '1'),
+    ]).catch(() => undefined);
+
+    set({
+      isBiometricLoginEnabled: true,
+      savedBiometricEmail: creds.email,
+      savedBiometricName: creds.name || null,
+      error: null,
+    });
+
+    return true;
+  },
+
+  disableBiometrics: async () => {
+    await Promise.all([
+      AsyncStorage.removeItem(BIOMETRIC_CREDS_KEY),
+      AsyncStorage.setItem(BIOMETRIC_LOGIN_KEY, '0'),
+    ]).catch(() => undefined);
+
+    set({
+      isBiometricLoginEnabled: false,
+      savedBiometricEmail: null,
+      savedBiometricName: null,
+    });
+  },
+
+  promptRegisterBiometricsIfNeeded: async (email: string, password: string, name?: string) => {
+    const canEnable = await probeAvailability();
+    if (!canEnable) return;
+
+    const [alreadyPrompted, alreadyEnabled] = await Promise.all([
+      AsyncStorage.getItem(BIOMETRIC_PROMPT_DONE_KEY).catch(() => null),
+      AsyncStorage.getItem(BIOMETRIC_LOGIN_KEY).catch(() => null),
+    ]);
+
+    if (alreadyPrompted === '1' || alreadyEnabled === '1') return;
+
+    Alert.alert(
+      i18n.t('lock.registerTitle', 'Enable Biometric Login?'),
+      i18n.t('lock.registerMessage', 'Would you like to register your fingerprint or face to quickly sign in next time if you log out?'),
+      [
+        {
+          text: i18n.t('common.later', 'Not Now'),
+          style: 'cancel',
+          onPress: () => {
+            void AsyncStorage.setItem(BIOMETRIC_PROMPT_DONE_KEY, '1');
+          },
+        },
+        {
+          text: i18n.t('common.enable', 'Enable'),
+          onPress: () => {
+            void get().registerBiometrics(email, password, name);
+          },
+        },
+      ]
+    );
+  },
+
+  getBiometricCredentials: async () => {
+    const raw = await AsyncStorage.getItem(BIOMETRIC_CREDS_KEY).catch(() => null);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as BiometricCredentials;
+    } catch {
+      return null;
+    }
+  },
+
+  authenticateForLogin: async () => {
+    const creds = await get().getBiometricCredentials();
+    if (!creds || !creds.email || !creds.password) return null;
+
+    const ok = await askPhone(i18n.t('lock.loginPrompt', 'Sign in with Biometrics'));
+    if (ok) {
+      return creds;
+    }
+    return null;
   },
 }));

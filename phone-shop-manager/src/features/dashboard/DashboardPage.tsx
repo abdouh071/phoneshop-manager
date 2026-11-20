@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   TrendingUp, TrendingDown, DollarSign,
   ShoppingBag, Wrench, AlertTriangle, CreditCard, Lock,
-  Plus, ArrowRight, Package, Smartphone, RefreshCw, Eye, CheckCircle2, ExternalLink, User
+  Plus, ArrowRight, Package, Smartphone, RefreshCw, Eye, ExternalLink, User
 } from 'lucide-react';
 import { Card, CardHeader } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -46,11 +46,12 @@ interface StatCardProps {
   subtext?: string;
   onClick?: () => void;
   linkLabel?: string;
+  className?: string;
 }
 
-const StatCard: React.FC<StatCardProps> = ({ label, value, change, icon, accent, subtext, onClick, linkLabel }) => (
+const StatCard: React.FC<StatCardProps> = ({ label, value, change, icon, accent, subtext, onClick, linkLabel, className }) => (
   <Card
-    className={[styles.statCard, accent && styles.accentCard, onClick && styles.statCardClickable].filter(Boolean).join(' ')}
+    className={[styles.statCard, accent && styles.accentCard, onClick && styles.statCardClickable, className].filter(Boolean).join(' ')}
     onClick={onClick}
   >
     <div className={styles.statTop}>
@@ -77,12 +78,23 @@ const StatCard: React.FC<StatCardProps> = ({ label, value, change, icon, accent,
   </Card>
 );
 
+/** Formats a number to a short abbreviated label (e.g. 12400 → "12.4k") */
+const shortNum = (n: number): string => {
+  if (n === 0) return '0';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(Math.round(n));
+};
+
 const MiniBarChart: React.FC<{ data: RevenueDataPoint[] }> = ({ data }) => {
   const max = Math.max(...data.map(d => d.revenue), 1);
   return (
     <div className={styles.barChart}>
       {data.map((d, i) => (
         <div key={i} className={styles.barGroup}>
+          <span className={[styles.barValueLabel, 'privacy-blur'].join(' ')}>
+            {d.revenue > 0 ? shortNum(d.revenue) : ''}
+          </span>
           <div className={styles.barWrapper}>
             <div
               className={[styles.bar, 'privacy-blur'].join(' ')}
@@ -168,7 +180,6 @@ export const DashboardPage = () => {
   const completedRepairs = useMemo(() => tickets.filter(t => isClaimedAndPaidRepair(t)), [tickets]);
 
   const todayTx = useMemo(() => activeInvoices.filter(t => isSameDay(t.date, today)), [activeInvoices, today]);
-  const yesterdayTx = useMemo(() => activeInvoices.filter(t => isSameDay(t.date, yesterday)), [activeInvoices, yesterday]);
 
   const startOfWeek = useMemo(() => { 
     const d = new Date(today); 
@@ -199,7 +210,6 @@ export const DashboardPage = () => {
 
   const todayRetailSalesRev = todayFigures.salesGrossRevenue;
   const todayPartsRev = todayFigures.partsRevenue;
-  const todaySalesRev = todayRetailSalesRev + todayPartsRev;
   const todayRepRev = todayFigures.repairsRevenue;
   const dailyRevenue = todayFigures.totalRevenue;
   const yesterdayRev = yesterdayFigures.totalRevenue;
@@ -222,10 +232,8 @@ export const DashboardPage = () => {
   }, [activeInvoices, completedRepairs, startOfMonth]);
 
   const unitsSoldToday = useMemo(() => Math.max(0, todayTx.reduce((s,t) => s + netUnitsSold(t.items), 0)), [todayTx]);
-  const unitsYesterday = useMemo(() => Math.max(0, yesterdayTx.reduce((s,t) => s + netUnitsSold(t.items), 0)), [yesterdayTx]);
 
   const revenueChange = yesterdayRev === 0 ? (dailyRevenue > 0 ? 100 : 0) : ((dailyRevenue-yesterdayRev)/yesterdayRev)*100;
-  const unitsSoldChange = unitsYesterday === 0 ? (unitsSoldToday > 0 ? 100 : 0) : ((unitsSoldToday-unitsYesterday)/unitsYesterday)*100;
 
   const activeRepairs = useMemo(() => tickets.filter(t => t.status === 'pending' || t.status === 'in_progress').length, [tickets]);
   const lowStockCount = useMemo(() => products.filter(p => p.stockStatus !== 'in_stock').length, [products]);
@@ -402,81 +410,227 @@ export const DashboardPage = () => {
         </div>
       )}
 
-      {/* Stat Cards */}
-      <div className={styles.statsGrid}>
-        <StatCard
-          accent
-          label={permissions.pos ? "Today's Total Revenue" : "Today's Repair Revenue"}
-          value={formatPrivateCurrency(permissions.pos ? (permissions.repairs ? dailyRevenue : todaySalesRev) : todayRepRev)}
-          change={revenueChange}
-          subtext={
-            permissions.pos && permissions.repairs
-              ? `Sales: ${formatPrivateCurrency(todayRetailSalesRev)} • Repairs: ${formatPrivateCurrency(todayRepRev)}${todayPartsRev > 0 ? ` • Parts: ${formatPrivateCurrency(todayPartsRev)}` : ''}`
-              : permissions.repairs
-                ? `${todayFigures.repairsRecognizedCount} repairs finished today`
-                : `${todayTx.length} completed sales`
-          }
-          icon={<DollarSign size={20} />}
-          onClick={permissions.pos ? () => navigate('/pos') : () => navigate('/repairs')}
-          linkLabel={permissions.pos ? 'Open POS' : 'Open Repairs'}
-        />
-        {(!isAnalyticsLocked || user?.role === 'admin') ? (
+      {/* ── TODAY'S INCOME SECTION ─────────────────────────── */}
+      <div>
+        <div className={styles.sectionHeader}>
+          <span className={styles.sectionTitle}>📈 Today's Income (Revenue)</span>
+          {revenueChange !== 0 && (
+            <span className={[styles.change, revenueChange >= 0 ? styles.changeUp : styles.changeDown].join(' ')}>
+              {revenueChange >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+              {Math.abs(revenueChange).toFixed(1)}% vs yesterday
+            </span>
+          )}
+        </div>
+
+        <div className={styles.heroBreakdownGrid}>
+          {/* Hero income card */}
           <StatCard
-            label={t('dashboard.netProfit', "Today's Net Profit")}
-            value={formatPrivateCurrency(todayNetProfit)}
+            accent
+            label="Total Income Today"
+            value={formatPrivateCurrency(dailyRevenue)}
             change={revenueChange}
-            subtext="Gross Revenue minus COGS"
-            icon={<TrendingUp size={20} />}
+            icon={<DollarSign size={20} />}
             onClick={() => navigate('/reports')}
             linkLabel="Full Report"
+            subtext={`${todayTx.length} sales · ${todayFigures.repairsRecognizedCount} repairs`}
           />
-        ) : permissions.pos ? (
-          <StatCard
-            label={t('dashboard.unitsSold', 'Units Sold Today')}
-            value={String(unitsSoldToday)}
-            change={unitsSoldChange}
-            subtext={`${todayTx.length} completed transactions`}
-            icon={<ShoppingBag size={20} />}
-            onClick={() => navigate('/pos')}
-            linkLabel="Open POS"
-          />
-        ) : (
-          <StatCard
-            label={t('dashboard.readyPickup', 'Ready for Pickup')}
-            value={String(tickets.filter(t => t.status === 'ready').length)}
-            subtext="Repairs awaiting collection"
-            icon={<CheckCircle2 size={20} />}
+
+          {/* 3 breakdown income cards */}
+          <div className={styles.breakdownGrid}>
+            {/* POS Sales */}
+            <Card
+              className={[styles.breakdownCard, styles.statCardClickable].join(' ')}
+              onClick={() => navigate('/pos')}
+            >
+              <div className={styles.breakdownCardTop}>
+                <div className={[styles.breakdownIcon, styles.breakdownIconSales].join(' ')}>
+                  <ShoppingBag size={16} />
+                </div>
+                <span style={{ fontSize: '10px', color: 'var(--color-primary)', opacity: 0.8, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                  Open POS <ExternalLink size={9} />
+                </span>
+              </div>
+              <p className={[styles.breakdownValue, 'privacy-blur'].join(' ')}>{formatPrivateCurrency(todayRetailSalesRev)}</p>
+              <p className={styles.breakdownLabel}>POS Sales</p>
+              <p className={styles.breakdownSub}>{todayTx.length} transaction{todayTx.length !== 1 ? 's' : ''} · {unitsSoldToday} units</p>
+            </Card>
+
+            {/* Repairs */}
+            {permissions.repairs ? (
+              <Card
+                className={[styles.breakdownCard, styles.statCardClickable].join(' ')}
+                onClick={() => navigate('/repairs')}
+              >
+                <div className={styles.breakdownCardTop}>
+                  <div className={[styles.breakdownIcon, styles.breakdownIconRepairs].join(' ')}>
+                    <Wrench size={16} />
+                  </div>
+                  <span style={{ fontSize: '10px', color: 'var(--color-primary)', opacity: 0.8, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                    View Board <ExternalLink size={9} />
+                  </span>
+                </div>
+                <p className={[styles.breakdownValue, 'privacy-blur'].join(' ')}>{formatPrivateCurrency(todayRepRev)}</p>
+                <p className={styles.breakdownLabel}>Repairs Income</p>
+                <p className={styles.breakdownSub}>{todayFigures.repairsRecognizedCount} repair{todayFigures.repairsRecognizedCount !== 1 ? 's' : ''} completed today</p>
+              </Card>
+            ) : (
+              <Card className={styles.breakdownCard}>
+                <div className={styles.breakdownCardTop}>
+                  <div className={[styles.breakdownIcon, styles.breakdownIconRepairs].join(' ')}><Wrench size={16} /></div>
+                </div>
+                <p className={[styles.breakdownValue, 'privacy-blur'].join(' ')}>—</p>
+                <p className={styles.breakdownLabel}>Repairs Income</p>
+                <p className={styles.breakdownSub}>No repair access</p>
+              </Card>
+            )}
+
+            {/* Parts B2B */}
+            {permissions.inventory_parts ? (
+              <Card
+                className={[styles.breakdownCard, styles.statCardClickable].join(' ')}
+                onClick={() => navigate('/parts')}
+              >
+                <div className={styles.breakdownCardTop}>
+                  <div className={[styles.breakdownIcon, styles.breakdownIconParts].join(' ')}>
+                    <Package size={16} />
+                  </div>
+                  <span style={{ fontSize: '10px', color: 'var(--color-primary)', opacity: 0.8, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                    View Parts <ExternalLink size={9} />
+                  </span>
+                </div>
+                <p className={[styles.breakdownValue, 'privacy-blur'].join(' ')}>{formatPrivateCurrency(todayPartsRev)}</p>
+                <p className={styles.breakdownLabel}>Parts B2B</p>
+                <p className={styles.breakdownSub}>{todayFigures.partsCount ?? 0} invoice{(todayFigures.partsCount ?? 0) !== 1 ? 's' : ''} today</p>
+              </Card>
+            ) : (
+              <Card className={styles.breakdownCard}>
+                <div className={styles.breakdownCardTop}>
+                  <div className={[styles.breakdownIcon, styles.breakdownIconParts].join(' ')}><Package size={16} /></div>
+                </div>
+                <p className={[styles.breakdownValue, 'privacy-blur'].join(' ')}>—</p>
+                <p className={styles.breakdownLabel}>Parts B2B</p>
+                <p className={styles.breakdownSub}>No parts access</p>
+              </Card>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── TODAY'S BENEFIT (NET PROFIT) SECTION ──────────────── */}
+      {(!isAnalyticsLocked || user?.role === 'admin') && (
+        <div>
+          <div className={styles.sectionHeader}>
+            <span className={styles.sectionTitle}>💰 Today's Benefit (Net Profit)</span>
+            {dailyRevenue > 0 && (
+              <span className={[styles.marginBadge, todayNetProfit >= 0 ? styles.marginPositive : styles.marginNegative].join(' ')}>
+                Margin: {((todayNetProfit / (dailyRevenue || 1)) * 100).toFixed(1)}%
+              </span>
+            )}
+          </div>
+
+          <div className={styles.heroBreakdownGrid}>
+            {/* Hero benefit card */}
+            <StatCard
+              label="Total Benefit"
+              value={formatPrivateCurrency(todayNetProfit)}
+              icon={<TrendingUp size={20} />}
+              accent={false}
+              subtext={`Margin: ${dailyRevenue > 0 ? ((todayNetProfit / dailyRevenue) * 100).toFixed(1) : '0.0'}%`}
+              onClick={() => navigate('/reports')}
+              linkLabel="Full Report"
+              className={styles.benefitHeroCard}
+            />
+
+            {/* 3 breakdown benefit cards */}
+            <div className={styles.breakdownGrid}>
+              {/* POS Benefit */}
+              <Card className={[styles.breakdownCard, styles.statCardClickable].join(' ')} onClick={() => navigate('/pos')}>
+                <div className={styles.breakdownCardTop}>
+                  <div className={[styles.breakdownIcon, styles.breakdownIconSales].join(' ')}><ShoppingBag size={16} /></div>
+                  {todayRetailSalesRev > 0 && (
+                    <span className={[styles.marginBadge, todayFigures.salesNetProfit >= 0 ? styles.marginPositive : styles.marginNegative].join(' ')}>
+                      {((todayFigures.salesNetProfit / (todayRetailSalesRev || 1)) * 100).toFixed(0)}%
+                    </span>
+                  )}
+                </div>
+                <p className={[styles.breakdownValue, 'privacy-blur'].join(' ')}>{formatPrivateCurrency(todayFigures.salesNetProfit)}</p>
+                <p className={styles.breakdownLabel}>POS Benefit</p>
+                <p className={styles.breakdownSub}>COGS: {formatPrivateCurrency(todayFigures.salesCOGS)}</p>
+              </Card>
+
+              {/* Repairs Benefit */}
+              <Card className={[styles.breakdownCard, styles.statCardClickable].join(' ')} onClick={() => navigate('/repairs')}>
+                <div className={styles.breakdownCardTop}>
+                  <div className={[styles.breakdownIcon, styles.breakdownIconRepairs].join(' ')}><Wrench size={16} /></div>
+                  {todayRepRev > 0 && (
+                    <span className={[styles.marginBadge, todayFigures.repairsNetProfit >= 0 ? styles.marginPositive : styles.marginNegative].join(' ')}>
+                      {((todayFigures.repairsNetProfit / (todayRepRev || 1)) * 100).toFixed(0)}%
+                    </span>
+                  )}
+                </div>
+                <p className={[styles.breakdownValue, 'privacy-blur'].join(' ')}>{formatPrivateCurrency(todayFigures.repairsNetProfit)}</p>
+                <p className={styles.breakdownLabel}>Repairs Benefit</p>
+                <p className={styles.breakdownSub}>Parts cost: {formatPrivateCurrency(todayFigures.repairsPartsCost)}</p>
+              </Card>
+
+              {/* Parts Benefit */}
+              <Card className={[styles.breakdownCard, styles.statCardClickable].join(' ')} onClick={() => navigate('/parts')}>
+                <div className={styles.breakdownCardTop}>
+                  <div className={[styles.breakdownIcon, styles.breakdownIconParts].join(' ')}><Package size={16} /></div>
+                  {todayPartsRev > 0 && (
+                    <span className={[styles.marginBadge, todayFigures.partsNetProfit >= 0 ? styles.marginPositive : styles.marginNegative].join(' ')}>
+                      {((todayFigures.partsNetProfit / (todayPartsRev || 1)) * 100).toFixed(0)}%
+                    </span>
+                  )}
+                </div>
+                <p className={[styles.breakdownValue, 'privacy-blur'].join(' ')}>{formatPrivateCurrency(todayFigures.partsNetProfit)}</p>
+                <p className={styles.breakdownLabel}>Parts Benefit</p>
+                <p className={styles.breakdownSub}>COGS: {formatPrivateCurrency(todayFigures.partsCOGS)}</p>
+              </Card>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── OPERATIONAL STATUS STRIP ───────────────────────────── */}
+      <div className={styles.opsStrip}>
+        {/* Low Stock */}
+        <button
+          type="button"
+          className={styles.opsCard}
+          onClick={() => navigate('/inventory')}
+        >
+          <div className={[styles.opsIcon, styles.opsIconWarning].join(' ')}>
+            <AlertTriangle size={20} />
+          </div>
+          <div>
+            <div className={styles.opsCount}>{lowStockCount}</div>
+            <div className={styles.opsLabel}>Low Stock Articles</div>
+            <div className={styles.opsSub}>
+              {lowStockCount === 0 ? 'All items well stocked' : `${lowStockCount} item${lowStockCount !== 1 ? 's' : ''} need restocking`}
+            </div>
+          </div>
+        </button>
+
+        {/* Unrepaired phones */}
+        {permissions.repairs && (
+          <button
+            type="button"
+            className={styles.opsCard}
             onClick={() => navigate('/repairs')}
-            linkLabel="View Board"
-          />
+          >
+            <div className={[styles.opsIcon, styles.opsIconInfo].join(' ')}>
+              <Wrench size={20} />
+            </div>
+            <div>
+              <div className={styles.opsCount}>{activeRepairs}</div>
+              <div className={styles.opsLabel}>Phones in Workshop</div>
+              <div className={styles.opsSub}>
+                {activeRepairs === 0 ? 'No phones awaiting repair' : `${activeRepairs} pending or in-progress`}
+              </div>
+            </div>
+          </button>
         )}
-        {permissions.repairs ? (
-          <StatCard
-            label={t('dashboard.activeRepairs', 'Active Workshop Repairs')}
-            value={String(activeRepairs)}
-            subtext={`${todayFigures.repairsRecognizedCount} finished today`}
-            icon={<Wrench size={20} />}
-            onClick={() => navigate('/repairs')}
-            linkLabel="View Board"
-          />
-        ) : (
-          <StatCard
-            label={t('dashboard.totalProducts', 'Total Products in Stock')}
-            value={String(products.reduce((sum, p) => sum + (p.stock || 0), 0))}
-            subtext={`${products.length} catalog models`}
-            icon={<Package size={20} />}
-            onClick={() => navigate('/inventory')}
-            linkLabel="View Inventory"
-          />
-        )}
-        <StatCard
-          label={t('dashboard.lowStockItems', 'Low Stock Items')}
-          value={String(lowStockCount)}
-          subtext={(!isAnalyticsLocked || user?.role === 'admin') ? `${unitsSoldToday} units sold today` : 'Requires restock soon'}
-          icon={<AlertTriangle size={20} />}
-          onClick={lowStockCount > 0 ? () => navigate('/inventory') : undefined}
-          linkLabel={lowStockCount > 0 ? 'View Inventory' : undefined}
-        />
       </div>
 
       {/* End of Day Widget + Cash Drawer */}

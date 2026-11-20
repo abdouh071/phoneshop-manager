@@ -63,6 +63,7 @@ const ReportsPage = lazyWithRetry(() => import('./features/reports/ReportsPage')
 const SettingsPage = lazyWithRetry(() => import('./features/settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const ActivityPage = lazyWithRetry(() => import('./features/activity/ActivityPage').then(m => ({ default: m.ActivityPage })));
 const CustomTicketPage = lazyWithRetry(() => import('./features/customTicket/CustomTicketPage').then(m => ({ default: m.CustomTicketPage })));
+const NotFoundPage = lazyWithRetry(() => import('./components/layout/NotFoundPage').then(m => ({ default: m.NotFoundPage })));
 const LoginPage = lazyWithRetry(() => import('./features/auth/LoginPage').then(m => ({ default: m.LoginPage })));
 const CustomerTrackingPage = lazyWithRetry(() => import('./features/tracking/CustomerTrackingPage').then(m => ({ default: m.CustomerTrackingPage })));
 
@@ -133,7 +134,7 @@ function App() {
                           <Route path="/activity" element={<ProtectedRoute requiredPermission="activity"><ActivityPage /></ProtectedRoute>} />
                           <Route path="/custom-ticket" element={<CustomTicketPage />} />
                           <Route path="/settings" element={<SettingsPage />} />
-                          <Route path="*" element={<DashboardPage />} />
+                          <Route path="*" element={<NotFoundPage />} />
                         </Routes>
                       </Suspense>
                     </AppShell>

@@ -40,6 +40,10 @@ const captured = vi.hoisted(() => ({
   claim: { claimed: true, refundedAt: '2026-11-04T12:00:00.000Z' } as { claimed: boolean; refundedAt: string },
   /** Every refund claim the till asked for, in order. */
   claims: [] as string[],
+  refundError: null as Error | null,
+  refundSnapshots: [] as SaleTransaction[],
+  refundCustomers: [] as unknown[],
+  refundDebts: [] as unknown[],
   /** Every stock move the refund path asked the shelf store for, in order. */
   stockBy: [] as Array<{ productId: string; delta: number }>,
   /** Every debt the refund path asked to settle, in order. */
@@ -64,9 +68,43 @@ vi.mock('../services/transactionService', () => ({
       return true;
     },
     getRetailTransactions: async () => [],
-    claimRefund: async (id: string) => {
-      captured.claims.push(id);
-      return { ...captured.claim };
+    editSale: async (expected: SaleTransaction, edit: {
+      updates: Record<string, unknown>;
+      stockDeltas: { productId: string; delta: number }[];
+      creditShift?: { customerId: string; amount: number; note: string };
+      debtUpdate?: { debtId: string; total: number; charged: number; itemsSummary: string; expectedPaid: number };
+    }) => {
+      captured.updates.push({ id: expected.id, updates: edit.updates });
+      captured.stock.push(...edit.stockDeltas.map(d => d.delta));
+      if (edit.creditShift && edit.creditShift.amount !== 0) {
+        captured.credit.push({
+          kind: edit.creditShift.amount > 0 ? 'add' : 'use',
+          customerId: edit.creditShift.customerId,
+          amount: Math.abs(edit.creditShift.amount),
+          note: edit.creditShift.note,
+        });
+      }
+      if (edit.debtUpdate) {
+        captured.debtAmounts.push({ debtId: edit.debtUpdate.debtId, total: edit.debtUpdate.total, charged: edit.debtUpdate.charged });
+      }
+      return {
+        transaction: { ...expected, ...edit.updates } as SaleTransaction,
+        stock: edit.stockDeltas.map(d => ({ id: d.productId, name: 'Fixture', stock: 10 + d.delta, price: 0 }) as unknown as PhoneModel),
+        customer: undefined,
+        debt: undefined,
+      };
+    },
+    refund: async (_expected: SaleTransaction) => {
+      captured.refundSnapshots.push(_expected);
+      if (captured.refundError) throw captured.refundError;
+      captured.stockBy.push(...(_expected.items || []).map(item => ({ productId: item.product.id, delta: item.quantity })));
+      return {
+        outcome: 'refunded' as const,
+        transaction: { ..._expected, status: 'refunded' as const, refundedAt: captured.claim.refundedAt, financialRevision: (_expected.financialRevision ?? 0) + 1 },
+        stock: (_expected.items || []).map(item => ({ ...item.product, stock: (item.product.stock || 0) + item.quantity })),
+        customer: captured.refundCustomers.length ? captured.refundCustomers[0] : undefined,
+        debt: captured.refundDebts.length ? captured.refundDebts[0] : undefined,
+      };
     },
   },
 }));
@@ -120,6 +158,7 @@ vi.mock('./authStore', () => ({
 
 vi.mock('./customerStore', () => ({
   useCustomerStore: {
+    setState: () => undefined,
     getState: () => ({
       customers: [],
       debts: captured.debts,
@@ -229,6 +268,10 @@ beforeEach(() => {
   captured.stockBy.length = 0;
   captured.settled.length = 0;
   captured.saleStock.length = 0;
+  captured.refundError = null;
+  captured.refundSnapshots.length = 0;
+  captured.refundCustomers.length = 0;
+  captured.refundDebts.length = 0;
   emptyCart();
   (phone as { price: number }).price = 10005;
 });
@@ -1002,7 +1045,9 @@ describe('the account split a corrected invoice leaves behind', () => {
  * The refund claim: the list this till holds is whatever it last fetched, so two
  * tills can both be holding `completed` for an invoice one of them is closing.
  * The server's answer — not the local copy — decides whether the shelf moves,
- * the debt closes and the Avoir is handed back.
+ * the debt closes and the Avoir is handed back. The whole reversal now lands in
+ * one server transaction, so a refused refund leaves everything untouched and a
+ * repeated refund adopts the same outcome instead of moving money twice.
  */
 describe('a refund only the server lets through (B5)', () => {
   const seedSale = (status: SaleTransaction['status'] = 'completed') => {
@@ -1016,6 +1061,7 @@ describe('a refund only the server lets through (B5)', () => {
           total: 20000,
           payments: [{ method: 'debt', amount: 20000 }],
           status,
+          stockApplied: true,
           invoiceNumber: 'INV-REFUND',
           customerId: 'cust_1',
         } as unknown as SaleTransaction,
@@ -1033,42 +1079,42 @@ describe('a refund only the server lets through (B5)', () => {
   const refund = () => useCartStore.getState().refundTransaction('tx_refund');
   const stored = () => useCartStore.getState().transactions.find(t => t.id === 'tx_refund');
 
-  it('a claim the server refuses moves nothing at all', async () => {
+  it('a refund the server refuses moves nothing at all', async () => {
     seedSale();
-    captured.claim = { claimed: false, refundedAt: '2026-11-04T12:00:00.000Z' };
+    captured.refundError = new Error('permission-denied');
 
-    const warnings = await refund();
+    await expect(refund()).rejects.toThrow('permission-denied');
 
-    expect(warnings).toEqual([]);
-    expect(captured.claims).toEqual(['tx_refund']);
+    expect(captured.refundSnapshots).toHaveLength(1);
     expect(captured.stockBy).toEqual([]);
     expect(captured.settled).toEqual([]);
     expect(captured.credit).toEqual([]);
     expect(stored()?.status).toBe('completed');
   });
 
-  it('a claimed refund moves the shelf and closes the debt exactly once', async () => {
+  it('a confirmed refund returns the reversed stock and the closed invoice once', async () => {
     seedSale();
 
-    await refund();
+    const warnings = await refund();
 
-    expect(captured.stockBy).toEqual([{ productId: 'sku_phone', delta: 2 }]);
-    expect(captured.settled).toEqual(['debt_1']);
+    expect(warnings).toEqual([]);
     expect(stored()?.status).toBe('refunded');
     expect(stored()?.refundedAt).toBe(captured.claim.refundedAt);
+    expect(captured.stockBy).toEqual([{ productId: 'sku_phone', delta: 2 }]);
+    expect(captured.settled).toEqual([]);
   });
 
-  it('a stale list still holding completed cannot refund the same sale twice', async () => {
+  it('a stale list still holding completed can ask again, and the service decides', async () => {
     seedSale();
     await refund();
     // The other till never heard about the first refund: its list still says completed.
     seedSale();
-    captured.claim = { claimed: false, refundedAt: '2026-11-04T12:05:00.000Z' };
+    captured.refundError = new Error('This invoice was already closed.');
 
-    await refund();
+    await expect(refund()).rejects.toThrow('already closed');
 
+    expect(captured.refundSnapshots).toHaveLength(2);
     expect(captured.stockBy).toEqual([{ productId: 'sku_phone', delta: 2 }]);
-    expect(captured.settled).toEqual(['debt_1']);
   });
 
   it('a sale the phone already voided is not asked of the server at all', async () => {
@@ -1076,7 +1122,7 @@ describe('a refund only the server lets through (B5)', () => {
 
     await refund();
 
-    expect(captured.claims).toEqual([]);
+    expect(captured.refundSnapshots).toEqual([]);
     expect(captured.stockBy).toEqual([]);
     expect(captured.settled).toEqual([]);
   });

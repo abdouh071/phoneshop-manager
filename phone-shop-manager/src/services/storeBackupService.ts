@@ -38,6 +38,7 @@ export const BACKUP_COLLECTIONS: readonly string[] = [
   'customers',
   'customer_debts',
   'customer_activity_logs',
+  'operation_receipts',
   'inventory',
   'repairs',
   'transactions',
@@ -60,6 +61,7 @@ export const APPEND_ONLY_COLLECTIONS: readonly string[] = [
   'writeOffLogs',
   'activityLogs',
   'customer_activity_logs',
+  'operation_receipts',
 ];
 
 /** Writes an admin should uncheck deliberately rather than restore blindly: these documents

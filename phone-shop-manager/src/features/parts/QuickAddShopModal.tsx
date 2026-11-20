@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Store, AlertCircle } from 'lucide-react';
 import { Modal } from '../../components/ui/Modal';
@@ -31,6 +31,7 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
   const [notes, setNotes] = useState('');
   const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdminUnlock, setShowAdminUnlock] = useState(false);
   const [creditLimitApproved, setCreditLimitApproved] = useState(false);
@@ -42,6 +43,7 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
   const toast = useToast();
 
   const handleClose = () => {
+    if (submittingRef.current) return;
     setShopName('');
     setContactName('');
     setPhone('');
@@ -54,7 +56,9 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
     onClose();
   };
 
-  const executeSubmit = async (overrideCreditApproval = false) => {
+  const executeSubmit = async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setIsSubmitting(true);
     setError(null);
 
@@ -76,10 +80,12 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
       );
 
       onCustomerCreated(newCustomer);
+      submittingRef.current = false;
       handleClose();
     } catch (err: unknown) {
       setError(errorMessage(err) || t('parts.quickAdd.submitFailed'));
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -101,7 +107,7 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
     }
 
     const limitNum = parseFloat(creditLimit);
-    if (!isNaN(limitNum) && limitNum > 0 && !isAdmin && !creditLimitApproved && !overrideCreditApproval) {
+    if (!isNaN(limitNum) && limitNum > 0 && !isAdmin && !creditLimitApproved) {
       setShowAdminUnlock(true);
       return;
     }
@@ -113,6 +119,8 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
+      closeOnEscape={!isSubmitting && !showAdminUnlock}
+      closeOnOverlayClick={!isSubmitting && !showAdminUnlock}
       title={t('parts.quickAdd.quickAddTitle')}
       subtitle={t('parts.quickAdd.quickAddSubtitle')}
       size="md"
@@ -231,8 +239,7 @@ export const QuickAddShopModal: React.FC<QuickAddShopModalProps> = ({
         onSuccess={() => {
           setCreditLimitApproved(true);
           setShowAdminUnlock(false);
-          // Call directly with override flag instead of relying on setState + setTimeout (#5 audit fix).
-          void executeSubmit(true);
+          void executeSubmit();
         }}
         actionName={t('parts.quickAdd.adminUnlockAction', {
           creditLimit,

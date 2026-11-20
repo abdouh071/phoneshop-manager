@@ -163,8 +163,12 @@ export const SettingsPage = () => {
   }, []);
 
   const handleSelectColorTheme = async (themeKey: ColorThemeKey) => {
-    await settings.updateSetting('colorTheme', themeKey);
-    toast.success('Theme Palette Applied', `Switched to ${COLOR_THEMES.find(t => t.key === themeKey)?.name}.`);
+    const saved = await settings.updateSetting('colorTheme', themeKey);
+    if (saved) {
+      toast.success('Theme Palette Applied', `Switched to ${COLOR_THEMES.find(t => t.key === themeKey)?.name}.`);
+    } else {
+      toast.error('Theme Not Saved', errorMessage(settings.error) || 'Could not sync the theme with the server. It stays on this screen until the next successful save.');
+    }
   };
 
   // ─── Local draft state (Problem 1 fix) ─────────────────────
@@ -266,9 +270,14 @@ export const SettingsPage = () => {
         allowedIp: draft.allowedIp.trim(),
         enableNotifications: draft.enableNotifications,
       };
-      await settings.updateSettingsBulk(payload);
-      setHasEdited(false);
-      toast.success(t('settings.saved', 'Settings Saved'), 'Your store preferences have been updated.');
+      const saved = await settings.updateSettingsBulk(payload);
+      if (saved) {
+        setHasEdited(false);
+        toast.success(t('settings.saved', 'Settings Saved'), 'Your store preferences have been updated.');
+      } else {
+        // The draft stays on screen for a retry; only a confirmed server write closes it.
+        toast.error('Save Failed', errorMessage(settings.error) || 'Could not write settings to Firestore. Please check your connection and try again.');
+      }
     } catch (err: unknown) {
       toast.error('Save Failed', errorMessage(err) || 'Could not write settings to Firestore. Please check your connection and try again.');
     } finally {

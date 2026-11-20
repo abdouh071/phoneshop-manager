@@ -120,6 +120,15 @@ service cloud.firestore {
       allow delete: if false;        // permanently prohibited
     }
 
+    // Retry receipts must outlive activity-log retention and cannot be rewritten.
+    match /operation_receipts/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() &&
+        (canSell(callerProfile()) || hasPerm(callerProfile(), 'inventory_edit') ||
+         canViewInventory(callerProfile()) || hasPerm(callerProfile(), 'repair_edit'));
+      allow update, delete: if false;
+    }
+
     // ─── Repairs ─────────────────────────────────────────────────────────────
     // Signed-in staff read and write every repair; anonymous callers get nothing.
     // The old `list if limit == 1` escape existed for the customer tracking lookup,

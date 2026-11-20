@@ -18,6 +18,7 @@ import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrenc
 import { exportToCSV } from '../../utils/exportUtils';
 import { matchesCustomer } from '../../utils/customerFinancials';
 import { isDebtPaymentCountedElsewhere } from '../../utils/debtPayments';
+import { closedAtOf } from '../../utils/dayFigures';
 import { formatWhatsAppUrl } from '../../utils/phoneUtils';
 import type { Customer, SaleTransaction, CustomerDebtEntry, RepairTicket } from '../../types';
 import styles from './AccountStatement.module.css';
@@ -112,7 +113,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
 
   const { transactions } = useCartStore();
   const { invoices, fetchInvoices } = usePartsCartStore();
-  const { debts, getCustomerDebtTotal } = useCustomerStore();
+  const { debts } = useCustomerStore();
   const { tickets } = useRepairStore();
   const settings = useSettingsStore();
   usePrivacyStore(s => s.isPrivacyActive);
@@ -245,7 +246,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
 
       // Determine upfront payment made at the time of purchase
       let paidUpfront = 0;
-      if (tx.status === 'refunded') {
+      if (tx.status === 'refunded' || tx.status === 'voided') {
         paidUpfront = 0;
       } else if (tx.accountSettlement) {
         paidUpfront = tx.accountSettlement.paidAmount || 0;
@@ -300,18 +301,21 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
         rawTransaction: tx,
       });
 
-      // Handle Refunds
-      if (tx.status === 'refunded') {
+      // Handle Refunds — the day the money was handed back, not the day the sale
+      // was rung up. The phone closes the same act as `voided`, so both stamps land
+      // the credit on the day it happened.
+      if (tx.status === 'refunded' || tx.status === 'voided') {
+        const closedAt = closedAtOf(tx);
         events.push({
           id: `refund_${tx.id}`,
-          date: tx.date,
+          date: closedAt,
           type: 'refund',
           refNumber: `REF-${refNumber}`,
           description: t('statementModal.refundCredit', 'Full Refund Credit for Order #{{ref}} ({{items}})', { ref: refNumber, items: itemsDesc }),
           debit: 0,
           credit: totalBilled,
           netChange: -totalBilled,
-          rawTimestamp: new Date(tx.date).getTime() + 1, // slightly after sale
+          rawTimestamp: new Date(closedAt).getTime() + 1, // slightly after sale
           rawTransaction: tx,
         });
       }
@@ -491,11 +495,6 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
   }, [allEvents, startDate, endDate]);
 
   if (!customer) return null;
-
-  const currentTotalDebt = getCustomerDebtTotal(customer.id);
-
-  // Reconciliation Check: when all time is selected, closingBalance should match currentTotalDebt exactly
-  Math.abs(statementData.closingBalance - currentTotalDebt);
 
   const handlePrint = () => {
     window.print();

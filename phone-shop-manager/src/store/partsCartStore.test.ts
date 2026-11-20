@@ -8,10 +8,6 @@
  * product on the shelf. A cart line's `product` is the live inventory object, so a
  * discount that wrote through it would quietly reprice the shop's stock — and the
  * receipt would be the only place the old price survived.
- *
- * The checkout-ordering tests at the bottom pin a second rule: the shelf moves
- * before the invoice exists, and a stock write that cannot be made durable aborts
- * the checkout before anything is billed.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Customer, PhoneModel, SaleTransaction, SuspendedCart } from '../types';
@@ -31,7 +27,13 @@ const captured = vi.hoisted(() => ({
   user: { id: 'u1', name: 'Counter', role: 'admin' },
   fetchInvoices: vi.fn<() => Promise<SaleTransaction[]>>(),
   fetchSuspendedCarts: vi.fn<() => Promise<SuspendedCart[]>>(),
+  saveSuspendedCart: vi.fn<(cart: SuspendedCart) => Promise<void>>(),
   /** What the till is handed when it asks for a reference. Real Firestore is not involved. */
+  beforeNumber: null as (() => Promise<void>) | null,
+  beforeCheckoutReturn: null as (() => void) | null,
+  acknowledge: vi.fn(),
+  getPending: vi.fn(),
+  resolve: vi.fn(),
   counter: { invoiceNumber: 'INV-PARTS-261104-0003', provisional: false } as {
     invoiceNumber: string;
     provisional: boolean;
@@ -39,7 +41,10 @@ const captured = vi.hoisted(() => ({
 }));
 
 vi.mock('../services/invoiceCounter', () => ({
-  claimInvoiceNumber: async () => ({ ...captured.counter }),
+  claimInvoiceNumber: async () => {
+    await captured.beforeNumber?.();
+    return { ...captured.counter };
+  },
 }));
 
 vi.mock('../services/transactionService', () => ({
@@ -53,9 +58,31 @@ vi.mock('../services/transactionService', () => ({
   },
 }));
 
+vi.mock('../services/partsCheckoutService', () => ({
+  partsCheckoutService: {
+    getPending: captured.getPending,
+    acknowledge: captured.acknowledge,
+    resolve: captured.resolve,
+    checkout: async (tx: SaleTransaction, options: { draftKey: string }) => {
+      captured.order.push('commit');
+      if (captured.failStock || tx.items.some(item => item.product.id === captured.failStockFor)) throw new Error('stock write failed');
+      captured.transactions.push(tx as unknown as Record<string, unknown>);
+      captured.stockMoves.push(...tx.items.map(item => ({ productId: item.product.id, delta: -item.quantity })));
+      const transaction = { ...tx, id: `tx_${captured.transactions.length}` };
+      captured.beforeCheckoutReturn?.();
+      return {
+        transaction, cancelled: false,
+        debtEntry: tx.accountSettlement?.chargedAmount ? { id: 'debt_1', customerId: tx.customerId, remainingBalance: tx.accountSettlement.chargedAmount } : undefined,
+        stock: tx.items.map(item => ({ ...item.product, stock: item.product.stock - item.quantity })),
+        pending: { transaction, draftKey: options.draftKey },
+      };
+    },
+  },
+}));
+
 vi.mock('../services/partsCartService', () => ({
   partsCartService: {
-    saveSuspendedCart: async () => undefined,
+    saveSuspendedCart: captured.saveSuspendedCart,
     deleteSuspendedCart: async () => undefined,
     getAllSuspendedCarts: captured.fetchSuspendedCarts,
   },
@@ -75,6 +102,7 @@ vi.mock('./authStore', () => ({
 
 vi.mock('./customerStore', () => ({
   useCustomerStore: {
+    setState: vi.fn(),
     getState: () => ({
       customers: captured.customers,
       recalculateCustomer: async (id: string) => {
@@ -118,6 +146,7 @@ const screen: PhoneModel = {
 
 vi.mock('./inventoryStore', () => ({
   useInventoryStore: {
+    setState: vi.fn(),
     getState: () => ({
       parts: [shelf, screen],
       products: [shelf, screen],
@@ -128,13 +157,6 @@ vi.mock('./inventoryStore', () => ({
         captured.order.push(`stock:${productId}:${delta}`);
         captured.stockMoves.push({ productId, delta });
         if (captured.failStock) throw new Error('stock write failed');
-        return { id: productId, stock: 10 } as PhoneModel;
-      },
-      // ForSale variant: same mock — also throws on failStock, closing the oversell test path.
-      adjustStockByAsyncForSale: async (productId: string, delta: number) => {
-        captured.order.push(`stock:${productId}:${delta}`);
-        captured.stockMoves.push({ productId, delta });
-        if (captured.failStock || captured.failStockFor === productId) throw new Error('stock write failed');
         return { id: productId, stock: 10 } as PhoneModel;
       },
       fetchParts: async () => {
@@ -172,10 +194,16 @@ beforeEach(() => {
   captured.order.length = 0;
   captured.failStock = false;
   captured.failStockFor = null;
+  captured.beforeNumber = null;
+  captured.beforeCheckoutReturn = null;
+  captured.acknowledge.mockReset();
+  captured.getPending.mockReset().mockReturnValue(null);
+  captured.resolve.mockReset();
   captured.partsRefetches = 0;
   captured.user = { id: 'u1', name: 'Counter', role: 'admin' };
   captured.fetchInvoices.mockReset().mockResolvedValue([]);
   captured.fetchSuspendedCarts.mockReset().mockResolvedValue([]);
+  captured.saveSuspendedCart.mockReset().mockResolvedValue(undefined);
   usePartsCartStore.setState({ invoices: [], isLoadingInvoices: false, invoicesError: null });
   captured.counter = { invoiceNumber: 'INV-PARTS-261104-0003', provisional: false };
   emptyCart();
@@ -387,12 +415,12 @@ describe('the basket promise', () => {
 });
 
 describe('partsCartStore checkout ordering', () => {
-  it('moves the shelf before the invoice exists', async () => {
+  it('delegates the whole sale to one atomic commit', async () => {
     cable(2);
     usePartsCartStore.getState().addToCart(screen);
     await usePartsCartStore.getState().checkout();
 
-    expect(captured.order).toEqual(['stock:part_cable:-2', 'stock:part_screen:-1', 'save']);
+    expect(captured.order).toEqual(['commit']);
   });
 
   it('stamps the written invoice as stock-applied so the sync adopts it instead of re-deducting', async () => {
@@ -407,22 +435,25 @@ describe('partsCartStore checkout ordering', () => {
     captured.failStock = true;
 
     await expect(usePartsCartStore.getState().checkout()).rejects.toThrow('stock write failed');
-    expect(captured.order).toEqual(['stock:part_cable:-2']);
+    expect(captured.order).toEqual(['commit']);
+    expect(captured.stockMoves).toHaveLength(0);
     expect(captured.transactions).toHaveLength(0);
   });
 
-  it('gives committed lines back when a later line fails, and resyncs the shelf', async () => {
+  it('leaves every line untouched and keeps the draft when the commit fails', async () => {
     cable(1);
     usePartsCartStore.getState().addToCart(screen);
     captured.failStockFor = 'part_screen';
 
     await expect(usePartsCartStore.getState().checkout()).rejects.toThrow('stock write failed');
-    expect(captured.order).toEqual(['stock:part_cable:-1', 'stock:part_screen:-1', 'stock:part_cable:1']);
+    expect(captured.order).toEqual(['commit']);
+    expect(captured.stockMoves).toHaveLength(0);
+    expect(usePartsCartStore.getState().items).toHaveLength(2);
     expect(captured.transactions).toHaveLength(0);
-    expect(captured.partsRefetches).toBe(1);
+    expect(captured.partsRefetches).toBe(0);
   });
 
-  it('keeps the B2B order: debt first, then the shelf, then the invoice', async () => {
+  it('delegates B2B stock, debt and invoice to the same commit', async () => {
     cable(1);
     const customer: Customer = { id: 'c1', name: 'Shop A', phone: '0550000000', shopName: 'Shop A' } as Customer;
 
@@ -435,8 +466,7 @@ describe('partsCartStore checkout ordering', () => {
     });
 
     expect(result).not.toBeNull();
-    // Order fixed (#2 audit): stock deducted first, then debt posted, then invoice saved.
-    expect(captured.order).toEqual(['stock:part_cable:-1', 'debt', 'save']);
+    expect(captured.order).toEqual(['commit']);
     expect(captured.transactions[0]).toMatchObject({ stockApplied: true });
   });
 
@@ -457,7 +487,7 @@ describe('partsCartStore checkout ordering', () => {
     expect(captured.transactions).toHaveLength(0);
   });
 
-  it('a failed B2B line gives the other lines back and never reaches the debt ledger', async () => {
+  it('a failed B2B commit never makes separate stock or debt writes', async () => {
     cable(1);
     usePartsCartStore.getState().addToCart(screen);
     captured.failStockFor = 'part_screen';
@@ -472,10 +502,79 @@ describe('partsCartStore checkout ordering', () => {
         chargedAmount: 9300,
       })
     ).rejects.toThrow('stock write failed');
-    expect(captured.order).toEqual(['stock:part_cable:-1', 'stock:part_screen:-1', 'stock:part_cable:1']);
+    expect(captured.order).toEqual(['commit']);
+    expect(captured.stockMoves).toHaveLength(0);
+    expect(usePartsCartStore.getState().items).toHaveLength(2);
     expect(captured.order).not.toContain('debt');
     expect(captured.transactions).toHaveLength(0);
-    expect(captured.partsRefetches).toBe(1);
+    expect(captured.partsRefetches).toBe(0);
+  });
+});
+
+describe('held parts cart customer identity', () => {
+  const account = (id: string): Customer => ({
+    id, name: `Contact ${id}`, shopName: `Shop ${id}`, phone: `055500000${id}`,
+    totalPurchases: 0, totalSpent: 0, lastVisitDate: '', joinDate: '',
+  });
+
+  it('holds explicit identity and restores A while preserving active account B on hold', () => {
+    const a = account('1');
+    const b = account('2');
+    captured.customers.push(a, b);
+    cable(1);
+    usePartsCartStore.getState().setSelectedCustomer(a);
+    usePartsCartStore.getState().suspendCart();
+    const heldA = usePartsCartStore.getState().suspendedCarts[0];
+    expect(heldA).toMatchObject({ customerId: a.id, customerName: a.shopName, customerPhone: a.phone });
+    expect(captured.saveSuspendedCart).toHaveBeenCalledWith(heldA);
+
+    cable(2);
+    usePartsCartStore.getState().setSelectedCustomer(b);
+    usePartsCartStore.getState().resumeCart(heldA.id);
+    expect(usePartsCartStore.getState()).toMatchObject({ selectedCustomer: a, customerName: a.shopName, customerPhone: a.phone });
+    const heldB = usePartsCartStore.getState().suspendedCarts[0];
+    expect(heldB).toMatchObject({ customerId: b.id, customerName: b.shopName, customerPhone: b.phone });
+    usePartsCartStore.getState().resumeCart(heldB.id);
+    expect(usePartsCartStore.getState()).toMatchObject({ selectedCustomer: b, customerName: b.shopName, customerPhone: b.phone });
+  });
+
+  it('clears the previous account and phone for a legacy named cart without guessing by name', () => {
+    const a = account('1');
+    captured.customers.push(a);
+    usePartsCartStore.getState().setSelectedCustomer(a);
+    usePartsCartStore.setState({ suspendedCarts: [{ id: 'legacy', date: '', items: [{ product: shelf, quantity: 1 }], customerName: a.shopName!, discount: null }] });
+    const result = usePartsCartStore.getState().resumeCart('legacy');
+    expect(usePartsCartStore.getState()).toMatchObject({ selectedCustomer: null, customerName: a.shopName, customerPhone: '' });
+    expect(result).toMatchObject({ requiresCustomerSelection: true });
+  });
+
+  it('restores walk-in phone details but never infers a registered account', () => {
+    const a = account('1');
+    captured.customers.push(a);
+    cable(1);
+    usePartsCartStore.getState().setCustomerName(a.shopName!);
+    usePartsCartStore.getState().setCustomerPhone(a.phone);
+    usePartsCartStore.getState().suspendCart();
+    const held = usePartsCartStore.getState().suspendedCarts[0];
+    expect(held).toMatchObject({ customerId: null, customerPhone: a.phone });
+    usePartsCartStore.getState().setSelectedCustomer(account('2'));
+    const result = usePartsCartStore.getState().resumeCart(held.id);
+    expect(usePartsCartStore.getState()).toMatchObject({ selectedCustomer: null, customerName: a.shopName, customerPhone: a.phone });
+    expect(result).toMatchObject({ requiresCustomerSelection: false });
+  });
+
+  it.each(['missing', 'merged'])('requires manual selection when the saved account is %s', kind => {
+    const a = account('1');
+    captured.customers.push(a);
+    cable(1);
+    usePartsCartStore.getState().setSelectedCustomer(a);
+    usePartsCartStore.getState().suspendCart();
+    const held = usePartsCartStore.getState().suspendedCarts[0];
+    if (kind === 'missing') captured.customers.length = 0;
+    else a.mergedIntoId = 'other-account';
+    const result = usePartsCartStore.getState().resumeCart(held.id);
+    expect(usePartsCartStore.getState().selectedCustomer).toBeNull();
+    expect(result).toMatchObject({ requiresCustomerSelection: true });
   });
 });
 
@@ -511,6 +610,42 @@ describe('partsCartStore suspended carts sync', () => {
     expect(removeItem).toHaveBeenCalledWith('parts_suspended_carts');
   });
 
+  it.each(['discard', 'resume'])('does not resurrect a cart after %s during a fetch', async action => {
+    const stale = staleCart();
+    usePartsCartStore.setState({ suspendedCarts: [stale] });
+    let finish!: (rows: SuspendedCart[]) => void;
+    captured.fetchSuspendedCarts.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const request = usePartsCartStore.getState().fetchCarts();
+    if (action === 'discard') usePartsCartStore.getState().discardSuspendedCart(stale.id);
+    else usePartsCartStore.getState().resumeCart(stale.id);
+    finish([stale]);
+    await request;
+    expect(usePartsCartStore.getState().suspendedCarts).toEqual([]);
+  });
+
+  it('does not resurrect a cart both held and discarded during a fetch', async () => {
+    let finish!: (rows: SuspendedCart[]) => void;
+    captured.fetchSuspendedCarts.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const request = usePartsCartStore.getState().fetchCarts();
+    cable(1);
+    usePartsCartStore.getState().suspendCart();
+    const held = usePartsCartStore.getState().suspendedCarts[0];
+    usePartsCartStore.getState().discardSuspendedCart(held.id);
+    finish([held]);
+    await request;
+    expect(usePartsCartStore.getState().suspendedCarts).toEqual([]);
+  });
+
+  it('ignores an older fetch that finishes after a newer fetch', async () => {
+    let finish!: (rows: SuspendedCart[]) => void;
+    captured.fetchSuspendedCarts.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const older = usePartsCartStore.getState().fetchCarts();
+    await usePartsCartStore.getState().fetchCarts();
+    finish([staleCart()]);
+    await older;
+    expect(usePartsCartStore.getState().suspendedCarts).toEqual([]);
+  });
+
   it('keeps a cart held while the read was in flight', async () => {
     let resolveRemote!: (carts: SuspendedCart[]) => void;
     captured.fetchSuspendedCarts.mockReturnValueOnce(new Promise(resolve => { resolveRemote = resolve; }));
@@ -533,9 +668,9 @@ afterEach(() => {
 });
 
 describe('parts invoice cache', () => {
-  const invoice = (id: string, total = 300) => ({
-    id, total, date: '2026-11-13T12:00:00Z', items: [], payments: [], saleType: 'parts_b2b', status: 'completed',
-  }) as SaleTransaction;
+  const invoice = (id: string, total = 300): SaleTransaction => ({
+    id, subtotal: total, total, date: '2026-11-13T12:00:00Z', items: [], payments: [], saleType: 'parts_b2b', status: 'completed',
+  });
 
   it('shares in-flight reads and reuses successful results for one minute', async () => {
     vi.useFakeTimers();
@@ -677,5 +812,91 @@ describe('who a walk-in parts sale belongs to', () => {
     expect(tx.customerId).toBe('c1');
     expect(tx.shopName).toBe('Boutique Amine');
     expect(captured.recalculated).toEqual(['c1']);
+  });
+
+  it('uses the submitted account even if selection changes while claiming the invoice number', async () => {
+    cable();
+    usePartsCartStore.getState().setSelectedCustomer(shopA);
+    const other = { ...shopA, id: 'c2' };
+    captured.beforeNumber = async () => { usePartsCartStore.getState().setSelectedCustomer(other); };
+
+    await usePartsCartStore.getState().checkout();
+
+    expect(captured.transactions[0].customerId).toBe('c1');
+    expect(usePartsCartStore.getState().selectedCustomer?.id).toBe('c2');
+    expect(usePartsCartStore.getState().items).toHaveLength(1);
+  });
+
+  it('retains the submitted phone on a walk-in invoice', async () => {
+    cable();
+    usePartsCartStore.getState().setCustomerPhone('0551234567');
+    await usePartsCartStore.getState().checkout();
+    expect(captured.transactions[0].customerPhone).toBe('0551234567');
+    expect(captured.transactions[0].customerId).toBeUndefined();
+  });
+});
+
+describe('Parts checkout local recovery', () => {
+  it('stops before submission when the cashier changes during the number claim', async () => {
+    cable();
+    captured.beforeNumber = async () => { captured.user = { ...captured.user, id: 'u2' }; };
+    await expect(usePartsCartStore.getState().checkout()).rejects.toThrow('cashier changed');
+    expect(captured.transactions).toHaveLength(0);
+    expect(usePartsCartStore.getState().items).toHaveLength(1);
+    expect(usePartsCartStore.getState().isCheckingOut).toBe(false);
+  });
+
+  it('does not clear the new cashier cart after an already-submitted checkout finishes', async () => {
+    cable();
+    captured.beforeCheckoutReturn = () => { captured.user = { ...captured.user, id: 'u2' }; };
+    const saved = await usePartsCartStore.getState().checkout();
+    expect(saved).toBeDefined();
+    expect(usePartsCartStore.getState().items).toHaveLength(1);
+    expect(captured.acknowledge).toHaveBeenCalledWith('u1', saved!.id);
+  });
+
+  it('keeps recovery identity when the confirmed cart cannot be removed from storage', async () => {
+    cable();
+    const warning = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(localStorage, 'removeItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+    const saved = await usePartsCartStore.getState().checkout();
+    expect(saved).toBeDefined();
+    expect(usePartsCartStore.getState().invoices).toHaveLength(1);
+    expect(usePartsCartStore.getState().items).toHaveLength(1);
+    expect(captured.acknowledge).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalled();
+  });
+
+  it('does not clear the cart when the server confirms cancellation', async () => {
+    cable();
+    const pending = { transaction: { id: 'attempt', processedById: 'u1' }, draftKey: 'old', requestKey: 'old' };
+    captured.resolve.mockResolvedValue({ cancelled: true, stock: [], pending });
+    await usePartsCartStore.getState().resolvePendingCheckout();
+    expect(captured.transactions).toHaveLength(0);
+    expect(usePartsCartStore.getState().items).toHaveLength(1);
+    expect(captured.acknowledge).toHaveBeenCalledWith('u1', 'attempt');
+  });
+
+  it('retains the draft and pending identity when recovery fails', async () => {
+    cable();
+    const pending = { transaction: { id: 'attempt', processedById: 'u1' }, draftKey: 'old', requestKey: 'old' };
+    captured.getPending.mockReturnValue(pending);
+    captured.resolve.mockRejectedValue(new Error('unavailable'));
+    await expect(usePartsCartStore.getState().resolvePendingCheckout()).rejects.toThrow('unavailable');
+    expect(usePartsCartStore.getState().pendingCheckout).toBe(pending);
+    expect(usePartsCartStore.getState().items).toHaveLength(1);
+    expect(captured.acknowledge).not.toHaveBeenCalled();
+    expect(usePartsCartStore.getState().isCheckingOut).toBe(false);
+  });
+
+  it('deduplicates the recovered invoice without submitting a new checkout', async () => {
+    cable();
+    const saved = (await usePartsCartStore.getState().checkout())!;
+    const pending = { transaction: saved, draftKey: 'old', requestKey: 'old' };
+    captured.resolve.mockResolvedValue({ transaction: saved, cancelled: false, stock: [shelf], pending });
+    await usePartsCartStore.getState().resolvePendingCheckout();
+    await usePartsCartStore.getState().resolvePendingCheckout();
+    expect(captured.transactions).toHaveLength(1);
+    expect(usePartsCartStore.getState().invoices).toHaveLength(1);
   });
 });

@@ -175,6 +175,53 @@
   box-shadow: 0 1px 3px rgba(217, 119, 6, 0.05);
 }
 
+/* Professional 2-tier stock alert banner */
+.stockAlertBanner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.stockAlertRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border: 1px solid;
+  border-radius: 10px;
+  flex-wrap: wrap;
+}
+
+.stockAlertLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.alertActionBtn {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 7px;
+  border: 1.5px solid;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+}
+
+.alertActionBtn:hover {
+  opacity: 0.88;
+  transform: translateY(-1px);
+}
+
 .warningLeft {
   display: flex;
   align-items: center;

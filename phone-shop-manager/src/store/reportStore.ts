@@ -4,6 +4,9 @@ import { useSettingsStore } from './settingsStore';
 import type { ReportData, ReportFilterOptions } from '../services/reportsService';
 import { errorMessage } from '../utils/errorUtils';
 
+/** Only the newest requested report may finish the load — see fetchData. */
+let fetchSequence = 0;
+
 interface ReportState {
   data: ReportData | null;
   isLoading: boolean;
@@ -32,11 +35,16 @@ export const useReportStore = create<ReportState>((set, get) => ({
       ...rawActive,
     };
 
+    // A slow fetch for an abandoned filter must not stamp its numbers over the
+    // ones the till just asked for: only the latest request may finish the load.
+    const sequence = ++fetchSequence;
     set({ isLoading: true, error: null, activeOptions: active });
     try {
       const data = await reportsService.getDashboardData(active);
+      if (sequence !== fetchSequence) return;
       set({ data, isLoading: false });
     } catch (err: unknown) {
+      if (sequence !== fetchSequence) return;
       console.error(err);
       set({ error: errorMessage(err) || 'Failed to load business reports', isLoading: false });
     }

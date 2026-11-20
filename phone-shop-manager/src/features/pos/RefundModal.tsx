@@ -16,27 +16,30 @@ export const RefundModal: React.FC<RefundModalProps> = ({ isOpen, onClose, trans
   const { refundTransaction } = useCartStore();
   const toast = useToast();
   const [isProcessing, setIsProcessing] = React.useState(false);
+  const submitting = React.useRef(false);
+  const [error, setError] = React.useState('');
 
   if (!transaction) return null;
 
+  const handleClose = () => { if (!submitting.current) onClose(); };
   const handleRefund = async () => {
-    if (isProcessing) return;
+    if (submitting.current) return;
+    submitting.current = true;
     setIsProcessing(true);
+    setError('');
     try {
-      const warnings = await refundTransaction(transaction.id);
+      const warnings = await refundTransaction(transaction.id, transaction);
       if (warnings.length > 0) {
-        // The sale is refunded; something on the customer's account is not. Saying
-        // "processed" here would be the lie that left balances standing.
-        toast.warning('Refunded, with one thing still open', warnings.join(' '));
+        toast.warning('Refund status', warnings.join(' '));
       } else {
-        toast.success('Refund Processed', `Transaction ${transaction.id} has been refunded.`);
+        toast.success('Refund Confirmed', `Transaction ${transaction.id} is refunded. Do not hand back the same money twice.`);
       }
       onClose();
     } catch (err) {
-      // The claim could not be answered, so nothing was handed back and nothing
-      // moved on the shelf or the account. The till has to hear that, not a crash.
-      toast.error('Refund not processed', err instanceof Error ? err.message : 'Could not reach the server. Try again.');
+      const message = err instanceof Error ? err.message : 'Could not reach the server.';
+      setError(`${message} Retry this same invoice to check its outcome; do not issue another refund until confirmed.`);
     } finally {
+      submitting.current = false;
       setIsProcessing(false);
     }
   };
@@ -45,7 +48,7 @@ export const RefundModal: React.FC<RefundModalProps> = ({ isOpen, onClose, trans
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       title="Refund Transaction"
       subtitle={`Order ${transaction.id}`}
       size="sm"
@@ -79,6 +82,12 @@ export const RefundModal: React.FC<RefundModalProps> = ({ isOpen, onClose, trans
         <p style={{ color: 'var(--color-on-surface-variant)', fontSize: 'var(--text-label-sm-size)' }}>
           This action will mark the transaction as refunded, automatically restore purchased items to inventory (or reverse returned items), void linked debt entries, and update customer spending records.
         </p>
+
+        {error && (
+          <p role="alert" style={{ color: 'var(--color-danger-text)', fontSize: 'var(--text-label-sm-size)', fontWeight: 600 }}>
+            {error}
+          </p>
+        )}
       </div>
     </Modal>
   );

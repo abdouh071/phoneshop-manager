@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { AlertTriangle, AlertCircle, CheckCircle2, XCircle, ChevronDown, Eye, Edit, Plus, Printer, DollarSign, Smartphone, ShieldCheck, MapPin, Package, Layers, FileSpreadsheet } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, XCircle, ChevronDown, Eye, Edit, Plus, Printer, DollarSign, Smartphone, ShieldCheck, MapPin, Package, Layers, FileSpreadsheet } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { PhoneModel } from '../../types';
 import { ACCESSORY_SUB_CATEGORIES, getSubCategoryMeta } from '../../utils/accessorySubCategories';
@@ -159,20 +159,30 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({ produc
   }, [lowStockProducts]);
 
   // Filtered low stock products based on Section 3 category & sub-category selection
+  // Sorted by urgency: highest deficit first (matches RepairDesk / Lightspeed standard)
   const displayedLowStockProducts = useMemo(() => {
-    return lowStockProducts.filter(p => {
-      const matchCat = lowStockCategory === 'all' || p.category === lowStockCategory;
-      const matchSub =
-        lowStockCategory !== 'accessory' ||
-        lowStockSubCategory === 'all' ||
-        (p.accessorySubCategory || 'other') === lowStockSubCategory;
-      return matchCat && matchSub;
-    });
+    return lowStockProducts
+      .filter(p => {
+        const matchCat = lowStockCategory === 'all' || p.category === lowStockCategory;
+        const matchSub =
+          lowStockCategory !== 'accessory' ||
+          lowStockSubCategory === 'all' ||
+          (p.accessorySubCategory || 'other') === lowStockSubCategory;
+        return matchCat && matchSub;
+      })
+      .sort((a, b) => {
+        const defA = Math.max(0, (a.lowStockThreshold || 1) - a.stock);
+        const defB = Math.max(0, (b.lowStockThreshold || 1) - b.stock);
+        return defB - defA;
+      });
   }, [lowStockProducts, lowStockCategory, lowStockSubCategory]);
 
   // 4. Stockouts & Critical Deficit (stock === 0 or stockStatus === 'out_of_stock')
+  // Sorted by reorder cost descending (highest lost revenue first — Lightspeed standard)
   const stockoutProducts = useMemo(() => {
-    return products.filter(p => p.stock === 0 || p.stockStatus === 'out_of_stock');
+    return products
+      .filter(p => p.stock === 0 || p.stockStatus === 'out_of_stock')
+      .sort((a, b) => (b.price || 0) - (a.price || 0));
   }, [products]);
 
   // Metrics for Headers
@@ -807,10 +817,14 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({ produc
               <table className={styles.table}>
                 <thead>
                   <tr>
+                    <th>Urgency</th>
                     <th>Product / Model</th>
                     <th>Category</th>
                     <th>SKU & Location</th>
-                    <th>Stock vs Min</th>
+                    <th>On Hand</th>
+                    <th>Min Level</th>
+                    <th style={{ color: '#d97706' }}>Reorder Qty</th>
+                    <th>Supplier</th>
                     {canViewCosts && <th>Cost Price</th>}
                     <th>Retail Price</th>
                     {canViewCosts && <th>Margin %</th>}
@@ -822,7 +836,8 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({ produc
                     const avatar = getBrandAvatar(product.name, product.model);
                     const prodMargin = margin(product);
                     const threshold = product.lowStockThreshold || 1;
-                    const percentFill = Math.min(100, Math.max(10, (product.stock / threshold) * 100));
+                    const deficit = Math.max(0, threshold - product.stock);
+                    const percentFill = Math.min(100, Math.max(5, (product.stock / threshold) * 100));
                     const isRestocking = loadingRestockId === product.id;
                     const isInlineOpen = inlineRestock[product.id]?.open;
 
@@ -831,7 +846,25 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({ produc
                         key={product.id}
                         className={styles.tr}
                         onClick={() => onSelectProduct(product)}
+                        style={{ background: '#fffbeb' }}
                       >
+                        <td>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '3px 8px',
+                            borderRadius: '8px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            background: '#fef3c7',
+                            color: '#92400e',
+                            border: '1px solid #fde68a',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            🟡 Low
+                          </span>
+                        </td>
                         <td>
                           <div className={styles.productCell}>
                             <div className={[styles.brandAvatar, avatar.cls].join(' ')}>
@@ -875,8 +908,8 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({ produc
                         </td>
                         <td>
                           <div className={styles.stockWarningBox}>
-                            <span className={styles.stockCountNumber} style={{ color: '#d97706' }}>
-                              {product.stock} <span style={{ fontSize: '11px', color: '#64748b' }}>/ min {threshold}</span>
+                            <span className={styles.stockCountNumber} style={{ color: '#d97706', fontWeight: 700 }}>
+                              {product.stock}
                             </span>
                             <div className={styles.stockBarWrapper}>
                               <div
@@ -885,6 +918,32 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({ produc
                               />
                             </div>
                           </div>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>
+                            {threshold}
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '3px 9px',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            background: deficit > 0 ? '#fef3c7' : '#dcfce7',
+                            color: deficit > 0 ? '#92400e' : '#166534',
+                            border: `1px solid ${deficit > 0 ? '#fde68a' : '#bbf7d0'}`,
+                          }}>
+                            {deficit > 0 ? `+${deficit} needed` : '✓ OK'}
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: '12px', fontWeight: 500, color: '#475569' }}>
+                            {product.supplier || '—'}
+                          </span>
                         </td>
                         {canViewCosts && (
                           <td data-col="cost">
@@ -1051,13 +1110,15 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({ produc
               <table className={styles.table}>
                 <thead>
                   <tr>
+                    <th>Urgency</th>
                     <th>Product / Model</th>
                     <th>Category</th>
                     <th>SKU & Location</th>
                     <th>Supplier</th>
+                    <th>Min Level</th>
+                    <th style={{ color: '#dc2626' }}>Reorder Qty</th>
                     {canViewCosts && <th>Cost Price</th>}
                     <th>Retail Sell</th>
-                    <th>Deficit Status</th>
                     <th style={{ textAlign: 'right' }}>Fast Restock Presets</th>
                   </tr>
                 </thead>
@@ -1066,13 +1127,32 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({ produc
                     const avatar = getBrandAvatar(product.name, product.model);
                     const isRestocking = loadingRestockId === product.id;
                     const isInlineOpen = inlineRestock[product.id]?.open;
+                    const threshold = product.lowStockThreshold || 1;
 
                     return (
                       <tr
                         key={product.id}
                         className={styles.tr}
                         onClick={() => onSelectProduct(product)}
+                        style={{ background: '#fef2f2' }}
                       >
+                        <td>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '3px 8px',
+                            borderRadius: '8px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            background: '#fde8e8',
+                            color: '#991b1b',
+                            border: '1px solid #fca5a5',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            🔴 Critical
+                          </span>
+                        </td>
                         <td>
                           <div className={styles.productCell}>
                             <div className={[styles.brandAvatar, avatar.cls].join(' ')}>
@@ -1119,6 +1199,27 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({ produc
                             {product.supplier || '—'}
                           </span>
                         </td>
+                        <td>
+                          <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>
+                            {threshold}
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '3px 9px',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            background: '#fee2e2',
+                            color: '#991b1b',
+                            border: '1px solid #fca5a5',
+                          }}>
+                            +{threshold} needed
+                          </span>
+                        </td>
                         {canViewCosts && (
                           <td data-col="cost">
                             <span data-privacy-cost className={[styles.costSub, 'privacy-cost'].join(' ')}>
@@ -1129,11 +1230,6 @@ export const InventoryTablesView: React.FC<InventoryTablesViewProps> = ({ produc
                         <td>
                           <span className={styles.priceMain}>
                             {formatCurrency(product.price)}
-                          </span>
-                        </td>
-                        <td>
-                          <span className={styles.stockoutAlert}>
-                            <AlertCircle size={13} /> Sold Out (0)
                           </span>
                         </td>
                         <td style={{ textAlign: 'right' }}>

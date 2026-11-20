@@ -57,7 +57,9 @@
     "signIn": "Se connecter",
     "showPassword": "Afficher le mot de passe",
     "staysSignedIn": "Ce téléphone vous garde connecté, et vous pouvez lui demander une empreinte à la place.",
-    "poweredBy": "Propulsé par Auto-Manager"
+    "poweredBy": "Propulsé par Auto-Manager",
+    "signInBiometrics": "Se connecter par biométrie",
+    "orPassword": "ou se connecter avec le mot de passe"
   },
   "sidebar": {
     "mainMenu": "Menu principal",
@@ -115,14 +117,38 @@
     "totalCount": "Total",
     "loadError": "Échec du chargement des tickets.",
     "empty": {
-      "all": { "title": "Tout est fait !", "sub": "Aucun ticket de réparation." },
-      "my_repairs": { "title": "Rien d'assigné", "sub": "Aucun ticket ne vous est assigné." },
-      "others_repairs": { "title": "Pas d'autres réparations", "sub": "Aucun ticket assigné à d'autres techniciens." },
-      "unassigned": { "title": "Tout est assigné !", "sub": "Chaque ticket a un technicien." },
-      "pending": { "title": "Aucun ticket en attente", "sub": "Tous les tickets ont été pris." },
-      "in_progress": { "title": "Aucune réparation en cours", "sub": "Aucune réparation active." },
-      "ready": { "title": "Aucun ticket prêt", "sub": "Rien en attente de retrait client." },
-      "other": { "title": "Aucun ticket", "sub": "Aucun ticket ne correspond à ce filtre." }
+      "all": {
+        "title": "Tout est fait !",
+        "sub": "Aucun ticket de réparation."
+      },
+      "my_repairs": {
+        "title": "Rien d'assigné",
+        "sub": "Aucun ticket ne vous est assigné."
+      },
+      "others_repairs": {
+        "title": "Pas d'autres réparations",
+        "sub": "Aucun ticket assigné à d'autres techniciens."
+      },
+      "unassigned": {
+        "title": "Tout est assigné !",
+        "sub": "Chaque ticket a un technicien."
+      },
+      "pending": {
+        "title": "Aucun ticket en attente",
+        "sub": "Tous les tickets ont été pris."
+      },
+      "in_progress": {
+        "title": "Aucune réparation en cours",
+        "sub": "Aucune réparation active."
+      },
+      "ready": {
+        "title": "Aucun ticket prêt",
+        "sub": "Rien en attente de retrait client."
+      },
+      "other": {
+        "title": "Aucun ticket",
+        "sub": "Aucun ticket ne correspond à ce filtre."
+      }
     }
   },
   "ticketDetail": {
@@ -195,7 +221,19 @@
     "fullySettled": "Soldé. Aucune dette restante.",
     "notesLabel": "Notes de règlement (facultatif)",
     "notesPlaceholder": "ex. Payé en espèces au comptoir",
-    "completeHandover": "Terminer la remise"
+    "completeHandover": "Terminer la remise",
+    "assignedTech": "Technicien assigné",
+    "changeTech": "Modifier",
+    "assignedToDevice": "Assigné à cet appareil",
+    "tapToAssign": "Appuyer pour assigner",
+    "noTechAssigned": "Non assigné",
+    "assignTechTitle": "Assigner un technicien",
+    "assignTechSub": "Sélectionnez un technicien ou laissez sans assignation.",
+    "unassigned": "Non assigné",
+    "clearAssignment": "Supprimer l'assignation",
+    "techUpdatedTitle": "Technicien mis à jour",
+    "techAssignedBody": "{{name}} est maintenant assigné à cette réparation.",
+    "techUnassignedBody": "Le ticket est maintenant sans assignation."
   },
   "newTicket": {
     "remarksPlaceholder": "ex. Dos rayé, tiroir SIM manquant, indicateur d'eau rose",
@@ -242,7 +280,12 @@
     "security": "Sécurité",
     "biometricTitle": "Déverrouiller par biométrie",
     "biometricBody": "Ce téléphone reste connecté et demande votre empreinte ou votre visage après environ 5 minutes loin de l’application.",
-    "biometricUnavailable": "Aucune empreinte ni reconnaissance faciale n’est configurée sur ce téléphone, donc rien à demander."
+    "biometricUnavailable": "Aucune empreinte ni reconnaissance faciale n’est configurée sur ce téléphone, donc rien à demander.",
+    "biometricSetupNotice": "Configurez-le à la connexion — déconnectez-vous et reconnectez-vous pour enregistrer.",
+    "biometricLoginEnabled": "Connexion biométrique activée",
+    "biometricLoginDisabled": "Connexion biométrique désactivée",
+    "disableBiometrics": "Désactiver la biométrie",
+    "enableBiometrics": "Activer la connexion biométrique"
   },
   "ticket": {
     "repairTicket": "Ticket de Réparation",
@@ -419,7 +462,12 @@
       "lowStockAlert": "Alerte stock faible",
       "barcode": "Code-barres / SKU (facultatif)",
       "barcodePlaceholder": "Généré automatiquement si vide",
-      "save": "Enregistrer dans le stock"
+      "save": "Enregistrer dans le stock",
+      "partName": "Nom de la pièce *",
+      "partNamePlaceholder": "ex. Écran OLED iPhone 12",
+      "compatibleModel": "Modèle compatible",
+      "compatibleModelPlaceholder": "ex. iPhone 12 / 12 Pro",
+      "partSkuPlaceholder": "Auto PRT-xxxxxx si vide"
     },
     "edit": {
       "title": "Modifier les prix du produit",
@@ -428,7 +476,24 @@
       "reasonPlaceholder": "ex. le fournisseur a augmenté le coût",
       "save": "Enregistrer les modifications",
       "askAdmin": "Demander l’approbation d’un admin"
-    }
+    },
+    "modeProducts": "Produits Retail",
+    "modeParts": "Pièces Détachées",
+    "partsTitle": "Inventaire Pièces",
+    "partsAll": "Toutes les pièces",
+    "partsScreens": "Écrans / LCD",
+    "partsBatteries": "Batteries",
+    "partsPorts": "Connecteurs de charge",
+    "partsCameras": "Caméras",
+    "partsOther": "Autres pièces",
+    "searchPartsPlaceholder": "Rechercher pièce, modèle, emplacement...",
+    "addPartTitle": "Ajouter une pièce",
+    "addPart": "Ajouter une pièce",
+    "savePart": "Enregistrer la pièce",
+    "noPartsFound": "Aucune pièce trouvée",
+    "addFirstPart": "Ajoutez votre première pièce détachée ci-dessous.",
+    "partCreated": "Pièce ajoutée",
+    "catWearables": "Wearables"
   },
   "pos": {
     "outOfStockBody": "{{name}} n’a aucune unité disponible.",
@@ -703,6 +768,8 @@
     "notMatched": "Cela ne correspond pas. Réessayez.",
     "usePassword": "Se connecter avec un mot de passe",
     "enablePrompt": "Confirmez votre empreinte ou votre visage pour activer ceci",
-    "enableFailed": "Le téléphone n’a pas accepté la biométrie."
+    "enableFailed": "Le téléphone n’a pas accepté la biométrie.",
+    "registerTitle": "Activer la connexion biométrique ?",
+    "registerMessage": "Utilisez votre empreinte digitale ou visage pour vous connecter la prochaine fois, sans saisir votre mot de passe."
   }
 }

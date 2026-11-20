@@ -1,6 +1,6 @@
-import { collection, doc, getDocs, addDoc, setDoc, deleteDoc, query, where, orderBy } from 'firebase/firestore';
+import { collection, doc, getDocs, addDoc, setDoc, deleteDoc, query, where, orderBy, runTransaction } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { Customer } from '../types';
+import type { Customer, CustomerActivityLog } from '../types';
 import { isPhoneMatch, normalizePhoneDigits, formatStandardPhone, getPhoneSearchVariants, isMoreDescriptiveName } from '../utils/phoneUtils';
 import { offlineCustomerSyncService } from './offlineCustomerSyncService';
 
@@ -284,6 +284,65 @@ export const customerService = {
     } finally {
       inFlightServiceCreations.delete(lockKey);
     }
+  },
+
+  changeStoreCredit: async (
+    customerId: string,
+    delta: number,
+    operationId: string,
+    audit: Pick<CustomerActivityLog, 'actionDescription' | 'actorId' | 'actorName' | 'actorRole'>
+  ): Promise<{ balance: number; log: CustomerActivityLog }> => {
+    if (!Number.isFinite(delta) || delta === 0 || !operationId.trim()) {
+      throw new Error('A credit movement needs a nonzero amount and a stable operation ID.');
+    }
+    if (customerId.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      throw new Error('Connect to the server before issuing or spending store credit.');
+    }
+    const signedCents = Math.round(delta * 100);
+    if (!Number.isSafeInteger(signedCents) || signedCents === 0) throw new Error('Invalid store credit amount.');
+    const logId = `credit_${encodeURIComponent(operationId)}`;
+    const result = await runTransaction(db, async tx => {
+      const customerRef = doc(db, COLLECTION, customerId);
+      const logRef = doc(db, 'customer_activity_logs', logId);
+      const customerSnap = await tx.get(customerRef);
+      const logSnap = await tx.get(logRef);
+      if (!customerSnap.exists()) throw new Error('Customer not found.');
+      const customer = customerSnap.data() as Customer;
+      if (customer.mergedIntoId) throw new Error('Select the active customer account manually.');
+      const currentCents = Math.round((customer.storeCredit ?? 0) * 100);
+      if (!Number.isSafeInteger(currentCents) || currentCents < 0) throw new Error('Invalid store credit balance.');
+      if (logSnap.exists()) {
+        const log = { ...logSnap.data(), id: logId } as CustomerActivityLog;
+        if (log.metadata?.operationCustomerId !== customerId || log.metadata?.signedCents !== signedCents) {
+          throw new Error('This credit operation ID already names a different movement.');
+        }
+        return { balance: currentCents / 100, log };
+      }
+      const nextCents = currentCents + signedCents;
+      if (nextCents < 0) throw new Error('INSUFFICIENT_STORE_CREDIT');
+      if (!Number.isSafeInteger(nextCents)) throw new Error('Invalid store credit balance.');
+      const balance = nextCents / 100;
+      const date = new Date().toISOString();
+      const log: CustomerActivityLog = JSON.parse(JSON.stringify({
+        ...audit,
+        id: logId,
+        customerId,
+        customerName: customer.name,
+        actionType: delta > 0 ? 'store_credit_issued' : 'store_credit_used',
+        actionTitle: delta > 0 ? 'Store Credit (Avoir) Issued' : 'Store Credit (Avoir) Redeemed',
+        date,
+        createdAt: date,
+        idempotencyKey: operationId,
+        metadata: { operationCustomerId: customerId, signedCents, amount: Math.abs(signedCents) / 100, newCredit: balance },
+      }));
+      tx.update(customerRef, { storeCredit: balance });
+      // The immutable audit row is also the receipt that makes a retry safe.
+      tx.set(logRef, log);
+      return { balance, log };
+    });
+    saveLocalCustomers(getLocalCustomers().map(customer => customer.id === customerId
+      ? { ...customer, storeCredit: result.balance } : customer));
+    return result;
   },
 
   updateCustomer: async (id: string, updates: Partial<Customer>): Promise<Customer> => {

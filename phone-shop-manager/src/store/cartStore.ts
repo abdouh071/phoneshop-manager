@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { CartItem, Customer, PaymentMethod, PhoneModel, SaleTransaction, SuspendedCart, B2BCheckoutOptions, CustomerDebtEntry } from '../types';
+import type { CartItem, Customer, PaymentMethod, PhoneModel, SaleTransaction, SuspendedCart, CustomerDebtEntry } from '../types';
 import { useInventoryStore } from './inventoryStore';
 import { inventoryService, commitSaleStockEffects } from '../services/inventoryService';
 import { transactionService } from '../services/transactionService';
@@ -13,7 +13,7 @@ import { formatCurrency } from '../utils/formatCurrency';
 import { discountAmountOf, lineDiscountOf } from '../utils/discountPolicy';
 import { planSaleEditStock } from '../utils/saleEditStock';
 import { returnedUnits, soldUnits } from '../utils/saleEditLines';
-import { foldStockDeltas, saleStockDeltas } from '../utils/stockDeltas';
+import { saleStockDeltas } from '../utils/stockDeltas';
 import { saleOpeningPayments } from '../utils/debtPayments';
 
 const getInventoryProducts = () =>
@@ -167,13 +167,12 @@ interface CartState {
 
   fetchTransactions: () => Promise<void>;
   checkout: (options?: CheckoutOptions) => Promise<SaleTransaction | null>;
-  checkoutB2B: (options: B2BCheckoutOptions) => Promise<{ transaction: SaleTransaction; debtEntry?: CustomerDebtEntry; invoiceNumber: string } | null>;
   /**
    * @returns anything the refund could not finish — currently only a credit record it
    * failed to close, which the till has to say out loud rather than leave the customer
    * owing for goods he returned.
    */
-  refundTransaction: (txId: string) => Promise<string[]>;
+  refundTransaction: (txId: string, expected?: SaleTransaction) => Promise<string[]>;
   /**
    * Rewrite a settled invoice in place. Lines absent from `tx.items` are treated as
    * products the counter is adding, so they deduct their whole quantity.
@@ -638,13 +637,15 @@ export const useCartStore = create<CartState>((set, get) => ({
           await useCustomerStore.getState().addStoreCredit(
             matchedOrCreatedCustomer.id,
             refundAmount,
-            `Exchange Surplus from Receipt #${saved.id.slice(0, 8)}`
+            `Exchange Surplus from Receipt #${saved.id.slice(0, 8)}`,
+            `${saved.id}_checkout_credit`
           ).catch(console.error);
         } else if (refundType === 'debt_deduction') {
           await useCustomerStore.getState().deductFromDebt(
             matchedOrCreatedCustomer.id,
             refundAmount,
-            `Exchange Surplus applied from Receipt #${saved.id.slice(0, 8)}`
+            `Exchange Surplus applied from Receipt #${saved.id.slice(0, 8)}`,
+            `${saved.id}_checkout_debt_deduction`
           ).catch(console.error);
         }
       }
@@ -654,7 +655,8 @@ export const useCartStore = create<CartState>((set, get) => ({
         await useCustomerStore.getState().useStoreCredit(
           matchedOrCreatedCustomer.id,
           options.storeCreditUsed,
-          `POS Sale #${saved.id.slice(0, 8)}`
+          `POS Sale #${saved.id.slice(0, 8)}`,
+          `${saved.id}_checkout_redeem`
         ).catch(console.error);
       }
 
@@ -764,295 +766,37 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
   },
 
-  checkoutB2B: async (options: B2BCheckoutOptions) => {
-    if (get().isCheckingOut) {
-      console.warn('B2B checkout already in progress, ignoring duplicate call');
-      return null;
-    }
-
-    const { items, discount } = get();
-    if (items.length === 0) return null;
-
-    set({ isCheckingOut: true });
-
-    try {
-      const itemsSnapshot = [...items];
-      const subtotal = get().getSubtotal();
-      const total = get().getTotal();
-      const actor = useAuthStore.getState().user;
-      const moment = new Date();
-      const now = moment.toISOString();
-      const { invoiceNumber, provisional: numberGuessed } = await claimInvoiceNumber('parts', moment);
-
-      const { customer, settlementType, paidAmount, paymentMethod, chargedAmount, dueDate, notes } = options;
-
-      const txPayments = paidAmount > 0
-        ? [{ method: paymentMethod, amount: paidAmount }]
-        : [];
-
-      let createdDebtEntry: CustomerDebtEntry | undefined;
-
-      // 1. If chargedAmount > 0, post to Customer Debt Ledger
-      if (chargedAmount > 0) {
-        try {
-          const itemsSummary = itemsSnapshot.map(i => `${i.quantity}x ${i.product.name} ${i.product.model}`).join(', ');
-          createdDebtEntry = await useCustomerStore.getState().addDebt({
-            customerId: customer.id,
-            customerName: customer.name,
-            customerPhone: customer.phone,
-            productOrService: itemsSummary || `Parts Invoice #${invoiceNumber}`,
-            totalAmount: total,
-            amountPaid: paidAmount,
-            date: now,
-            dueDate: dueDate || undefined,
-            notes: notes ? `${notes} (Invoice #${invoiceNumber})` : `Parts Invoice #${invoiceNumber}`,
-            invoiceNumber,
-            itemsSummary,
-            type: 'parts_b2b',
-            // Real tender, counted once on the invoice — not a fabricated cash row.
-            payments: saleOpeningPayments(txPayments, now, actor?.name),
-          });
-        } catch (err) {
-          console.error('Failed to add debt for B2B checkout:', err);
-          throw err;
-        }
-      }
-
-      // 2. Build and save SaleTransaction
-      const txData: Omit<SaleTransaction, 'id'> = {
-        date: now,
-        items: [...itemsSnapshot],
-        subtotal,
-        discount: discount || undefined,
-        total,
-        payments: txPayments,
-        customerName: customer.name,
-        customerId: customer.id,
-        shopName: customer.shopName || customer.name,
-        saleType: 'parts_b2b',
-        stockApplied: false,
-        invoiceNumber,
-        invoiceNumberProvisional: numberGuessed || undefined,
-        accountSettlement: {
-          type: settlementType,
-          paidAmount,
-          chargedAmount,
-          debtEntryId: createdDebtEntry?.id,
-          dueDate: dueDate || undefined,
-          notes: notes || undefined,
-        },
-        status: 'completed',
-        processedById: actor?.id,
-        processedByName: actor?.name,
-      };
-
-      const saved = await transactionService.save(txData);
-
-      // 3. Update customer purchase stats (Authoritative recalculation)
-      try {
-        useCustomerStore.getState().recalculateCustomer(customer.id).catch(console.error);
-      } catch (err) {
-        console.error('Failed to update customer purchase stats:', err);
-      }
-
-      // 4. Immediate Authoritative Stock Deduction in Zustand & Firestore (executed ONCE per
-      // snapshot), stamped on the invoice so a crash between the sale and the shelf is healed.
-      await moveSaleStock(saved, itemsSnapshot, 'parts_b2b');
-
-      // 5. Clear active cart
-      set(state => ({
-        transactions: [saved, ...state.transactions],
-        items: [],
-        customerName: '',
-        customerPhone: '',
-        discount: null,
-        payments: [{ method: 'cash', amount: 0 }],
-      }));
-
-      saveLocalActiveCart([], '', '', null);
-      cartService.clearActiveCart().catch(console.error);
-
-      // 6. Log to Activity Log & Customer Audit Log
-      const itemsDesc = itemsSnapshot.map(i => `${i.quantity}x ${i.product.name}`).join(', ');
-      const shopDisplayName = customer.shopName ? `${customer.shopName} (${customer.name})` : customer.name;
-      const settlementSummary = settlementType === 'paid_full'
-        ? `Fully Paid (${formatCurrency(paidAmount)} via ${paymentMethod.toUpperCase()})`
-        : settlementType === 'charged_to_account'
-          ? `100% Charged to Account Tab (${formatCurrency(chargedAmount)})`
-          : `Partial: Paid ${formatCurrency(paidAmount)} (${paymentMethod.toUpperCase()}), Charged ${formatCurrency(chargedAmount)} to Account`;
-
-      activityLogService.log(
-        'sales',
-        `B2B Parts Sale [${invoiceNumber}] — ${formatCurrency(total)} for ${shopDisplayName} (${settlementSummary})`,
-        { detail: itemsDesc, entityId: saved.id, entityType: 'sale', userName: actor?.name, userId: actor?.id }
-      ).catch(console.error);
-
-      customerLogService.log({
-        customerId: customer.id,
-        customerName: customer.name,
-        actionType: 'b2b_parts_sale',
-        actionTitle: `B2B Parts Invoice #${invoiceNumber}`,
-        actionDescription: `Commercial parts dispatch to ${shopDisplayName} (${itemsSnapshot.length} parts: ${itemsDesc}). Total: ${formatCurrency(total)} — ${settlementSummary} processed by ${actor?.name || 'Staff'}.`,
-        actorId: actor?.id,
-        actorName: actor?.name || 'Staff',
-        actorRole: actor?.role,
-        metadata: {
-          transactionId: saved.id,
-          invoiceNumber,
-          total,
-          settlementType,
-          paidAmount,
-          chargedAmount,
-          debtEntryId: createdDebtEntry?.id,
-          dueDate,
-        },
-      }).catch(console.error);
-
-      return { transaction: saved, debtEntry: createdDebtEntry, invoiceNumber };
-    } finally {
-      set({ isCheckingOut: false });
-    }
-  },
-
-  refundTransaction: async (txId) => {
-    const warnings: string[] = [];
-    let tx = get().transactions.find(t => t.id === txId);
-    let isPartsB2B = false;
-    if (!tx) {
-      const { usePartsCartStore } = await import('./partsCartStore');
-      tx = usePartsCartStore.getState().invoices.find(t => t.id === txId);
-      if (tx) isPartsB2B = true;
-    }
-    // A cheap refusal on the copy this till holds; the claim below asks the server.
-    // The phone closes a sale as `voided`, so that door counts as closed here too.
-    if (!tx || tx.status === 'refunded' || tx.status === 'voided' || tx.status === 'cancelled') return warnings;
-
-    // The claim comes before any stock, debt or Avoir moves: two tills can both hold
-    // `completed` for an invoice one of them is about to close, and only the till the
-    // server lets through may hand the money back. A lost claim changes nothing.
-    const { claimed, refundedAt } = await transactionService.claimRefund(txId);
-    if (!claimed) return warnings;
-    
-    // 1. Authoritative stock reversal (Problem 4 fix):
-    // Regular purchases -> return to stock (+qty)
-    // Returned items from customer previously -> deduct from stock (-qty)
-    try {
-      foldStockDeltas(
-        tx.items.map(item => ({
-          productId: item.product?.id,
-          delta: item.isReturn ? (item.restock !== false ? -item.quantity : 0) : item.quantity,
-        }))
-      ).forEach(({ productId, delta }) => {
-        useInventoryStore.getState().adjustStockBy(productId, delta);
-      });
-    } catch (err) {
-      console.error('Failed to restore stock on refund:', err);
-    }
-
-    const customerStore = useCustomerStore.getState();
-
-    // 2. Void or remove linked customer debt if this transaction was put on debt (Problem 4 fix)
-    // The invoice number is a clause of its own because the phone records it on both sides
-    // and has no transaction id to offer a credit sale it wrote while off the network.
-    const linkedDebt = customerStore.debts.find(d =>
-      d.id === tx.accountSettlement?.debtEntryId ||
-      d.transactionId === txId ||
-      (tx.invoiceNumber && d.invoiceNumber === tx.invoiceNumber) ||
-      (d.notes && d.notes.includes(txId))
-    );
-    if (linkedDebt) {
-      // If customer had already paid part of this debt, convert collected amount to store credit so funds are not lost
-      if (linkedDebt.amountPaid > 0 && tx.customerId) {
-        await customerStore.addStoreCredit(
-          tx.customerId,
-          linkedDebt.amountPaid,
-          `Refund of partial payment made on voided debt (Receipt #${tx.invoiceNumber || txId.slice(0, 8)})`
-        ).catch(console.error);
-      }
-      await customerStore.settleDebt(
-        linkedDebt.id,
-        `Receipt #${tx.invoiceNumber || txId.slice(0, 8)} was refunded.`
-      ).catch(debtErr => {
-        // A refund that leaves the balance standing is not finished, and the till has
-        // to hear that: it used to be a console line, so the customer kept owing for
-        // goods he had already handed back.
-        console.error('Refund closed the sale but not the credit record:', debtErr);
-        warnings.push(
-          `${tx.customerName || 'The customer'} still owes ${formatCurrency(linkedDebt.remainingBalance)}. ` +
-          `Clear that credit record from the Customers tab.`
-        );
-      });
-    }
-
-    // 3. Restore store credit if customer spent store credit on this sale
-    if (tx.exchangeSummary?.storeCreditUsed && tx.exchangeSummary.storeCreditUsed > 0 && tx.customerId) {
-      await customerStore.addStoreCredit(
-        tx.customerId,
-        tx.exchangeSummary.storeCreditUsed,
-        `Refund Restoration for Receipt #${tx.invoiceNumber || txId.slice(0, 8)}`
-      ).catch(console.error);
-    }
-
-    // 4. Reverse surplus store credit if this was an exchange that granted store credit (avoir)
-    if (tx.total < 0 && tx.exchangeSummary?.refundType === 'store_credit' && tx.customerId) {
-      await customerStore.useStoreCredit(
-        tx.customerId,
-        Math.abs(tx.total),
-        `Voided Exchange Surplus from Receipt #${tx.invoiceNumber || txId.slice(0, 8)}`
-      ).catch(console.error);
-    }
-
-    // 5. Deduct from customer's totalSpent & totalPurchases
-    // 6. The sale was already closed on the server by the claim above; the moment it
-    // stamped is the moment every copy below carries.
-
-    // 5. Authoritative recalculation of customer financials on refund
-    if (tx.customerId) {
-      customerStore.recalculateCustomer(tx.customerId).catch(console.error);
-    }
-
-    if (isPartsB2B) {
-      const { usePartsCartStore } = await import('./partsCartStore');
-      usePartsCartStore.setState(state => ({
-        invoices: state.invoices.map(t =>
-          t.id === txId ? { ...t, status: 'refunded' as const, refundedAt } : t
-        )
-      }));
-    } else {
-      set(state => ({
-        transactions: state.transactions.map(t =>
-          t.id === txId ? { ...t, status: 'refunded' as const, refundedAt } : t
-        )
-      }));
-    }
-
-    // 7. Log the refund to the store-wide Activity Log
+  refundTransaction: async (txId, expected) => {
     const actor = useAuthStore.getState().user;
-    activityLogService.log(
-      'sales',
-      `Refund processed for transaction #${txId} — ${formatCurrency(tx.total)}`,
-      { entityId: txId, entityType: 'sale', userName: actor?.name, userId: actor?.id }
-    ).catch(console.error);
-
-    // 8. Customer audit timeline log
-    if (tx.customerId) {
-      const itemsDesc = tx.items
-        .map(i => `${i.quantity}x ${i.product.name}`)
-        .join(', ');
-      customerLogService.log({
-        customerId: tx.customerId,
-        customerName: tx.customerName || 'Customer',
-        actionType: 'item_return',
-        actionTitle: `Full Refund — Receipt #${tx.invoiceNumber || txId.slice(0, 8)}`,
-        actionDescription: `Full refund of ${formatCurrency(tx.total)} processed by ${actor?.name || 'Staff'}. Items: ${itemsDesc}.`,
-        actorId: actor?.id,
-        actorName: actor?.name || 'Staff',
-        actorRole: actor?.role,
-        metadata: { transactionId: txId, refundedTotal: tx.total, itemsDesc },
-      }).catch(console.error);
+    if (!actor) throw new Error('Sign in before refunding an invoice.');
+    let sale = expected ?? get().transactions.find(t => t.id === txId);
+    if (!sale) {
+      const { usePartsCartStore } = await import('./partsCartStore');
+      sale = usePartsCartStore.getState().invoices.find(t => t.id === txId);
     }
-
-    return warnings;
+    if (!sale || sale.id !== txId) throw new Error('Refresh the invoice before refunding it.');
+    // A cheap refusal on the copy this till holds; the service's transaction asks the
+    // server. The phone closes a sale as `voided`, so that door counts as closed here.
+    if (sale.status === 'refunded' || sale.status === 'voided' || sale.status === 'cancelled') {
+      return ['This invoice was already closed. No new refund or account movement was made.'];
+    }
+    const result = await transactionService.refund(sale, { id: actor.id, name: actor.name || 'Staff', role: actor.role });
+    if (useAuthStore.getState().user?.id !== actor.id) throw new Error('The refund was confirmed for the previous cashier. Refresh the invoice before continuing.');
+    set(state => ({ transactions: state.transactions.map(t => t.id === txId ? result.transaction : t) }));
+    const { usePartsCartStore } = await import('./partsCartStore');
+    usePartsCartStore.setState(state => ({ invoices: state.invoices.map(t => t.id === txId ? result.transaction : t) }));
+    const stock = new Map(result.stock.map(product => [product.id, product]));
+    useInventoryStore.setState(state => ({
+      products: state.products.map(product => stock.get(product.id) ?? product),
+      parts: state.parts.map(product => stock.get(product.id) ?? product),
+    }));
+    if (result.customer || result.debt) {
+      useCustomerStore.setState(state => ({
+        customers: result.customer ? [result.customer, ...state.customers.filter(customer => customer.id !== result.customer!.id)] : state.customers,
+        debts: result.debt ? [result.debt, ...state.debts.filter(debt => debt.id !== result.debt!.id)] : state.debts,
+      }));
+    }
+    return result.outcome === 'already_closed' ? ['This invoice was already closed. No new refund or account movement was made.'] : [];
   },
 
   editTransaction: async (txId, newItems, returnToStockOptions) => {
@@ -1106,15 +850,6 @@ export const useCartStore = create<CartState>((set, get) => ({
         .map(s => `"${s.name}" (shelf ${s.available}, needs ${s.wanted})`)
         .join(', ');
       throw new Error(`Not enough stock to put on the invoice: ${detail}`);
-    }
-
-    const stockPromises = deltas.map(({ productId, delta }) =>
-      inventoryService.adjustStockAsync(productId, delta)
-    );
-
-    if (stockPromises.length > 0) {
-      await Promise.all(stockPromises).catch(console.error);
-      await useInventoryStore.getState().fetchProducts().catch(console.error);
     }
 
     let status: NonNullable<SaleTransaction['status']> = tx.status || 'completed';
@@ -1192,6 +927,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       total,
       status,
       payments: adjustedPayments,
+      financialRevision: (tx.financialRevision ?? 0) + 1,
     };
 
     /**
@@ -1235,53 +971,36 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
 
     // If this transaction was linked to a debt entry, update the debt balance accordingly (Problem 8 fix)
-    const customerStore = useCustomerStore.getState();    const linkedDebt = customerStore.debts.find(d =>
+    const customerStore = useCustomerStore.getState();
+    const linkedDebt = customerStore.debts.find(d =>
       d.id === tx.accountSettlement?.debtEntryId ||
       d.transactionId === txId ||
       (tx.invoiceNumber && d.invoiceNumber === tx.invoiceNumber) ||
       (d.notes && d.notes.includes(txId))
     );
+    // Money the customer already handed over is a fact; correcting the invoice
+    // cannot un-pay it. What the account held before this edit and what it holds
+    // after is the difference between the two over-collections, and the shop's
+    // own rule for absorbed money — the one a void already uses — is to keep it
+    // as Avoir rather than let `Math.max(0, …)` quietly eat it.
+    const itemsSummary = newItems.map(lineNote).join(', ');
+    const paid = linkedDebt?.amountPaid || 0;
+    const surplusShift = linkedDebt
+      ? Math.max(0, paid - total) - Math.max(0, paid - (tx.total || 0))
+      : 0;
+    const creditHolder = linkedDebt ? (tx.customerId || linkedDebt.customerId) : undefined;
+    const receipt = tx.invoiceNumber || txId.slice(0, 8);
+
+    // What the account owes is what the corrected tender lines declare as `debt`.
+    // A parts invoice carries no such line — its charge lives in `accountSettlement`
+    // alone — so silence in the payments is not evidence that a standing balance was
+    // paid; there the account's own paid figure decides, as it does on the phone.
+    let newCharged = 0;
     if (linkedDebt) {
-      const itemsSummary = newItems.map(lineNote).join(', ');
-      // Money the customer already handed over is a fact; correcting the invoice
-      // cannot un-pay it. What the account held before this edit and what it holds
-      // after is the difference between the two over-collections, and the shop's
-      // own rule for absorbed money — the one a void already uses — is to keep it
-      // as Avoir rather than let `Math.max(0, …)` quietly eat it.
-      const paid = linkedDebt.amountPaid || 0;
-      const surplusShift = Math.max(0, paid - total) - Math.max(0, paid - (tx.total || 0));
-      const creditHolder = tx.customerId || linkedDebt.customerId;
-      const receipt = tx.invoiceNumber || txId.slice(0, 8);
-
-      if (surplusShift > 0 && creditHolder) {
-        await customerStore
-          .addStoreCredit(
-            creditHolder,
-            surplusShift,
-            `Over-collection on corrected Receipt #${receipt} held as Avoir`
-          )
-          .catch(console.error);
-      } else if (surplusShift < 0 && creditHolder) {
-        // The invoice came back up to what was already paid, so the Avoir written
-        // by the earlier correction is money the shop has now handed over twice.
-        await customerStore
-          .useStoreCredit(
-            creditHolder,
-            Math.abs(surplusShift),
-            `Avoir released by corrected Receipt #${receipt}`
-          )
-          .catch(console.error);
-      }
-
-      // What the account owes is what the corrected tender lines declare as `debt`.
-      // A parts invoice carries no such line — its charge lives in `accountSettlement`
-      // alone — so silence in the payments is not evidence that a standing balance was
-      // paid; there the account's own paid figure decides, as it does on the phone.
       const accountLines = adjustedPayments.filter(p => p.method === 'debt');
-      const newCharged = accountLines.length > 0
+      newCharged = accountLines.length > 0
         ? Math.round(accountLines.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) * 100) / 100
         : Math.max(0, total - (linkedDebt.amountPaid || 0));
-      customerStore.updateDebtAmount(linkedDebt.id, total, itemsSummary, newCharged).catch(console.error);
 
       // The stamp describes this invoice's own split: `paidAmount` is what changed hands
       // at the till, which is what the account statement prints as paid upfront. The
@@ -1304,26 +1023,101 @@ export const useCartStore = create<CartState>((set, get) => ({
       };
     }
 
-    await transactionService.updateTransaction(txId, updates);
+    // ── The writes ──
+    // Online, the whole correction — invoice, shelf, credit record and Avoir — lands
+    // in one server transaction keyed by the revision this till saw; a stale till is
+    // refused before anything moves. Offline (or an invoice only this device knows)
+    // the durable per-product queue and keyed Avoir moves keep the legacy sequence,
+    // because there is no server to run one atomic correction on.
+    let confirmed: { transaction: SaleTransaction; stock: PhoneModel[]; customer?: Customer; debt?: CustomerDebtEntry } | null = null;
+    if (!navigator.onLine || txId.startsWith('offline_')) {
+      const stockPromises = deltas.map(({ productId, delta }) =>
+        inventoryService.adjustStockAsync(productId, delta)
+      );
+
+      if (stockPromises.length > 0) {
+        await Promise.all(stockPromises).catch(console.error);
+        await useInventoryStore.getState().fetchProducts().catch(console.error);
+      }
+
+      if (linkedDebt) {
+        if (surplusShift > 0 && creditHolder) {
+          await customerStore
+            .addStoreCredit(
+              creditHolder,
+              surplusShift,
+              `Over-collection on corrected Receipt #${receipt} held as Avoir`,
+              `${txId}_edit_${(tx.financialRevision ?? 0) + 1}_credit`
+            )
+            .catch(console.error);
+        } else if (surplusShift < 0 && creditHolder) {
+          // The invoice came back up to what was already paid, so the Avoir written
+          // by the earlier correction is money the shop has now handed over twice.
+          await customerStore
+            .useStoreCredit(
+              creditHolder,
+              Math.abs(surplusShift),
+              `Avoir released by corrected Receipt #${receipt}`,
+              `${txId}_edit_${(tx.financialRevision ?? 0) + 1}_credit`
+            )
+            .catch(console.error);
+        }
+        customerStore.updateDebtAmount(linkedDebt.id, total, itemsSummary, newCharged).catch(console.error);
+      }
+
+      await transactionService.updateTransaction(txId, updates);
+    } else {
+      confirmed = await transactionService.editSale(tx, {
+        updates,
+        stockDeltas: deltas.map(({ productId, delta }) => ({ productId, delta })),
+        creditShift: surplusShift !== 0 && creditHolder
+          ? {
+              customerId: creditHolder,
+              amount: surplusShift,
+              note: surplusShift > 0
+                ? `Over-collection on corrected Receipt #${receipt} held as Avoir`
+                : `Avoir released by corrected Receipt #${receipt}`,
+            }
+          : undefined,
+        debtUpdate: linkedDebt
+          ? { debtId: linkedDebt.id, total, charged: newCharged, itemsSummary, expectedPaid: paid }
+          : undefined,
+      });
+    }
 
     // If this transaction has an attached customer, recalculate stats authoritatively
     if (tx.customerId) {
       useCustomerStore.getState().recalculateCustomer(tx.customerId).catch(console.error);
     }
 
+    const finalTx: SaleTransaction = confirmed?.transaction ?? { ...tx, ...updates };
     if (isPartsB2B) {
       const { usePartsCartStore } = await import('./partsCartStore');
       usePartsCartStore.setState(state => ({
         invoices: state.invoices.map(t =>
-          t.id === txId ? { ...t, ...updates } : t
+          t.id === txId ? finalTx : t
         )
       }));
     } else {
       set(state => ({
         transactions: state.transactions.map(t =>
-          t.id === txId ? { ...t, ...updates } : t
+          t.id === txId ? finalTx : t
         )
       }));
+    }
+
+    if (confirmed) {
+      const stock = new Map(confirmed.stock.map(product => [product.id, product]));
+      useInventoryStore.setState(state => ({
+        products: state.products.map(product => stock.get(product.id) ?? product),
+        parts: state.parts.map(product => stock.get(product.id) ?? product),
+      }));
+      if (confirmed.customer || confirmed.debt) {
+        useCustomerStore.setState(state => ({
+          customers: confirmed.customer ? [confirmed.customer, ...state.customers.filter(c => c.id !== confirmed.customer!.id)] : state.customers,
+          debts: confirmed.debt ? [confirmed.debt, ...state.debts.filter(d => d.id !== confirmed.debt!.id)] : state.debts,
+        }));
+      }
     }
 
     const actor = useAuthStore.getState().user;

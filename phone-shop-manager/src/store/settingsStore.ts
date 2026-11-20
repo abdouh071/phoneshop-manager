@@ -6,6 +6,9 @@ import { errorMessage } from '../utils/errorUtils';
 /** The fallback a technician earns when no rate is configured anywhere. */
 const DEFAULT_TECHNICIAN_PERCENT = 50;
 
+/** One live settings listener per app, however many screens ask for one. */
+let settingsUnsubscribe: (() => void) | null = null;
+
 interface SettingsState extends StoreSettings {
   colorTheme: ColorThemeKey;
   isLoading: boolean;
@@ -15,8 +18,8 @@ interface SettingsState extends StoreSettings {
   getTechnicianRate: (techName?: string) => number;
   setTechnicianRate: (techName: string, rate: number) => Promise<void>;
   fetchSettings: () => Promise<() => void>;
-  updateSetting: <K extends keyof StoreSettings>(key: K, value: StoreSettings[K]) => Promise<void>;
-  updateSettingsBulk: (settings: Partial<StoreSettings>) => Promise<void>;
+  updateSetting: <K extends keyof StoreSettings>(key: K, value: StoreSettings[K]) => Promise<boolean>;
+  updateSettingsBulk: (settings: Partial<StoreSettings>) => Promise<boolean>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -66,22 +69,27 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   fetchSettings: async () => {
     set({ isLoading: true, error: null });
-    
-    // Subscribe to real-time Firestore updates
-    const unsubscribe = settingsService.subscribeSettings((remoteSettings) => {
-      set({ 
-        ...remoteSettings, 
-        colorTheme: remoteSettings.colorTheme || 'default',
-        technicianRates: remoteSettings.technicianRates || {},
-        technicianProfitPercentage: remoteSettings.technicianProfitPercentage ?? DEFAULT_TECHNICIAN_PERCENT,
-        labelFont: remoteSettings.labelFont || '2',
-        isLoading: false, 
-        isInitialized: true 
+
+    // Subscribe to real-time Firestore updates — one listener no matter how many
+    // screens mount, so a second fetch does not stack subscriptions or let a late
+    // snapshot from a dead mount overwrite the settings another screen just saved.
+    if (!settingsUnsubscribe) {
+      settingsUnsubscribe = settingsService.subscribeSettings((remoteSettings) => {
+        set({
+          ...remoteSettings,
+          colorTheme: remoteSettings.colorTheme || 'default',
+          technicianRates: remoteSettings.technicianRates || {},
+          technicianProfitPercentage: remoteSettings.technicianProfitPercentage ?? DEFAULT_TECHNICIAN_PERCENT,
+          labelFont: remoteSettings.labelFont || '2',
+          isLoading: false,
+          isInitialized: true
+        });
+        if (remoteSettings.storeName) {
+          document.title = `${remoteSettings.storeName} - Phone Shop Manager`;
+        }
       });
-      if (remoteSettings.storeName) {
-        document.title = `${remoteSettings.storeName} - Phone Shop Manager`;
-      }
-    });
+    }
+    const unsubscribe = settingsUnsubscribe;
 
     // Also do an initial fetch to handle case when doc doesn't exist yet
     const remoteSettings = await settingsService.getSettings();
@@ -128,15 +136,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   updateSetting: async (key, value) => {
-    // Optimistic UI update
+    // Optimistic UI update: the till sees its choice immediately, and on failure the
+    // draft stays on screen — the boolean says whether the server really took it.
     set({ [key]: value } as Partial<SettingsState>);
     if (key === 'storeName' && typeof value === 'string') {
       document.title = `${value} - Phone Shop Manager`;
     }
     try {
       await settingsService.updateSettings({ [key]: value });
+      return true;
     } catch (err: unknown) {
       set({ error: errorMessage(err) || 'Failed to sync settings with Firestore' });
+      return false;
     }
   },
 
@@ -147,8 +158,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
     try {
       await settingsService.updateSettings(newSettings);
+      return true;
     } catch (err: unknown) {
       set({ error: errorMessage(err) || 'Failed to sync settings with Firestore' });
+      return false;
     }
   }
 }));

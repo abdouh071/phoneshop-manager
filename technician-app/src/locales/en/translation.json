@@ -57,7 +57,9 @@
     "signIn": "Sign In",
     "showPassword": "Show password",
     "staysSignedIn": "This phone keeps you signed in, and you can ask it for a fingerprint instead.",
-    "poweredBy": "Powered by Auto-Manager"
+    "poweredBy": "Powered by Auto-Manager",
+    "signInBiometrics": "Sign in with Biometrics",
+    "orPassword": "or sign in with password"
   },
   "sidebar": {
     "mainMenu": "Main Menu",
@@ -115,14 +117,38 @@
     "totalCount": "Total",
     "loadError": "Failed to load tickets.",
     "empty": {
-      "all": { "title": "All caught up!", "sub": "No repair tickets yet." },
-      "my_repairs": { "title": "Nothing assigned", "sub": "No tickets are assigned to you right now." },
-      "others_repairs": { "title": "No other repairs", "sub": "No tickets assigned to other technicians." },
-      "unassigned": { "title": "All assigned!", "sub": "Every ticket has a technician." },
-      "pending": { "title": "No pending tickets", "sub": "All tickets have been picked up." },
-      "in_progress": { "title": "Nothing in progress", "sub": "No active repairs right now." },
-      "ready": { "title": "No ready tickets", "sub": "Nothing waiting for customer pickup." },
-      "other": { "title": "No tickets", "sub": "No tickets match this filter." }
+      "all": {
+        "title": "All caught up!",
+        "sub": "No repair tickets yet."
+      },
+      "my_repairs": {
+        "title": "Nothing assigned",
+        "sub": "No tickets are assigned to you right now."
+      },
+      "others_repairs": {
+        "title": "No other repairs",
+        "sub": "No tickets assigned to other technicians."
+      },
+      "unassigned": {
+        "title": "All assigned!",
+        "sub": "Every ticket has a technician."
+      },
+      "pending": {
+        "title": "No pending tickets",
+        "sub": "All tickets have been picked up."
+      },
+      "in_progress": {
+        "title": "Nothing in progress",
+        "sub": "No active repairs right now."
+      },
+      "ready": {
+        "title": "No ready tickets",
+        "sub": "Nothing waiting for customer pickup."
+      },
+      "other": {
+        "title": "No tickets",
+        "sub": "No tickets match this filter."
+      }
     }
   },
   "ticketDetail": {
@@ -195,7 +221,19 @@
     "fullySettled": "Fully settled. No debt remaining.",
     "notesLabel": "Settlement Notes (Optional)",
     "notesPlaceholder": "e.g. Paid cash at counter",
-    "completeHandover": "Complete Handover"
+    "completeHandover": "Complete Handover",
+    "assignedTech": "Assigned Technician",
+    "changeTech": "Change",
+    "assignedToDevice": "Assigned to this device",
+    "tapToAssign": "Tap to assign",
+    "noTechAssigned": "Unassigned",
+    "assignTechTitle": "Assign Technician",
+    "assignTechSub": "Select a repair staff member or leave unassigned.",
+    "unassigned": "Unassigned",
+    "clearAssignment": "Clear Assignment",
+    "techUpdatedTitle": "Technician Updated",
+    "techAssignedBody": "{{name}} is now assigned to this repair.",
+    "techUnassignedBody": "Ticket is now unassigned."
   },
   "newTicket": {
     "remarksPlaceholder": "e.g. Scratched back, missing SIM tray, water indicator pink",
@@ -242,7 +280,12 @@
     "security": "Security",
     "biometricTitle": "Unlock with biometrics",
     "biometricBody": "This phone stays signed in, and asks for your fingerprint or face after about 5 minutes away.",
-    "biometricUnavailable": "No fingerprint or face unlock is set up on this phone, so there is nothing to ask for."
+    "biometricUnavailable": "No fingerprint or face unlock is set up on this phone, so there is nothing to ask for.",
+    "biometricSetupNotice": "Set up at login — sign out and back in to register.",
+    "biometricLoginEnabled": "Biometric Login Enabled",
+    "biometricLoginDisabled": "Biometric Login Disabled",
+    "disableBiometrics": "Disable Biometrics",
+    "enableBiometrics": "Enable Biometric Login"
   },
   "ticket": {
     "repairTicket": "Repair Ticket",
@@ -419,7 +462,12 @@
       "lowStockAlert": "Low Stock Alert",
       "barcode": "Barcode / SKU (Optional)",
       "barcodePlaceholder": "Auto-generated if blank",
-      "save": "Save Product to Stock"
+      "save": "Save Product to Stock",
+      "partName": "Part Name *",
+      "partNamePlaceholder": "e.g. iPhone 12 Screen OLED",
+      "compatibleModel": "Compatible Model",
+      "compatibleModelPlaceholder": "e.g. iPhone 12 / 12 Pro",
+      "partSkuPlaceholder": "Auto PRT-xxxxxx if blank"
     },
     "edit": {
       "title": "Edit Product Pricing",
@@ -428,7 +476,24 @@
       "reasonPlaceholder": "e.g. Supplier raised the cost",
       "save": "Save Changes",
       "askAdmin": "Ask an admin to approve"
-    }
+    },
+    "modeProducts": "Retail Products",
+    "modeParts": "Spare Parts",
+    "partsTitle": "Parts Inventory",
+    "partsAll": "All Parts",
+    "partsScreens": "Screens / LCD",
+    "partsBatteries": "Batteries",
+    "partsPorts": "Charging Ports",
+    "partsCameras": "Cameras",
+    "partsOther": "Other Parts",
+    "searchPartsPlaceholder": "Search part, model, shelf location...",
+    "addPartTitle": "Add Spare Part",
+    "addPart": "Add Spare Part",
+    "savePart": "Save Spare Part",
+    "noPartsFound": "No Spare Parts Found",
+    "addFirstPart": "Add your first spare part below.",
+    "partCreated": "Spare Part Added",
+    "catWearables": "Wearables"
   },
   "pos": {
     "outOfStockBody": "{{name}} has 0 available units.",
@@ -703,6 +768,8 @@
     "notMatched": "That did not match. Try again.",
     "usePassword": "Sign in with a password instead",
     "enablePrompt": "Confirm your fingerprint or face to turn this on",
-    "enableFailed": "Your phone did not accept the biometric."
+    "enableFailed": "Your phone did not accept the biometric.",
+    "registerTitle": "Enable Biometric Login?",
+    "registerMessage": "Use your fingerprint or face to sign in next time, without entering your password."
   }
 }

@@ -55,14 +55,57 @@ type InventoryMetrics = {
   totalValuation: number;
 };
 
-const CATEGORY_TABS = [
+export const isPartProduct = (p: PhoneModel) =>
+  p.category === 'repair_part' || p.sku?.toUpperCase().startsWith('PRT-');
+
+const RETAIL_CATEGORY_TABS = [
   { id: 'all', labelKey: 'common.all', fallback: 'All' },
   { id: 'low_stock_only', labelKey: 'inventory.catLowStock', fallback: 'Low Stock' },
   { id: 'smartphone', labelKey: 'inventory.catPhones', fallback: 'Phones' },
   { id: 'accessory', labelKey: 'inventory.catAccessories', fallback: 'Accessories' },
   { id: 'tablet', labelKey: 'inventory.catTablets', fallback: 'Tablets' },
-  { id: 'repair_part', labelKey: 'inventory.catParts', fallback: 'Parts' },
+  { id: 'wearable', labelKey: 'inventory.catWearables', fallback: 'Wearables' },
 ];
+
+const PARTS_CATEGORY_TABS = [
+  { id: 'all', labelKey: 'inventory.partsAll', fallback: 'All Parts' },
+  { id: 'low_stock_only', labelKey: 'inventory.catLowStock', fallback: 'Low Stock' },
+  { id: 'screen', labelKey: 'inventory.partsScreens', fallback: 'Screens / LCD' },
+  { id: 'battery', labelKey: 'inventory.partsBatteries', fallback: 'Batteries' },
+  { id: 'charging_port', labelKey: 'inventory.partsPorts', fallback: 'Charging Ports' },
+  { id: 'camera', labelKey: 'inventory.partsCameras', fallback: 'Cameras' },
+  { id: 'other_part', labelKey: 'inventory.partsOther', fallback: 'Other Parts' },
+];
+
+const matchesPartSubCategory = (product: PhoneModel, filterId: string): boolean => {
+  if (filterId === 'all') return true;
+  if (filterId === 'low_stock_only') {
+    const threshold = product.lowStockThreshold ?? 2;
+    return product.stock <= threshold;
+  }
+  const text = `${product.name} ${product.model || ''}`.toLowerCase();
+  if (filterId === 'screen') {
+    return text.includes('screen') || text.includes('afficheur') || text.includes('lcd') || text.includes('oled') || text.includes('ecran') || text.includes('vitre');
+  }
+  if (filterId === 'battery') {
+    return text.includes('battery') || text.includes('batterie') || text.includes('pile');
+  }
+  if (filterId === 'charging_port') {
+    return text.includes('port') || text.includes('connecteur') || text.includes('charge') || text.includes('nappe') || text.includes('flex');
+  }
+  if (filterId === 'camera') {
+    return text.includes('camera') || text.includes('caméra') || text.includes('lens');
+  }
+  if (filterId === 'other_part') {
+    return (
+      !matchesPartSubCategory(product, 'screen') &&
+      !matchesPartSubCategory(product, 'battery') &&
+      !matchesPartSubCategory(product, 'charging_port') &&
+      !matchesPartSubCategory(product, 'camera')
+    );
+  }
+  return true;
+};
 
 /**
  * `label` is the string that lands in the activity log, which the shop reads in
@@ -76,7 +119,8 @@ const ADJUST_REASONS = [
   { id: 'shrinkage', label: 'Lost / Shrinkage' },
 ];
 
-const ADDABLE_CATEGORIES: ProductCategory[] = ['accessory', 'smartphone', 'tablet', 'repair_part', 'wearable'];
+const ADDABLE_RETAIL_CATEGORIES: ProductCategory[] = ['accessory', 'smartphone', 'tablet', 'wearable'];
+const ADDABLE_CATEGORIES = ADDABLE_RETAIL_CATEGORIES; // alias kept for backwards compat
 
 const DEFAULT_ADJUST_REASON = ADJUST_REASONS[0].label;
 
@@ -88,6 +132,11 @@ type InventoryHeaderProps = {
   onSearchChange: (value: string) => void;
   selectedCategory: string;
   onSelectCategory: (category: string) => void;
+  inventoryMode: 'products' | 'parts';
+  onModeChange: (mode: 'products' | 'parts') => void;
+  retailCount: number;
+  partsCount: number;
+  categoryTabs: Array<{ id: string; labelKey: string; fallback: string }>;
 };
 
 /**
@@ -101,6 +150,11 @@ const InventoryHeader = ({
   onSearchChange,
   selectedCategory,
   onSelectCategory,
+  inventoryMode,
+  onModeChange,
+  retailCount,
+  partsCount,
+  categoryTabs,
 }: InventoryHeaderProps) => {
   const { t } = useTranslation();
 
@@ -114,6 +168,49 @@ const InventoryHeader = ({
 
   return (
     <>
+      {/* Top Segmented Mode Selector: Retail Products vs Spare Parts */}
+      <View style={styles.modeToggleBar}>
+        <TouchableOpacity
+          style={[styles.modeTab, inventoryMode === 'products' && styles.modeTabActive]}
+          onPress={() => onModeChange('products')}
+          activeOpacity={0.8}
+        >
+          <MaterialCommunityIcons
+            name="package-variant-closed"
+            size={18}
+            color={inventoryMode === 'products' ? colors.brand : colors.textMuted}
+          />
+          <Text style={[styles.modeTabText, inventoryMode === 'products' && styles.modeTabTextActive]}>
+            {t('inventory.modeProducts', 'Retail Products')}
+          </Text>
+          <View style={[styles.modeBadge, inventoryMode === 'products' && styles.modeBadgeActive]}>
+            <Text style={[styles.modeBadgeText, inventoryMode === 'products' && styles.modeBadgeTextActive]}>
+              {retailCount}
+            </Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.modeTab, inventoryMode === 'parts' && styles.modeTabActive]}
+          onPress={() => onModeChange('parts')}
+          activeOpacity={0.8}
+        >
+          <MaterialCommunityIcons
+            name="cog-outline"
+            size={18}
+            color={inventoryMode === 'parts' ? colors.brand : colors.textMuted}
+          />
+          <Text style={[styles.modeTabText, inventoryMode === 'parts' && styles.modeTabTextActive]}>
+            {t('inventory.modeParts', 'Spare Parts')}
+          </Text>
+          <View style={[styles.modeBadge, inventoryMode === 'parts' && styles.modeBadgeActive]}>
+            <Text style={[styles.modeBadgeText, inventoryMode === 'parts' && styles.modeBadgeTextActive]}>
+              {partsCount}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.kpiContainer}>
         <ScrollView
           horizontal
@@ -150,7 +247,11 @@ const InventoryHeader = ({
 
       <View style={styles.searchRow}>
         <Searchbar
-          placeholder={t('inventory.searchPlaceholder', 'Search name, model, barcode...')}
+          placeholder={
+            inventoryMode === 'products'
+              ? t('inventory.searchPlaceholder', 'Search name, model, barcode...')
+              : t('inventory.searchPartsPlaceholder', 'Search part, model, shelf location...')
+          }
           value={search}
           onChangeText={onSearchChange}
           style={styles.searchbar}
@@ -165,7 +266,7 @@ const InventoryHeader = ({
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.categoriesScroll}
         >
-          {CATEGORY_TABS.map((tab) => {
+          {categoryTabs.map((tab) => {
             const isActive = selectedCategory === tab.id;
             return (
               <TouchableOpacity
@@ -186,13 +287,15 @@ const InventoryHeader = ({
   );
 };
 
-export const InventoryScreen = ({ navigation }: any) => {
+export const InventoryScreen = ({ navigation, route }: any) => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
   const can = usePermissions();
   const { addToCart } = usePosStore();
 
+  const initialMode = route?.params?.initialMode === 'parts' ? 'parts' : 'products';
+  const [inventoryMode, setInventoryMode] = useState<'products' | 'parts'>(initialMode);
   const [products, setProducts] = useState<PhoneModel[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -259,20 +362,31 @@ export const InventoryScreen = ({ navigation }: any) => {
     return () => unsubscribe();
   }, [can.inventory_products]);
 
-  // Inventory KPI metrics
-  const metrics = useMemo(() => {
+  // Separate pools for retail products and spare parts
+  const retailProducts = useMemo(() => products.filter((p) => !isPartProduct(p)), [products]);
+  const partsProducts = useMemo(() => products.filter((p) => isPartProduct(p)), [products]);
+  const currentPool = inventoryMode === 'products' ? retailProducts : partsProducts;
+  const activeCategoryTabs = inventoryMode === 'products' ? RETAIL_CATEGORY_TABS : PARTS_CATEGORY_TABS;
+
+  const handleModeChange = (newMode: 'products' | 'parts') => {
+    setInventoryMode(newMode);
+    setSelectedCategory('all');
+  };
+
+  // Inventory KPI metrics computed strictly for the active pool
+  const metrics = useMemo<InventoryMetrics>(() => {
     let totalItems = 0;
     let inStockCount = 0;
     let lowStockCount = 0;
     let outOfStockCount = 0;
     let totalValuation = 0;
 
-    products.forEach((p) => {
+    currentPool.forEach((p) => {
       const stock = p.stock || 0;
       totalItems += stock;
-      totalValuation += stock * (p.price || 0);
+      totalValuation += stock * (p.costPrice || p.price || 0);
 
-      const threshold = p.lowStockThreshold ?? 1;
+      const threshold = p.lowStockThreshold ?? (inventoryMode === 'parts' ? 2 : 1);
       if (stock === 0) {
         outOfStockCount++;
       } else if (stock <= threshold) {
@@ -283,14 +397,14 @@ export const InventoryScreen = ({ navigation }: any) => {
     });
 
     return {
-      totalProducts: products.length,
+      totalProducts: currentPool.length,
       totalItems,
       inStockCount,
       lowStockCount,
       outOfStockCount,
       totalValuation,
     };
-  }, [products]);
+  }, [currentPool, inventoryMode]);
 
   // Filtered products list. The haystack per product is built when the list
   // changes, not on every keystroke.
@@ -303,21 +417,25 @@ export const InventoryScreen = ({ navigation }: any) => {
     [products]
   );
 
-  const filteredProducts = useMemo(
-    () =>
-      searchableProducts
-        .filter(({ product, search: haystack }) => {
+  const filteredProducts = useMemo(() => {
+    return searchableProducts
+      .filter(({ product, search: haystack }) => {
+        if (inventoryMode === 'products') {
+          if (isPartProduct(product)) return false;
           if (selectedCategory === 'low_stock_only') {
             const threshold = product.lowStockThreshold ?? 1;
             if (product.stock > threshold) return false;
           } else if (selectedCategory !== 'all' && product.category !== selectedCategory) {
             return false;
           }
-          return matchesSearch(haystack, search);
-        })
-        .map(({ product }) => product),
-    [searchableProducts, selectedCategory, search]
-  );
+        } else {
+          if (!isPartProduct(product)) return false;
+          if (!matchesPartSubCategory(product, selectedCategory)) return false;
+        }
+        return matchesSearch(haystack, search);
+      })
+      .map(({ product }) => product);
+  }, [searchableProducts, inventoryMode, selectedCategory, search]);
 
   // Barcode scanner integration
   const adjustFromScan = (product: PhoneModel) => {
@@ -441,9 +559,17 @@ export const InventoryScreen = ({ navigation }: any) => {
       return;
     }
 
+    // Parts mode: force category to repair_part and generate PRT- SKU
+    const effectiveCategory: ProductCategory =
+      inventoryMode === 'parts' ? 'repair_part' : newProdCategory;
+
     // A code on two rows is how one scan ends up adding the wrong product, and this
     // form used to accept it silently — including the barcode defaulting to the sku.
-    const sku = newProdSku.trim() || `SKU-${Date.now().toString().slice(-6)}`;
+    const skuSuffix = Date.now().toString().slice(-6);
+    const sku =
+      newProdSku.trim() ||
+      newProdBarcode.trim() ||
+      (inventoryMode === 'parts' ? `PRT-${skuSuffix}` : `SKU-${skuSuffix}`);
     const barcode = newProdBarcode.trim() || sku;
     const collisions = findCodeCollisions(products, { sku, barcode });
     if (collisions.length > 0) {
@@ -459,14 +585,14 @@ export const InventoryScreen = ({ navigation }: any) => {
       const price = parseFloat(newProdPrice) || 0;
       const costPrice = parseFloat(newProdCostPrice) || 0;
       const stock = parseInt(newProdStock, 10) || 0;
-      const threshold = parseInt(newProdThreshold, 10) || 1;
+      const threshold = parseInt(newProdThreshold, 10) || (inventoryMode === 'parts' ? 2 : 1);
       const stockStatus: StockStatus =
         stock === 0 ? 'out_of_stock' : stock <= threshold ? 'low_stock' : 'in_stock';
 
       const newProductData = {
         name: newProdName.trim(),
         model: newProdModel.trim() || '',
-        category: newProdCategory,
+        category: effectiveCategory,
         price,
         costPrice,
         stock,
@@ -481,7 +607,9 @@ export const InventoryScreen = ({ navigation }: any) => {
 
       await activityLogService.log(
         'inventory',
-        `Added new inventory product: ${newProductData.name} (${stock} units @ ${price} DA)`,
+        inventoryMode === 'parts'
+          ? `Added spare part: ${newProductData.name} (${stock} units, cost ${costPrice} DA)`
+          : `Added new inventory product: ${newProductData.name} (${stock} units @ ${price} DA)`,
         {
           entityId: docRef.id,
           entityType: 'product',
@@ -502,7 +630,12 @@ export const InventoryScreen = ({ navigation }: any) => {
       setNewProdSku('');
       setNewProdBarcode('');
 
-      Alert.alert(t('inventory.productCreated', 'Product Created'), t('inventory.productCreatedBody', '{{name}} added to inventory.', { name: newProductData.name }));
+      Alert.alert(
+        inventoryMode === 'parts'
+          ? t('inventory.partCreated', 'Spare Part Added')
+          : t('inventory.productCreated', 'Product Created'),
+        t('inventory.productCreatedBody', '{{name}} added to inventory.', { name: newProductData.name })
+      );
     } catch (err: any) {
       Alert.alert(t('common.error', 'Error'), err.message || t('inventory.saveProductFailed', 'Could not save product.'));
     } finally {
@@ -655,7 +788,11 @@ export const InventoryScreen = ({ navigation }: any) => {
       {/* Header */}
       <Appbar.Header style={styles.header}>
         <Appbar.Content
-          title={t('inventory.title', 'Inventory & Stock')}
+          title={
+            inventoryMode === 'parts'
+              ? t('inventory.partsTitle', 'Parts Inventory')
+              : t('inventory.title', 'Inventory & Stock')
+          }
           subtitle={t('inventory.subtitle', '{{products}} products · {{units}} units', {
             products: metrics.totalProducts,
             units: metrics.totalItems,
@@ -665,7 +802,18 @@ export const InventoryScreen = ({ navigation }: any) => {
         />
         <Appbar.Action icon="barcode-scan" color={colors.onBrand} onPress={handleOpenScanner} />
         {can.inventory_edit && (
-          <Appbar.Action icon="plus-box" color={colors.onBrand} onPress={() => setIsAddModalOpen(true)} />
+          <Appbar.Action
+            icon={inventoryMode === 'parts' ? 'cog-plus-outline' : 'plus-box'}
+            color={colors.onBrand}
+            onPress={() => {
+              if (inventoryMode === 'parts') {
+                setNewProdCategory('repair_part');
+              } else {
+                setNewProdCategory('accessory');
+              }
+              setIsAddModalOpen(true);
+            }}
+          />
         )}
       </Appbar.Header>
 
@@ -686,6 +834,11 @@ export const InventoryScreen = ({ navigation }: any) => {
               onSearchChange={setSearch}
               selectedCategory={selectedCategory}
               onSelectCategory={setSelectedCategory}
+              inventoryMode={inventoryMode}
+              onModeChange={handleModeChange}
+              retailCount={retailProducts.length}
+              partsCount={partsProducts.length}
+              categoryTabs={activeCategoryTabs}
             />
           }
           keyboardShouldPersistTaps="handled"
@@ -797,12 +950,22 @@ export const InventoryScreen = ({ navigation }: any) => {
           }}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="package-variant" size={56} color={colors.borderStrong} />
-              <Text style={styles.emptyTitle}>{t('inventory.noProducts', 'No Products Found')}</Text>
+              <MaterialCommunityIcons
+                name={inventoryMode === 'parts' ? 'cog-outline' : 'package-variant'}
+                size={56}
+                color={colors.borderStrong}
+              />
+              <Text style={styles.emptyTitle}>
+                {inventoryMode === 'parts'
+                  ? t('inventory.noPartsFound', 'No Spare Parts Found')
+                  : t('inventory.noProducts', 'No Products Found')}
+              </Text>
               <Text style={styles.emptySub}>
                 {search
                   ? t('inventory.noProductsSearch', 'No products matched your search.')
-                  : t('inventory.addFirstProduct', 'Add your first inventory product below.')}
+                  : inventoryMode === 'parts'
+                    ? t('inventory.addFirstPart', 'Add your first spare part below.')
+                    : t('inventory.addFirstProduct', 'Add your first inventory product below.')}
               </Text>
               {can.inventory_edit && (
                 <Button
@@ -810,10 +973,19 @@ export const InventoryScreen = ({ navigation }: any) => {
                   buttonColor={colors.brand}
                   textColor={colors.onBrand}
                   style={styles.emptyButton}
-                  icon="plus"
-                  onPress={() => setIsAddModalOpen(true)}
+                  icon={inventoryMode === 'parts' ? 'cog-plus-outline' : 'plus'}
+                  onPress={() => {
+                    if (inventoryMode === 'parts') {
+                      setNewProdCategory('repair_part');
+                    } else {
+                      setNewProdCategory('accessory');
+                    }
+                    setIsAddModalOpen(true);
+                  }}
                 >
-                  {t('inventory.addProduct', 'Add Product')}
+                  {inventoryMode === 'parts'
+                    ? t('inventory.addPart', 'Add Spare Part')
+                    : t('inventory.addProduct', 'Add Product')}
                 </Button>
               )}
             </View>
@@ -927,7 +1099,11 @@ export const InventoryScreen = ({ navigation }: any) => {
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, spacing.xl) }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{t('inventory.add.title', 'Add New Product')}</Text>
+              <Text style={styles.modalTitle}>
+                {inventoryMode === 'parts'
+                  ? t('inventory.addPartTitle', 'Add Spare Part')
+                  : t('inventory.add.title', 'Add New Product')}
+              </Text>
               <TouchableOpacity onPress={() => setIsAddModalOpen(false)}>
                 <MaterialCommunityIcons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
@@ -935,8 +1111,16 @@ export const InventoryScreen = ({ navigation }: any) => {
 
             <ScrollView style={styles.formScroll} keyboardShouldPersistTaps="handled">
               <TextInput
-                label={t('inventory.add.name', 'Product Name *')}
-                placeholder={t('inventory.add.namePlaceholder', 'e.g. iPhone 15 Silicone Case')}
+                label={
+                  inventoryMode === 'parts'
+                    ? t('inventory.add.partName', 'Part Name *')
+                    : t('inventory.add.name', 'Product Name *')
+                }
+                placeholder={
+                  inventoryMode === 'parts'
+                    ? t('inventory.add.partNamePlaceholder', 'e.g. iPhone 12 Screen OLED')
+                    : t('inventory.add.namePlaceholder', 'e.g. iPhone 15 Silicone Case')
+                }
                 value={newProdName}
                 onChangeText={setNewProdName}
                 mode="outlined"
@@ -944,43 +1128,63 @@ export const InventoryScreen = ({ navigation }: any) => {
               />
 
               <TextInput
-                label={t('inventory.add.model', 'Model / Variant')}
-                placeholder={t('inventory.add.modelPlaceholder', 'e.g. Midnight Blue / MagSafe')}
+                label={
+                  inventoryMode === 'parts'
+                    ? t('inventory.add.compatibleModel', 'Compatible Model')
+                    : t('inventory.add.model', 'Model / Variant')
+                }
+                placeholder={
+                  inventoryMode === 'parts'
+                    ? t('inventory.add.compatibleModelPlaceholder', 'e.g. iPhone 12 / 12 Pro')
+                    : t('inventory.add.modelPlaceholder', 'e.g. Midnight Blue / MagSafe')
+                }
                 value={newProdModel}
                 onChangeText={setNewProdModel}
                 mode="outlined"
                 style={styles.fieldSm}
               />
 
-              {/* Category Picker */}
-              <Text style={styles.adjustSectionLabel}>{t('inventory.add.category', 'Category:')}</Text>
-              <View style={styles.chipWrapRow}>
-                {ADDABLE_CATEGORIES.map((cat) => (
-                  <TouchableOpacity
-                    key={cat}
-                    style={[styles.catPickChip, newProdCategory === cat && styles.catPickChipActive]}
-                    onPress={() => setNewProdCategory(cat)}
-                  >
-                    <Text style={[styles.catPickChipText, newProdCategory === cat && styles.catPickChipTextActive]}>
-                      {t(`inventory.category.${cat}`, cat.replace('_', ' ').toUpperCase())}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              {/* Category Picker — hidden in parts mode (locked to repair_part) */}
+              {inventoryMode === 'products' && (
+                <>
+                  <Text style={styles.adjustSectionLabel}>{t('inventory.add.category', 'Category:')}</Text>
+                  <View style={styles.chipWrapRow}>
+                    {ADDABLE_RETAIL_CATEGORIES.map((cat) => (
+                      <TouchableOpacity
+                        key={cat}
+                        style={[styles.catPickChip, newProdCategory === cat && styles.catPickChipActive]}
+                        onPress={() => setNewProdCategory(cat)}
+                      >
+                        <Text style={[styles.catPickChipText, newProdCategory === cat && styles.catPickChipTextActive]}>
+                          {t(`inventory.category.${cat}`, cat.replace('_', ' ').toUpperCase())}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              )}
+              {inventoryMode === 'parts' && (
+                <View style={styles.partCategoryBadgeRow}>
+                  <MaterialCommunityIcons name="cog-outline" size={16} color={colors.brand} />
+                  <Text style={styles.partCategoryBadge}>
+                    {t('inventory.category.repair_part', 'REPAIR PART')}
+                  </Text>
+                </View>
+              )}
 
               <View style={styles.formRow}>
                 <TextInput
-                  label={t('inventory.add.sellingPrice', 'Selling Price (DA) *')}
-                  value={newProdPrice}
-                  onChangeText={setNewProdPrice}
+                  label={t('inventory.add.costPrice', 'Cost Price (DA)')}
+                  value={newProdCostPrice}
+                  onChangeText={setNewProdCostPrice}
                   keyboardType="numeric"
                   mode="outlined"
                   style={styles.fieldHalf}
                 />
                 <TextInput
-                  label={t('inventory.add.costPrice', 'Cost Price (DA)')}
-                  value={newProdCostPrice}
-                  onChangeText={setNewProdCostPrice}
+                  label={t('inventory.add.sellingPrice', 'Selling Price (DA) *')}
+                  value={newProdPrice}
+                  onChangeText={setNewProdPrice}
                   keyboardType="numeric"
                   mode="outlined"
                   style={styles.fieldHalf}
@@ -1008,7 +1212,11 @@ export const InventoryScreen = ({ navigation }: any) => {
 
               <TextInput
                 label={t('inventory.add.barcode', 'Barcode / SKU (Optional)')}
-                placeholder={t('inventory.add.barcodePlaceholder', 'Auto-generated if blank')}
+                placeholder={
+                  inventoryMode === 'parts'
+                    ? t('inventory.add.partSkuPlaceholder', 'Auto PRT-xxxxxx if blank')
+                    : t('inventory.add.barcodePlaceholder', 'Auto-generated if blank')
+                }
                 value={newProdBarcode}
                 onChangeText={setNewProdBarcode}
                 mode="outlined"
@@ -1018,14 +1226,16 @@ export const InventoryScreen = ({ navigation }: any) => {
 
             <Button
               mode="contained"
-              buttonColor={colors.success}
+              buttonColor={inventoryMode === 'parts' ? colors.info : colors.success}
               textColor={colors.onBrand}
               loading={isSavingNewProduct}
               disabled={isSavingNewProduct}
               onPress={handleSaveNewProduct}
               style={styles.sheetSubmit}
             >
-              {t('inventory.add.save', 'Save Product to Stock')}
+              {inventoryMode === 'parts'
+                ? t('inventory.savePart', 'Save Spare Part')
+                : t('inventory.add.save', 'Save Product to Stock')}
             </Button>
           </View>
         </View>
@@ -1522,5 +1732,76 @@ const styles = StyleSheet.create({
   sheetSubmit: {
     marginTop: spacing.md,
     paddingVertical: spacing.xs,
+  },
+  // ─── Mode Toggle Bar (Retail / Spare Parts) ────────────────────────────────
+  modeToggleBar: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  modeTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  modeTabActive: {
+    backgroundColor: colors.brandSoft,
+    borderBottomWidth: 2,
+    borderBottomColor: colors.brand,
+  },
+  modeTabText: {
+    fontSize: fontSize.label,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  modeTabTextActive: {
+    color: colors.brand,
+    fontWeight: '700',
+  },
+  modeBadge: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 1,
+    minWidth: 20,
+    alignItems: 'center',
+  },
+  modeBadgeActive: {
+    backgroundColor: colors.brand,
+  },
+  modeBadgeText: {
+    fontSize: fontSize.caption,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  modeBadgeTextActive: {
+    color: colors.onBrand,
+  },
+  // ─── Parts-mode category badge (locked indicator) ─────────────────────────
+  partCategoryBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.brandSoft,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+    marginBottom: spacing.sm,
+    alignSelf: 'flex-start',
+  },
+  partCategoryBadge: {
+    fontSize: fontSize.label,
+    fontWeight: '700',
+    color: colors.brand,
   },
 });

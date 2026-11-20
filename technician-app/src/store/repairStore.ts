@@ -54,6 +54,7 @@ interface RepairState {
   createTicket: (ticket: Partial<RepairTicket>) => Promise<void>;
   fetchMyCompletedTickets: (technicianName: string) => Promise<RepairTicket[]>;
   updateTicketParts: (id: string, parts: { productId?: string; name: string; cost: number; quantity?: number }[]) => Promise<void>;
+  updateTicketTechnician: (id: string, technicianName: string | null, technicianId: string | null) => Promise<void>;
 }
 
 type TicketsSetter = (partial: Partial<RepairState>) => void;
@@ -520,6 +521,52 @@ export const useRepairStore = create<RepairState>((set, get) => ({
       // no signal was simply lost. Park it and let the optimistic UI stand.
       console.warn('Failed to update remark on Firestore (offline), queuing for auto-sync:', error);
       await offlineSyncService.saveOfflineRemark(id, remark);
+    }
+  },
+
+  updateTicketTechnician: async (id: string, technicianName: string | null, technicianId: string | null) => {
+    const currentUser = useAuthStore.getState().user;
+    try {
+      const docRef = doc(db, 'repairs', id);
+      const now = new Date().toISOString();
+
+      await updateDoc(docRef, {
+        assignedTechnician: technicianName || null,
+        assignedTechnicianId: technicianId || null,
+        updatedAt: now,
+      });
+
+      // Optimistically update local tickets array
+      set((state) => ({
+        tickets: state.tickets.map((t) =>
+          t.id === id
+            ? {
+                ...t,
+                assignedTechnician: technicianName || undefined,
+                assignedTechnicianId: technicianId || undefined,
+                updatedAt: now,
+              }
+            : t
+        ),
+      }));
+
+      void refreshTrackingMirrorForTicket(id);
+
+      const localTicket = get().tickets.find((t) => t.id === id);
+      await activityLogService.log(
+        'repairs',
+        `Repair #${localTicket?.ticketNumber || id} reassigned to ${technicianName || 'Unassigned'}`,
+        {
+          entityId: id,
+          entityType: 'repair',
+          detail: `Technician: ${technicianName || 'Unassigned'}`,
+          userName: currentUser?.name || 'Admin',
+          userId: currentUser?.id || 'admin-app',
+        }
+      );
+    } catch (error) {
+      console.error('Failed to update assigned technician:', error);
+      throw error;
     }
   },
 

@@ -55,6 +55,10 @@ const fake = vi.hoisted(() => {
           return snapshotOf(ref.key);
         },
         update: (ref: FakeRef, data: FakeDoc) => {
+          if (!docs.has(ref.key)) throw new Error('Fake: missing document');
+          writes.push({ key: ref.key, data });
+        },
+        set: (ref: FakeRef, data: FakeDoc) => {
           writes.push({ key: ref.key, data });
         },
       };
@@ -70,6 +74,7 @@ const fake = vi.hoisted(() => {
 interface FakeTx {
   get: (ref: FakeRef) => Promise<{ exists: () => boolean; data: () => FakeDoc | undefined }>;
   update: (ref: FakeRef, data: FakeDoc) => void;
+  set: (ref: FakeRef, data: FakeDoc) => void;
 }
 
 vi.mock('firebase/firestore', async (importOriginal) => {

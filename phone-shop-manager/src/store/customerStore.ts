@@ -109,9 +109,9 @@ interface CustomerState {
     };
   }) => Promise<Customer>;
   // Store Credit (Avoir) and Exchange Debt Deductions
-  addStoreCredit: (customerId: string, amount: number, note?: string) => Promise<number>;
-  useStoreCredit: (customerId: string, amount: number, note?: string) => Promise<number>;
-  deductFromDebt: (customerId: string, amount: number, note?: string) => Promise<{ amountDeducted: number; remainingSurplus: number }>;
+  addStoreCredit: (customerId: string, amount: number, note: string | undefined, operationId: string) => Promise<number>;
+  useStoreCredit: (customerId: string, amount: number, note: string | undefined, operationId: string) => Promise<number>;
+  deductFromDebt: (customerId: string, amount: number, note: string | undefined, operationId: string) => Promise<{ amountDeducted: number; remainingSurplus: number }>;
   // Customer Management & Deduplication
   deleteCustomer: (id: string, options?: { deleteDebts?: boolean }) => Promise<void>;
   switchAccountType: (customerId: string, newType: 'retail' | 'shop_repairer', shopName?: string) => Promise<void>;
@@ -1378,61 +1378,39 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
     return customer;
   },
 
-  addStoreCredit: async (customerId, amount, note) => {
-    const customer = get().customers.find(c => c.id === customerId);
-    if (!customer) throw new Error('Customer not found');
-    const newCredit = (customer.storeCredit || 0) + Math.max(0, amount);
-
-    await customerService.updateCustomer(customerId, { storeCredit: newCredit });
-    set(state => ({
-      customers: state.customers.map(c => c.id === customerId ? { ...c, storeCredit: newCredit } : c),
-    }));
-
+  addStoreCredit: async (customerId, amount, note, operationId) => {
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Invalid store credit amount.');
     const actor = useAuthStore.getState().user;
-    get().addCustomerAuditLog({
-      customerId: customer.id,
-      customerName: customer.name,
-      actionType: 'store_credit_issued',
-      actionTitle: 'Store Credit (Avoir) Issued',
-      actionDescription: `Issued ${formatCurrency(amount)} Store Credit. New balance: ${formatCurrency(newCredit)}${note ? ` (${note})` : ''} by ${actor?.name || 'Staff'}.`,
+    const { balance, log } = await customerService.changeStoreCredit(customerId, amount, operationId, {
+      actionDescription: `Issued ${formatCurrency(amount)} Store Credit${note ? ` (${note})` : ''} by ${actor?.name || 'Staff'}.`,
       actorId: actor?.id,
       actorName: actor?.name || 'Staff',
       actorRole: actor?.role,
-      metadata: { amount, newCredit, note },
-    }).catch(console.error);
-
-    return newCredit;
+    });
+    set(state => ({
+      customers: state.customers.map(c => c.id === customerId ? { ...c, storeCredit: balance } : c),
+      customerLogs: [log, ...state.customerLogs.filter(entry => entry.id !== log.id)],
+    }));
+    return balance;
   },
 
-  useStoreCredit: async (customerId, amount, note) => {
-    const customer = get().customers.find(c => c.id === customerId);
-    if (!customer) throw new Error('Customer not found');
-    const available = customer.storeCredit || 0;
-    const toDeduct = Math.min(available, Math.max(0, amount));
-    const newCredit = Math.max(0, available - toDeduct);
-
-    await customerService.updateCustomer(customerId, { storeCredit: newCredit });
-    set(state => ({
-      customers: state.customers.map(c => c.id === customerId ? { ...c, storeCredit: newCredit } : c),
-    }));
-
+  useStoreCredit: async (customerId, amount, note, operationId) => {
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Invalid store credit amount.');
     const actor = useAuthStore.getState().user;
-    get().addCustomerAuditLog({
-      customerId: customer.id,
-      customerName: customer.name,
-      actionType: 'store_credit_used',
-      actionTitle: 'Store Credit (Avoir) Redeemed',
-      actionDescription: `Redeemed ${formatCurrency(toDeduct)} Store Credit for POS sale. Remaining balance: ${formatCurrency(newCredit)}${note ? ` (${note})` : ''} by ${actor?.name || 'Staff'}.`,
+    const { balance, log } = await customerService.changeStoreCredit(customerId, -amount, operationId, {
+      actionDescription: `Redeemed ${formatCurrency(amount)} Store Credit${note ? ` (${note})` : ''} by ${actor?.name || 'Staff'}.`,
       actorId: actor?.id,
       actorName: actor?.name || 'Staff',
       actorRole: actor?.role,
-      metadata: { amount: toDeduct, newCredit, note },
-    }).catch(console.error);
-
-    return newCredit;
+    });
+    set(state => ({
+      customers: state.customers.map(c => c.id === customerId ? { ...c, storeCredit: balance } : c),
+      customerLogs: [log, ...state.customerLogs.filter(entry => entry.id !== log.id)],
+    }));
+    return balance;
   },
 
-  deductFromDebt: async (customerId, amount, note) => {
+  deductFromDebt: async (customerId, amount, note, operationId) => {
     const customerDebts = get().getCustomerDebts(customerId)
       .filter(d => d.status !== 'paid' && d.remainingBalance > 0)
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -1445,7 +1423,10 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
       const paymentAmount = Math.min(debt.remainingBalance, remainingToDeduct);
       await get().recordDebtPayment(debt.id, {
         amount: paymentAmount,
-        method: 'cash',
+        // Not money the shop received: an exchange surplus moved the customer's own
+        // balance down. Recording it as cash put it in the drawer on paper, so the
+        // day closed long by the same sum the till never saw.
+        method: 'debt',
         note: note || 'Exchange Surplus Credit Applied',
       });
       totalDeducted += paymentAmount;
@@ -1458,7 +1439,8 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         await get().addStoreCredit(
           customerId,
           remainingToDeduct,
-          note ? `${note} (surplus auto-converted)` : 'Exchange surplus auto-converted to store credit'
+          note ? `${note} (surplus auto-converted)` : 'Exchange surplus auto-converted to store credit',
+          `${operationId}_surplus`
         );
       } catch (creditErr) {
         console.warn('Could not auto-convert surplus to store credit:', creditErr);

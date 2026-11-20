@@ -18,10 +18,10 @@ import { claimInvoiceNumber } from '../services/invoiceCounter';
 import { activityLogService } from '../services/activityLogService';
 import { customerLogService } from '../services/customerLogService';
 import { partsCartService } from '../services/partsCartService';
+import { partsCheckoutService, type PartsCheckoutResult, type PendingPartsCheckout } from '../services/partsCheckoutService';
 import { formatCurrency } from '../utils/formatCurrency';
 import { discountAmountOf, lineDiscountOf, unitPriceAfterDiscount } from '../utils/discountPolicy';
 import type { LineConcession } from '../utils/discountPolicy';
-import { saleOpeningPayments } from '../utils/debtPayments';
 import { errorMessage } from '../utils/errorUtils';
 
 const getInventoryProducts = () => {
@@ -56,6 +56,8 @@ let lastInvoicesFetchAt: number | null = null;
 let cachedInvoices: SaleTransaction[] | null = null;
 let invoicesSession: ReturnType<typeof useAuthStore.getState>['user'] | undefined;
 let invoicesRequest: Promise<void> | null = null;
+let cartsFetchGeneration = 0;
+const suspendedFetchRemovals = new Set<Set<string>>();
 
 /**
  * What the basket discount is, kept as it was promised: a trade percentage stays a
@@ -191,12 +193,16 @@ export interface PartsCartState {
 
   // Suspend Cart Actions
   suspendCart: () => void;
-  resumeCart: (id: string) => { success: boolean; warnings?: string[] };
+  resumeCart: (id: string) => { success: boolean; warnings?: string[]; requiresCustomerSelection?: boolean };
   discardSuspendedCart: (id: string) => void;
   fetchCarts: () => Promise<void>;
   isCheckingOut: boolean;
 
   // Checkouts
+  pendingCheckout: PendingPartsCheckout | null;
+  checkoutRecoveryError: string | null;
+  refreshPendingCheckout: () => void;
+  resolvePendingCheckout: () => Promise<PartsCheckoutResult | null>;
   checkout: () => Promise<SaleTransaction | null>;
   checkoutB2B: (options: B2BCheckoutOptions) => Promise<{ transaction: SaleTransaction; debtEntry?: CustomerDebtEntry; invoiceNumber: string } | null>;
 
@@ -213,6 +219,47 @@ export interface PartsCartState {
 /** One discounted line: the dinars it carries off, and how deep that is as a share. */
 export type PartsLineConcession = LineConcession;
 
+const checkoutDraftKey = (state: PartsCartState): string => JSON.stringify({
+  items: state.items.map(item => ({ id: item.product.id, quantity: item.quantity, price: item.unitPrice ?? item.product.price })),
+  customerId: state.selectedCustomer?.id ?? null,
+  customerName: state.customerName,
+  customerPhone: state.customerPhone,
+  discount: state.discount,
+});
+
+const acceptCheckout = async (result: PartsCheckoutResult): Promise<void> => {
+  const { transaction, debtEntry, customer, stock, pending } = result;
+  if (transaction) {
+    usePartsCartStore.setState(state => ({ invoices: [transaction, ...state.invoices.filter(invoice => invoice.id !== transaction.id)] }));
+    lastInvoicesFetchAt = null;
+    if (stock.length) {
+      const byId = new Map(stock.map(product => [product.id, product]));
+      useInventoryStore.setState(state => ({
+        products: state.products.map(product => byId.get(product.id) ?? product),
+        parts: state.parts.map(product => byId.get(product.id) ?? product),
+      }));
+    } else {
+      void useInventoryStore.getState().fetchParts();
+    }
+    if (debtEntry || customer) {
+      useCustomerStore.setState(state => ({
+        ...(debtEntry ? { debts: [debtEntry, ...state.debts.filter(debt => debt.id !== debtEntry.id)] } : {}),
+        ...(customer ? { customers: state.customers.map(entry => entry.id === customer.id ? customer : entry) } : {}),
+      }));
+    }
+  }
+  try {
+    if (transaction && useAuthStore.getState().user?.id === pending.transaction.processedById && checkoutDraftKey(usePartsCartStore.getState()) === pending.draftKey) {
+      localStorage.removeItem(STORAGE_KEY_PARTS_ACTIVE);
+      usePartsCartStore.getState().clearCart();
+    }
+    await partsCheckoutService.acknowledge(pending.transaction.processedById!, pending.transaction.id);
+  } catch (error) {
+    console.error('Checkout confirmed, but local recovery state could not be cleared:', error);
+  }
+  usePartsCartStore.getState().refreshPendingCheckout();
+};
+
 const initialActive = loadLocalActiveCart();
 const initialSuspended = loadLocalSuspendedCarts();
 
@@ -228,6 +275,29 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
   isLoadingInvoices: false,
   invoicesError: null,
   isCheckingOut: false,
+  pendingCheckout: null,
+  checkoutRecoveryError: null,
+  refreshPendingCheckout: () => {
+    const actorId = useAuthStore.getState().user?.id;
+    try {
+      set({ pendingCheckout: actorId ? partsCheckoutService.getPending(actorId) : null, checkoutRecoveryError: null });
+    } catch (error) {
+      set({ pendingCheckout: null, checkoutRecoveryError: errorMessage(error) });
+    }
+  },
+  resolvePendingCheckout: async () => {
+    const actorId = useAuthStore.getState().user?.id;
+    if (!actorId || get().isCheckingOut) return null;
+    set({ isCheckingOut: true });
+    try {
+      const result = await partsCheckoutService.resolve(actorId);
+      if (result) await acceptCheckout(result);
+      return result;
+    } finally {
+      set({ isCheckingOut: false });
+      get().refreshPendingCheckout();
+    }
+  },
 
   fetchInvoices: (opts) => {
     const session = useAuthStore.getState().user;
@@ -285,12 +355,16 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
     // The service's reconcile already merges remote and local lists; the result is authoritative,
     // even when empty, so a cart deleted on another till does not come back from our mirror.
     const before = get().suspendedCarts;
+    const generation = ++cartsFetchGeneration;
+    const removedIds = new Set<string>();
+    suspendedFetchRemovals.add(removedIds);
     try {
       const suspended = await partsCartService.getAllSuspendedCarts(before);
-      // A hold/resume/discard made while this read was in flight must not be undone by it.
+      if (generation !== cartsFetchGeneration) return;
       const current = get().suspendedCarts;
       const merged = new Map(suspended.map(cart => [cart.id, cart]));
       if (current !== before) for (const cart of current) merged.set(cart.id, cart);
+      for (const id of removedIds) merged.delete(id);
       const finalSuspended = [...merged.values()].sort(
         (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
       );
@@ -298,6 +372,8 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       saveLocalSuspendedCarts(finalSuspended);
     } catch (err) {
       console.error('Failed to fetch parts carts', err);
+    } finally {
+      suspendedFetchRemovals.delete(removedIds);
     }
   },
 
@@ -426,13 +502,15 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
   },
 
   suspendCart: () => {
-    const { items, customerName, discount } = get();
+    const { items, customerName, customerPhone, selectedCustomer, discount } = get();
     if (items.length === 0) return;
 
     const newCart: SuspendedCart = {
       id: `parts_cart_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       items: [...items],
       customerName: customerName || '',
+      customerId: selectedCustomer?.id ?? null,
+      customerPhone,
       discount: discount ?? null,
       date: new Date().toISOString(),
     };
@@ -458,6 +536,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
     const target = state.suspendedCarts.find(c => c.id === id);
     if (!target) return { success: false, warnings: ['Cart not found'] };
 
+    for (const removedIds of suspendedFetchRemovals) removedIds.add(id);
     let updatedSuspended = state.suspendedCarts.filter(c => c.id !== id);
 
     // If active cart has items, safely place it on hold instead of losing it
@@ -466,6 +545,8 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         id: `parts_cart_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         items: [...state.items],
         customerName: state.customerName || '',
+        customerId: state.selectedCustomer?.id ?? null,
+        customerPhone: state.customerPhone,
         discount: state.discount ?? null,
         date: new Date().toISOString(),
       };
@@ -501,22 +582,36 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
     // read that as a flat promise and keep a percentage as the percentage it was
     // promised in, so resuming does not quietly shrink the trade discount.
     const disc = readBasketDiscount(target.discount);
+    const selectedCustomer = target.customerId
+      ? useCustomerStore.getState().customers.find(customer => customer.id === target.customerId && !customer.mergedIntoId) ?? null
+      : null;
+    const customerName = selectedCustomer
+      ? selectedCustomer.shopName || selectedCustomer.name
+      : target.customerName || '';
+    const customerPhone = selectedCustomer?.phone ?? target.customerPhone ?? '';
+    const requiresCustomerSelection = Boolean(
+      (target.customerId && !selectedCustomer)
+      || (target.customerId === undefined && target.customerName)
+    );
     set({
       suspendedCarts: updatedSuspended,
       items: validatedItems,
-      customerName: target.customerName || '',
+      selectedCustomer,
+      customerName,
+      customerPhone,
       discount: disc,
       payments: [{ method: 'cash', amount: 0 }],
     });
 
     saveLocalSuspendedCarts(updatedSuspended);
-    saveLocalActiveCart(validatedItems, target.customerName || '', '', disc);
+    saveLocalActiveCart(validatedItems, customerName, customerPhone, disc);
     partsCartService.deleteSuspendedCart(id).catch(console.error);
 
-    return { success: true, warnings };
+    return { success: true, warnings, requiresCustomerSelection };
   },
 
   discardSuspendedCart: (id) => {
+    for (const removedIds of suspendedFetchRemovals) removedIds.add(id);
     const updated = get().suspendedCarts.filter(c => c.id !== id);
     set({ suspendedCarts: updated });
     saveLocalSuspendedCarts(updated);
@@ -526,7 +621,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
   // Random / Walk-in parts checkout
   checkout: async () => {
     if (get().isCheckingOut) return null;
-    const { items, payments, customerName } = get();
+    const { items, payments, customerName, customerPhone, selectedCustomer: matchedCust } = get();
     if (items.length === 0) return null;
 
     set({ isCheckingOut: true });
@@ -540,15 +635,20 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       const total = get().getTotal();
       const discount = get().getDiscountAmount();
       const actor = useAuthStore.getState().user;
-      const now = new Date();
-      const { invoiceNumber, provisional: numberGuessed } = await claimInvoiceNumber('parts', now);
+      if (!navigator.onLine) throw new Error('Connect to the server before completing a Parts sale.');
+      const draftKey = checkoutDraftKey(get());
+      const pending = actor?.id ? partsCheckoutService.getPending(actor.id) : null;
+      const now = pending ? new Date(pending.transaction.date) : new Date();
+      const { invoiceNumber, provisional: numberGuessed } = pending
+        ? { invoiceNumber: pending.transaction.invoiceNumber!, provisional: pending.transaction.invoiceNumberProvisional }
+        : await claimInvoiceNumber('parts', now);
+      if (useAuthStore.getState().user?.id !== actor?.id) throw new Error('The signed-in cashier changed. Review the cart before checkout.');
 
       // Only an account the counter attached by hand owns this invoice. A name typed
       // into the walk-in field is free text: two shops and three passengers can share
       // it, and reading it as an account key billed the sale to a stranger and rewrote
       // that stranger's lifetime totals. Attaching one is the operator's act, never a guess.
       const customerStore = useCustomerStore.getState();
-      const matchedCust = get().selectedCustomer;
 
       const txData: Omit<SaleTransaction, 'id'> = {
         date: now.toISOString(),
@@ -559,67 +659,26 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         total,
         payments: payments.map(p => ({ ...p, amount: p.amount || total })),
         customerName: customerName || undefined,
+        customerPhone: customerPhone || undefined,
         customerId: matchedCust?.id,
         shopName: matchedCust?.shopName,
         saleType: 'parts_b2b',
         invoiceNumber,
         invoiceNumberProvisional: numberGuessed || undefined,
         status: 'completed',
-        // The shelf was moved before this invoice exists, so the offline sync
-        // must adopt the sale instead of healing (and re-deducting) its stock.
         stockApplied: true,
         processedById: actor?.id,
         processedByName: actor?.name,
       };
 
-      // The shelf must move before the invoice exists: an invoice that survives a
-      // crash must never describe stock the till still counts on the shelf. The
-      // awaited form settles only when the delta is committed or parked in the
-      // offline queue, and its failure aborts the checkout before anything is billed.
-      const stockResults = await Promise.allSettled(
-        itemsSnapshot.map(item =>
-          useInventoryStore.getState().adjustStockByAsyncForSale(item.product.id, -item.quantity)
-        )
-      );
-      const stockFailure = stockResults.find((r): r is PromiseRejectedResult => r.status === 'rejected');
-      if (stockFailure) {
-        // Lines that committed before the failed one must come back, or a retry
-        // would deduct them twice from the same shelf.
-        const committed = itemsSnapshot.filter((_, i) => stockResults[i].status === 'fulfilled');
-        await Promise.allSettled(
-          committed.map(item =>
-            useInventoryStore.getState().adjustStockByAsync(item.product.id, +item.quantity)
-          )
-        );
-        // The failed lines applied their delta optimistically on this till; resync with the shelf.
-        void useInventoryStore.getState().fetchParts();
-        throw stockFailure.reason;
-      }
-
-      const saved = await transactionService.save(txData);
+      const result = await partsCheckoutService.checkout(txData, { draftKey, actorRole: actor?.role });
+      const saved = result.transaction!;
+      await acceptCheckout(result);
 
       // Authoritative update of customer statistics
       if (matchedCust) {
         customerStore.recalculateCustomer(matchedCust.id).catch(console.error);
       }
-
-      // Keep parts invoices isolated in partsCartStore
-      set(s => ({
-        invoices: [saved, ...s.invoices],
-      }));
-      lastInvoicesFetchAt = null;
-
-      // Reset parts active cart
-      set({
-        items: [],
-        customerName: '',
-        customerPhone: '',
-        selectedCustomer: null,
-        discount: null,
-        payments: [{ method: 'cash', amount: 0 }],
-      });
-
-      saveLocalActiveCart([], '', '', null);
 
       // Audit logs
       const itemsDesc = itemsSnapshot.map(i => `${i.quantity}x ${i.product.name} ${i.product.model}`).join(', ');
@@ -632,6 +691,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       return saved;
     } finally {
       set({ isCheckingOut: false });
+      get().refreshPendingCheckout();
     }
   },
 
@@ -652,8 +712,14 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       const total = get().getTotal();
       const discount = get().getDiscountAmount();
       const actor = useAuthStore.getState().user;
-      const now = new Date();
-      const { invoiceNumber, provisional: numberGuessed } = await claimInvoiceNumber('parts', now);
+      if (!navigator.onLine) throw new Error('Connect to the server before completing a Parts sale.');
+      const draftKey = checkoutDraftKey(get());
+      const pending = actor?.id ? partsCheckoutService.getPending(actor.id) : null;
+      const now = pending ? new Date(pending.transaction.date) : new Date();
+      const { invoiceNumber, provisional: numberGuessed } = pending
+        ? { invoiceNumber: pending.transaction.invoiceNumber!, provisional: pending.transaction.invoiceNumberProvisional }
+        : await claimInvoiceNumber('parts', now);
+      if (useAuthStore.getState().user?.id !== actor?.id) throw new Error('The signed-in cashier changed. Review the cart before checkout.');
 
       const { customer, settlementType, paidAmount, paymentMethod, chargedAmount, dueDate, notes, allowCreditLimitOverride } = options;
 
@@ -661,66 +727,8 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
         ? [{ method: paymentMethod, amount: paidAmount }]
         : [];
 
-      let createdDebtEntry: CustomerDebtEntry | undefined;
       const itemsSummary = itemsSnapshot.map(i => `${i.quantity}x ${i.product.name} ${i.product.model}`).join(', ');
 
-      // 1. Deduct stock FIRST (atomic, idempotent via replayKey). The Firestore
-      //    transaction in commitStockDelta now rejects negative stock, closing the
-      //    two-terminal oversell window. Only proceed to billing if every unit moved.
-      const stockResults = await Promise.allSettled(
-        itemsSnapshot.map(item =>
-          useInventoryStore.getState().adjustStockByAsyncForSale(item.product.id, -item.quantity)
-        )
-      );
-      const stockFailure = stockResults.find((r): r is PromiseRejectedResult => r.status === 'rejected');
-      if (stockFailure) {
-        // Lines that committed before the failed one must come back, or a retry
-        // would deduct them twice from the same shelf.
-        const committed = itemsSnapshot.filter((_, i) => stockResults[i].status === 'fulfilled');
-        await Promise.allSettled(
-          committed.map(item =>
-            useInventoryStore.getState().adjustStockByAsync(item.product.id, +item.quantity)
-          )
-        );
-        // The failed lines applied their delta optimistically on this till; resync with the shelf.
-        void useInventoryStore.getState().fetchParts();
-        throw stockFailure.reason;
-      }
-
-      // 2. Post to Customer Debt Ledger (only after stock is confirmed moved).
-      //    If debt creation fails, we reverse stock before re-throwing.
-      if (chargedAmount > 0) {
-        try {
-          createdDebtEntry = await useCustomerStore.getState().addDebt({
-            customerId: customer.id,
-            customerName: customer.name,
-            customerPhone: customer.phone,
-            productOrService: itemsSummary || `Parts Invoice #${invoiceNumber}`,
-            totalAmount: total,
-            amountPaid: paidAmount,
-            date: now.toISOString(),
-            dueDate: dueDate || undefined,
-            notes: notes ? `${notes} (Invoice #${invoiceNumber})` : `Parts Invoice #${invoiceNumber}`,
-            invoiceNumber,
-            itemsSummary,
-            type: 'parts_b2b',
-            // Real tender, counted once on the invoice — not a fabricated cash row.
-            payments: saleOpeningPayments(txPayments, now.toISOString(), actor?.name),
-            allowCreditLimitOverride,
-          });
-        } catch (err) {
-          // Compensate: return stock to shelf before surfacing the error.
-          await Promise.allSettled(
-            itemsSnapshot.map(item =>
-              useInventoryStore.getState().adjustStockByAsync(item.product.id, +item.quantity)
-            )
-          );
-          console.error('Failed to add debt for B2B checkout — stock reversed:', err);
-          throw err;
-        }
-      }
-
-      // 3. Build and save SaleTransaction
       const txData: Omit<SaleTransaction, 'id'> = {
         date: now.toISOString(),
         items: itemsSnapshot,
@@ -739,19 +747,19 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
           type: settlementType,
           paidAmount,
           chargedAmount,
-          debtEntryId: createdDebtEntry?.id,
           dueDate: dueDate || undefined,
           notes: notes || undefined,
         },
         status: 'completed',
-        // The shelf was moved before this invoice exists, so the offline sync
-        // must adopt the sale instead of healing (and re-deducting) its stock.
         stockApplied: true,
         processedById: actor?.id,
         processedByName: actor?.name,
       };
 
-      const saved = await transactionService.save(txData);
+      const result = await partsCheckoutService.checkout(txData, { draftKey, allowCreditLimitOverride, actorRole: actor?.role });
+      const saved = result.transaction!;
+      const createdDebtEntry = result.debtEntry;
+      await acceptCheckout(result);
 
       // 3. Update customer purchase stats (Authoritative recalculation)
       try {
@@ -759,24 +767,6 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       } catch (err) {
         console.error('Failed to update customer purchase stats:', err);
       }
-
-      // 4. Keep parts invoices isolated in partsCartStore
-      set(s => ({
-        invoices: [saved, ...s.invoices],
-      }));
-      lastInvoicesFetchAt = null;
-
-      // 5. Reset parts active cart
-      set({
-        items: [],
-        customerName: '',
-        customerPhone: '',
-        selectedCustomer: null,
-        discount: null,
-        payments: [{ method: 'cash', amount: 0 }],
-      });
-
-      saveLocalActiveCart([], '', '', null);
 
       // 6. Double Audit Logging
       const settlementLabel =
@@ -821,6 +811,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
       return { transaction: saved, debtEntry: createdDebtEntry, invoiceNumber };
     } finally {
       set({ isCheckingOut: false });
+      get().refreshPendingCheckout();
     }
   },
 

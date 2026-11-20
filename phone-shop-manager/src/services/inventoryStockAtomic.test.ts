@@ -83,14 +83,15 @@ const fake = vi.hoisted(() => {
 
       const tx: FakeTx = {
         get: async (ref: FakeRef) => {
+          if (writes.length) throw new Error('Firestore transactions require all reads to be executed before all writes.');
           reads.set(ref.key, versionOf(ref.key));
           return snapshotOf(ref.key);
         },
         update: (ref: FakeRef, data: FakeDoc) => {
-          // Firestore rejects an update to a document this transaction never read.
-          if (!reads.has(ref.key)) throw new Error(`Fake transaction: update without read (${ref.key})`);
+          if (!docs.has(ref.key)) throw new Error('Missing update target');
           writes.push({ key: ref.key, data });
         },
+        set: (ref: FakeRef, data: FakeDoc) => { writes.push({ key: ref.key, data }); },
       };
 
       const result = await fn(tx);
@@ -112,6 +113,7 @@ const fake = vi.hoisted(() => {
 interface FakeTx {
   get: (ref: FakeRef) => Promise<{ exists: () => boolean; data: () => FakeDoc | undefined }>;
   update: (ref: FakeRef, data: FakeDoc) => void;
+  set: (ref: FakeRef, data: FakeDoc) => void;
 }
 
 vi.mock('firebase/firestore', async (importOriginal) => {
@@ -170,7 +172,7 @@ describe('Atomic stock writes', () => {
     it('reads the server document and writes current + delta', async () => {
       seedProduct(10, 10);
 
-      const result = await commitStockDelta('prod_1', -3);
+      const result = await commitStockDelta('prod_1', -3, 'movement');
 
       expect(result).toEqual({ previousStock: 10, stock: 7, stockStatus: 'in_stock' });
       expect(fake.stockOf('prod_1')).toBe(7);
@@ -179,7 +181,7 @@ describe('Atomic stock writes', () => {
     it('never drives the server stock below zero', async () => {
       seedProduct(2, 2);
 
-      const result = await commitStockDelta('prod_1', -50);
+      const result = await commitStockDelta('prod_1', -50, 'writeoff');
 
       expect(result.stock).toBe(0);
       expect(result.stockStatus).toBe('out_of_stock');
@@ -208,25 +210,43 @@ describe('Atomic stock writes', () => {
       expect(fake.stockOf('prod_1')).toBe(4);
     });
 
-    it('leaves the stamp list off the document when the caller names no movement', async () => {
+    it('requires a stable movement identity', async () => {
       seedProduct(10, 10);
-
-      await commitStockDelta('prod_1', -3);
-
-      expect(fake.stockOf('prod_1')).toBe(7);
-      expect(fake.docs.get('inventory/prod_1')?.appliedStockKeys).toBeUndefined();
+      await expect(commitStockDelta('prod_1', -3, '')).rejects.toThrow('stable operation ID');
+      expect(fake.stockOf('prod_1')).toBe(10);
     });
 
-    it('keeps the stamp list bounded on a model the shop sells all day', async () => {
+    it('recognizes a replay after more than forty subsequent movements', async () => {
       seedProduct(100, 100);
+      for (let i = 0; i < 45; i++) await commitStockDelta('prod_1', -1, `mv_${i}`);
+      await commitStockDelta('prod_1', -1, 'mv_0');
+      expect(fake.stockOf('prod_1')).toBe(55);
+      expect(fake.docs.get('inventory/prod_1')?.appliedStockKeys).toBeUndefined();
+      expect(fake.docs.has('operation_receipts/stock_mv_0')).toBe(true);
+    });
 
-      for (let i = 0; i < 45; i++) await commitStockDelta('prod_1', 0, `mv_${i}`);
+    it('promotes a legacy stamp without moving stock and survives its later eviction', async () => {
+      seedProduct(10, 10);
+      fake.docs.get('inventory/prod_1')!.appliedStockKeys = ['legacy'];
+      await commitStockDelta('prod_1', -3, 'legacy');
+      fake.docs.get('inventory/prod_1')!.appliedStockKeys = [];
+      await commitStockDelta('prod_1', -3, 'legacy');
+      expect(fake.stockOf('prod_1')).toBe(10);
+    });
 
-      const keys = fake.docs.get('inventory/prod_1')?.appliedStockKeys as string[];
-      expect(keys).toHaveLength(40);
-      expect(keys).not.toContain('mv_0');
-      expect(keys[0]).toBe('mv_5');
-      expect(keys[39]).toBe('mv_44');
+    it('rejects a key reused for a different delta or product', async () => {
+      seedProduct(10, 10);
+      fake.seed('prod_2', { stock: 10 });
+      await commitStockDelta('prod_1', -3, 'movement');
+      await expect(commitStockDelta('prod_1', -2, 'movement')).rejects.toThrow('different movement');
+      await expect(commitStockDelta('prod_2', -3, 'movement')).rejects.toThrow('different movement');
+      expect(fake.stockOf('prod_1')).toBe(7);
+      expect(fake.stockOf('prod_2')).toBe(10);
+    });
+
+    it('rejects missing products without creating a receipt', async () => {
+      await expect(commitStockDelta('missing', 10, 'movement')).rejects.toThrow('no longer exists');
+      expect(fake.docs.has('operation_receipts/stock_movement')).toBe(false);
     });
   });
 
@@ -253,6 +273,39 @@ describe('Atomic stock writes', () => {
       expect(saleStamp('sale_1')).toBe(true);
       // One commit moved both the shelf and the stamp — there is no gap to crash into.
       expect(fake.stats.commits).toBe(1);
+    });
+
+    it('deducts multiple inventory products without reading after a write', async () => {
+      seedProduct(10, 10);
+      fake.seed('prod_2', { stock: 5, lowStockThreshold: 1 });
+      seedSale('sale_1', false);
+
+      const result = await commitSaleStockEffects('sale_1', [
+        { productId: 'prod_1', delta: -3 },
+        { productId: 'prod_2', delta: -4 },
+      ]);
+
+      expect(result.applied).toHaveLength(2);
+      expect(fake.stockOf('prod_1')).toBe(7);
+      expect(fake.stockOf('prod_2')).toBe(1);
+      expect(saleStamp('sale_1')).toBe(true);
+      expect(fake.stats.commits).toBe(1);
+    });
+
+    it('reads legacy fallback products before writing any inventory product', async () => {
+      seedProduct(10, 10);
+      fake.docs.set('products/prod_old', { stock: 8, lowStockThreshold: 1 });
+      seedSale('sale_1', false);
+
+      const result = await commitSaleStockEffects('sale_1', [
+        { productId: 'prod_1', delta: -3 },
+        { productId: 'prod_old', delta: -2 },
+      ]);
+
+      expect(result.applied).toHaveLength(2);
+      expect(fake.stockOf('prod_1')).toBe(7);
+      expect(fake.docs.get('products/prod_old')?.stock).toBe(6);
+      expect(saleStamp('sale_1')).toBe(true);
     });
 
     it('adopts an invoice already stamped, moving nothing a second time', async () => {
@@ -379,6 +432,16 @@ describe('Atomic stock writes', () => {
   });
 
   describe('inventoryService.applyStockDelta', () => {
+    it('persists the retry identity before sending any stock write', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(10, 10);
+      const save = vi.spyOn(localStorageMock, 'setItem').mockImplementationOnce(() => { throw new Error('Disk full'); });
+      await expect(inventoryService.applyStockDelta('prod_1', -2)).rejects.toThrow('Disk full');
+      expect(fake.stockOf('prod_1')).toBe(10);
+      expect(fake.stats.commits).toBe(0);
+      save.mockRestore();
+    });
+
     it('applies the delta to server stock, ignoring this device\'s stale mirror', async () => {
       vi.stubGlobal('navigator', { onLine: true });
       // Another till already sold 7 units from this device's cached view of 10.
@@ -451,7 +514,7 @@ describe('Atomic stock writes', () => {
       const pending = inventoryService.getPendingStockAdjustments();
       expect(pending).toHaveLength(1);
       expect(pending[0].delta).toBe(-3);
-      expect(fake.docs.get('inventory/prod_1')?.appliedStockKeys).toContain(pending[0].id);
+      expect(fake.docs.get(`operation_receipts/stock_${pending[0].id}`)).toMatchObject({ productId: 'prod_1', delta: -3 });
 
       fake.flags.lostAck = false;
       expect(await unifiedOfflineSyncService.syncOfflineStockAdjustments()).toBe(1);

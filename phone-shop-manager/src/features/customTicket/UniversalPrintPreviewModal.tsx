@@ -69,7 +69,7 @@ export const UniversalPrintPreviewModal: React.FC<UniversalPrintPreviewModalProp
               </div>
               <div style={{ fontSize: '11.5px', color: '#94a3b8' }}>
                 {ticket.format === 'sticker'
-                  ? '50 × 30mm label · Centered H & V · Xprinter XP-420B (TSPL)'
+                  ? `${(ticket.stickerSize || '50x20').replace('x', ' × ')}mm label · Centered H & V · Xprinter XP-420B (TSPL)`
                   : ticket.format === '58mm'
                   ? '58mm Mini Roll · ESC/POS 32 chars'
                   : 'Standard Roll (XP-T80Q) · ESC/POS 42 chars'}

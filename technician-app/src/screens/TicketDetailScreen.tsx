@@ -17,11 +17,19 @@ import type { RepairTicket } from '../types';
 
 export const TicketDetailScreen = ({ route, navigation }: any) => {
   const { ticket: initialTicket } = route.params;
-  const { tickets, updateTicketStatus, settleAndClaimTicket, updateTicketRemark, updateTicketParts } = useRepairStore();
-  const { user } = useAuthStore();
+  const { tickets, updateTicketStatus, settleAndClaimTicket, updateTicketRemark, updateTicketParts, updateTicketTechnician } = useRepairStore();
+  const { user, staff, fetchStaff } = useAuthStore();
   const [loading, setLoading] = useState(false);
+  const [techModalVisible, setTechModalVisible] = useState(false);
+  const [updatingTech, setUpdatingTech] = useState(false);
   const { t } = useTranslation();
   const can = usePermissions();
+
+  useEffect(() => {
+    if (staff.length === 0) {
+      void fetchStaff();
+    }
+  }, [staff.length, fetchStaff]);
 
   // Handover is the money path, so the counter and the admin own it. `can.repair_status`
   // is true for every technician by preset — that key covers moving a ticket between
@@ -140,6 +148,25 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
   const depositAlreadyPaid = ticket.depositAmount || 0;
   const currentFinalPriceNum = parseFloat(finalPrice) || 0;
   const balanceDue = Math.max(0, currentFinalPriceNum - depositAlreadyPaid);
+
+  const handleAssignTechnician = async (techName: string | null, techId: string | null) => {
+    setUpdatingTech(true);
+    try {
+      await updateTicketTechnician(ticket.id, techName, techId);
+      setTechModalVisible(false);
+      Vibration.vibrate(40);
+      Alert.alert(
+        t('ticketDetail.techUpdatedTitle', 'Technician Assigned'),
+        techName
+          ? t('ticketDetail.techAssignedBody', 'Ticket assigned to {{name}}', { name: techName })
+          : t('ticketDetail.techUnassignedBody', 'Ticket is now unassigned')
+      );
+    } catch (err: any) {
+      Alert.alert(t('common.error', 'Error'), err.message || t('ticketDetail.techUpdateFailed', 'Could not reassign technician.'));
+    } finally {
+      setUpdatingTech(false);
+    }
+  };
 
   const handleAddPart = async () => {
     const cost = parseFloat(partCost);
@@ -457,6 +484,50 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
                   </TouchableOpacity>
                 </View>
               )}
+            </View>
+          </Card.Content>
+        </Card>
+
+        {/* Assigned Technician Card (Admin can modify directly) */}
+        <Card style={styles.card}>
+          <Card.Content>
+            <View style={styles.findingsHeaderRow}>
+              <View style={styles.sectionHeader}>
+                <MaterialCommunityIcons name="account-wrench" size={20} color={colors.brand} />
+                <Text style={styles.sectionTitle}>{t('ticketDetail.assignedTech', 'Assigned Technician')}</Text>
+              </View>
+              {user?.role === 'admin' && (
+                <Button
+                  mode="text"
+                  compact
+                  icon="account-edit-outline"
+                  onPress={() => setTechModalVisible(true)}
+                  textColor={colors.brand}
+                  loading={updatingTech}
+                >
+                  {t('ticketDetail.changeTech', 'Change')}
+                </Button>
+              )}
+            </View>
+
+            <View style={styles.techDisplayRow}>
+              <View style={[styles.techAvatar, !ticket.assignedTechnician && styles.techAvatarEmpty]}>
+                <MaterialCommunityIcons
+                  name={ticket.assignedTechnician ? 'account-check' : 'account-question'}
+                  size={24}
+                  color={ticket.assignedTechnician ? colors.brand : colors.textMuted}
+                />
+              </View>
+              <View style={styles.techInfoBlock}>
+                <Text style={styles.techNameText}>
+                  {ticket.assignedTechnician || t('ticketDetail.unassigned', 'Unassigned')}
+                </Text>
+                <Text style={styles.techSubText}>
+                  {ticket.assignedTechnician
+                    ? t('ticketDetail.assignedToDevice', 'Technician in charge of this repair')
+                    : (user?.role === 'admin' ? t('ticketDetail.tapToAssign', 'Tap Change to assign a technician') : t('ticketDetail.noTechAssigned', 'No technician assigned yet'))}
+                </Text>
+              </View>
             </View>
           </Card.Content>
         </Card>
@@ -902,6 +973,81 @@ export const TicketDetailScreen = ({ route, navigation }: any) => {
               </View>
             </View>
           </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ASSIGN TECHNICIAN MODAL (ADMIN ONLY) */}
+      <Modal visible={techModalVisible} animationType="slide" transparent>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalSheet, { maxHeight: '80%' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{t('ticketDetail.assignTechTitle', 'Assign Technician')}</Text>
+              <TouchableOpacity onPress={() => setTechModalVisible(false)}>
+                <MaterialCommunityIcons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.subDetailText}>
+              {t('ticketDetail.assignTechSub', 'Select the staff member responsible for ticket #{{number}}', { number: ticket.ticketNumber })}
+            </Text>
+
+            <ScrollView style={{ marginTop: spacing.md }}>
+              {/* Unassigned Option */}
+              <TouchableOpacity
+                style={[
+                  styles.techOptionItem,
+                  !ticket.assignedTechnician && styles.techOptionActive,
+                ]}
+                onPress={() => handleAssignTechnician(null, null)}
+                disabled={updatingTech}
+              >
+                <View style={[styles.techOptionAvatar, { backgroundColor: colors.border }]}>
+                  <MaterialCommunityIcons name="account-remove-outline" size={20} color={colors.textMuted} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.techOptionName}>{t('ticketDetail.unassigned', 'Unassigned')}</Text>
+                  <Text style={styles.techOptionRole}>{t('ticketDetail.clearAssignment', 'Leave unassigned for pool pickup')}</Text>
+                </View>
+                {!ticket.assignedTechnician && (
+                  <MaterialCommunityIcons name="check-circle" size={22} color={colors.brand} />
+                )}
+              </TouchableOpacity>
+
+              {/* Staff List */}
+              {staff
+                .filter(s => s.role === 'repair_agent' || s.role === 'admin')
+                .map((member) => {
+                  const isSelected = ticket.assignedTechnician === member.name;
+                  return (
+                    <TouchableOpacity
+                      key={member.id}
+                      style={[styles.techOptionItem, isSelected && styles.techOptionActive]}
+                      onPress={() => handleAssignTechnician(member.name || member.email, member.id)}
+                      disabled={updatingTech}
+                    >
+                      <View style={styles.techOptionAvatar}>
+                        <MaterialCommunityIcons name="account" size={20} color={colors.brand} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.techOptionName}>{member.name || member.email}</Text>
+                        <Text style={styles.techOptionRole}>
+                          {member.role === 'admin' ? t('roles.admin', 'Admin') : t('roles.repair_agent', 'Repair Technician')}
+                        </Text>
+                      </View>
+                      {isSelected && (
+                        <MaterialCommunityIcons name="check-circle" size={22} color={colors.brand} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+            </ScrollView>
+
+            <View style={[styles.modalActions, { marginTop: spacing.md }]}>
+              <Button mode="text" onPress={() => setTechModalVisible(false)} textColor={colors.textMuted}>
+                {t('common.close', 'Close')}
+              </Button>
+            </View>
+          </View>
         </View>
       </Modal>
     </View>
@@ -1384,5 +1530,80 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: spacing.md,
     marginTop: 18,
+  },
+  techDisplayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.xs,
+  },
+  techAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.circle,
+    backgroundColor: colors.brandSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  techAvatarEmpty: {
+    backgroundColor: colors.border,
+  },
+  techInfoBlock: {
+    flex: 1,
+  },
+  techNameText: {
+    fontSize: fontSize.subtitle,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  techSubText: {
+    fontSize: fontSize.caption,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  techOptionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.sm,
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+  },
+  techOptionActive: {
+    borderColor: colors.brand,
+    backgroundColor: colors.brandSoft,
+  },
+  techOptionAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.circle,
+    backgroundColor: colors.brandSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  techOptionName: {
+    fontSize: fontSize.bodyStrong,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  techOptionRole: {
+    fontSize: fontSize.caption,
+    color: colors.textSecondary,
+  },
+  // ─── Assign Technician Bottom Sheet ─────────────────────────────────────────
+  modalSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.lg,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: spacing.md,
   },
 });

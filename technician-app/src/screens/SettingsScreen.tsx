@@ -29,10 +29,10 @@ export const SettingsScreen = ({ navigation }: any) => {
   const hasAdminRate =
     typeof user?.name === 'string' && typeof technicianRates[user.name] === 'number';
 
-  const lockRequired = useLockStore((state) => state.required);
   const lockCanEnable = useLockStore((state) => state.canEnable);
   const lockError = useLockStore((state) => state.error);
-  const setLockRequired = useLockStore((state) => state.setRequired);
+  const isBiometricLoginEnabled = useLockStore((state) => state.isBiometricLoginEnabled);
+  const disableBiometrics = useLockStore((state) => state.disableBiometrics);
   const refreshLockAvailability = useLockStore((state) => state.refreshAvailability);
   const [lockBusy, setLockBusy] = useState(false);
 
@@ -44,11 +44,17 @@ export const SettingsScreen = ({ navigation }: any) => {
 
   const [currentLang, setCurrentLang] = useState(i18next.language || 'en');
 
-  // Turning it on makes the phone prove it answers first, so the switch can never
-  // be the thing that locks a technician out of their own till.
   const handleToggleLock = async (on: boolean) => {
     setLockBusy(true);
-    await setLockRequired(on);
+    if (!on) {
+      await disableBiometrics();
+    } else {
+      Alert.alert(
+        t('settings.biometricTitle', 'Biometric Login'),
+        t('settings.biometricSetupNotice', 'To enable or change biometric credentials, simply log out and sign in with your email & password to register your fingerprint or face.'),
+        [{ text: t('common.ok', 'OK') }]
+      );
+    }
     setLockBusy(false);
   };
 
@@ -157,23 +163,23 @@ export const SettingsScreen = ({ navigation }: any) => {
           </Card.Content>
         </Card>
 
-        {/* Security Section — this phone, not the account */}
+        {/* Security Section — Biometric Login */}
         <Text style={styles.sectionTitle}>{t('settings.security', 'Security')}</Text>
         <Card style={styles.card}>
           <Card.Content>
             <View style={styles.lockRow}>
               <MaterialCommunityIcons name="fingerprint" size={24} color={colors.textSecondary} />
-              <Text style={styles.lockLabel}>{t('settings.biometricTitle', 'Unlock with biometrics')}</Text>
+              <Text style={styles.lockLabel}>{t('settings.biometricTitle', 'Biometric Login')}</Text>
               <Switch
-                value={lockRequired}
+                value={isBiometricLoginEnabled}
                 onValueChange={handleToggleLock}
-                disabled={lockBusy || (!lockRequired && !lockCanEnable)}
+                disabled={lockBusy || (!isBiometricLoginEnabled && !lockCanEnable)}
                 color={colors.brand}
               />
             </View>
             <Text style={styles.lockHint}>
-              {lockCanEnable || lockRequired
-                ? t('settings.biometricBody', 'This phone stays signed in, and asks for your fingerprint or face after about 5 minutes away.')
+              {lockCanEnable || isBiometricLoginEnabled
+                ? t('settings.biometricBody', 'Sign in quickly using your fingerprint or face when you log out or open the login screen.')
                 : t('settings.biometricUnavailable', 'No fingerprint or face unlock is set up on this phone, so there is nothing to ask for.')}
             </Text>
             {Boolean(lockError) && <Text style={styles.lockError}>{lockError}</Text>}

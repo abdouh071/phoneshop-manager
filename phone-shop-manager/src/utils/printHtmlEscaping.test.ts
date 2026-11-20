@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
-import { buildReceiptHTML } from './printWindow';
+import { buildLabelsHTML, buildReceiptHTML } from './printWindow';
 import { buildCustomTicketHTML } from '../features/customTicket/customTicketTemplate';
 import type { CustomTicketData } from '../features/customTicket/customTicketTypes';
 
@@ -42,6 +43,26 @@ const customTicketData = (overrides: Partial<CustomTicketData> = {}): CustomTick
   format: '80mm',
   copies: 1,
   ...overrides,
+});
+
+describe('label prices', () => {
+  const priceStyle = 'font-size:13px;font-weight:800;height:4mm';
+
+  it('omits an absent price instead of printing an invented zero', () => {
+    const html = buildLabelsHTML([{ sku: 'ACC-1', name: 'Cable' }], 'Fixture Shop');
+    expect(html).not.toContain(priceStyle);
+    expect(html).not.toContain('NaN');
+  });
+
+  it.each([0, 500])('preserves an explicitly supplied price of %s', price => {
+    const html = buildLabelsHTML([{ sku: 'ACC-1', name: 'Cable', price }], 'Fixture Shop');
+    expect(html).toContain(priceStyle);
+  });
+
+  it('keeps repair-part prices hidden', () => {
+    const html = buildLabelsHTML([{ sku: 'PRT-1', name: 'Screen', price: 500, category: 'repair_part' }]);
+    expect(html).not.toContain(priceStyle);
+  });
 });
 
 describe('print HTML builders escape user data', () => {

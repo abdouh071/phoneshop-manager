@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, TrendingUp, Filter } from 'lucide-react';
+import { Calendar, TrendingUp, Filter, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
 import type { MainTab, SubFilterClickHandler } from './reportTypes';
@@ -45,42 +45,79 @@ export const TimeframeFilterBar: React.FC<TimeframeFilterBarProps> = ({
 }) => {
   const { t } = useTranslation();
 
+  // Quick-access pills: single-click jump to any period
+  const quickPills: { label: string; tab: MainTab; filter: string }[] = [
+    { label: 'Today',       tab: 'daily',   filter: 'today' },
+    { label: 'Yesterday',   tab: 'daily',   filter: 'yesterday' },
+    { label: 'This Week',   tab: 'weekly',  filter: 'this_week' },
+    { label: 'Last 7 Days', tab: 'weekly',  filter: 'last_7_days' },
+    { label: 'This Month',  tab: 'monthly', filter: 'this_month' },
+    { label: 'Last Month',  tab: 'monthly', filter: 'last_month' },
+    { label: 'This Year',   tab: 'yearly',  filter: 'year_to_date' },
+  ];
+
   return (
     <div className={styles.filterContainer}>
-      <div className={styles.mainTabs}>
+
+      {/* ── Quick-access pills ──────────────────────────────── */}
+      <div className={styles.quickPillsRow}>
+        {quickPills.map(pill => {
+          const isActive = activeSubFilter === pill.filter;
+          return (
+            <button
+              key={pill.filter}
+              type="button"
+              className={[styles.quickPill, isActive && styles.quickPillActive].filter(Boolean).join(' ')}
+              onClick={() => {
+                handleMainTabChange(pill.tab);
+                // The mainTab change triggers its default sub-filter, then we override
+                setTimeout(() => handleSubFilterClick(pill.filter), 0);
+              }}
+            >
+              {pill.label}
+            </button>
+          );
+        })}
+        <span className={styles.quickPillDivider} />
         <button
-          className={[styles.mainTabBtn, mainTab === 'daily' && styles.mainTabActive].filter(Boolean).join(' ')}
-          onClick={() => handleMainTabChange('daily')}
-        >
-          <Calendar size={14} /> {t('reports.daily', 'Daily')}
-        </button>
-        <button
-          className={[styles.mainTabBtn, mainTab === 'weekly' && styles.mainTabActive].filter(Boolean).join(' ')}
-          onClick={() => handleMainTabChange('weekly')}
-        >
-          <Calendar size={14} /> {t('reports.weekly', 'Weekly')}
-        </button>
-        <button
-          className={[styles.mainTabBtn, mainTab === 'monthly' && styles.mainTabActive].filter(Boolean).join(' ')}
-          onClick={() => handleMainTabChange('monthly')}
-        >
-          <Calendar size={14} /> {t('reports.monthly', 'Monthly')}
-        </button>
-        <button
-          className={[styles.mainTabBtn, mainTab === 'yearly' && styles.mainTabActive].filter(Boolean).join(' ')}
-          onClick={() => handleMainTabChange('yearly')}
-        >
-          <TrendingUp size={14} /> {t('reports.yearly', 'Yearly')}
-        </button>
-        <button
-          className={[styles.mainTabBtn, mainTab === 'custom' && styles.mainTabActive].filter(Boolean).join(' ')}
+          type="button"
+          className={[styles.quickPill, mainTab === 'custom' && styles.quickPillActive].filter(Boolean).join(' ')}
           onClick={() => handleMainTabChange('custom')}
         >
-          <Filter size={14} /> {t('reports.custom', 'Custom Range')}
+          <Filter size={11} /> Custom
         </button>
       </div>
 
-      {/* Sub-Filters Toolbar */}
+      {/* ── Period tabs + sub-filters ───────────────────────── */}
+      <div className={styles.mainTabs}>
+        {(['daily', 'weekly', 'monthly', 'yearly', 'custom'] as MainTab[]).map(tab => {
+          const icons: Record<MainTab, React.ReactNode> = {
+            daily:   <Calendar size={13} />,
+            weekly:  <Calendar size={13} />,
+            monthly: <Calendar size={13} />,
+            yearly:  <TrendingUp size={13} />,
+            custom:  <Filter size={13} />,
+          };
+          const labels: Record<MainTab, string> = {
+            daily:   t('reports.daily', 'Daily'),
+            weekly:  t('reports.weekly', 'Weekly'),
+            monthly: t('reports.monthly', 'Monthly'),
+            yearly:  t('reports.yearly', 'Yearly'),
+            custom:  t('reports.custom', 'Custom'),
+          };
+          return (
+            <button
+              key={tab}
+              className={[styles.mainTabBtn, mainTab === tab && styles.mainTabActive].filter(Boolean).join(' ')}
+              onClick={() => handleMainTabChange(tab)}
+            >
+              {icons[tab]} {labels[tab]}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Sub-filters per active tab ──────────────────────── */}
       <div className={styles.subFiltersBar}>
         {mainTab === 'daily' && (
           <>
@@ -96,6 +133,7 @@ export const TimeframeFilterBar: React.FC<TimeframeFilterBarProps> = ({
             >
               {t('reports.yesterday', 'Yesterday')}
             </button>
+            <ChevronRight size={12} style={{ color: 'var(--color-outline-variant)' }} />
             <div className={styles.customDateInputs}>
               <span>Specific Date:</span>
               <input
@@ -117,7 +155,7 @@ export const TimeframeFilterBar: React.FC<TimeframeFilterBarProps> = ({
               className={[styles.subFilterBtn, activeSubFilter === 'this_week' && styles.subFilterActive].filter(Boolean).join(' ')}
               onClick={() => handleSubFilterClick('this_week')}
             >
-              {t('reports.thisWeek', 'This Week')} ({startDayName} - {t('reports.today', 'Today')})
+              {t('reports.thisWeek', 'This Week')} ({startDayName}–{t('reports.today', 'Today')})
             </button>
             <button
               className={[styles.subFilterBtn, activeSubFilter === 'last_7_days' && styles.subFilterActive].filter(Boolean).join(' ')}
@@ -148,6 +186,7 @@ export const TimeframeFilterBar: React.FC<TimeframeFilterBarProps> = ({
             >
               {t('reports.lastMonth', 'Last Month')}
             </button>
+            <ChevronRight size={12} style={{ color: 'var(--color-outline-variant)' }} />
             <div className={styles.customDateInputs}>
               <span>Month:</span>
               <select
@@ -194,8 +233,9 @@ export const TimeframeFilterBar: React.FC<TimeframeFilterBarProps> = ({
             >
               {t('reports.fullYear', 'Full Year')}
             </button>
+            <ChevronRight size={12} style={{ color: 'var(--color-outline-variant)' }} />
             <div className={styles.customDateInputs}>
-              <span>Select Year:</span>
+              <span>Year:</span>
               <select
                 className={styles.dateInput}
                 value={selectedYear}
@@ -233,7 +273,7 @@ export const TimeframeFilterBar: React.FC<TimeframeFilterBarProps> = ({
               size="sm"
               onClick={() => handleSubFilterClick('custom', { customStartDate: customStart, customEndDate: customEnd })}
             >
-              Apply Range
+              Apply
             </Button>
           </div>
         )}

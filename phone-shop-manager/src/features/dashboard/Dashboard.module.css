@@ -381,7 +381,206 @@
   background: var(--color-surface-container-low);
 }
 
-/* Overdue Debt Alert Banner */
+/* ── Revenue / Benefit Section Headers ─────────────────────────── */
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.sectionTitle {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-on-surface-variant);
+}
+
+/* ── Hero + Breakdown grid (1 big + 3 small) ────────────────────── */
+.heroBreakdownGrid {
+  display: grid;
+  grid-template-columns: 1.1fr 3fr;
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .heroBreakdownGrid { grid-template-columns: 1fr; }
+}
+
+.breakdownGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .breakdownGrid { grid-template-columns: 1fr; }
+}
+
+/* ── Benefit hero card (green accent) ───────────────────────────── */
+.benefitHeroCard {
+  background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%) !important;
+}
+
+.benefitHeroCard .statValue,
+.benefitHeroCard .statLabel {
+  color: #14532d !important;
+}
+
+.benefitIcon {
+  background: rgba(21, 128, 61, 0.15) !important;
+  color: #15803d !important;
+}
+
+/* ── Breakdown stat card (smaller) ──────────────────────────────── */
+.breakdownCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.breakdownCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+}
+
+.breakdownCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.breakdownIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.breakdownIconSales   { background: #dbeafe; color: #1d4ed8; }
+.breakdownIconRepairs { background: #ede9fe; color: #7c3aed; }
+.breakdownIconParts   { background: #fef3c7; color: #b45309; }
+
+.breakdownValue {
+  font-family: var(--font-headline);
+  font-size: var(--text-headline-sm-size);
+  font-weight: 700;
+  color: var(--color-on-surface);
+  line-height: 1.1;
+}
+
+.breakdownLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.breakdownSub {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+  margin-top: 3px;
+  opacity: 0.85;
+}
+
+.marginBadge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.marginPositive { background: rgba(22, 101, 52, 0.12); color: #166534; }
+.marginNegative { background: rgba(220, 38, 38, 0.1); color: #b91c1c; }
+
+/* ── Operational strip (Low Stock + Active Repairs) ─────────────── */
+.opsStrip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 700px) {
+  .opsStrip { grid-template-columns: 1fr; }
+}
+
+.opsCard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.opsCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  border-color: var(--color-primary);
+}
+
+.opsIcon {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.opsIconWarning { background: #fef3c7; color: #b45309; }
+.opsIconInfo    { background: #ede9fe; color: #7c3aed; }
+
+.opsCount {
+  font-family: var(--font-headline);
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--color-on-surface);
+  line-height: 1;
+}
+
+.opsLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
+.opsSub {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+  opacity: 0.75;
+  margin-top: 2px;
+}
+
+/* ── Enhanced Bar Chart: value labels ──────────────────────────── */
+.barValueLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-on-surface-variant);
+  text-align: center;
+  margin-bottom: 2px;
+  opacity: 0.85;
+  min-height: 14px;
+  line-height: 14px;
+}
+
+/* ── Overdue Debt Alert Banner */
 .overdueAlertBanner {
   background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
   border: 1px solid #fecaca;

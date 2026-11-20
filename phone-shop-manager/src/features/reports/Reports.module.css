@@ -682,3 +682,166 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ─── QUICK ACCESS PILLS ─────────────────────────────────────── */
+.quickPillsRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-surface-container-low);
+}
+
+.quickPill {
+  background: var(--color-surface);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  transition: all 0.13s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.quickPill:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-surface-container-low);
+}
+
+.quickPillActive {
+  background: var(--color-primary-container) !important;
+  border-color: var(--color-primary) !important;
+  color: var(--color-on-primary-container) !important;
+  font-weight: 700;
+}
+
+.quickPillDivider {
+  width: 1px;
+  height: 18px;
+  background: var(--color-outline-variant);
+  margin: 0 2px;
+}
+
+/* ─── INCOME / BENEFIT STREAM BREAKDOWN ─────────────────────── */
+.breakdownSectionTitle {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-on-surface-variant);
+  margin-bottom: 10px;
+}
+
+.streamBreakdownGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .streamBreakdownGrid { grid-template-columns: 1fr; }
+}
+
+.streamCard {
+  background: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  transition: transform 0.13s ease, box-shadow 0.13s ease;
+}
+
+.streamCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.07);
+}
+
+.streamCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.streamIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.streamIconPos     { background: #dbeafe; color: #1d4ed8; }
+.streamIconRepairs { background: #ede9fe; color: #7c3aed; }
+.streamIconParts   { background: #fef3c7; color: #b45309; }
+
+.streamRevenue {
+  font-family: var(--font-headline);
+  font-size: var(--text-headline-sm-size);
+  font-weight: 700;
+  color: var(--color-on-surface);
+  line-height: 1.1;
+}
+
+.streamLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-surface-variant);
+  margin-top: 2px;
+}
+
+.streamMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-surface-container-low);
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
+}
+
+.streamMarginBadge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.streamMarginPos { background: rgba(22, 101, 52, 0.12); color: #166534; }
+.streamMarginNeg { background: rgba(220, 38, 38, 0.1);  color: #b91c1c; }
+
+.streamProfitPos { color: #15803d; font-weight: 600; }
+.streamProfitNeg { color: #dc2626; font-weight: 600; }
+
+/* ─── KPI ACTIVITY LIST (replaces single count number) ────────── */
+.kpiActivityList {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.kpiActivityRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+}
+
+.kpiActivityRow strong {
+  font-weight: 600;
+  color: var(--color-on-surface);
+  font-size: 12px;
+}

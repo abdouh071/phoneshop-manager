@@ -98,6 +98,7 @@ export interface SaleTransaction {
    * into old history and deducts a second time.
    */
   stockApplied?: boolean;
+  financialRevision?: number;
   accountSettlement?: {
     type: 'paid_full' | 'charged_to_account' | 'partial_payment';
     paidAmount: number;
@@ -135,6 +136,8 @@ export interface SuspendedCart {
   date: string;
   items: CartItem[];
   customerName: string;
+  customerId?: string | null;
+  customerPhone?: string;
   discount: { type: 'percent' | 'flat'; value: number } | null;
 }
 
