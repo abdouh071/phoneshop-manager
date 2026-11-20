@@ -98,6 +98,60 @@ export function scoreMatch(normalizedQueryWord: string, normalizedField: string)
   return 0;
 }
 
+// ─── Ordered word matching ────────────────────────────────────────────────────
+
+/**
+ * Score a multi-word query against field words, requiring words to appear
+ * IN ORDER with bounded gaps between consecutive matches.
+ *
+ * Gap policy (applied to each query word after the first):
+ *   - Pure numeric tokens like "9", "10"  → maxGap = 0
+ *     They must DIRECTLY follow the previous matched field word.
+ *     This prevents "REDMI 9" from matching "REDMI NOTE 9".
+ *   - Mixed alphanumeric tokens like "9a", "a54" → maxGap = 1
+ *     Allow at most one intervening word (e.g. brand "samsung a54" ≈ "samsung galaxy a54").
+ *   - Pure alpha tokens like "redmi", "note" → maxGap = 2
+ *     Brand/word tokens are allowed wider gaps.
+ *
+ * Returns 0 if any query word cannot be satisfied within its gap budget.
+ */
+function scoreOrderedWords(queryWords: string[], fieldWords: string[]): number {
+  let lastIdx = -1;
+  let total = 0;
+
+  for (let qi = 0; qi < queryWords.length; qi++) {
+    const qw = queryWords[qi];
+    const isAlphaOnly = /^[a-z\u0600-\u06ff]+$/.test(qw);
+    const isNumeric   = /^\d+$/.test(qw);
+
+    // First word may appear anywhere; subsequent words have a gap budget.
+    const maxGap = qi === 0 ? Infinity : isNumeric ? 0 : isAlphaOnly ? 2 : 1;
+
+    let found = false;
+    for (let fi = lastIdx + 1; fi < fieldWords.length; fi++) {
+      const gap = fi - lastIdx - 1; // words skipped since last match
+      if (qi > 0 && gap > maxGap) break; // exceeded budget — give up
+
+      const fw = fieldWords[fi];
+      let ws = 0;
+      if (fw === qw)                             ws = 70; // exact word match
+      else if (isAlphaOnly && fw.startsWith(qw)) ws = 60; // prefix (alpha only)
+      else if (isAlphaOnly && fw.includes(qw))   ws = 40; // substring (alpha only)
+
+      if (ws > 0) {
+        total += ws;
+        lastIdx = fi;
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) return 0; // AND — one failure disqualifies the field
+  }
+
+  return total;
+}
+
 // ─── Per-field multi-word scorer ──────────────────────────────────────────────
 
 /**
@@ -123,23 +177,22 @@ function scoreField(queryWords: string[], normalizedField: string): number {
   const fieldWords = normalizedField.split(' ');
 
   // A single field-word starts with the full phrase (unusual but handle it).
-  // Also enforce word boundary: the phrase must end at a word boundary inside `w`.
   if (fieldWords.some(w => w.startsWith(phrase) && (w.length === phrase.length || w[phrase.length] === ' '))) {
     return 75 * queryWords.length;
   }
 
-  // The field contains the phrase as a substring (preceded/followed by spaces or edges).
+  // The field contains the phrase as a substring (at word boundaries).
   const phraseInField = new RegExp(`(?:^| )${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?= |$)`);
   if (phraseInField.test(normalizedField)) return 70 * queryWords.length;
 
-  // All query words must individually satisfy this field
-  let total = 0;
-  for (const word of queryWords) {
-    const s = scoreMatch(word, normalizedField);
-    if (s === 0) return 0; // AND — one failure disqualifies this field
-    total += s;
+  // ── Ordered word fallback ─────────────────────────────────────────────────
+  // For single-word queries, use the full scoreMatch (supports fuzzy, field-
+  // level startsWith, etc.).  For multi-word queries, require words to appear
+  // in ORDER with gap limits so "REDMI 9" does NOT match "REDMI NOTE 9".
+  if (queryWords.length === 1) {
+    return scoreMatch(queryWords[0], normalizedField);
   }
-  return total;
+  return scoreOrderedWords(queryWords, fieldWords);
 }
 
 // ─── Main ranked search ───────────────────────────────────────────────────────

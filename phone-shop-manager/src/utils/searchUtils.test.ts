@@ -9,9 +9,10 @@ const getFields = (p: Product) =>
 // ── The user's exact reported scenario ────────────────────────────────────────
 describe('searchAndRank – model-number precision (user-reported bug)', () => {
   const products: Product[] = [
-    { name: 'AF-REDMI 9 ORG',  model: 'REDMI 9',  storage: '9A' }, // ← has storage=9A, should NOT match
-    { name: 'AF REDMI 9A ORG', model: 'REDMI 9A', storage: '9A' }, // ← the CORRECT match
-    { name: 'AF-REDMI 10 ORG', model: 'REDMI 10', storage: '10' }, // ← should NOT match
+    { name: 'AF-REDMI 9 ORG',    model: 'REDMI 9',      storage: '9A' }, // ← has storage=9A, should NOT match
+    { name: 'AF REDMI 9A ORG',   model: 'REDMI 9A',     storage: '9A' }, // ← the CORRECT match for "9A"
+    { name: 'AF-REDMI 10 ORG',   model: 'REDMI 10',     storage: '10' }, // ← should NOT match
+    { name: 'AF REDMI NOTE 9 ORG', model: 'REDMI NOTE 9', storage: '9' }, // ← "NOTE" between REDMI and 9
   ];
 
   it('REDMI 9A → returns only "AF REDMI 9A ORG"', () => {
@@ -19,7 +20,7 @@ describe('searchAndRank – model-number precision (user-reported bug)', () => {
     expect(results.map(p => p.name)).toEqual(['AF REDMI 9A ORG']);
   });
 
-  it('REDMI 9 → returns only "AF-REDMI 9 ORG"', () => {
+  it('REDMI 9 → returns only "AF-REDMI 9 ORG" (not NOTE 9)', () => {
     const results = searchAndRank(products, 'REDMI 9', getFields);
     expect(results.map(p => p.name)).toEqual(['AF-REDMI 9 ORG']);
   });
@@ -29,9 +30,14 @@ describe('searchAndRank – model-number precision (user-reported bug)', () => {
     expect(results.map(p => p.name)).toEqual(['AF-REDMI 10 ORG']);
   });
 
-  it('REDMI → returns all three (the brand matches all)', () => {
+  it('REDMI NOTE 9 → returns only "AF REDMI NOTE 9 ORG"', () => {
+    const results = searchAndRank(products, 'REDMI NOTE 9', getFields);
+    expect(results.map(p => p.name)).toEqual(['AF REDMI NOTE 9 ORG']);
+  });
+
+  it('REDMI → returns all four (the brand matches all)', () => {
     const results = searchAndRank(products, 'REDMI', getFields);
-    expect(results).toHaveLength(3);
+    expect(results).toHaveLength(4);
   });
 });
 
@@ -63,18 +69,27 @@ describe('searchAndRank – ranking order', () => {
 // ── Cross-field isolation ──────────────────────────────────────────────────────
 describe('searchAndRank – cross-field false positive prevention', () => {
   it('query words must co-exist in the SAME field, not across fields', () => {
-    // name has "apple", sku has "15" — query "apple 15" should NOT match
-    // if only way to satisfy both words is to combine different fields
+    // name="Apple Case" has "apple", sku="CASE-15-BLK" has "15" — different fields → NO
+    // name="Apple iPhone 15" has both in one field → YES (via phrase "iphone 15" in model)
     const items = [
-      { name: 'Apple Case',  model: 'Generic', sku: 'CASE-15-BLK' },  // name=apple, sku=15 → NO
-      { name: 'Apple iPhone 15', model: 'iPhone 15', sku: 'APL-15' }, // name has both → YES
+      { name: 'Apple Case',      model: 'Generic',   sku: 'CASE-15-BLK' }, // cross-field → NO
+      { name: 'Apple iPhone 15', model: 'iPhone 15', sku: 'APL-15' },      // model="iphone 15" → YES
     ];
-    const results = searchAndRank(items, 'apple 15', p => [p.name, p.model, p.sku].filter(Boolean) as string[]);
-    // Only the second item has "apple" and "15" in the same field
+    const results = searchAndRank(items, 'iphone 15', p => [p.name, p.model, p.sku].filter(Boolean) as string[]);
+    // The second item matches via its model field "iphone 15" (exact phrase)
     expect(results.map(r => r.name)).toContain('Apple iPhone 15');
-    // The first item (Apple Case with sku CASE-15) should NOT match because
-    // "apple" and "15" don't co-exist in name, model, OR sku independently
+    // The first item has no field containing both "iphone" and "15" → excluded
     expect(results.map(r => r.name)).not.toContain('Apple Case');
+  });
+
+  it('numeric token must be adjacent: "apple 15" does NOT match "apple iphone 15"', () => {
+    // "15" is pure-numeric → must directly follow "apple" with no gap
+    const items = [{ name: 'Apple iPhone 15', model: 'iPhone 15' }];
+    const results = searchAndRank(items, 'apple 15', p => [p.name, p.model].filter(Boolean) as string[]);
+    // No field has "apple" directly adjacent to "15" (name has "iphone" between them;
+    // model has "iphone" between them; joined "apple iphone 15 iphone 15" still has gap)
+    // → "iphone 15" is the right query, not "apple 15"
+    expect(results).toHaveLength(0);
   });
 });
 
