@@ -11,7 +11,7 @@
 
 A powerful, all-in-one, production-grade management system designed specifically for **independent phone repair shops, smartphone retailers, and electronics service centers**. 
 
-**PhoneShop Manager Pro** combines a high-speed Point of Sale (POS), a real-time Kanban repair management board, full inventory and spare parts tracking, supplier purchase orders, customer CRM with WhatsApp integration, financial analytics, multi-user role permissions, and direct silent thermal printing — accompanied by a dedicated mobile app for workshop technicians.
+**PhoneShop Manager Pro** combines a high-speed Point of Sale (POS), a real-time Kanban repair management board, full inventory and spare parts tracking, supplier purchase orders, customer CRM with WhatsApp integration, financial analytics, multi-user role permissions, and direct silent thermal printing — accompanied by a dedicated **Android Management App** for shop owners, managers, cashiers, and workbench technicians.
 
 ---
 
@@ -19,6 +19,7 @@ A powerful, all-in-one, production-grade management system designed specifically
 
 - [🎯 Who Is This For?](#-who-is-this-for)
 - [🧪 Live Demo](#-live-demo--quick-evaluation-account)
+- [📦 Pre-Built App Releases & How to Install](#-pre-built-app-releases--how-to-install)
 - [📸 Visual Tour](#-visual-tour--core-pages)
 - [🌟 Feature Breakdown](#-comprehensive-feature-breakdown)
 - [🖨️ Thermal Printing & Hardware](#️-thermal-printing--hardware-integration)
@@ -30,7 +31,7 @@ A powerful, all-in-one, production-grade management system designed specifically
   - [Step 4 — First Login](#step-4-first-login--creating-other-staff-profiles)
   - [Step 5 — Print Server](#step-5-start-the-hardware-print-server-optional)
   - [Step 6 — Desktop Builds](#step-6-standalone-desktop-applications-macos--windows)
-  - [Step 7 — Android APK](#step-7-technician-mobile-companion-app-technician-app)
+  - [Step 7 — Android Management App](#step-7-android-management-app-technician-app)
 - [🔒 Security Architecture](#-security--privacy-architecture)
 - [🌍 Multi-Language & RTL](#-multi-language--localization)
 - [💻 Tech Stack](#-tech-stack-summary)
@@ -45,7 +46,7 @@ A powerful, all-in-one, production-grade management system designed specifically
 
 - 🔧 **Independent repair shops** that need repairs + POS in one system — without paying \$100–200/month for SaaS alternatives
 - 🏪 **Smartphone retailers** who want real inventory control with thermal printing and barcode scanning
-- 👨‍💼 **Multi-technician workshops** that need role-based access and a dedicated mobile bench app
+- 👨‍💼 **Multi-role store teams** that need granular role access across desktop and mobile (Store Owners, Admins, Managers, Cashiers, Technicians)
 - 🌍 **Arabic-speaking markets** requiring full RTL support across the POS, receipts, and financial reports
 
 ---
@@ -57,7 +58,7 @@ Want to test drive the platform without configuring your own backend first? Use 
 | Field | Value |
 |---|---|
 | **🌐 Live Web Application** | **[https://ecomeweb-91a7e.web.app](https://ecomeweb-91a7e.web.app)** |
-| **📱 Technician Android APK** | **[Download APK (v1.1.1)](https://expo.dev/artifacts/eas/jZREECvoT6sghrPPJGYlPX3ruQHRKDgd_PCuIebENOk.apk)** |
+| **📱 Android Management APK** | **[Download Latest APK from Releases](https://github.com/abdouh071/phoneshop-manager/releases)** *(or [Direct Cloud Build](https://expo.dev/artifacts/eas/jZREECvoT6sghrPPJGYlPX3ruQHRKDgd_PCuIebENOk.apk))* |
 | **Demo Login Email** | `Adou4849@gmail.com` |
 | **Demo Password** | *(open a [GitHub Discussion](https://github.com/abdouh071/phoneshop-manager/discussions) or [Issue](https://github.com/abdouh071/phoneshop-manager/issues) to request access — sandbox environment)* |
 | **Assigned Role** | **Super Admin** *(Full master access to POS, Repairs, Inventory, Parts, Financials & Settings)* |
@@ -67,6 +68,47 @@ Want to test drive the platform without configuring your own backend first? Use 
 > The credentials and links above are provided strictly for sandbox preview and evaluation. **Anyone who clones or forks this project MUST set up their own dedicated Firebase database and create their own initial admin account** following [Step 2: Set Up Your Own Firebase Backend](#step-2-set-up-your-own-firebase-backend).
 > - Never record real store inventory, customer IMEI numbers, cash transactions, or passwords in a shared demo database.
 > - Always supply your own isolated project keys in `.env` and configure your own initial administrator account via the Firebase Console.
+
+---
+
+## 📦 Pre-Built App Releases & How to Install
+
+Ready-to-use standalone desktop and mobile binaries are published under **[GitHub Releases](https://github.com/abdouh071/phoneshop-manager/releases)**:
+
+| Package | Platform | Target Architecture | Description |
+|---|---|---|---|
+| **`PhoneShopPro-1.1.0-mac-arm64.dmg`** | macOS | Apple Silicon (M1, M2, M3, M4) | Standalone desktop application with integrated silent thermal print server |
+| **`PhoneShopPro-1.1.0-mac-x64.dmg`** | macOS | Intel x86_64 Macs | Standalone desktop application with integrated silent thermal print server |
+| **`PhoneShopPro-Setup-1.1.0-win-x64.exe`** | Windows | 64-bit (Windows 10 & 11) | Desktop installer with auto-spawning local thermal printing service |
+| **`PhoneShopPro-Setup-1.1.0-win-ia32.exe`** | Windows | 32-bit (Windows 7, 8, 10 & 11) | Lightweight legacy Windows desktop installer |
+| **`PhoneShop-Technician-1.1.0.apk`** | Android | Android 8.0+ Smartphones & Tablets | Standalone mobile management app with multi-role login & camera barcode scanner |
+
+### 🛠️ Installation Instructions
+
+#### 🍏 macOS (`.dmg`)
+1. Download `PhoneShopPro-1.1.0-mac-arm64.dmg` (for M1–M4 Apple Silicon) or `PhoneShopPro-1.1.0-mac-x64.dmg` (for Intel).
+2. Double-click the downloaded `.dmg` file and drag **PhoneShop Manager Pro** into your **Applications** folder.
+3. Open the application.
+   > **Note on macOS Gatekeeper:** Because the application is self-signed, macOS may show a prompt saying *"App cannot be opened because it is from an unidentified developer"*. To open:
+   > - Right-click (or Control-click) `PhoneShop Manager Pro` in your Applications folder.
+   > - Select **Open** from the menu, then click **Open** in the confirmation dialog. (You only need to do this once).
+
+#### 🪟 Windows (`.exe`)
+1. Download `PhoneShopPro-Setup-1.1.0-win-x64.exe` (or the 32-bit `ia32.exe` version for Windows 7 / 32-bit machines).
+2. Double-click the installer and follow the setup wizard.
+   > **Note on Windows SmartScreen:** If Windows Defender SmartScreen shows *"Windows protected your PC"*, click **More info** → **Run anyway**.
+3. Launch **PhoneShop Manager Pro**. The hardware thermal print server will automatically start in the background on port `3355` — no manual setup or Node.js required!
+
+#### 📱 Android Management App (`.apk`)
+1. Download `PhoneShop-Technician-1.1.0.apk` directly to your Android device (or transfer it from your computer).
+2. Tap the downloaded `.apk` file to install.
+   *(If prompted by Android, tap **Settings** and enable **"Allow from this source"** / **"Install unknown apps"**).*
+3. Open **PhoneShop Manager** directly from your phone's home screen.
+4. Log in with any provisioned staff account — the app dynamically adjusts its features based on the assigned role:
+   - 👑 **Super Admin / Store Owner**: Full shop overview, repair approvals, financial summaries, POS sales, and staff management.
+   - 👔 **Manager**: Repair ticket updates, inventory tracking, POS checkout, and customer profiles.
+   - 💰 **Cashier**: Fast POS sales counter (accessories & labor) and customer debt collection.
+   - 🔧 **Technician**: Personal workbench repair queue, visual pattern lock viewer, and camera barcode scanner.
 
 ---
 
@@ -198,15 +240,19 @@ Want to test drive the platform without configuring your own backend first? Use 
   - **Technician**: Access restricted to assigned repair workbench and status updates.
 - **Multi-Language & RTL Layout**: Seamless toggle between English, French, and full Right-to-Left (RTL) Arabic.
 
-### 12. 📲 Technician Mobile Companion App (`technician-app`)
-- **Workshop Mobility**: Designed specifically for repair technicians stationed at the workbench or working on the shop floor.
-- **Biometric Authentication (Face ID & Fingerprint Lock)**: Quick biometric unlock so technicians can access the app securely at the bench without repeatedly entering passwords.
-- **Assigned Workbench Pipeline**: Technicians see their personal active queue, filterable by status (`In Diagnosis`, `Waiting for Parts`, `In Progress`, `Ready for Pickup`).
-- **Direct Ticket Assignment & Reassignment**: Bench technicians can claim unassigned tickets or reassign them directly from mobile.
+### 12. 📲 Android Management App (`technician-app`)
+- **Full Multi-Role Support (Admins, Managers, Cashiers & Technicians)**: Unlike basic technician-only utilities, the Android Management App dynamically customizes its interface and permissions based on the logged-in staff role:
+  - 👑 **Super Admin & Store Owner**: High-level store health, today's revenue KPIs, active repair pipeline counts, and master access on the go.
+  - 👔 **Store Manager**: Oversee workbench progress, approve repair estimates, update ticket statuses, and access customer history.
+  - 💰 **Cashier / Sales Staff**: Fast mobile counter POS with barcode scanning for walk-in accessories and quick service sales.
+  - 🔧 **Repair Technician**: Personal workbench queue, visual pattern unlock tester, parts usage allocation, and commission tracking.
+- **Biometric Authentication (Face ID & Fingerprint Lock)**: Quick biometric unlock so staff can access the app securely at the bench or on the counter without repeatedly typing passwords.
+- **Assigned Workbench Pipeline**: Filter active repairs by status (`In Diagnosis`, `Waiting for Parts`, `In Progress`, `Ready for Pickup`).
+- **Direct Ticket Assignment & Reassignment**: Reassign tickets between staff and technicians directly from mobile.
 - **Mobile Counter POS (Dual Mode: Products & Services)**: Fast POS counter on mobile with dedicated tabs for retail accessories and technician repair labor/services.
 - **Interactive 3x3 Pattern Lock Canvas & PIN**: View the client's screen unlock pattern visually on the mobile screen to easily test device touch, cameras, and components.
 - **Hardware Camera Barcode Scanner**: Scan the adhesive repair sticker on the phone's backplate to open the exact ticket in under a second without typing.
-- **New Ticket Intake on the Go**: Rapid intake form allowing technicians or floor staff to register new repair orders directly from their smartphone.
+- **New Ticket Intake on the Go**: Rapid intake form allowing floor staff to register new repair orders directly from their smartphone.
 - **Personal Earnings & Productivity Reports**: Track daily/weekly completed repairs, turnaround speed, and calculated repair commissions.
 - **Instant Cloud Sync**: Any status transition or note added on mobile immediately updates the manager's desktop Kanban board and the customer's live tracking link.
 - **Multi-Language & Dark Mode**: Full support for English, French, and Arabic RTL layout with an eye-friendly dark theme.
@@ -288,7 +334,7 @@ phoneshop-manager/
 │   ├── vite.config.ts
 │   └── .env.example
 │
-├── technician-app/            # Mobile Companion App for Workshop Staff
+├── technician-app/            # Android Management App (Multi-Role Mobile App)
 │   ├── src/
 │   │   ├── screens/           # Mobile screens (repairs, details, profile)
 │   │   ├── components/        # Mobile UI elements
@@ -501,29 +547,37 @@ In Electron desktop applications, Firebase credentials and configurations are **
 
 ---
 
-### Step 7: Technician Mobile Companion App (`technician-app`)
+### Step 7: Android Management App (`technician-app`)
 
-The **Technician Companion App** is a purpose-built React Native mobile application for Android smartphones and tablets. It allows workshop technicians at the bench to view assigned devices, inspect visual pattern locks, scan device barcode stickers with the phone camera, update repair statuses, and track daily earnings.
+The **Android Management App** is a purpose-built React Native & Expo mobile application for Android smartphones and tablets. **It now features full multi-role RBAC support**, empowering Store Owners, Managers, Cashiers, and Workshop Technicians to manage the business directly from their mobile devices:
+- 👑 **Store Owners & Admins**: View overall revenue, profit margins, repair volume, and staff activities on the go.
+- 👔 **Managers**: Oversee live repairs, approve estimates, update repair stages, and access client ledgers.
+- 💰 **Cashiers**: Process walk-in accessory sales and diagnostic intake fees via the mobile POS counter.
+- 🔧 **Technicians**: Bench workbench queue, visual pattern lock viewer, and camera barcode scanner.
 
 #### 👤 How to Create Accounts to Log Into the Mobile App
-For security, the mobile app connects directly to your Firestore database and strictly enforces role permissions. **Technicians cannot register themselves publicly**; their accounts must be provisioned by the shop owner:
+For security, the mobile app connects directly to your Firestore database and strictly enforces role permissions. **Users cannot register themselves publicly**; accounts are created by the shop administrator:
 
 1. Open the main **PhoneShop Manager Pro** desktop web dashboard (`http://localhost:5173`).
 2. Log in with your **Admin / Super Admin** account.
 3. Navigate to **Settings → Users** tab.
 4. Click **Add User** (or "New Staff Member"):
-   - Enter Full Name (e.g., `Karim Technician`).
-   - Enter Staff Email (e.g., `karim.tech@myshop.com`).
+   - Enter Full Name (e.g., `Samir Manager` or `Karim Technician`).
+   - Enter Staff Email (e.g., `staff@myshop.com`).
    - Enter a Secure Password.
-   - Select Role: **Technician** (which maps to `repair_agent` or `admin`).
+   - Select the desired Role:
+     - **Admin / Store Owner**: Master mobile permissions and analytics.
+     - **Manager**: Repair oversight, approvals, and inventory.
+     - **Cashier / Sales**: Mobile POS sales and basic repair intake.
+     - **Technician**: Workbench repair queue, pattern lock viewer, and barcode scanner.
 5. Click **Save**.
-6. The account is instantly authorized. The technician can now open the mobile app and log in with these exact credentials.
+6. The account is instantly authorized. Staff can now open the Android app and log in with their assigned credentials.
 
 ---
 
 #### 📱 How to Build the Standalone Android App (`.apk`) with Your Own Keys
 
-The mobile app is engineered to run as a **100% standalone native Android app**. Technicians install the `.apk` directly on their Android devices and launch it from their home screen — **no Expo Go app or computer connection required**.
+The mobile app is engineered to run as a **100% standalone native Android app**. Staff install the `.apk` directly on their Android devices and launch it from their home screen — **no Expo Go app or computer connection required**.
 
 ##### 1. Prerequisites & Free Expo Account Setup:
 EAS Cloud Build compiles Android `.apk` files directly on Expo's cloud servers for free.
@@ -655,7 +709,7 @@ Language can be switched instantly from the top navigation bar or under **Settin
 | **State Management** | Zustand |
 | **Backend & Database** | Google Cloud Firestore, Firebase Authentication |
 | **Print Server** | Node.js, Express.js, `node-thermal-printer` |
-| **Mobile Companion** | React Native, Expo SDK 57, Expo Router |
+| **Android Management App** | React Native, Expo SDK 57, Expo Router (Multi-Role RBAC: Owner, Manager, Cashier, Tech) |
 | **Desktop Wrapper** | Electron — packaged as macOS `.dmg` and Windows `.exe` installers |
 | **i18n & RTL** | i18next, react-i18next |
 
