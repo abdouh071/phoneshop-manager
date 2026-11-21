@@ -7,11 +7,46 @@
 [![Firebase](https://img.shields.io/badge/Firebase-Firestore_%26_Auth-ffca28.svg?logo=firebase&logoColor=black)](https://firebase.google.com/)
 [![Expo](https://img.shields.io/badge/Expo-SDK_57-000020.svg?logo=expo&logoColor=white)](https://expo.dev/)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Hardware Tested](https://img.shields.io/badge/Hardware-Xprinter_XP--T80Q_%7C_XP--420B-orange.svg)](#-thermal-printing--hardware-integration)
+[![Hardware Tested](https://img.shields.io/badge/Hardware-Xprinter_XP--T80Q_%7C_XP--420B-orange.svg)](#️-thermal-printing--hardware-integration)
 
 A powerful, all-in-one, production-grade management system designed specifically for **independent phone repair shops, smartphone retailers, and electronics service centers**. 
 
 **PhoneShop Manager Pro** combines a high-speed Point of Sale (POS), a real-time Kanban repair management board, full inventory and spare parts tracking, supplier purchase orders, customer CRM with WhatsApp integration, financial analytics, multi-user role permissions, and direct silent thermal printing — accompanied by a dedicated mobile app for workshop technicians.
+
+---
+
+## 📋 Table of Contents
+
+- [🎯 Who Is This For?](#-who-is-this-for)
+- [🧪 Live Demo](#-live-demo--quick-evaluation-account)
+- [📸 Visual Tour](#-visual-tour--core-pages)
+- [🌟 Feature Breakdown](#-comprehensive-feature-breakdown)
+- [🖨️ Thermal Printing & Hardware](#️-thermal-printing--hardware-integration)
+- [🏗️ Repository Architecture](#️-repository-architecture)
+- [🚀 Installation & Setup](#-step-by-step-installation--setup)
+  - [Step 1 — Clone](#step-1-clone-the-repository)
+  - [Step 2 — Firebase Backend](#step-2-set-up-your-own-firebase-backend)
+  - [Step 3 — Web Application](#step-3-configure-and-start-the-manager-web-application)
+  - [Step 4 — First Login](#step-4-first-login--creating-other-staff-profiles)
+  - [Step 5 — Print Server](#step-5-start-the-hardware-print-server-optional)
+  - [Step 6 — Desktop Builds](#step-6-standalone-desktop-applications-macos--windows)
+  - [Step 7 — Android APK](#step-7-technician-mobile-companion-app-technician-app)
+- [🔒 Security Architecture](#-security--privacy-architecture)
+- [🌍 Multi-Language & RTL](#-multi-language--localization)
+- [💻 Tech Stack](#-tech-stack-summary)
+- [🗺️ Roadmap](#️-roadmap)
+- [🤝 Contributing](#-contributing)
+- [📄 License](#-license)
+- [💬 Community & Support](#-community--support)
+
+---
+
+## 🎯 Who Is This For?
+
+- 🔧 **Independent repair shops** that need repairs + POS in one system — without paying \$100–200/month for SaaS alternatives
+- 🏪 **Smartphone retailers** who want real inventory control with thermal printing and barcode scanning
+- 👨‍💼 **Multi-technician workshops** that need role-based access and a dedicated mobile bench app
+- 🌍 **Arabic-speaking markets** requiring full RTL support across the POS, receipts, and financial reports
 
 ---
 
@@ -24,7 +59,7 @@ Want to test drive the platform without configuring your own backend first? Use 
 | **🌐 Live Web Application** | **[https://ecomeweb-91a7e.web.app](https://ecomeweb-91a7e.web.app)** |
 | **📱 Technician Android APK** | **[Download APK (v1.1.1)](https://expo.dev/artifacts/eas/jZREECvoT6sghrPPJGYlPX3ruQHRKDgd_PCuIebENOk.apk)** |
 | **Demo Login Email** | `Adou4849@gmail.com` |
-| **Demo Password** | `Abdouh071` |
+| **Demo Password** | *(open a [GitHub Discussion](https://github.com/abdouh071/phoneshop-manager/discussions) or [Issue](https://github.com/abdouh071/phoneshop-manager/issues) to request access — sandbox environment)* |
 | **Assigned Role** | **Super Admin** *(Full master access to POS, Repairs, Inventory, Parts, Financials & Settings)* |
 
 > [!CAUTION]
@@ -37,80 +72,31 @@ Want to test drive the platform without configuring your own backend first? Use 
 
 ## 📸 Visual Tour & Core Pages
 
-### 📊 Executive Dashboard
-Gain real-time business visibility in a single view: today's revenue, active repair pipeline, pending diagnostic tasks, low stock alerts, estimated profit margins, recent audit logs, and instant quick-action shortcuts.
-
-![Dashboard Preview](docs/screenshots/dashboard.png)
-
----
-
-### 🔧 Repair Management & Interactive Kanban Board
-Track the entire lifecycle of client devices from intake to delivery. Drag and drop repair tickets across statuses, assign technicians, log unlock patterns/PINs, document diagnostics, allocate spare parts, and issue print tickets.
-
-![Repairs Kanban Board Preview](docs/screenshots/repairs.png)
-
----
-
-### 🛒 High-Speed Point of Sale (POS)
-Engineered for counter-speed retail: instant barcode scanning, quick-access category filters, cart management with line-item discounts, multiple payment methods (Cash, Card, Transfer, Split payments), customer association, and 1-click silent thermal receipt printing.
-
-![Point of Sale Preview](docs/screenshots/pos.png)
-
----
-
-### 📦 Comprehensive Retail Inventory Management
-Track devices, accessories, and packaged goods. Monitor stock levels, SKU / barcodes, cost vs. selling prices, profit margins, brand and model categories, reorder thresholds, and perform instant stock adjustments.
-
-![Inventory Preview](docs/screenshots/inventory.png)
-
----
-
-### 🔩 Spare Parts & Components Catalog
-Dedicated spare parts inventory tailored for phone repair: screens, batteries, charging ports, cameras, back glass, and flex cables. Track compatibility by phone model, allocate parts directly to repair orders, and monitor parts usage costs.
-
-![Parts Management Preview](docs/screenshots/parts.png)
-
----
-
-### 📋 Purchasing & Supplier Management
-Streamline vendor relationships: track purchase orders, incoming stock shipments, supplier contact details, payment statuses (Paid, Partial, Unpaid), and automatically update warehouse stock on order reception.
-
-![Purchasing Preview](docs/screenshots/purchasing.png)
-
----
-
-### 👥 Customer Relationship Management (CRM)
-Centralized customer directory with full history: contact details, total lifetime spend, repair history, store credit, loyalty points, and direct 1-click WhatsApp messaging for instant repair status notifications.
-
-![Customers Preview](docs/screenshots/customers.png)
-
----
-
-### 📈 Financial Analytics & Business Intelligence
-Deep actionable insights into store performance: sales trends over time, repair turnaround metrics, profit & loss analysis, technician productivity benchmarks, expense breakdown, and CSV data exports.
-
-![Reports & Analytics Preview](docs/screenshots/reports.png)
-
----
-
-### 📝 Complete Audit & Activity Log
-Maintain full operational transparency with an immutable audit trail: track who logged in, created or modified repair orders, adjusted stock, made cash withdrawals, or modified system settings, complete with exact timestamps and user attribution.
-
-![Activity Log Preview](docs/screenshots/activity.png)
-
----
-
-### ⚙️ System Settings, Permissions & Hardware Config
-Customize your store profile, tax rules, currency symbols, multi-lingual preferences, user roles, security access matrices, and configure thermal receipt / adhesive sticker printers.
-
-![Settings Preview](docs/screenshots/settings.png)
-
----
-
-### 🔐 Secure Multi-User Login
-Enterprise-grade authentication with Firebase Auth. Protects your shop from unauthorized registrations with dedicated role enforcement for Super Admins, Store Owners, Managers, Cashiers, and Technicians.
-
-![Login Page Preview](docs/screenshots/login.png)
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/dashboard.png" width="380" alt="Dashboard"/><br/><b>📊 Executive Dashboard</b></td>
+    <td align="center"><img src="docs/screenshots/repairs.png" width="380" alt="Repair Kanban"/><br/><b>🔧 Repair Kanban Board</b></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/pos.png" width="380" alt="Point of Sale"/><br/><b>🛒 Point of Sale (POS)</b></td>
+    <td align="center"><img src="docs/screenshots/inventory.png" width="380" alt="Inventory"/><br/><b>📦 Inventory Management</b></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/parts.png" width="380" alt="Spare Parts"/><br/><b>🔩 Spare Parts Catalog</b></td>
+    <td align="center"><img src="docs/screenshots/purchasing.png" width="380" alt="Purchasing"/><br/><b>📋 Purchasing & Suppliers</b></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/customers.png" width="380" alt="CRM"/><br/><b>👥 Customer CRM</b></td>
+    <td align="center"><img src="docs/screenshots/reports.png" width="380" alt="Analytics"/><br/><b>📈 Financial Analytics</b></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/activity.png" width="380" alt="Audit Log"/><br/><b>📝 Audit & Activity Log</b></td>
+    <td align="center"><img src="docs/screenshots/settings.png" width="380" alt="Settings"/><br/><b>⚙️ Settings & Permissions</b></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/screenshots/login.png" width="380" alt="Login"/><br/><b>🔐 Secure Multi-User Login</b></td>
+  </tr>
+</table>
 
 ---
 
@@ -266,7 +252,7 @@ The printing engine has been **thoroughly field-tested and optimized for Xprinte
 ## 🏗️ Repository Architecture
 
 ```
-Phones-workspace/
+phoneshop-manager/
 ├── docs/
 │   └── screenshots/           # Application screenshots for documentation
 │       ├── login.png
@@ -436,7 +422,6 @@ The system features an **automated initial bootstrap mechanism**:
 ---
 
 ### Step 5: Start the Hardware Print Server (Optional)
-
 If you have an 80mm thermal receipt printer or adhesive label printer connected to your computer:
 
 1. Open a new terminal window:
@@ -471,7 +456,7 @@ If you have an 80mm thermal receipt printer or adhesive label printer connected 
 
 ---
 
-### Step 5.1: Standalone Desktop Applications (macOS & Windows)
+### Step 6: Standalone Desktop Applications (macOS & Windows)
 
 For counter cashiers and shop managers, **PhoneShop Manager Pro** can be packaged into standalone native desktop applications with an **integrated auto-starting thermal print server**.
 
@@ -516,7 +501,7 @@ In Electron desktop applications, Firebase credentials and configurations are **
 
 ---
 
-### Step 6: Technician Mobile Companion App (`technician-app`)
+### Step 7: Technician Mobile Companion App (`technician-app`)
 
 The **Technician Companion App** is a purpose-built React Native mobile application for Android smartphones and tablets. It allows workshop technicians at the bench to view assigned devices, inspect visual pattern locks, scan device barcode stickers with the phone camera, update repair statuses, and track daily earnings.
 
@@ -671,8 +656,21 @@ Language can be switched instantly from the top navigation bar or under **Settin
 | **Backend & Database** | Google Cloud Firestore, Firebase Authentication |
 | **Print Server** | Node.js, Express.js, `node-thermal-printer` |
 | **Mobile Companion** | React Native, Expo SDK 57, Expo Router |
-| **Desktop Wrapper** | Electron (ready for standalone offline desktop bundling) |
+| **Desktop Wrapper** | Electron — packaged as macOS `.dmg` and Windows `.exe` installers |
 | **i18n & RTL** | i18next, react-i18next |
+
+---
+
+## 🗺️ Roadmap
+
+Planned improvements and upcoming features:
+
+- [ ] WhatsApp Business API integration (auto-send repair status updates to customers)
+- [ ] Multi-branch / multi-location support with per-branch dashboards
+- [ ] Customer-facing repair tracking PWA (no login required)
+- [ ] Offline-first mode with local PouchDB sync for unstable internet environments
+- [ ] Advanced expense tracking module (rent, utilities, salaries)
+- [ ] Scheduled SMS notifications via Twilio / local SMS gateway
 
 ---
 
@@ -686,6 +684,12 @@ We welcome contributions from the community! Whether you want to add support for
 4. Push to your branch (`git push origin feature/awesome-feature`)
 5. Open a Pull Request
 
+**Before submitting a PR, please:**
+- Run `npm run build` and confirm there are no TypeScript errors
+- If touching translations, update all 3 locale files (`en`, `fr`, `ar`) in `phone-shop-manager/src/locales/`
+- If adding a UI feature, add or update a screenshot in `docs/screenshots/`
+- Keep pull requests focused — one feature or fix per PR
+
 ---
 
 ## 📄 License
@@ -696,4 +700,9 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 ## 💬 Community & Support
 
-Built with ❤️ for phone repair shop owners, independent technicians, and small electronics retail businesses worldwide. If you find this software helpful, consider giving it a ⭐ on GitHub!
+- 🐛 **Bug reports & feature requests**: [Open an Issue](https://github.com/abdouh071/phoneshop-manager/issues)
+- 💬 **Questions & setup help**: [GitHub Discussions](https://github.com/abdouh071/phoneshop-manager/discussions)
+- 🧪 **Demo access credentials**: Request them in [Discussions](https://github.com/abdouh071/phoneshop-manager/discussions)
+- ⭐ **If this saved you time or money**, please give it a star on GitHub — it helps the project grow!
+
+Built with ❤️ for phone repair shop owners, independent technicians, and small electronics retail businesses worldwide.
