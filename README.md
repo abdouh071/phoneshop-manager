@@ -17,17 +17,19 @@ A powerful, all-in-one, production-grade management system designed specifically
 
 ## 🧪 Live Demo & Quick Evaluation Account
 
-Want to test drive the platform without configuring your own backend first? Use the pre-configured evaluation credentials:
+Want to test drive the platform without configuring your own backend first? Use the pre-configured live evaluation environment:
 
 | Field | Value |
 |---|---|
+| **🌐 Live Web Application** | **[https://ecomeweb-91a7e.web.app](https://ecomeweb-91a7e.web.app)** |
+| **📱 Technician Android APK** | **[Download APK (v1.1.1)](https://expo.dev/artifacts/eas/jZREECvoT6sghrPPJGYlPX3ruQHRKDgd_PCuIebENOk.apk)** |
 | **Demo Login Email** | `Adou4849@gmail.com` |
 | **Demo Password** | `Abdouh071` |
 | **Assigned Role** | **Super Admin** *(Full master access to POS, Repairs, Inventory, Parts, Financials & Settings)* |
 
 > [!CAUTION]
 > **CRITICAL NOTICE FOR USERS CLONING THIS REPOSITORY:**
-> The credentials above are provided strictly for sandbox preview and evaluation. **Anyone who clones or forks this project MUST set up their own dedicated Firebase database and create their own initial admin account** following [Step 2: Set Up Your Own Firebase Backend](#step-2-set-up-your-own-firebase-backend).
+> The credentials and links above are provided strictly for sandbox preview and evaluation. **Anyone who clones or forks this project MUST set up their own dedicated Firebase database and create their own initial admin account** following [Step 2: Set Up Your Own Firebase Backend](#step-2-set-up-your-own-firebase-backend).
 > - Never record real store inventory, customer IMEI numbers, cash transactions, or passwords in a shared demo database.
 > - Always supply your own isolated project keys in `.env` and configure your own initial administrator account via the Firebase Console.
 
@@ -131,8 +133,9 @@ Enterprise-grade authentication with Firebase Auth. Protects your shop from unau
   - Upfront deposit, estimated repair cost, and estimated completion date.
 - **Technician Assignment**: Allocate specific repair tickets to designated technicians.
 - **Spare Parts Allocation**: Deduct parts directly from parts inventory and link their cost to the ticket.
-- **Customer Self-Service Tracking**: Generate unique tracking codes and QR codes so customers can check repair status online without calling the shop.
+- **Public Customer Tracking Portal (`/tracking`)**: Generate unique tracking codes and QR codes printed on receipts so customers can check live repair progress online from any smartphone without logging in.
 - **Printable Repair Stickers & Receipts**: Print 80mm intake claim checks for customers and 50x30mm adhesive barcode labels for the physical phone backplate.
+- **Custom Ticket Builder**: Customize thermal intake tickets and customer claim receipts with your shop logo, warranty terms, and custom disclaimer notes.
 
 ### 3. 🛒 Point of Sale (POS) Counter
 - **Barcode & Scanner Support**: Fast product lookup via handheld USB/Bluetooth barcode scanners or manual search.
@@ -170,7 +173,9 @@ Enterprise-grade authentication with Firebase Auth. Protects your shop from unau
 ### 7. 👥 Customer Relationship Management (CRM)
 - **Comprehensive Profiles**: Customer name, primary phone number, secondary phone, email, physical address, and internal notes.
 - **Interaction History**: Complete log of all past repair orders and retail purchases made by the customer.
-- **Financial Balances**: Store credit balances and customer receivables tracking.
+- **Customer Account Statement (Relevé de Compte)**: Generate comprehensive, printable statements showing total purchases, debts, payments, remaining balance, and itemized transaction timeline with instant PDF export.
+- **Smart Customer Deduplication & Merge**: Detect duplicate customer profiles by phone number or name, and merge them with 1 click while safely consolidating all tickets, sales history, and debt ledgers.
+- **Credit & Debt Ledger**: Per-customer debt tracking with status badges (`Pending`, `Partial`, `Settled`), installment payment logging, and balance limits.
 - **1-Click WhatsApp Communication**: Open pre-formatted WhatsApp chat messages to notify customers when their device is ready for pickup or needs estimate approval.
 
 ### 8. 🌅 End of Day (Z-Report) Cash Reconciliation
@@ -209,8 +214,11 @@ Enterprise-grade authentication with Firebase Auth. Protects your shop from unau
 
 ### 12. 📲 Technician Mobile Companion App (`technician-app`)
 - **Workshop Mobility**: Designed specifically for repair technicians stationed at the workbench or working on the shop floor.
+- **Biometric Authentication (Face ID & Fingerprint Lock)**: Quick biometric unlock so technicians can access the app securely at the bench without repeatedly entering passwords.
 - **Assigned Workbench Pipeline**: Technicians see their personal active queue, filterable by status (`In Diagnosis`, `Waiting for Parts`, `In Progress`, `Ready for Pickup`).
-- **Visual Pattern Lock Grid & PIN**: View the client's screen unlock pattern visually on the mobile screen to easily test device touch, cameras, and components.
+- **Direct Ticket Assignment & Reassignment**: Bench technicians can claim unassigned tickets or reassign them directly from mobile.
+- **Mobile Counter POS (Dual Mode: Products & Services)**: Fast POS counter on mobile with dedicated tabs for retail accessories and technician repair labor/services.
+- **Interactive 3x3 Pattern Lock Canvas & PIN**: View the client's screen unlock pattern visually on the mobile screen to easily test device touch, cameras, and components.
 - **Hardware Camera Barcode Scanner**: Scan the adhesive repair sticker on the phone's backplate to open the exact ticket in under a second without typing.
 - **New Ticket Intake on the Go**: Rapid intake form allowing technicians or floor staff to register new repair orders directly from their smartphone.
 - **Personal Earnings & Productivity Reports**: Track daily/weekly completed repairs, turnaround speed, and calculated repair commissions.
@@ -324,7 +332,7 @@ Phones-workspace/
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/phoneshop-manager.git
+git clone https://github.com/abdouh071/phoneshop-manager.git
 cd phoneshop-manager
 ```
 
@@ -470,7 +478,7 @@ For production cashier and counter setups, **PhoneShop Manager Pro** is distribu
 > [!TIP]
 > **No manual terminal commands required!** When you run any of the desktop applications below, the hardware thermal print server automatically boots in the background on port `3355`, ready to dispatch receipt and barcode label jobs directly to USB, Network, and Windows shared printers.
 
-Pre-compiled standalone packages are located in the [`releases/`](file:///Users/Abdouh71/Phones-workspace/releases) folder. File names are generated from the app version, so a new build can never overwrite an old one:
+Pre-compiled standalone packages are located in the [`releases/`](releases/) folder. File names are generated from the app version, so a new build can never overwrite an old one:
 
 | Operating System | Package File | Architecture | Compatibility Notes |
 |---|---|---|---|
@@ -481,10 +489,10 @@ Pre-compiled standalone packages are located in the [`releases/`](file:///Users/
 
 Build them with `npm run electron:build:mac:arm64`, `:mac:intel`, `:win` or `:win7` (run `npm run build` first). Every installer carries the print server in `Contents/Resources/print-server/` on macOS and `resources/print-server/` on Windows.
 
-> The `1.0.0` installers from October 2026 are kept in [`releases/_archive-2026-10/`](file:///Users/Abdouh71/Phones-workspace/releases/_archive-2026-10) for reference only — do not hand one of those to a till.
+> The `1.0.0` installers from October 2026 are kept in [`releases/_archive-2026-10/`](releases/_archive-2026-10/) for reference only — do not hand one of those to a till.
 
 #### Features of Desktop Packages:
-- **Instant Launch**: Connects directly to the official production database (`phoneshop-mgr-pro-2026`).
+- **Instant Launch**: Connects directly to your configured Firebase project (configured out of the box for the `ecomeweb-91a7e` evaluation environment).
 - **Integrated Print Server**: Automatically detects and drives 80mm thermal receipt printers and 4x6" / jewelry label printers without needing Node.js installed on client machines.
 - **Offline / Disconnect Guard**: In case of network interruption, displays an interactive status screen with instant reconnection fallback.
 - **Hardware Acceleration & Security**: Chromium security flags are tailored to allow seamless local printing communication between the secured application renderer and the embedded localhost print service.
