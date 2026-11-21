@@ -540,15 +540,31 @@ For security, the mobile app connects directly to your Firestore database and st
 
 The mobile app is engineered to run as a **100% standalone native Android app**. Technicians install the `.apk` directly on their Android devices and launch it from their home screen — **no Expo Go app or computer connection required**.
 
-##### 1. Prerequisites:
-- Install the EAS (Expo Application Services) CLI globally:
-  ```bash
-  npm install -g eas-cli
-  ```
-- Create a free account at [expo.dev](https://expo.dev) and log in via your terminal:
-  ```bash
-  eas login
-  ```
+##### 1. Prerequisites & Free Expo Account Setup:
+EAS Cloud Build compiles Android `.apk` files directly on Expo's cloud servers for free.
+
+1. **Create a Free Expo Account**:
+   - Go to [https://expo.dev/signup](https://expo.dev/signup) and create a free account (no credit card required; the free tier includes free cloud builds).
+2. **Install the EAS CLI Globally**:
+   ```bash
+   npm install -g eas-cli
+   ```
+3. **Log In to Expo via Terminal**:
+   ```bash
+   eas login
+   ```
+   *(Enter your Expo username / email and password when prompted).*
+4. **Verify Your Terminal Session**:
+   ```bash
+   eas whoami
+   ```
+   *(Confirms you are authenticated as your Expo account).*
+5. **Link the Mobile App to Your Own Expo Account**:
+   ```bash
+   cd technician-app
+   eas init
+   ```
+   *(When asked to configure or create a project, select **Yes / Create new project** to link `app.json` directly to your own personal Expo account).*
 
 ##### 2. Configure Your Firebase Keys in the App:
 In React Native, environment variables starting with `EXPO_PUBLIC_` are baked into the compiled APK at build time.
@@ -592,6 +608,11 @@ cd technician-app
 npm install
 eas build --platform android --profile preview
 ```
+
+> [!TIP]
+> **Automatic Keystore Generation:** When running this for the first time, EAS will ask:
+> *"Would you like to generate a new Android Keystore?"*
+> Simply press **Enter (Yes)**. Expo will automatically generate the Android signing credentials and store them securely on their cloud server with zero manual configuration.
 
 EAS Build will compile the native Android package in the cloud. When the build completes (typically 4–6 minutes), the terminal will display:
 - A **direct download link** to the `.apk` file.
