@@ -60,7 +60,7 @@ Want to test drive the platform without configuring your own backend first? Use 
 | **🌐 Live Web Application** | **[https://ecomeweb-91a7e.web.app](https://ecomeweb-91a7e.web.app)** |
 | **📱 Android Management APK** | **[Download Latest APK from Releases](https://github.com/abdouh071/phoneshop-manager/releases)** *(or [Direct Cloud Build](https://expo.dev/artifacts/eas/jZREECvoT6sghrPPJGYlPX3ruQHRKDgd_PCuIebENOk.apk))* |
 | **Demo Login Email** | `Adou4849@gmail.com` |
-| **Demo Password** | *(open a [GitHub Discussion](https://github.com/abdouh071/phoneshop-manager/discussions) or [Issue](https://github.com/abdouh071/phoneshop-manager/issues) to request access — sandbox environment)* |
+| **Demo Password** | `Abdouh071` |
 | **Assigned Role** | **Super Admin** *(Full master access to POS, Repairs, Inventory, Parts, Financials & Settings)* |
 
 > [!CAUTION]
@@ -756,7 +756,6 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 - 🐛 **Bug reports & feature requests**: [Open an Issue](https://github.com/abdouh071/phoneshop-manager/issues)
 - 💬 **Questions & setup help**: [GitHub Discussions](https://github.com/abdouh071/phoneshop-manager/discussions)
-- 🧪 **Demo access credentials**: Request them in [Discussions](https://github.com/abdouh071/phoneshop-manager/discussions)
 - ⭐ **If this saved you time or money**, please give it a star on GitHub — it helps the project grow!
 
 Built with ❤️ for phone repair shop owners, independent technicians, and small electronics retail businesses worldwide.
