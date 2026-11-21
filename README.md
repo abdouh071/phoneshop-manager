@@ -28,7 +28,7 @@ A powerful, all-in-one, production-grade management system designed specifically
   - [Step 1 — Clone](#step-1-clone-the-repository)
   - [Step 2 — Firebase Backend](#step-2-set-up-your-own-firebase-backend)
   - [Step 3 — Web Application](#step-3-configure-and-start-the-manager-web-application)
-  - [Step 4 — First Login](#step-4-first-login--creating-other-staff-profiles)
+  - [Step 4 — First Login & Staff Roles](#step-4-first-login--managing-staff-roles-in-settings)
   - [Step 5 — Print Server](#step-5-start-the-hardware-print-server-optional)
   - [Step 6 — Desktop Builds](#step-6-standalone-desktop-applications-macos--windows)
   - [Step 7 — Android Management App](#step-7-android-management-app-technician-app)
@@ -72,6 +72,17 @@ Want to test drive the platform without configuring your own backend first? Use 
 ---
 
 ## 📦 Pre-Built App Releases & How to Install
+
+> [!IMPORTANT]
+> **PREVIEW & EVALUATION NOTICE:**
+> The pre-built installers published under **[GitHub Releases](https://github.com/abdouh071/phoneshop-manager/releases)** (`.dmg`, `.exe`, `.apk`) are **compiled exclusively for demonstration and sandbox evaluation**. They are pre-connected to our shared evaluation database (`ecomeweb-91a7e`) to enable prospective shop owners and evaluators to test-drive native features immediately with zero setup.
+> 
+> **For Production Deployment in a Real Workshop or Store:**
+> Because store data, customer IMEI records, financial ledgers, and cash balances must remain 100% confidential, **you must build your own custom standalone application packages** linked to your private Firebase database keys following:
+> - **[Step 6: Standalone Desktop Applications (macOS & Windows)](#step-6-standalone-desktop-applications-macos--windows)**
+> - **[Step 7: Android Management App](#step-7-android-management-app-technician-app)**
+> 
+> Compiling your own binaries takes just a single command (`npm run electron:build:...` or `eas build`) and ensures that your hardware and customer data remain strictly private and under your sole ownership.
 
 Ready-to-use standalone desktop and mobile binaries are published under **[GitHub Releases](https://github.com/abdouh071/phoneshop-manager/releases)**:
 
@@ -232,12 +243,13 @@ Ready-to-use standalone desktop and mobile binaries are published under **[GitHu
 ### 11. ⚙️ Settings, Customization & Multi-User Access
 - **Store Identity**: Customize shop name, legal registration number, phone numbers, address, tax rate, and receipt header/footer messages.
 - **Multi-Currency & Tax Engine**: Set default currency symbol, position (prefix/suffix), and inclusive/exclusive tax rates.
-- **Role-Based Access Control (RBAC)**:
-  - **Super Admin**: Unrestricted system control, user provisioning, database configuration.
-  - **Store Owner**: Full financial access, reports, inventory pricing, user management.
-  - **Manager**: Day-to-day oversight, inventory management, repair approvals, POS.
-  - **Cashier / Seller**: POS sales, customer creation, basic repair intake.
-  - **Technician**: Access restricted to assigned repair workbench and status updates.
+- **In-App Role Assignment & Team Management (`Settings ⚙️ → Users & Staff`)**:
+  - The shop administrator assigns and updates roles directly from the user management interface in Settings with instant real-time synchronization across both desktop terminals and mobile devices.
+  - **Super Admin**: Unrestricted master control, database bootstrap ownership, global configuration, user provisioning, and role assignment.
+  - **Store Owner**: Complete financial reporting (profit & loss, margins, expenses), inventory pricing rules, supplier orders, and staff performance oversight.
+  - **Manager**: Day-to-day operations, repair approvals, ticket intake modifications, inventory stock counts, and POS override privileges.
+  - **Cashier / Sales Staff**: High-speed POS counter sales, walk-in customer creation, payment processing, intake receipt issuance, and cash drawer management.
+  - **Technician**: Workbench repair pipeline queue, diagnostics entry, parts allocation to tickets, visual pattern unlock tester, and camera barcode scanner.
 - **Multi-Language & RTL Layout**: Seamless toggle between English, French, and full Right-to-Left (RTL) Arabic.
 
 ### 12. 📲 Android Management App (`technician-app`)
@@ -447,23 +459,29 @@ The system features an **automated initial bootstrap mechanism**:
 
 ---
 
-### Step 4: First Login & Creating Other Staff Profiles
+### Step 4: First Login & Managing Staff Roles in Settings
 
 1. Open your browser and navigate to **http://localhost:5173** (or your hosted URL).
 2. Log in using the initial administrator credentials you created in Firebase.
 3. **Automatic Super Admin Activation**: Upon successful sign-in, the system automatically creates your master administrator profile in Firestore, granting complete access to financial reports, inventory, system settings, and user management.
-4. **Creating All Other User Profiles Later (In-App)**:
+4. **Assigning & Managing Roles in Settings (`Settings ⚙️ → Users & Staff`)**:
    > [!TIP]
-   > **You never need to touch the Firebase Console again to add users!**
-   > All future team members are managed directly inside the application interface:
+   > **All team member creation, role assignments, and permission updates are managed 100% in-app!**
+   > You never need to touch the Firebase Console or write JSON database records:
    - Navigate to **Settings ⚙️ → Users & Staff**.
-   - Click **Add User** (or "+ New Staff Member").
-   - Enter their Name, Email, Password, and Role:
-     - **Admin / Store Owner**: Full operational and management access.
-     - **Manager**: Day-to-day oversight, inventory, repairs, POS.
-     - **Cashier / Sales Agent**: POS sales, customer ledger, basic repair intake.
-     - **Repair Technician**: Workbench queue and mobile companion app access.
-   - The system automatically creates both their Firebase Authentication credentials and their role-guarded Firestore profile with the appropriate permission matrix.
+   - **To Add a New Staff Member**:
+     - Click **Add User** (or "+ New Staff Member").
+     - Enter their Name, Email, and temporary Password.
+     - Select their Role from the dropdown:
+       - **Admin / Store Owner**: Full operational, financial, and management privileges.
+       - **Manager**: Day-to-day oversight, inventory control, repair approvals, and POS.
+       - **Cashier / Sales Agent**: POS sales counter, customer debt ledger, and basic repair intake.
+       - **Repair Technician**: Assigned workbench queue, visual pattern lock canvas, parts allocation, and mobile app access.
+     - Click **Save**. The system instantly provisions both their Firebase Authentication identity and their role-guarded Firestore profile with the appropriate permission matrix.
+   - **To Change or Reassign an Existing Member's Role**:
+     - In the staff list under **Users & Staff**, click **Edit** next to any employee.
+     - Change their role in the dropdown and click **Save**.
+     - Permissions update immediately across both desktop sessions and the Android Management App in real time without requiring account recreation.
 
 ---
 
