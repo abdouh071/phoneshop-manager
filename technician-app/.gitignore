@@ -32,7 +32,9 @@ yarn-error.*
 
 # local env files
 .env
-.env*.local
+.env.*
+!.env.example
+google-services.json
 *.log
 npm_log.txt
 npm_pid.txt

@@ -224,7 +224,7 @@ Enterprise-grade authentication with Firebase Auth. Protects your shop from unau
 - **Personal Earnings & Productivity Reports**: Track daily/weekly completed repairs, turnaround speed, and calculated repair commissions.
 - **Instant Cloud Sync**: Any status transition or note added on mobile immediately updates the manager's desktop Kanban board and the customer's live tracking link.
 - **Multi-Language & Dark Mode**: Full support for English, French, and Arabic RTL layout with an eye-friendly dark theme.
-- **Cross-Platform**: Built with **React Native & Expo SDK 57** for deployment on Android smartphones, tablets, iPhones, and iPads.
+- **Cross-Platform**: Built with **React Native & Expo SDK 57** for standalone native deployment on Android smartphones and tablets.
 
 ---
 
@@ -473,35 +473,52 @@ If you have an 80mm thermal receipt printer or adhesive label printer connected 
 
 ### Step 5.1: Standalone Desktop Applications (macOS & Windows)
 
-For production cashier and counter setups, **PhoneShop Manager Pro** is distributed as standalone native desktop applications with an **integrated auto-starting thermal print server**.
+For counter cashiers and shop managers, **PhoneShop Manager Pro** can be packaged into standalone native desktop applications with an **integrated auto-starting thermal print server**.
 
 > [!TIP]
-> **No manual terminal commands required!** When you run any of the desktop applications below, the hardware thermal print server automatically boots in the background on port `3355`, ready to dispatch receipt and barcode label jobs directly to USB, Network, and Windows shared printers.
+> **Zero hardware configuration required on counter machines!** When you launch any packaged desktop application, the hardware thermal print server automatically boots in the background on port `3355`, ready to dispatch receipts and sticky repair labels to USB, Network, and Windows shared printers without requiring Node.js to be installed on the machine.
 
-Pre-compiled standalone packages are located in the [`releases/`](releases/) folder. File names are generated from the app version, so a new build can never overwrite an old one:
+#### 🛠️ How to Build Desktop Installers with Your Own API Keys
 
-| Operating System | Package File | Architecture | Compatibility Notes |
-|---|---|---|---|
-| 🍏 **macOS (Apple Silicon)** | `PhoneShopPro-1.1.0-mac-arm64.dmg` | arm64 | M1/M2/M3/M4 |
-| 🍏 **macOS (Intel)** | `PhoneShopPro-1.1.0-mac-x64.dmg` | x86_64 | Intel Macs |
-| 🪟 **Windows 64-bit** | `PhoneShopPro-Setup-1.1.0-win-x64.exe` | x64 | Windows 10 & Windows 11 |
-| 🪟 **Windows Legacy / 32-bit** | `releases/win7-ia32/PhoneShopPro-Setup-1.1.0-win-ia32.exe` | ia32 | **Windows 7**, 8, 8.1, 10 & 11 (32 & 64-bit). Built on Electron 22, kept in its own folder so it is not installed by mistake. |
+In Electron desktop applications, Firebase credentials and configurations are **compiled directly into the local application bundle**. Follow these steps to build your own installers:
 
-Build them with `npm run electron:build:mac:arm64`, `:mac:intel`, `:win` or `:win7` (run `npm run build` first). Every installer carries the print server in `Contents/Resources/print-server/` on macOS and `resources/print-server/` on Windows.
+1. **Populate Your Firebase Credentials**:
+   Open `phone-shop-manager/.env` (create it from `.env.example`) and fill in your Firebase project parameters:
+   ```env
+   VITE_FIREBASE_API_KEY=AIzaSyA1234567890abcdef
+   VITE_FIREBASE_AUTH_DOMAIN=my-phone-shop.firebaseapp.com
+   VITE_FIREBASE_PROJECT_ID=my-phone-shop
+   VITE_FIREBASE_STORAGE_BUCKET=my-phone-shop.firebasestorage.app
+   VITE_FIREBASE_MESSAGING_SENDER_ID=123456789012
+   VITE_FIREBASE_APP_ID=1:123456789012:web:abcdef123456
+   VITE_SUPER_ADMIN_EMAIL=admin@example.com
+   ```
 
-> The `1.0.0` installers from October 2026 are kept in [`releases/_archive-2026-10/`](releases/_archive-2026-10/) for reference only — do not hand one of those to a till.
+2. **Compile the Production Web Bundle**:
+   ```bash
+   cd phone-shop-manager
+   npm install
+   npm run build
+   ```
+   *(This validates TypeScript and builds the optimized frontend bundle in `dist/` with your credentials inlined).*
 
-#### Features of Desktop Packages:
-- **Instant Launch**: Connects directly to your configured Firebase project (configured out of the box for the `ecomeweb-91a7e` evaluation environment).
-- **Integrated Print Server**: Automatically detects and drives 80mm thermal receipt printers and 4x6" / jewelry label printers without needing Node.js installed on client machines.
-- **Offline / Disconnect Guard**: In case of network interruption, displays an interactive status screen with instant reconnection fallback.
-- **Hardware Acceleration & Security**: Chromium security flags are tailored to allow seamless local printing communication between the secured application renderer and the embedded localhost print service.
+3. **Package the Desktop Installer for Your Operating System**:
+   Run the build script corresponding to your target platform:
+
+   | Platform | Build Command | Output File | Architecture | Compatibility Notes |
+   |---|---|---|---|---|
+   | 🍏 **macOS (Apple Silicon)** | `npm run electron:build:mac:arm64` | `../releases/PhoneShopPro-1.1.0-mac-arm64.dmg` | `arm64` | Apple M1, M2, M3, M4 Macs |
+   | 🍏 **macOS (Intel)** | `npm run electron:build:mac:intel` | `../releases/PhoneShopPro-1.1.0-mac-x64.dmg` | `x86_64` | Intel-based Macs |
+   | 🪟 **Windows 64-bit** | `npm run electron:build:win` | `../releases/PhoneShopPro-Setup-1.1.0-win-x64.exe` | `x64` | Windows 10 & Windows 11 |
+   | 🪟 **Windows Legacy / 32-bit** | `npm run electron:build:win7` | `../releases/win7-ia32/PhoneShopPro-Setup-1.1.0-win-ia32.exe` | `ia32` | Windows 7, 8, 8.1, 10 & 11 (32-bit & 64-bit) |
+
+   All generated installers will be saved in the [`releases/`](releases/) folder. Every installer automatically carries the embedded thermal print server inside its resource bundle.
 
 ---
 
 ### Step 6: Technician Mobile Companion App (`technician-app`)
 
-The **Technician Companion App** is a purpose-built React Native mobile application allowing bench technicians and floor staff to view assigned devices, inspect visual pattern locks, scan device barcode stickers with the phone camera, update repair statuses, and track daily earnings.
+The **Technician Companion App** is a purpose-built React Native mobile application for Android smartphones and tablets. It allows workshop technicians at the bench to view assigned devices, inspect visual pattern locks, scan device barcode stickers with the phone camera, update repair statuses, and track daily earnings.
 
 #### 👤 How to Create Accounts to Log Into the Mobile App
 For security, the mobile app connects directly to your Firestore database and strictly enforces role permissions. **Technicians cannot register themselves publicly**; their accounts must be provisioned by the shop owner:
@@ -517,26 +534,26 @@ For security, the mobile app connects directly to your Firestore database and st
 5. Click **Save**.
 6. The account is instantly authorized. The technician can now open the mobile app and log in with these exact credentials.
 
-> [!NOTE]
-> The mobile app automatically verifies user authorization on login. Only accounts with roles `repair_agent`, `sales_agent`, or `admin` are permitted access. Inactive or revoked staff accounts are blocked immediately.
-
 ---
 
-#### 📥 How to Download & Install the Mobile App on Phones
+#### 📱 How to Build the Standalone Android App (`.apk`) with Your Own Keys
 
-You have two simple ways to get the app onto technicians' phones or tablets:
+The mobile app is engineered to run as a **100% standalone native Android app**. Technicians install the `.apk` directly on their Android devices and launch it from their home screen — **no Expo Go app or computer connection required**.
 
-##### Method A: Instant Launch with Expo Go (Quickest — No Compilation Required)
-1. On the technician's phone or tablet, download the free **Expo Go** application:
-   - 🤖 **Android**: [Download on Google Play Store](https://play.google.com/store/apps/details?id=host.exp.exponent)
-   - 🍏 **iOS (iPhone/iPad)**: [Download on Apple App Store](https://apps.apple.com/app/expo-go/id982107779)
-2. In your terminal on your computer, navigate to the mobile app directory:
-   ```bash
-   cd technician-app
-   npm install
-   cp .env.example .env
-   ```
-3. Populate `technician-app/.env` with your Firebase credentials (using `EXPO_PUBLIC_` prefixes):
+##### 1. Prerequisites:
+- Install the EAS (Expo Application Services) CLI globally:
+  ```bash
+  npm install -g eas-cli
+  ```
+- Create a free account at [expo.dev](https://expo.dev) and log in via your terminal:
+  ```bash
+  eas login
+  ```
+
+##### 2. Configure Your Firebase Keys in the App:
+In React Native, environment variables starting with `EXPO_PUBLIC_` are baked into the compiled APK at build time.
+
+1. Create `technician-app/.env` (copy from `.env.example`) and fill in your Firebase project parameters:
    ```env
    EXPO_PUBLIC_FIREBASE_API_KEY=AIzaSyA1234567890abcdef
    EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=my-phone-shop.firebaseapp.com
@@ -545,46 +562,59 @@ You have two simple ways to get the app onto technicians' phones or tablets:
    EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=123456789012
    EXPO_PUBLIC_FIREBASE_APP_ID=1:123456789012:web:abcdef123456
    ```
-4. Start the Expo development server:
-   ```bash
-   npx expo start
+
+2. Open `technician-app/eas.json` and set your credentials inside the `preview` profile `env` block so EAS Cloud injects them during packaging:
+   ```json
+   "preview": {
+     "distribution": "internal",
+     "channel": "preview",
+     "android": {
+       "buildType": "apk"
+     },
+     "env": {
+       "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyA1234567890abcdef",
+       "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "my-phone-shop.firebaseapp.com",
+       "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "my-phone-shop",
+       "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "my-phone-shop.firebasestorage.app",
+       "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "123456789012",
+       "EXPO_PUBLIC_FIREBASE_APP_ID": "1:123456789012:web:abcdef123456"
+     }
+   }
    ```
-5. **Open on Phone**:
-   - **Android**: Open the Expo Go app and tap "Scan QR code", then scan the terminal QR code.
-   - **iOS**: Open the native iOS Camera app, point it at the QR code, and tap the "Open in Expo Go" banner.
-   - The app will load onto the device immediately!
 
-##### Method B: Install a Published Expo Build (Recommended)
-Staff install a build published from this project rather than running Expo Go. Build it once with:
+3. *(Optional)*: Download `google-services.json` from the [Firebase Console](https://console.firebase.google.com/) (**Project Settings ⚙️ → General → Your apps → Add Android App** with package name `com.phoneshop.technicianapp`) and place the downloaded file into `technician-app/google-services.json`.
+
+##### 3. Build the Standalone Android APK:
+In your terminal, navigate to the `technician-app/` folder and launch the EAS build:
 
 ```bash
-cd technician-app && eas build -p android --profile production
+cd technician-app
+npm install
+eas build --platform android --profile preview
 ```
 
-then point the dashboard at your Expo builds page:
+EAS Build will compile the native Android package in the cloud. When the build completes (typically 4–6 minutes), the terminal will display:
+- A **direct download link** to the `.apk` file.
+- A **terminal QR code** for instant mobile scanning.
 
-```bash
-# phone-shop-manager/.env  — no URL, no button
-VITE_APK_DOWNLOAD_URL=https://expo.dev/accounts/<your-account>/builds
-```
-
-**Settings → Staff & Users** shows **Get the Technician App**, which opens that URL. When the variable is unset the button stays disabled on purpose: it used to link to `/downloads/Auto-Manager.apk`, a 102 MB snapshot of the October build that was shipped inside every desktop installer and went stale the day it was added. Installers no longer carry an APK.
-
-> [!NOTE]
-> A sideloaded APK has to be re-installed on each phone after a new `eas build`; `eas update` only ships JavaScript changes, never a new native binary.
+##### 4. Install Directly on Android Devices:
+1. Open the download link on any Android smartphone or tablet (or scan the QR code).
+2. Download the `technician-app-preview.apk` file.
+3. Tap the file in your notifications or downloads folder to install.
+   *(If prompted by Android, tap "Settings" and enable "Allow from this source" / "Install unknown apps").*
+4. **Done!** The app icon (`Auto-Manager`) appears directly on your Android device's home screen, completely independent and ready for daily workshop usage.
 
 ---
 
-#### 📱 How to Use the App (Daily Technician Workflow)
+#### 🛠️ Daily Technician Workflow
 
-1. **Sign In**: Open the app and log in using the email and password created in **Settings → Users**.
-2. **Assigned Workbench**: View all repair jobs assigned to you. Filter across tabs (`All`, `In Diagnosis`, `Waiting for Parts`, `In Progress`, `Ready for Pickup`).
-3. **Camera Barcode / QR Scanner**: Tap the Barcode Scanner icon on the top right. Point your phone camera at the adhesive sticker on the back of any client phone to instantly load its repair ticket without typing.
-4. **Hardware Diagnostic & Pattern Locks**: Open any repair ticket to review customer complaints, IMEI/serial number, accessories left behind, and inspect the **Visual Pattern Lock Grid or PIN** to unlock and test the device.
-5. **Updating Status**: Tap one-touch status buttons (e.g. `Start Repair`, `Waiting for Parts`, `Mark Ready for Pickup`). Status changes immediately sync in real-time to the desktop Kanban board and the customer's live tracking web link.
-6. **New Ticket Intake on the Go**: Take in a walk-in repair directly from the phone using the `+ New Ticket` button.
-7. **Technician Reports & Productivity**: Open the Reports tab to see daily/weekly completed repairs, average turnaround times, and personal commission earnings.
-8. **Settings & Dark Mode**: Switch between English, French, and Arabic (with mirrored RTL layout), or toggle dark theme for night benchwork.
+1. **Fast Biometric / Password Sign In**: Technicians log in using their assigned staff credentials or unlock with **Fingerprint / Face ID** for quick access at the bench.
+2. **Assigned Workbench Queue**: View active repairs in a structured queue, filterable by tabs (`All`, `In Diagnosis`, `Waiting for Parts`, `In Progress`, `Ready for Pickup`).
+3. **Hardware Camera Barcode Scanner**: Tap the scanner icon on the top right. Point the camera at the adhesive barcode label on the device backplate to open the ticket in under a second.
+4. **Visual Pattern Lock & PIN Testing**: Inspect the customer's visual 3x3 pattern lock grid or numerical PIN to test touchscreen, cameras, speakers, and charging.
+5. **Direct Status & Technician Reassignment**: Update repair stages (`Start Repair`, `Waiting for Parts`, `Mark Ready for Pickup`) or reassign tickets between bench technicians with instant real-time sync to the desktop dashboard.
+6. **Mobile Counter POS (Dual Mode)**: Switch between *Products* and *Services* tabs to process quick walk-in accessory sales or labor fees directly from the smartphone.
+7. **New Walk-in Ticket Intake**: Register new repairs on the spot from the phone using the `+ New Ticket` button.
 
 ---
 

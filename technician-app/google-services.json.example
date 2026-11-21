@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "382569044952",
-    "project_id": "phoneshop-mgr-pro-2026",
-    "storage_bucket": "phoneshop-mgr-pro-2026.firebasestorage.app"
+    "project_number": "YOUR_PROJECT_NUMBER",
+    "project_id": "your-firebase-project-id",
+    "storage_bucket": "your-firebase-project-id.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:382569044952:android:e165c901a68be88dc2f0ad",
+        "mobilesdk_app_id": "1:YOUR_PROJECT_NUMBER:android:your-app-id",
         "android_client_info": {
           "package_name": "com.phoneshop.technicianapp"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBi9lVS3VOrICdBujcZFBMS_2FIrJAAB4Q"
+          "current_key": "YOUR_ANDROID_API_KEY"
         }
       ],
       "services": {
