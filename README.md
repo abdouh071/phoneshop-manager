@@ -1,3 +1,4 @@
+Dont Forget to give us a ⭐ Star
 # 📱 PhoneShop Manager Pro — Complete Phone Repair Shop Management Suite
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
