@@ -59,7 +59,8 @@ Want to test drive the platform without configuring your own backend first? Use 
 | Field | Value |
 |---|---|
 | **🌐 Live Web Application** | **[https://ecomeweb-91a7e.web.app](https://ecomeweb-91a7e.web.app)** |
-| **📱 Android Management APK** | **[Download Latest APK from Releases](https://github.com/abdouh071/phoneshop-manager/releases)** *(or [Direct Cloud Build](https://expo.dev/artifacts/eas/jZREECvoT6sghrPPJGYlPX3ruQHRKDgd_PCuIebENOk.apk))* |
+| **📦 Pre-Built App Releases** | **[Download macOS (.dmg), Windows (.exe) & Android (.apk) from GitHub Releases ↗](https://github.com/abdouh071/phoneshop-manager/releases)** |
+| **📱 Direct Android APK Download** | **[Download Standalone APK (EAS Cloud Build)](https://expo.dev/artifacts/eas/jZREECvoT6sghrPPJGYlPX3ruQHRKDgd_PCuIebENOk.apk)** |
 | **Demo Login Email** | `Adou4849@gmail.com` |
 | **Demo Password** | `Abdouh071` |
 | **Assigned Role** | **Super Admin** *(Full master access to POS, Repairs, Inventory, Parts, Financials & Settings)* |
