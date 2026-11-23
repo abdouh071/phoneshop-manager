@@ -34,6 +34,7 @@ import { SpecLinesCard } from './SpecLinesCard';
 import { StickerTextInputCard } from './StickerTextInputCard';
 import { StickerTypographyCard } from './StickerTypographyCard';
 import { UniversalPrintPreviewModal } from './UniversalPrintPreviewModal';
+import { GiantTextTicketDesigner } from './GiantTextTicketDesigner';
 
 export const CustomTicketPage: React.FC = () => {
   const { storeName, currency } = useSettingsStore();
@@ -48,9 +49,6 @@ export const CustomTicketPage: React.FC = () => {
 
   // Mode: specs (detailed slip) vs free_text (blank centered sticker) vs quick_big (write & print box label)
   const [activeMode, setActiveMode] = useState<TicketPrintMode | 'quick_big'>('specs');
-  const [quickText, setQuickText] = useState('');
-  const [isQuickPrinting, setIsQuickPrinting] = useState(false);
-  const [quickPreviewTicket, setQuickPreviewTicket] = useState<CustomTicketData | null>(null);
 
   // Active ticket form state (restored from localStorage draft if available)
   const [ticket, setTicket] = useState<CustomTicketData>(() => {
@@ -348,71 +346,6 @@ export const CustomTicketPage: React.FC = () => {
     await handleServerPrint();
   };
 
-  // Quick Big Box Label: one input, one button → preview → print. No templates.
-  const buildQuickTicket = (text: string): CustomTicketData => ({
-    ...PRESET_TEMPLATES[0].data,
-    format: 'sticker',
-    mode: 'free_text',
-    freeText: text,
-    fontSize: 'giant',
-    isBold: true,
-    textAlign: 'center',
-    stickerSize: '50x20',
-    showStoreNameOnSticker: false,
-    includeBarcode: false,
-    barcodeValue: '',
-    copies: 1,
-  });
-
-  // The preview modal edits its ticket via a SetStateAction; route those edits onto the snapshot.
-  const setQuickPreviewTicketSafe: React.Dispatch<React.SetStateAction<CustomTicketData>> = updater => {
-    setQuickPreviewTicket(prev =>
-      prev === null ? prev : typeof updater === 'function' ? updater(prev) : updater
-    );
-  };
-
-  const handleQuickBigPrintClick = () => {
-    const text = quickText.trim();
-    if (!text) {
-      toast.warning('Type Something First', 'Write the big text before printing.');
-      return;
-    }
-    setQuickPreviewTicket(buildQuickTicket(text));
-  };
-
-  const handleQuickBrowserPrint = () => {
-    if (!quickPreviewTicket) return;
-    openPrintWindow(
-      buildCustomTicketHTML(quickPreviewTicket, storeName, currencySymbol),
-      'Big Box Label'
-    );
-    setQuickPreviewTicket(null);
-  };
-
-  const handleQuickConfirmPrint = async () => {
-    if (!quickPreviewTicket) return;
-    setIsQuickPrinting(true);
-    try {
-      const result = await printCustomTicketDirect(quickPreviewTicket, storeName, currencySymbol);
-      if (result.success) {
-        if (result.warning) {
-          toast.warning('Printed, with text cut off', result.warning);
-        } else {
-          toast.success('Printed!', `Big label sent to ${labelPrinter || 'the label printer'}.`);
-        }
-        setQuickText('');
-        setQuickPreviewTicket(null);
-      } else {
-        toast.error('Print Server Error', result.error || 'Failed to print big label via print server.');
-      }
-    } catch (err: unknown) {
-      console.error('[Quick Big Print Error]', err);
-      toast.error('Print Server Error', errorMessage(err) || 'Could not communicate with the print server.');
-    } finally {
-      setIsQuickPrinting(false);
-    }
-  };
-
   return (
     <div className={styles.page}>
       {/* Header Bar */}
@@ -557,49 +490,11 @@ export const CustomTicketPage: React.FC = () => {
       {/* Main Two-Column Layout */}
       <div className={styles.layout}>
         {activeMode === 'quick_big' ? (
-          /* Quick Big Box Label: one input, one print button — nothing else. */
-          <div className={styles.quickBigWrap}>
-            <div className={`${styles.card} ${styles.quickBigCard}`}>
-              <div className={styles.cardHeader}>
-                <div className={styles.cardTitle}>
-                  <Type size={16} />
-                  <span>Write &amp; Print — Big Box Label</span>
-                </div>
-                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
-                  {(quickText || '').split('\n').filter(Boolean).length} lines · {(quickText || '').length} chars
-                </span>
-              </div>
-
-              <label className={styles.label} htmlFor="quick-big-text" style={{ display: 'block', marginBottom: '6px' }}>
-                The text prints as one big centered label in giant font. Short text prints biggest; long text wraps onto more lines.
-              </label>
-              <textarea
-                id="quick-big-text"
-                rows={3}
-                maxLength={200}
-                className={styles.quickBigTextarea}
-                value={quickText}
-                onChange={e => setQuickText(e.target.value)}
-                placeholder={'e.g.\nIPHONE 15 SCREENS'}
-                autoFocus
-              />
-              <p className={styles.quickBigHint}>
-                {quickText.trim()
-                  ? 'Long lines wrap automatically — keep it short for the biggest letters.'
-                  : 'Around 14 giant characters fit per line on the label.'}
-              </p>
-
-              <Button
-                className={styles.quickBigPrintBtn}
-                leftIcon={<Printer size={18} />}
-                isLoading={isQuickPrinting}
-                disabled={isQuickPrinting || !quickText.trim()}
-                onClick={handleQuickBigPrintClick}
-              >
-                Preview &amp; Print
-              </Button>
-            </div>
-          </div>
+          <GiantTextTicketDesigner
+            storeName={storeName}
+            currencySymbol={currencySymbol}
+            labelPrinter={labelPrinter}
+          />
         ) : (
           <>
             {/* Left: Input Form Controls */}
@@ -699,23 +594,6 @@ export const CustomTicketPage: React.FC = () => {
           setShowPrintPreview={setShowPrintPreview}
           handleBrowserPrint={handleBrowserPrint}
           handleConfirmPrint={handleConfirmPrint}
-        />
-      )}
-
-      {/* ── Quick Big Box Label Preview (same modal, snapshot ticket) ──────── */}
-      {quickPreviewTicket && (
-        <UniversalPrintPreviewModal
-          ticket={quickPreviewTicket}
-          setTicket={setQuickPreviewTicketSafe}
-          storeName={storeName}
-          currencySymbol={currencySymbol}
-          isOnline={isOnline}
-          printer={printer}
-          labelPrinter={labelPrinter}
-          isPrinting={isQuickPrinting}
-          setShowPrintPreview={() => setQuickPreviewTicket(null)}
-          handleBrowserPrint={handleQuickBrowserPrint}
-          handleConfirmPrint={handleQuickConfirmPrint}
         />
       )}
 

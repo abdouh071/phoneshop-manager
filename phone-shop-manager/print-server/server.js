@@ -2984,15 +2984,103 @@ function startServer(port) {
  */
 async function handlePrintBigBoxLabel(body) {
   try {
-    const { text = '', copies = 1 } = body || {};
+    const {
+      text = '',
+      copies = 1,
+      tspl: customTspl,
+      widthMm = 50,
+      heightMm = 30,
+      orientation = 'landscape',
+      borderStyle = 'none',
+      paddingMm = 2,
+      textAlign = 'center',
+      lines = [],
+    } = body || {};
 
+    const numCopies = clampCopies(copies);
+
+    // 1. Direct TSPL command stream from client
+    if (customTspl && typeof customTspl === 'string' && customTspl.trim()) {
+      await executeTSPLPrint(customTspl, LABEL_PRINTER_NAME);
+      console.log(`[BigBoxLabel] Executed custom TSPL stream (${numCopies} copies) on ${LABEL_PRINTER_NAME}`);
+      return {
+        ok: true,
+        message: `Big Box Label printed (${numCopies} cop${numCopies === 1 ? 'y' : 'ies'}) on ${LABEL_PRINTER_NAME}`,
+      };
+    }
+
+    // 2. Structured multi-line payload
+    if (Array.isArray(lines) && lines.length > 0) {
+      const wMm = Math.max(10, Math.min(150, Number(widthMm) || 50));
+      const hMm = Math.max(10, Math.min(200, Number(heightMm) || 30));
+      const isPortrait = orientation === 'portrait';
+      const labelW = isPortrait ? Math.round(hMm * 8) : Math.round(wMm * 8);
+      const labelH = isPortrait ? Math.round(wMm * 8) : Math.round(hMm * 8);
+
+      let tspl = '';
+      tspl += `SIZE ${wMm} mm, ${hMm} mm\r\n`;
+      tspl += 'GAP 2 mm, 0 mm\r\n';
+      tspl += 'REFERENCE 0,0\r\n';
+      tspl += `DIRECTION ${isPortrait ? 0 : 1}\r\n`;
+      tspl += 'CLS\r\n';
+
+      // Border
+      if (borderStyle === 'thin') {
+        tspl += `BOX 4,4,${labelW - 4},${labelH - 4},2\r\n`;
+      } else if (borderStyle === 'thick') {
+        tspl += `BOX 6,6,${labelW - 6},${labelH - 6},5\r\n`;
+      } else if (borderStyle === 'double') {
+        tspl += `BOX 4,4,${labelW - 4},${labelH - 4},2\r\n`;
+        tspl += `BOX 10,10,${labelW - 10},${labelH - 10},2\r\n`;
+      }
+
+      const padX = Math.round((Number(paddingMm) || 2) * 8);
+
+      // Estimate total height to center vertically
+      let totalLinesH = 0;
+      const lineHeights = [];
+      for (const item of lines) {
+        const itemText = tsplText(String(item.text || '').replace(/[^\x20-\x7E]/g, '').trim(), 60);
+        if (!itemText) continue;
+        const font = item.font || (item.fontSize >= 36 ? '5' : item.fontSize >= 24 ? '4' : item.fontSize >= 16 ? '3' : '2');
+        const baseH = font === '5' ? 48 : font === '4' ? 32 : font === '3' ? 24 : 20;
+        const mul = Math.max(1, Math.min(6, Number(item.mul) || (item.fontSize >= 48 ? 2 : 1)));
+        const h = baseH * mul + 6;
+        lineHeights.push({ itemText, font, mul, h });
+        totalLinesH += h;
+      }
+
+      let curY = Math.max(padX, Math.floor((labelH - totalLinesH) / 2));
+      for (const { itemText, font, mul } of lineHeights) {
+        const baseW = font === '5' ? 32 : font === '4' ? 24 : font === '3' ? 16 : TSPL_FONT_2_WIDTH;
+        const lineW = itemText.length * baseW * mul;
+        let lineX = padX;
+        if (textAlign === 'right') {
+          lineX = Math.max(padX, labelW - lineW - padX);
+        } else if (textAlign === 'center') {
+          lineX = Math.max(padX, Math.floor((labelW - lineW) / 2));
+        }
+        tspl += `TEXT ${lineX},${curY},"${font}",0,${mul},${mul},"${itemText}"\r\n`;
+        curY += (font === '5' ? 48 : font === '4' ? 32 : font === '3' ? 24 : 20) * mul + 6;
+      }
+
+      tspl += `PRINT ${numCopies},1\r\n`;
+      tspl += 'CLS\r\n';
+
+      await executeTSPLPrint(tspl, LABEL_PRINTER_NAME);
+      return {
+        ok: true,
+        message: `Big Box Label printed (${numCopies} cop${numCopies === 1 ? 'y' : 'ies'}) on ${LABEL_PRINTER_NAME}`,
+      };
+    }
+
+    // 3. Fallback: single text behavior
     // Sanitise — keep printable ASCII only, strip control chars
     const safeText = tsplText(String(text).replace(/[^\x20-\x7E]/g, '').trim(), 20);
     if (!safeText) {
       return { ok: false, status: 400, error: 'No text provided for Big Box Label' };
     }
 
-    const numCopies = clampCopies(copies);
     const N = safeText.length;
 
     // Label constants

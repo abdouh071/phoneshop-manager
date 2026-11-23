@@ -2136,8 +2136,23 @@ export async function printPartsInvoiceDirect(
 }
 
 export interface BigBoxLabelPrintPayload {
-  text: string;
+  text?: string;
   copies?: number;
+  tspl?: string;
+  widthMm?: number;
+  heightMm?: number;
+  orientation?: 'landscape' | 'portrait';
+  borderStyle?: 'none' | 'thin' | 'thick' | 'double' | 'dashed';
+  paddingMm?: number;
+  textAlign?: 'center' | 'left' | 'right';
+  lines?: Array<{
+    text: string;
+    fontSize?: number;
+    fontWeight?: string;
+    isBadge?: boolean;
+    mul?: number;
+    font?: string;
+  }>;
 }
 
 /**
