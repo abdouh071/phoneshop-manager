@@ -74,7 +74,7 @@ Test drive the platform in an isolated sandbox environment before setting up you
 |---|---|---|---|
 | **🌐 Live Web Application** | **[https://ecomeweb-91a7e.web.app](https://ecomeweb-91a7e.web.app)** | 👁️ **Visual Preview & PNG Export** *(Direct hardware printing requires local background service)* | Instant browser sandbox evaluation, ticket designer & remote store management |
 | **💻 Pre-Built Desktop Apps** | **[macOS (.dmg) & Windows (.exe) ↗](https://github.com/abdouh071/phoneshop-manager/releases)** | ⚡ **100% Automatic** *(Built-in silent print server starts on launch with zero setup)* | Physical store counter, checkout cashier desk & repair workbench |
-| **📱 Mobile Management App** | **[Download Standalone Android APK ↗](https://expo.dev/artifacts/eas/jZREECvoT6sghrPPJGYlPX3ruQHRKDgd_PCuIebENOk.apk)** | 📱 Floor counter POS, camera barcode scanner, ticket intake & cloud sync | Shop owners, floor staff, mobile cashiers & workbench technicians |
+| **📱 Mobile Management App** | **[Download Standalone Android APK ↗](https://expo.dev/artifacts/eas/4Tvnl5-UBymS8fBcp7852QBxdHfFA2OTPPDI6JKIpUg.apk)** | 📱 Floor counter POS, camera barcode scanner, ticket intake & cloud sync | Shop owners, floor staff, mobile cashiers & workbench technicians |
 | **Demo Login Credentials** | **Email:** `Adou4849@gmail.com`<br>**Password:** `Abdouh071` | **Role:** **Super Admin** *(Full master access across all features)* | Evaluation account pre-connected to demo database |
 
 > [!NOTE]
