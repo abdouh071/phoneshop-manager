@@ -5,13 +5,16 @@ import { initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/
 import { collection, deleteDoc, doc, getDocFromServer, getDocsFromServer, setDoc, updateDoc, type Firestore } from 'firebase/firestore';
 import type { PhoneModel, SaleTransaction } from '../types';
 import { partsCheckoutService } from './partsCheckoutService';
+import { retailCheckoutService } from './retailCheckoutService';
 import { customerService } from './customerService';
 import { commitStockDelta } from './inventoryService';
 import { transactionService } from './transactionService';
 
 const context = vi.hoisted(() => ({ db: null as unknown as Firestore }));
 vi.mock('../lib/firebase', () => ({ get db() { return context.db; } }));
-vi.mock('./offlineQueueMirror', () => ({ offlineQueueMirror: { write: vi.fn() } }));
+vi.mock('./offlineQueueMirror', () => ({
+  offlineQueueMirror: { write: vi.fn(), onRestored: vi.fn(() => () => undefined) },
+}));
 vi.mock('./offlineCustomerSyncService', () => ({ offlineCustomerSyncService: {} }));
 vi.mock('./offlineQueue', () => ({ offlineQueue: {} }));
 
@@ -56,7 +59,7 @@ describe.skipIf(!endpoint)('financial services with real Firestore transactions 
     context.db = env.authenticatedContext('seller').firestore() as unknown as Firestore;
     const storage = new Map<string, string>();
     vi.stubGlobal('navigator', { onLine: true, locks });
-    vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value); } });
+    vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value); }, removeItem: (key: string) => { storage.delete(key); } });
   }, 20000);
 
   it('commits and replays a Parts credit sale with linked debt and both stock lines', async () => {
@@ -181,5 +184,57 @@ describe.skipIf(!endpoint)('financial services with real Firestore transactions 
     await expect(customerService.changeStoreCredit('customer', 20, 'issue-A', audit)).rejects.toThrow('different movement');
     expect(await read('customers', 'customer')).toMatchObject({ storeCredit: 110 });
     expect(await count('customer_activity_logs')).toBe(1);
+  }, 20000);
+
+  it('prevents two retail tills from spending the same Avoir credit in parallel', async () => {
+    await updateDoc(doc(context.db, 'inventory', 'A'), { stock: 5 });
+    const retailSale = (actor: string): Omit<SaleTransaction, 'id'> => ({
+      date: '2026-11-17T11:00:00Z',
+      processedById: actor,
+      processedByName: `Retail ${actor}`,
+      invoiceNumber: `RET-${actor}`,
+      saleType: 'retail',
+      status: 'completed',
+      customerId: 'customer',
+      customerName: 'Emulator customer',
+      items: [{ product: part('A'), quantity: 1 }],
+      subtotal: 100,
+      total: 100,
+      payments: [
+        { method: 'cash', amount: 20 },
+        { method: 'store_credit', amount: 80 },
+      ],
+    });
+
+    const results = await Promise.allSettled([
+      retailCheckoutService.checkout(retailSale('till-A'), { draftKey: 'ret-A', actorRole: 'sales_agent', storeCreditUsed: 80 }),
+      retailCheckoutService.checkout(retailSale('till-B'), { draftKey: 'ret-B', actorRole: 'sales_agent', storeCreditUsed: 80 }),
+    ]);
+
+    expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
+    expect(await read('customers', 'customer')).toMatchObject({ storeCredit: 20 });
+    expect(await read('inventory', 'A')).toMatchObject({ stock: 4 });
+    expect(await count('transactions')).toBe(1);
+  }, 20000);
+
+  it('refuses retail checkout overselling inside real Firestore transactions rather than clamping at zero', async () => {
+    const oversellSale: Omit<SaleTransaction, 'id'> = {
+      date: '2026-11-17T12:00:00Z',
+      processedById: 'seller',
+      processedByName: 'Emulator cashier',
+      invoiceNumber: 'RET-OVER',
+      saleType: 'retail',
+      status: 'completed',
+      items: [{ product: part('A'), quantity: 2 }],
+      subtotal: 200,
+      total: 200,
+      payments: [{ method: 'cash', amount: 200 }],
+    };
+
+    await expect(
+      retailCheckoutService.checkout(oversellSale, { draftKey: 'over-1', actorRole: 'sales_agent' })
+    ).rejects.toThrow('INSUFFICIENT_STOCK');
+    expect(await read('inventory', 'A')).toMatchObject({ stock: 1 });
+    expect(await count('transactions')).toBe(0);
   }, 20000);
 });

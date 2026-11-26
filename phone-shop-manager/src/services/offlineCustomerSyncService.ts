@@ -6,6 +6,7 @@ import { formatStandardPhone, normalizePhoneDigits, isMoreDescriptiveName } from
 import { errorMessage } from '../utils/errorUtils';
 import { findExistingDocId } from './idempotentReplay';
 import { offlineQueueMirror } from './offlineQueueMirror';
+import { offlineQueue } from './offlineQueue';
 import { deleteTrackingMirrorFor, writeTrackingMirror } from './trackingMirrorService';
 import { mirrorIdOf, type TrackingMirrorSource } from '../utils/trackingMirror';
 
@@ -461,13 +462,23 @@ export const offlineCustomerSyncService = {
     } catch (e) {
       console.warn('[OfflineCustomerSync] Firestore logs customerId update skipped/failed:', e);
     }
+
+    // 7. Remap any queued action payloads targeting this offline customer ID
+    try {
+      const remap = new Map([[oldTempId, newRealId]]);
+      offlineQueue.remapIds(remap);
+      const { transactionService } = await import('./transactionService');
+      transactionService.remapJournalIds(remap);
+    } catch (e) {
+      console.warn('[OfflineCustomerSync] Error remapping offline queue IDs:', e);
+    }
   },
 
   /**
    * Process all queued offline customers and sync them to Firestore
    */
   syncPendingCustomers: async (): Promise<{ syncedCount: number; errors: number }> => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       return { syncedCount: 0, errors: 0 };
     }
 

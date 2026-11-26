@@ -6,8 +6,9 @@ import { errorMessage } from '../utils/errorUtils';
 /** The fallback a technician earns when no rate is configured anywhere. */
 const DEFAULT_TECHNICIAN_PERCENT = 50;
 
-/** One live settings listener per app, however many screens ask for one. */
+/** One live settings listener per app, reference-counted across active owners. */
 let settingsUnsubscribe: (() => void) | null = null;
+let activeSubscriptionOwners = 0;
 
 interface SettingsState extends StoreSettings {
   colorTheme: ColorThemeKey;
@@ -16,7 +17,7 @@ interface SettingsState extends StoreSettings {
   error: string | null;
   technicianRates: Record<string, number>;
   getTechnicianRate: (techName?: string) => number;
-  setTechnicianRate: (techName: string, rate: number) => Promise<void>;
+  setTechnicianRate: (techName: string, rate: number) => Promise<boolean>;
   fetchSettings: () => Promise<() => void>;
   updateSetting: <K extends keyof StoreSettings>(key: K, value: StoreSettings[K]) => Promise<boolean>;
   updateSettingsBulk: (settings: Partial<StoreSettings>) => Promise<boolean>;
@@ -62,17 +63,19 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ technicianRates: updated });
     try {
       await settingsService.updateSettings({ technicianRates: updated });
+      return true;
     } catch (err: unknown) {
       set({ error: errorMessage(err) || 'Failed to sync technician rate' });
+      return false;
     }
   },
 
   fetchSettings: async () => {
     set({ isLoading: true, error: null });
 
-    // Subscribe to real-time Firestore updates — one listener no matter how many
-    // screens mount, so a second fetch does not stack subscriptions or let a late
-    // snapshot from a dead mount overwrite the settings another screen just saved.
+    // Subscribe to real-time Firestore updates — one ref-counted listener shared across
+    // active mounts, releasing and resetting cleanly when the final owner unmounts (e.g. logout)
+    // so a subsequent sign-in establishes a fresh listener.
     if (!settingsUnsubscribe) {
       settingsUnsubscribe = settingsService.subscribeSettings((remoteSettings) => {
         set({
@@ -89,7 +92,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         }
       });
     }
-    const unsubscribe = settingsUnsubscribe;
+    activeSubscriptionOwners++;
+    let released = false;
+    const unsubscribe = () => {
+      if (released) return;
+      released = true;
+      activeSubscriptionOwners = Math.max(0, activeSubscriptionOwners - 1);
+      if (activeSubscriptionOwners === 0 && settingsUnsubscribe) {
+        const teardown = settingsUnsubscribe;
+        settingsUnsubscribe = null;
+        teardown();
+      }
+    };
 
     // Also do an initial fetch to handle case when doc doesn't exist yet
     const remoteSettings = await settingsService.getSettings();

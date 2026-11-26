@@ -2,6 +2,8 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useRepairStore } from '../../store/repairStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useAuthStore } from '../../store/authStore';
+import { useToast } from '../../components/ui/Toast';
+import { errorMessage } from '../../utils/errorUtils';
 import {
   Users,
   DollarSign,
@@ -58,6 +60,7 @@ export const TechnicianSettlementsTab: React.FC = () => {
   const { tickets } = useRepairStore();
   const settings = useSettingsStore();
   const { staff, fetchStaff } = useAuthStore();
+  const toast = useToast();
   const defaultPercentage = settings.technicianProfitPercentage ?? 50;
   const formatCur = useFormatCurrency();
   const weekStartDay = settings.weekStartDay ?? 0;
@@ -137,18 +140,26 @@ export const TechnicianSettlementsTab: React.FC = () => {
 
   const handleSaveDefaultRate = async (rateVal: number) => {
     const clamped = Math.max(0, Math.min(100, Math.round(rateVal)));
-    await settings.updateSetting('technicianProfitPercentage', clamped);
     setDefaultRateInput(String(clamped));
-    setSavedDefaultHint(true);
-    setTimeout(() => setSavedDefaultHint(false), 2500);
+    const saved = await settings.updateSetting('technicianProfitPercentage', clamped);
+    if (saved) {
+      setSavedDefaultHint(true);
+      setTimeout(() => setSavedDefaultHint(false), 2500);
+    } else {
+      toast.error('Save Failed', errorMessage(settings.error) || 'Could not save default technician rate.');
+    }
   };
 
   const handleSaveTechRate = async (techName: string, rateVal: number) => {
     const clamped = Math.max(0, Math.min(100, Math.round(rateVal)));
-    await settings.setTechnicianRate(techName, clamped);
     setLocalRates(prev => ({ ...prev, [techName]: String(clamped) }));
-    setSavedTechHint(techName);
-    setTimeout(() => setSavedTechHint(null), 2500);
+    const saved = await settings.setTechnicianRate(techName, clamped);
+    if (saved) {
+      setSavedTechHint(techName);
+      setTimeout(() => setSavedTechHint(null), 2500);
+    } else {
+      toast.error('Save Failed', errorMessage(settings.error) || 'Could not save custom technician rate.');
+    }
   };
 
   // Compute active date range boundaries [rangeStart, rangeEnd]

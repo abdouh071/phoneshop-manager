@@ -38,7 +38,10 @@ export type MirroredQueueKey =
   | 'offline_pending_stock_adjustments'
   | 'offline_customer_sync_queue'
   | 'offline_dead_letters'
-  | 'parts_checkout_journal';
+  | 'parts_checkout_journal'
+  | 'retail_checkout_journal'
+  | 'sale_refund_journal'
+  | 'sale_edit_journal';
 
 export const MIRRORED_QUEUE_KEYS: readonly MirroredQueueKey[] = [
   'offline_action_queue',
@@ -47,6 +50,9 @@ export const MIRRORED_QUEUE_KEYS: readonly MirroredQueueKey[] = [
   'offline_customer_sync_queue',
   'offline_dead_letters',
   'parts_checkout_journal',
+  'retail_checkout_journal',
+  'sale_refund_journal',
+  'sale_edit_journal',
 ];
 
 export interface QueueCopy {

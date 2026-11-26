@@ -8,7 +8,7 @@
  * (two tills selling the same model) into an observable abort instead of silent data loss.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { inventoryService, commitStockDelta, commitSaleStockEffects } from './inventoryService';
+import { inventoryService, commitStockDelta, commitSaleStockEffects, reconcilePendingStockAdjustments } from './inventoryService';
 import { unifiedOfflineSyncService } from './unifiedOfflineSyncService';
 
 type FakeDoc = Record<string, unknown>;
@@ -178,10 +178,18 @@ describe('Atomic stock writes', () => {
       expect(fake.stockOf('prod_1')).toBe(7);
     });
 
-    it('never drives the server stock below zero', async () => {
+    it('rejects overselling instead of clamping silently by default', async () => {
       seedProduct(2, 2);
 
-      const result = await commitStockDelta('prod_1', -50, 'writeoff');
+      await expect(commitStockDelta('prod_1', -50, 'sale_oversell')).rejects.toThrow('INSUFFICIENT_STOCK');
+      expect(fake.stockOf('prod_1')).toBe(2);
+      expect(fake.docs.has('operation_receipts/stock_sale_oversell')).toBe(false);
+    });
+
+    it('clamps to zero only when write-off explicitly opts into clampAtZero', async () => {
+      seedProduct(2, 2);
+
+      const result = await commitStockDelta('prod_1', -50, 'writeoff', { clampAtZero: true });
 
       expect(result.stock).toBe(0);
       expect(result.stockStatus).toBe('out_of_stock');
@@ -354,12 +362,30 @@ describe('Atomic stock writes', () => {
       expect(saleStamp('sale_1')).toBe(true);
     });
 
-    it('never drives the shelf below zero', async () => {
+    it('rejects overselling instead of clamping silently and writes nothing to any product', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(5, 5);
+      fake.seed('prod_2', { stock: 2, lowStockThreshold: 1 });
+      seedSale('sale_1', false);
+
+      await expect(
+        commitSaleStockEffects('sale_1', [
+          { productId: 'prod_1', delta: -1 },
+          { productId: 'prod_2', delta: -50 },
+        ])
+      ).rejects.toThrow('INSUFFICIENT_STOCK');
+
+      expect(fake.stockOf('prod_1')).toBe(5);
+      expect(fake.stockOf('prod_2')).toBe(2);
+      expect(saleStamp('sale_1')).toBe(false);
+    });
+
+    it('clamps to zero when allowClamp is passed explicitly for legacy recovery', async () => {
       vi.stubGlobal('navigator', { onLine: true });
       seedProduct(2, 2);
       seedSale('sale_1', false);
 
-      const { applied } = await commitSaleStockEffects('sale_1', [{ productId: 'prod_1', delta: -50 }]);
+      const { applied } = await commitSaleStockEffects('sale_1', [{ productId: 'prod_1', delta: -50 }], { allowClamp: true });
 
       expect(applied[0].stock).toBe(0);
       expect(applied[0].stockStatus).toBe('out_of_stock');
@@ -542,6 +568,44 @@ describe('Atomic stock writes', () => {
       vi.stubGlobal('navigator', { onLine: true });
       expect(await unifiedOfflineSyncService.syncOfflineStockAdjustments()).toBe(2);
       expect(fake.stockOf('prod_1')).toBe(5);
+    });
+
+    it('rethrows definite oversell rejections without queueing invalid movements, restoring local mirror', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      // Another till already sold down to 1 while local still showed 10.
+      seedProduct(1, 10);
+
+      await expect(inventoryService.applyStockDelta('prod_1', -3)).rejects.toThrow('INSUFFICIENT_STOCK');
+
+      expect(fake.stockOf('prod_1')).toBe(1);
+      expect(inventoryService.getPendingStockAdjustments()).toHaveLength(0);
+      expect(inventoryService.getLocalInventory()[0].stock).toBe(10);
+    });
+
+    it('marks a lost acknowledgement / timeout as uncertain and reconciles receipt before retrying', async () => {
+      vi.stubGlobal('navigator', { onLine: true });
+      seedProduct(10, 10);
+      fake.flags.lostAck = true;
+
+      const result = await inventoryService.applyStockDelta('prod_1', -4);
+
+      expect(result.atomic).toBe(false);
+      expect(result.uncertain).toBe(true);
+      const pending = inventoryService.getPendingStockAdjustments();
+      expect(pending).toHaveLength(1);
+      expect(pending[0].uncertain).toBe(true);
+      const opId = pending[0].id;
+
+      // Late server commit already recorded operation_receipts/stock_<opId> -> reconcile clears without running tx again
+      const commitsBefore = fake.stats.commits;
+      const summary = await reconcilePendingStockAdjustments();
+      expect(summary.adopted).toBe(1);
+      expect(summary.retried).toBe(0);
+      expect(fake.stockOf('prod_1')).toBe(6);
+      expect(inventoryService.getLocalInventory()[0].stock).toBe(6);
+      expect(inventoryService.getPendingStockAdjustments()).toHaveLength(0);
+      expect(fake.stats.commits).toBe(commitsBefore);
+      expect(fake.docs.has(`operation_receipts/stock_${opId}`)).toBe(true);
     });
   });
 

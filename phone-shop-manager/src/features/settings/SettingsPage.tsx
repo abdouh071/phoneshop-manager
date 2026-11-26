@@ -157,9 +157,21 @@ export const SettingsPage = () => {
     }
   }, [location.search, user?.role]);
 
-  // Fetch settings on mount
+  // Fetch settings on mount with clean cancellation release
   useEffect(() => {
-    settings.fetchSettings();
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    settings.fetchSettings().then(unsub => {
+      if (cancelled) {
+        unsub();
+      } else {
+        unsubscribe = unsub;
+      }
+    });
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   const handleSelectColorTheme = async (themeKey: ColorThemeKey) => {
@@ -690,7 +702,12 @@ export const SettingsPage = () => {
               <Select
                 label={t('settings.theme', 'Theme')}
                 value={settings.theme}
-                onChange={val => settings.updateSetting('theme', val as StoreSettings['theme'])}
+                onChange={async (val) => {
+                  const saved = await settings.updateSetting('theme', val as StoreSettings['theme']);
+                  if (!saved) {
+                    toast.error('Theme Not Saved', errorMessage(settings.error) || 'Could not save the theme preference to the server.');
+                  }
+                }}
                 options={[
                   { value: 'light', label: t('settings.light', 'Light Mode') },
                   { value: 'dark', label: t('settings.dark', 'Dark Mode') },

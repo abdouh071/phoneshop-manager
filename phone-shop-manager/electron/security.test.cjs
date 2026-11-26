@@ -12,7 +12,7 @@ const path = require('path');
 const { resolveStaticPath, isTrustedFrameOrigin, permissionAllowed } = require('./security.cjs');
 
 const DIST = path.resolve('/tmp/fake-dist');
-const FEED_ORIGINS = new Set(['https://phoneshop-mgr-pro-2026.web.app']);
+const FEED_ORIGINS = new Set(['https://ecomeweb-91a7e.web.app']);
 
 test('a normal asset resolves inside the bundle', () => {
   const got = resolveStaticPath(DIST, '/assets/app-1234.js');
@@ -66,12 +66,12 @@ test('malformed escapes and NUL bytes are refused outright', () => {
 
 test('only top-level frames on served origins may print', () => {
   const opts = { allowedOrigins: FEED_ORIGINS, localOrigin: 'http://127.0.0.1:41234' };
-  assert.equal(isTrustedFrameOrigin('https://phoneshop-mgr-pro-2026.web.app/pos', opts), true);
+  assert.equal(isTrustedFrameOrigin('https://ecomeweb-91a7e.web.app/pos', opts), true);
   assert.equal(isTrustedFrameOrigin('http://127.0.0.1:41234/customers', opts), true);
   assert.equal(isTrustedFrameOrigin('http://127.0.0.1:9999/', opts), false);
   assert.equal(isTrustedFrameOrigin('https://evil.test/', opts), false);
-  assert.equal(isTrustedFrameOrigin('https://phoneshop-mgr-pro-2026.web.app.evil.test/', opts), false);
-  assert.equal(isTrustedFrameOrigin('https://phoneshop-mgr-pro-2026.web.app:8443/', opts), false);
+  assert.equal(isTrustedFrameOrigin('https://ecomeweb-91a7e.web.app.evil.test/', opts), false);
+  assert.equal(isTrustedFrameOrigin('https://ecomeweb-91a7e.web.app:8443/', opts), false);
   assert.equal(
     isTrustedFrameOrigin('data:text/html,<script>alert(1)</script>', opts),
     false,

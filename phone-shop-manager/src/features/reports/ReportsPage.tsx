@@ -26,6 +26,7 @@ import { DAY_NAMES, buildYearOptions } from './reportUtils';
 import { buildExecutiveReportHtml } from './execReportHtml';
 import { buildDailyIncomeCsv, buildFinancialSummaryCsv, buildRepairsLedgerCsv, buildSalesLedgerCsv } from './reportExport';
 import { TimeframeFilterBar } from './TimeframeFilterBar';
+import { ReportCacheBanner } from './ReportCacheBanner';
 import { ReportSummaryCards } from './ReportSummaryCards';
 import { DailyIncomeCard } from './DailyIncomeCard';
 import { ReportTrendChart } from './ReportTrendChart';
@@ -100,7 +101,7 @@ export const ReportsPage = () => {
 
   // Fetch initial report
   useEffect(() => {
-    fetchData({ dateRange: 'last_7_days', weekStartDay });
+    fetchData({ dateRange: 'last_7_days', weekStartDay }, { forceRefresh: true });
   }, [fetchData, weekStartDay]);
 
   // Handle Main Tab Switch
@@ -254,7 +255,7 @@ export const ReportsPage = () => {
           <Button 
             variant="secondary" 
             leftIcon={<RefreshCw size={15} />}
-            onClick={() => fetchData()}
+            onClick={() => fetchData(undefined, { forceRefresh: true })}
           >
             {t('reports.refresh', 'Refresh')}
           </Button>
@@ -313,6 +314,8 @@ export const ReportsPage = () => {
         </Card>
       ) : data ? (
         <>
+          <ReportCacheBanner data={data} onRetry={() => fetchData()} />
+
           {/* 1. EXECUTIVE FINANCIAL SUMMARY CARDS */}
           <ReportSummaryCards data={data} />
 

@@ -116,6 +116,8 @@ export interface SaleTransaction {
     storeCreditUsed?: number;
   };
   status?: 'completed' | 'refunded' | 'partially_refunded' | 'voided' | 'cancelled' | 'pending_approval';
+  /** Distinguishes server-validated sales from offline drafts awaiting sync validation or flagged stock conflicts. */
+  validationStatus?: 'confirmed' | 'pending_validation' | 'stock_conflict';
   /** When the counter took the goods back and handed the money over — not the day the
    *  sale was rung up. Absent on documents closed before the moment was recorded. */
   refundedAt?: string;
@@ -360,6 +362,7 @@ export interface Customer {
   mergedIntoId?: string;
   /** ISO timestamp of when this customer was merged/archived */
   mergedAt?: string;
+  updatedAt?: string;
 }
 
 export const isShopCustomer = (c: Customer): boolean => {

@@ -2,19 +2,35 @@ import {
   collection,
   doc,
   getDocs,
-  getDoc,
   addDoc,
   increment,
+  runTransaction,
   updateDoc,
   query,
   where,
-  limit
+  limit,
+  type DocumentReference,
+  type Transaction,
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../lib/firebase';
 import { isOfflineCustomerId, replaceCachedCustomer, saleProfileDeltas } from './offlineQueuePolicy';
+import { runStoreCreditShiftTx, type FirestoreTxOps, type TxRef } from './stockTransactionCore';
 import { isRealPhone, isSamePhone } from '../utils/phone';
-import type { Customer, CustomerDebtEntry } from '../types';
+import type { Customer } from '../types';
+
+const toTxOps = (tx: Transaction): FirestoreTxOps => ({
+  doc: (col, id) => doc(db, col, id) as unknown as TxRef,
+  get: async (ref) => {
+    const snap = await tx.get(ref as unknown as DocumentReference);
+    return {
+      exists: () => snap.exists(),
+      data: () => snap.data() as Record<string, unknown> | undefined,
+    };
+  },
+  update: (ref, data) => tx.update(ref as unknown as DocumentReference, data),
+  set: (ref, data) => tx.set(ref as unknown as DocumentReference, data),
+});
 
 const CACHED_CUSTOMERS_KEY = '@cached_customers';
 
@@ -190,33 +206,18 @@ export const customerService = {
     customerId: string,
     delta: number,
     note: string,
-    actorName?: string
+    actorName?: string,
+    operationId?: string
   ): Promise<number> => {
-    const ref = doc(db, 'customers', customerId);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new Error('Customer not found');
-    const cust = snap.data() as Customer;
-    const current = Math.max(0, Number(cust.storeCredit) || 0);
-    const next = Math.max(0, Math.round((current + delta) * 100) / 100);
-
-    await updateDoc(ref, { storeCredit: next });
-
-    const issued = delta >= 0;
-    await addDoc(collection(db, 'customer_activity_logs'), {
-      customerId,
-      customerName: cust.name || 'Customer',
-      actionType: issued ? 'store_credit_issued' : 'store_credit_used',
-      actionTitle: issued ? 'Store Credit (Avoir) Issued' : 'Store Credit (Avoir) Redeemed',
-      actionDescription: issued
-        ? `Issued ${Math.abs(delta)} DA Store Credit. New balance: ${next} DA (${note}) by ${actorName || 'Staff'}.`
-        : `Redeemed ${Math.abs(delta)} DA Store Credit. Remaining balance: ${next} DA (${note}) by ${actorName || 'Staff'}.`,
-      actorName: actorName || 'Staff',
-      metadata: { amount: Math.abs(delta), newCredit: next, note },
-      date: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-    }).catch(err => console.warn('[CustomerService] Avoir activity log could not be written:', err));
-
-    return next;
+    return await runTransaction(db, async (tx) =>
+      runStoreCreditShiftTx(toTxOps(tx), {
+        customerId,
+        delta,
+        note,
+        actorName,
+        operationId,
+      })
+    );
   },
 
   /**
@@ -295,20 +296,16 @@ export const customerService = {
 
     const debtRef = await addDoc(collection(db, 'customer_debts'), debtData);
 
-    // Update customer debt total
-    try {
-      const custDocRef = doc(db, 'customers', params.customerId);
-      const custSnap = await getDoc(custDocRef);
-      if (custSnap.exists()) {
-        const custData = custSnap.data() as Customer;
-        const currentDebt = custData.totalDebt || 0;
-        await updateDoc(custDocRef, {
-          totalDebt: currentDebt + remainingBalance,
+    // Update customer debt total atomically without overwriting concurrent terminal changes
+    if (remainingBalance > 0) {
+      try {
+        await updateDoc(doc(db, 'customers', params.customerId), {
+          totalDebt: increment(remainingBalance),
           lastVisitDate: now,
         });
+      } catch (err) {
+        console.warn('[CustomerService] Failed to update customer debt total:', err);
       }
-    } catch (err) {
-      console.warn('[CustomerService] Failed to update customer debt total:', err);
     }
 
     return debtRef.id;
@@ -320,16 +317,11 @@ export const customerService = {
   recordCustomerSpending: async (customerId: string, amount: number) => {
     if (!customerId || amount <= 0) return;
     try {
-      const custDocRef = doc(db, 'customers', customerId);
-      const custSnap = await getDoc(custDocRef);
-      if (custSnap.exists()) {
-        const custData = custSnap.data() as Customer;
-        await updateDoc(custDocRef, {
-          totalSpent: (custData.totalSpent || 0) + amount,
-          totalPurchases: (custData.totalPurchases || 0) + 1,
-          lastVisitDate: new Date().toISOString(),
-        });
-      }
+      await updateDoc(doc(db, 'customers', customerId), {
+        totalSpent: increment(amount),
+        totalPurchases: increment(1),
+        lastVisitDate: new Date().toISOString(),
+      });
     } catch (e) {
       console.warn('[CustomerService] Failed to record customer spending:', e);
     }

@@ -48,7 +48,7 @@ export const POSPage = () => {
   usePrivacyStore((s) => s.isPrivacyActive);
   const { fetchProducts, products: allProducts } = useInventoryStore();
   const [searchQuery, setSearchQuery] = useState('');
-  const { items, addToCart, removeFromCart, updateQuantity, clearCart, setPayments, setCustomerName, setCustomerPhone, setDiscount, checkout, customerName, customerPhone, discount, getPurchasesSubtotal, getReturnsSubtotal, hasReturnItems, getDiscountAmount, getTotal, getItemCount, suspendedCarts, suspendCart, resumeCart, discardSuspendedCart, fetchCarts, fetchTransactions, transactions, isCheckingOut } = useCartStore();
+  const { items, addToCart, removeFromCart, updateQuantity, clearCart, setPayments, setSelectedCustomer, setCustomerName, setCustomerPhone, setDiscount, checkout, customerId, customerName, customerPhone, discount, getPurchasesSubtotal, getReturnsSubtotal, hasReturnItems, getDiscountAmount, getTotal, getItemCount, suspendedCarts, suspendCart, resumeCart, discardSuspendedCart, fetchCarts, fetchTransactions, transactions, isCheckingOut, pendingCheckout, checkoutRecoveryError, refreshPendingCheckout, resolvePendingCheckout } = useCartStore();
   const { invoices: partsInvoices } = usePartsCartStore();
   const { tickets } = useRepairStore();
   const { debts } = useCustomerStore();
@@ -87,14 +87,10 @@ export const POSPage = () => {
   const [paymentMode, setPaymentMode] = useState<'cash' | 'mobile' | 'card' | 'debt'>('cash');
   // Partial payment: how much the buyer pays upfront when using Credit Tab
   const [downPayment, setDownPayment] = useState<number>(0);
-  // Track whether a customer was explicitly selected (not just typed)
-  const [customerAttached, setCustomerAttached] = useState(false);
-  // The account the cashier picked. Re-finding it by name picked a different client
-  // whenever two accounts shared one name, and showed that stranger's debt and credit.
-  const [attachedCustomerId, setAttachedCustomerId] = useState<string | null>(null);
+  // Track explicitly attached customer identity from cartStore so holds/resumes never drift
+  const attachedCustomerId = customerId;
   const detachAttachedCustomer = useCallback(() => {
-    setCustomerAttached(false);
-    setAttachedCustomerId(null);
+    useCartStore.getState().setCustomerId(null);
   }, []);
 
   // Problem 2 fix: Admin unlock and override for Credit Limit
@@ -126,9 +122,10 @@ export const POSPage = () => {
 
   // Find attached customer details (including current debt balance) - strictly the account picked by hand
   const matchedCustomer = useMemo(() => {
-    if (!customerAttached || !attachedCustomerId) return null;
-    return customers.find(c => c.id === attachedCustomerId) || null;
-  }, [customers, attachedCustomerId, customerAttached]);
+    if (!attachedCustomerId) return null;
+    return customers.find(c => c.id === attachedCustomerId && !c.mergedIntoId) || null;
+  }, [customers, attachedCustomerId]);
+  const customerAttached = Boolean(matchedCustomer);
 
   // Current active debt balance of matched customer
   const currentCustomerDebt = useMemo(() => {
@@ -390,10 +387,17 @@ export const POSPage = () => {
         }
       } catch (err: unknown) {
         console.error(err);
-        if (errorMessage(err)?.includes('Credit limit exceeded')) {
-          toast.error('Credit Limit Exceeded', errorMessage(err));
+        const msg = errorMessage(err) || '';
+        if (msg.startsWith('INSUFFICIENT_STOCK:')) {
+          toast.error('Insufficient Stock', 'Server stock changed on another terminal. Review quantities before retrying.');
+        } else if (msg.includes('INSUFFICIENT_STORE_CREDIT')) {
+          toast.error('Insufficient Store Credit (Avoir)', 'This customer no longer has enough Avoir available.');
+        } else if (msg.includes('Credit limit exceeded')) {
+          toast.error('Credit Limit Exceeded', msg);
+        } else if (msg.includes('RETAIL_CHECKOUT_TIMEOUT') || msg.includes('timed out')) {
+          toast.warning('Checkout Unconfirmed', 'The server did not confirm in time. Resolve the pending sale before starting another.');
         } else {
-          toast.error('Failed to complete sale. Please try again.');
+          toast.error('Failed to complete sale', msg || 'Please try again.');
         }
       }
     } finally {
@@ -436,7 +440,10 @@ export const POSPage = () => {
   }, [handleBarcodeInput]);
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
-  useEffect(() => { fetchCarts(); }, [fetchCarts]);
+  useEffect(() => {
+    fetchCarts();
+    refreshPendingCheckout();
+  }, [fetchCarts, refreshPendingCheckout]);
 
   // Handle deep links from Activity Log (e.g. /pos?tab=history&search=txId&focusId=txId)
   useEffect(() => {
@@ -451,6 +458,26 @@ export const POSPage = () => {
     }
   }, [location.search]);
 
+  const handleResolvePendingCheckout = useCallback(async () => {
+    if (isBusy || checkoutLock.current) return;
+    checkoutLock.current = true;
+    setIsProcessing(true);
+    try {
+      const result = await resolvePendingCheckout();
+      if (result?.transaction) {
+        setCompletedTx(result.transaction);
+        toast.success('Pending Sale Resolved', `Invoice #${result.transaction.invoiceNumber || result.transaction.id} was confirmed from server state.`);
+      } else if (result?.cancelled) {
+        toast.info('Pending Checkout Cancelled', 'Unconfirmed attempt was cleanly cancelled without moving stock or credit.');
+      }
+    } catch (err: unknown) {
+      toast.error('Resolve Checkout Failed', errorMessage(err) || 'Please check connection and retry.');
+    } finally {
+      setIsProcessing(false);
+      checkoutLock.current = false;
+    }
+  }, [isBusy, resolvePendingCheckout, toast]);
+
   const handleBackToCart = () => {
     setShowSuspended(false);
     setHeldSearchQuery('');
@@ -464,9 +491,15 @@ export const POSPage = () => {
   const handleResumeSuspended = (cart: SuspendedCart) => {
     const res = resumeCart(cart.id);
     setShowSuspended(false);
+    if (res.requiresCustomerSelection) {
+      toast.warning(
+        'Select Customer Manually',
+        'This held cart has no verified customer link. Attach the customer manually if this sale belongs to an account.'
+      );
+    }
     if (res.warnings && res.warnings.length > 0) {
       res.warnings.forEach(w => toast.warning('Stock Level Alert', w));
-    } else {
+    } else if (!res.requiresCustomerSelection) {
       toast.success('Cart Resumed', `Active cart set for ${cart.customerName || 'Walk-in Customer'}`);
     }
   };
@@ -543,21 +576,14 @@ export const POSPage = () => {
   };
 
   const handleDetachCustomer = () => {
-    setCustomerName('');
-    setCustomerPhone('');
-    detachAttachedCustomer();
+    setSelectedCustomer(null);
     toast.info('Customer Detached', 'Sale will proceed as walk-in buyer.');
   };
 
   const handleCustomerSelect = (name: string, cust?: Customer | null) => {
-    setCustomerName(name);
     if (cust) {
       // Customer selected from dropdown or registered
-      setCustomerAttached(true);
-      setAttachedCustomerId(cust.id);
-      if (cust.phone) {
-        setCustomerPhone(cust.phone);
-      }
+      setSelectedCustomer(cust);
       if (cust.wholesaleDiscountPercent && cust.wholesaleDiscountPercent > 0) {
         setDiscount({ type: 'percent', value: cust.wholesaleDiscountPercent });
         toast.success('Wholesale Discount Applied', `${cust.wholesaleDiscountPercent}% discount applied for ${cust.shopName || cust.name}.`);
@@ -567,7 +593,7 @@ export const POSPage = () => {
       // wipe the phone number if the name field was fully cleared.
       // This way, if a cashier typed "Amine" and also typed a phone
       // for the credit tab, editing the name won't erase the phone.
-      detachAttachedCustomer();
+      setCustomerName(name);
       if (!name || !name.trim()) {
         setCustomerPhone('');
       }
@@ -658,6 +684,22 @@ export const POSPage = () => {
           onHold={handleSuspendCart}
           onClear={handleClearCart}
         />
+
+        {/* Pending Recovery Banner for uncertain timed-out checkouts */}
+        {checkoutRecoveryError && (
+          <div role="alert" style={{ margin: '8px 12px 0', padding: '10px 12px', borderRadius: 8, background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontSize: 12 }}>
+            {checkoutRecoveryError}
+          </div>
+        )}
+        {pendingCheckout && (
+          <div role="alert" style={{ margin: '8px 12px 0', padding: '10px 12px', borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <strong>Unconfirmed checkout #{pendingCheckout.transaction.invoiceNumber || pendingCheckout.transaction.id.slice(0, 8)}</strong>
+            <span>Check or resolve this attempt so stock and credit are not moved twice.</span>
+            <button type="button" onClick={() => void handleResolvePendingCheckout()} disabled={isBusy} style={{ alignSelf: 'flex-start', padding: '4px 10px', borderRadius: 6, border: '1px solid #d97706', background: '#fff', color: '#92400e', fontWeight: 600, cursor: 'pointer' }}>
+              Resolve Pending Sale
+            </button>
+          </div>
+        )}
 
         {/* Customer Attachment Bar (Single Unified Top Zone) */}
         {!showSuspended && (

@@ -73,6 +73,7 @@ const fake = vi.hoisted(() => {
 
       const tx: FakeTx = {
         get: async (ref: FakeRef) => {
+          if (writes.length) throw new Error('Read after write');
           reads.set(ref.key, versionOf(ref.key));
           stats.reads++;
           return snapshotOf(ref.key);

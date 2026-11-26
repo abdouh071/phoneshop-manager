@@ -27,7 +27,9 @@ import {
   type TrackingMirrorSource,
 } from '../utils/trackingMirror';
 import { newIdempotencyKey } from './idempotentReplay';
-import { offlineQueue } from './offlineQueue';
+import { offlineQueue, UnrecoverableSyncActionError } from './offlineQueue';
+import { invalidateReportsCache } from './reportCacheInvalidation';
+import { extractBaseValues, findConflictingField } from '../utils/conflictCheck';
 import {
   deleteTrackingMirrorFor,
   refreshTrackingMirrorById,
@@ -206,7 +208,7 @@ export const repairService = {
   getAll: async (options?: { allowLocalFallback?: boolean }): Promise<RepairTicket[]> => {
     const mayFallBack = options?.allowLocalFallback !== false;
 
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       if (!mayFallBack) throw new Error("Offline: the repair history on this device is not the shop's history.");
       return deduplicateTickets(getLocalRepairs());
     }
@@ -411,6 +413,7 @@ export const repairService = {
     statusHistory?: RepairStatusHistoryEntry[],
     options?: { throwOnError?: boolean; completedAt?: string }
   ): Promise<RepairTicket> => {
+    invalidateReportsCache();
     const updatedAt = new Date().toISOString();
     const local = getLocalRepairs();
     const existingLocal = local.find(t => t.id === id);
@@ -495,6 +498,7 @@ export const repairService = {
   createTicket: async (
     ticket: Omit<RepairTicket, 'id' | 'ticketNumber' | 'createdAt' | 'updatedAt'>
   ): Promise<RepairTicket> => {
+    invalidateReportsCache();
     const runCreation = async (): Promise<RepairTicket> => {
       const local = getLocalRepairs();
 
@@ -584,8 +588,9 @@ export const repairService = {
   updateTicket: async (
     id: string,
     updates: Partial<RepairTicket>,
-    options?: { throwOnError?: boolean }
+    options?: { throwOnError?: boolean; onOutcome?: (outcome: 'committed' | 'queued') => void }
   ): Promise<RepairTicket> => {
+    invalidateReportsCache();
     const local = getLocalRepairs();
     const existing = local.find(t => t.id === id);
     const merged = { ...(existing || ({} as RepairTicket)), ...updates, id, updatedAt: new Date().toISOString() };
@@ -594,14 +599,21 @@ export const repairService = {
     // Same rule as the status change: a temporary id names no document, and the local
     // ticket the sync uploads already carries these fields.
     if (id.startsWith('offline_')) {
+      options?.onOutcome?.('queued');
       return merged;
     }
 
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      offlineQueue.enqueue({
+    const baseValues = extractBaseValues(
+      existing as unknown as Record<string, unknown> | undefined,
+      updates as unknown as Record<string, unknown>
+    );
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      await offlineQueue.enqueue({
         type: 'UPDATE_REPAIR_TICKET',
-        payload: { id, updates }
+        payload: { id, updates, ...(baseValues ? { baseValues } : {}) }
       }).catch(console.warn);
+      options?.onOutcome?.('queued');
       return merged;
     }
 
@@ -622,13 +634,15 @@ export const repairService = {
       // The pre-write local copy lets the refresh retire the old mirror id when
       // this edit changed the phone behind a legacy last-4 PIN.
       void refreshTrackingMirrorById(id, existing);
+      options?.onOutcome?.('committed');
       return merged;
     } catch (err) {
       console.warn('Failed to update ticket on Firestore, stored locally & queued for sync:', err);
-      offlineQueue.enqueue({
+      await offlineQueue.enqueue({
         type: 'UPDATE_REPAIR_TICKET',
-        payload: { id, updates }
+        payload: { id, updates, ...(baseValues ? { baseValues } : {}) }
       }).catch(console.warn);
+      options?.onOutcome?.('queued');
 
       if (options?.throwOnError) {
         throw err;
@@ -636,6 +650,43 @@ export const repairService = {
     }
 
     return merged;
+  },
+
+  replayQueuedTicketUpdate: async (payload: {
+    id: string;
+    updates: Partial<RepairTicket>;
+    baseValues?: Record<string, unknown>;
+  }): Promise<RepairTicket> => {
+    const cleanPatch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+    for (const [k, v] of Object.entries(payload.updates || {})) {
+      if (v !== undefined) cleanPatch[k] = v;
+    }
+    const existingLocal = getLocalRepairs().find(t => t.id === payload.id);
+    const updated = await runTransaction(db, async tx => {
+      const ref = doc(db, COLLECTION, payload.id);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) {
+        throw new UnrecoverableSyncActionError(`Repair ticket ${payload.id} no longer exists on the server.`);
+      }
+      const server = docToTicket(snap.id, snap.data() as Record<string, unknown>);
+      const conflictKey = findConflictingField(
+        server as unknown as Record<string, unknown>,
+        cleanPatch,
+        payload.baseValues
+      );
+      if (conflictKey) {
+        throw new UnrecoverableSyncActionError(
+          `Repair ticket field "${conflictKey}" was updated on another device while offline. Review before overwriting.`
+        );
+      }
+      tx.update(ref, cleanPatch);
+      return { ...server, ...cleanPatch, id: payload.id } as RepairTicket;
+    });
+
+    const local = getLocalRepairs();
+    saveLocalRepairs(local.some(t => t.id === payload.id) ? local.map(t => (t.id === payload.id ? updated : t)) : [updated, ...local]);
+    void refreshTrackingMirrorById(payload.id, existingLocal);
+    return updated;
   },
 
   /**
@@ -808,6 +859,7 @@ export const repairService = {
     id: string,
     options?: { throwOnError?: boolean }
   ): Promise<void> => {
+    invalidateReportsCache();
     // 1. Record tombstone immediately to prevent resurrection from cached or slow queries
     addDeletedTicketId(id);
 

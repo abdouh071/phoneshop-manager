@@ -878,11 +878,11 @@ export const NewTicketModal: React.FC<NewTicketModalProps> = ({ isOpen, onClose,
                       <span className={dropStyles.optionName}>{c.name}</span>
                       <div className={dropStyles.optionRight}>
                         <span className={dropStyles.optionPhone}>{c.phone}</span>
-                        {Boolean(c.totalDebt && c.totalDebt > 0) ? (
+                        {(c.totalDebt ?? 0) > 0 ? (
                           <span className={dropStyles.optionDebt}>
                             ⚠️ Dept: {formatPrivateCurrency(c.totalDebt ?? 0)}
                           </span>
-                        ) : Boolean(c.totalSpent && c.totalSpent > 0) ? (
+                        ) : (c.totalSpent ?? 0) > 0 ? (
                           <span className={dropStyles.optionSpent}>
                             Spent: {formatPrivateCurrency(c.totalSpent)}
                           </span>

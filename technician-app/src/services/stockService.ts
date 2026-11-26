@@ -10,10 +10,30 @@
  * Reads happen INSIDE the transaction, so the delta is always applied to the
  * server's current value rather than to anything the device remembered.
  */
-import { doc, getDoc, runTransaction, type DocumentReference, type Transaction } from 'firebase/firestore';
+import { collection, doc, getDoc, runTransaction, type DocumentReference, type Transaction } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { clampStock, deriveStockStatus, profileTotalsAfter, saleProfileDeltas } from './offlineQueuePolicy';
+import { clampStock, deriveStockStatus } from './offlineQueuePolicy';
+import {
+  runPartsAllocationTx,
+  runSaleEffectsTx,
+  runPosCheckoutTx,
+  type FirestoreTxOps,
+  type TxRef,
+} from './stockTransactionCore';
 import type { StockStatus } from '../types';
+
+const toTxOps = (tx: Transaction): FirestoreTxOps => ({
+  doc: (col, id) => doc(db, col, id) as unknown as TxRef,
+  get: async (ref) => {
+    const snap = await tx.get(ref as unknown as DocumentReference);
+    return {
+      exists: () => snap.exists(),
+      data: () => snap.data() as Record<string, unknown> | undefined,
+    };
+  },
+  update: (ref, data) => tx.update(ref as unknown as DocumentReference, data),
+  set: (ref, data) => tx.set(ref as unknown as DocumentReference, data),
+});
 
 /** A till must not hang on a locked counter; the queue retries the delta later. */
 const STOCK_TX_TIMEOUT_MS = 6_000;
@@ -104,7 +124,11 @@ const stockRefInTransaction = async (
  * Throws when the product exists in neither collection, so the caller can record
  * the failure instead of pretending stock moved.
  */
-export const commitStockDelta = async (id: string, delta: number): Promise<StockResult> => {
+export const commitStockDelta = async (
+  id: string,
+  delta: number,
+  options?: { rejectShortfall?: boolean }
+): Promise<StockResult> => {
   if (!id) throw new Error('commitStockDelta: missing product id');
   const amount = Math.trunc(Number(delta) || 0);
 
@@ -112,8 +136,12 @@ export const commitStockDelta = async (id: string, delta: number): Promise<Stock
     runTransaction(db, async (tx) => {
       const { ref, collection, data } = await stockRefInTransaction(tx, id);
       const currentStock = clampStock(data.stock);
-      // Never below zero: an oversold line reads as 0, not as -3.
-      const nextStock = Math.max(0, currentStock + amount);
+      const rawNext = currentStock + amount;
+      if (options?.rejectShortfall && amount < 0 && rawNext < 0) {
+        throw new Error(`INSUFFICIENT_STOCK: ${String(data.name || id)} (${currentStock} left, ${Math.abs(amount)} requested)`);
+      }
+      // Never below zero when legacy replay paths permit clamping.
+      const nextStock = Math.max(0, rawNext);
       const stockStatus = deriveStockStatus(nextStock, data.lowStockThreshold ?? 1) as StockStatus;
       tx.update(ref, { stock: nextStock, stockStatus });
       return { collection, previousStock: currentStock, stock: nextStock, stockStatus };
@@ -198,7 +226,8 @@ export interface AppliedStockLine {
  */
 export const applyStockLines = async (
   lines: StockLine[],
-  direction: -1 | 1
+  direction: -1 | 1,
+  options?: { rejectShortfall?: boolean }
 ): Promise<{ ok: AppliedStockLine[]; failed: { line: StockLine; error: string }[] }> => {
   const ok: AppliedStockLine[] = [];
   const failed: { line: StockLine; error: string }[] = [];
@@ -223,7 +252,7 @@ export const applyStockLines = async (
   await mapWithConcurrency([...grouped], STOCK_CONCURRENCY, async ([productId, group]) => {
     const line: StockLine = { productId, name: group.name, quantity: group.quantity };
     try {
-      const result = await commitStockDelta(productId, direction * group.quantity);
+      const result = await commitStockDelta(productId, direction * group.quantity, options);
       ok.push({ line, result });
     } catch (err) {
       failed.push({ line, error: err instanceof Error ? err.message : String(err) });
@@ -347,56 +376,22 @@ export const commitPartsAllocation = async (
   fields: TicketPartsFields
 ): Promise<PartsCommitOutcome> => {
   const deltas = diffParts(previous, fields.partsUsed);
-  const applied: PartsDelta[] = [];
-  const failed: { delta: PartsDelta; error: string }[] = [];
-  let adopted = false;
+  let outcome: PartsCommitOutcome = { applied: [], failed: [], adopted: false };
 
   await withTimeout(
     runTransaction(db, async (tx) => {
-      const ticketRef = doc(db, 'repairs', ticketId);
-      const ticketSnap = await tx.get(ticketRef);
-      if (!ticketSnap.exists()) throw new Error(`Ticket ${ticketId} no longer exists`);
-      const current = ticketSnap.data() as Record<string, unknown>;
-
-      if (current.lastPartsActionId === actionId) {
-        adopted = true;
-        return;
-      }
-
-      // diffParts keys by product, so every delta touches a different counter and
-      // the writes inside this transaction cannot contend with each other.
-      for (const delta of deltas) {
-        let ref = doc(db, 'inventory', delta.productId);
-        let snap = await tx.get(ref);
-        if (!snap.exists()) {
-          ref = doc(db, 'products', delta.productId);
-          snap = await tx.get(ref);
-          if (!snap.exists()) {
-            failed.push({ delta, error: `Product ${delta.productId} not found in inventory or products` });
-            continue;
-          }
-        }
-        const data = snap.data() as Record<string, unknown>;
-        const currentStock = clampStock(data.stock);
-        const threshold = data.lowStockThreshold ?? 1;
-        // A part added to the ticket leaves the shelf; a removed one returns to it.
-        const nextStock = Math.max(0, currentStock - delta.delta);
-        const stockStatus = deriveStockStatus(nextStock, threshold) as StockStatus;
-        tx.update(ref, { stock: nextStock, stockStatus });
-        applied.push(delta);
-      }
-
-      tx.update(ticketRef, {
-        partsUsed: fields.partsUsed,
-        lastPartsActionId: actionId,
-        updatedAt: fields.updatedAt,
+      outcome = await runPartsAllocationTx(toTxOps(tx), {
+        ticketId,
+        actionId,
+        deltas,
+        fields,
       });
     }),
     STOCK_TX_TIMEOUT_MS,
     'partsAllocation'
   );
 
-  return { applied, failed, adopted };
+  return outcome;
 };
 
 /** The customer's own numbers this sale moves, when it was written on a profile. */
@@ -415,114 +410,89 @@ export interface SaleEffectsOutcome {
 
 /**
  * One transaction takes the sold units off the shelf, adds the sale to the customer's
- * own record, and stamps the invoice as having done both — the same shape as
- * `commitPartsAllocation`, with the invoice as the anchor.
- *
- * The stamps are what make an upload safe to retry. A sale rung up without signal can
- * reach the server while the phone believes it failed, so the sync pass finds the
- * document already there. "Already there" cannot tell a replay whose work is finished
- * from an invoice the server saved and nobody ever moved the shelf for, and gating the
- * side effects on `created` skipped the shelf and the ledger for exactly the sales that
- * needed them. Reading the stamps inside the transaction that writes them answers both:
- * a crash after the commit adopts and moves nothing, a half-committed sale is finished
- * once, and two devices racing to upload the same sale cannot both deduct it.
+ * own record, and stamps the invoice as having done both — all reads execute strictly
+ * before writes inside the Firestore transaction.
  */
 export const commitSaleEffects = async (
   saleId: string,
   lines: StockLine[],
-  profile?: SaleProfileEffect
+  profile?: SaleProfileEffect,
+  options?: { rejectShortfall?: boolean }
 ): Promise<SaleEffectsOutcome> => {
-  // A line with no SKU never reached the shelf, so it is reported before the transaction
-  // rather than inside it — a retry of the transaction must not report it twice.
-  const invalid: { line: StockLine; error: string }[] = [];
-  const grouped = new Map<string, { name: string; quantity: number }>();
-  for (const line of lines) {
-    const quantity = Math.trunc(Number(line.quantity) || 0);
-    if (!line.productId) {
-      invalid.push({ line, error: 'missing product id' });
-      continue;
-    }
-    if (quantity <= 0) continue;
-    const existing = grouped.get(line.productId);
-    grouped.set(line.productId, {
-      name: existing?.name || line.name,
-      quantity: (existing?.quantity || 0) + quantity,
-    });
-  }
-
-  let applied: AppliedStockLine[] = [];
-  let missed: { line: StockLine; error: string }[] = [];
-  let adopted = false;
+  let outcome: SaleEffectsOutcome = { applied: [], failed: [], adopted: false };
 
   await withTimeout(
     runTransaction(db, async (tx) => {
-      // Firestore re-runs this function when a document it read moves underneath it, so
-      // every attempt starts from an empty report rather than appending to the last one.
-      applied = [];
-      missed = [];
-      adopted = false;
-
-      const saleRef = doc(db, 'transactions', saleId);
-      const saleSnap = await tx.get(saleRef);
-      if (!saleSnap.exists()) throw new Error(`Sale ${saleId} no longer exists`);
-      const sale = saleSnap.data() as Record<string, unknown>;
-
-      const moveStock = sale.stockApplied !== true;
-      const moveProfile = !!profile?.customerId && sale.profileApplied !== true;
-      if (!moveStock && !moveProfile) {
-        adopted = true;
-        return;
-      }
-
-      if (moveStock) {
-        for (const [productId, group] of grouped) {
-          const line: StockLine = { productId, name: group.name, quantity: group.quantity };
-          let ref = doc(db, 'inventory', productId);
-          let snap = await tx.get(ref);
-          let collection: StockCollection = 'inventory';
-          if (!snap.exists()) {
-            ref = doc(db, 'products', productId);
-            snap = await tx.get(ref);
-            collection = 'products';
-            if (!snap.exists()) {
-              missed.push({ line, error: `Product ${productId} not found in inventory or products` });
-              continue;
-            }
-          }
-          const data = snap.data() as Record<string, unknown>;
-          const previousStock = clampStock(data.stock);
-          const threshold = data.lowStockThreshold ?? 1;
-          const stock = Math.max(0, previousStock - group.quantity);
-          const stockStatus = deriveStockStatus(stock, threshold) as StockStatus;
-          tx.update(ref, { stock, stockStatus });
-          applied.push({ line, result: { collection, previousStock, stock, stockStatus } });
-        }
-      }
-
-      const stamp: Record<string, unknown> = {};
-      if (moveStock) stamp.stockApplied = true;
-
-      if (moveProfile && profile) {
-        const customerRef = doc(db, 'customers', profile.customerId);
-        const customerSnap = await tx.get(customerRef);
-        // A profile that has gone missing must not hold the shelf movement hostage: the
-        // till's own writer warns and moves on, and the stamp records the same answer so
-        // the next pass does not spend the sale on a customer who is no longer there.
-        if (customerSnap.exists()) {
-          const deltas = saleProfileDeltas(profile.paid, profile.charged);
-          tx.update(customerRef, {
-            ...profileTotalsAfter(customerSnap.data() as Record<string, unknown>, deltas),
-            lastVisitDate: new Date().toISOString(),
-          });
-        }
-        stamp.profileApplied = true;
-      }
-
-      tx.update(saleRef, stamp);
+      const res = await runSaleEffectsTx(toTxOps(tx), {
+        saleId,
+        lines,
+        profile,
+        rejectShortfall: options?.rejectShortfall,
+      });
+      outcome = {
+        applied: res.applied.map((a) => ({
+          line: a.line,
+          result: {
+            collection: a.collection,
+            previousStock: a.previousStock,
+            stock: a.stock,
+            stockStatus: a.stockStatus,
+          },
+        })),
+        failed: res.failed,
+        adopted: res.adopted,
+      };
     }),
     STOCK_TX_TIMEOUT_MS,
     'saleEffects'
   );
 
-  return { applied, failed: [...invalid, ...missed], adopted };
+  return outcome;
+};
+
+/**
+ * Online atomic POS checkout: validates all product stock levels, deducts inventory,
+ * updates customer totals, creates an optional debt entry, and records the sale in
+ * a single read-before-write transaction. Refuses overselling (`INSUFFICIENT_STOCK`)
+ * before creating any invoice or debt document.
+ */
+export const commitPosSaleAtomic = async (params: {
+  lines: StockLine[];
+  saleData: Record<string, unknown>;
+  profile?: SaleProfileEffect;
+  debtData?: Record<string, unknown>;
+}): Promise<{
+  saleId: string;
+  debtEntryId?: string;
+  applied: AppliedStockLine[];
+}> => {
+  const saleRef = doc(collection(db, 'transactions'));
+  const debtRef = params.debtData ? doc(collection(db, 'customer_debts')) : null;
+  let applied: AppliedStockLine[] = [];
+
+  await withTimeout(
+    runTransaction(db, async (tx) => {
+      const res = await runPosCheckoutTx(toTxOps(tx), {
+        saleId: saleRef.id,
+        lines: params.lines,
+        saleData: params.saleData,
+        profile: params.profile,
+        debtId: debtRef?.id,
+        debtData: params.debtData,
+      });
+      applied = res.applied.map((a) => ({
+        line: a.line,
+        result: {
+          collection: a.collection,
+          previousStock: a.previousStock,
+          stock: a.stock,
+          stockStatus: a.stockStatus,
+        },
+      }));
+    }),
+    STOCK_TX_TIMEOUT_MS,
+    'posCheckoutAtomic'
+  );
+
+  return { saleId: saleRef.id, debtEntryId: debtRef?.id, applied };
 };

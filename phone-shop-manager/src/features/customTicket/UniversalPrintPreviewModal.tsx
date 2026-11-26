@@ -1,8 +1,10 @@
 import React from 'react';
-import { Printer, FileText, Eye, X } from 'lucide-react';
+import { Printer, FileText, Eye, X, AlertTriangle } from 'lucide-react';
 import { BarcodePreview } from './BarcodePreview';
 import { getComputedFontSize } from './ticketPrintUtils';
+import { computeFreeTextStickerLayout } from '../../utils/customLabelWrap';
 import type { CustomTicketData, TicketFormat } from './customTicketTypes';
+import type { StickerOverflowWarning } from './ticketPrintTypes';
 
 interface UniversalPrintPreviewModalProps {
   ticket: CustomTicketData;
@@ -13,6 +15,7 @@ interface UniversalPrintPreviewModalProps {
   printer?: string;
   labelPrinter?: string;
   isPrinting: boolean;
+  blankStickerOverflowWarning?: StickerOverflowWarning | null;
   setShowPrintPreview: React.Dispatch<React.SetStateAction<boolean>>;
   handleBrowserPrint: () => void;
   handleConfirmPrint: () => Promise<void>;
@@ -28,10 +31,24 @@ export const UniversalPrintPreviewModal: React.FC<UniversalPrintPreviewModalProp
     printer,
     labelPrinter,
     isPrinting,
+    blankStickerOverflowWarning,
     setShowPrintPreview,
     handleBrowserPrint,
     handleConfirmPrint,
   } = props;
+
+  const freeTextLayout = ticket.format === 'sticker' && ticket.mode === 'free_text'
+    ? computeFreeTextStickerLayout(ticket, storeName)
+    : null;
+  const modalOverflowWarning = blankStickerOverflowWarning ?? (freeTextLayout?.isOverflow
+    ? {
+        isOverflow: true,
+        lineCount: freeTextLayout.wrappedLines.length,
+        clippedLines: freeTextLayout.clippedLines,
+        maxEstimatedLines: freeTextLayout.maxLines,
+        stickerSize: freeTextLayout.stickerSize,
+      }
+    : null);
 
   return (
     <div style={{
@@ -148,7 +165,11 @@ export const UniversalPrintPreviewModal: React.FC<UniversalPrintPreviewModalProp
                   overflow: 'hidden',
                 }}>
                   <div style={{
-                    fontSize: getComputedFontSize(ticket.freeText || '', ticket.fontSize, true),
+                    fontSize: getComputedFontSize(
+                      freeTextLayout ? freeTextLayout.wrappedLines.join('\n') : (ticket.freeText || ''),
+                      ticket.fontSize,
+                      true
+                    ),
                     fontWeight: ticket.isBold !== false ? 900 : 500,
                     lineHeight: 1.25,
                     whiteSpace: 'pre-wrap',
@@ -156,9 +177,33 @@ export const UniversalPrintPreviewModal: React.FC<UniversalPrintPreviewModalProp
                     color: '#111',
                     width: '100%',
                   }}>
-                    {ticket.freeText || '(Empty Blank Sticker)'}
+                    {ticket.freeText
+                      ? (freeTextLayout ? freeTextLayout.wrappedLines.join('\n') : ticket.freeText)
+                      : '(Empty Blank Sticker)'}
                   </div>
                 </div>
+                {modalOverflowWarning && (
+                  <div
+                    role="alert"
+                    style={{
+                      marginTop: '4px',
+                      padding: '4px 6px',
+                      borderRadius: '4px',
+                      background: 'rgba(245, 158, 11, 0.14)',
+                      border: '1px solid #f59e0b',
+                      color: '#b45309',
+                      fontSize: '10px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    <AlertTriangle size={12} style={{ flexShrink: 0 }} />
+                    <span>
+                      Height alert: {modalOverflowWarning.lineCount} wrapped lines exceed ~{modalOverflowWarning.maxEstimatedLines} lines on {modalOverflowWarning.stickerSize}mm.
+                    </span>
+                  </div>
+                )}
                 {ticket.includeBarcode && ticket.barcodeValue && (
                   <div style={{ borderTop: '1px solid #c8b400', marginTop: '2px', paddingTop: '2px' }}>
                     <BarcodePreview

@@ -56,7 +56,7 @@ try {
 // print server answers PNA preflights for allowlisted origins, Chromium already
 // treats http://127.0.0.1 as a trustworthy URL, and the desktop shell prints
 // over IPC — so the renderer keeps its same-origin policy.
-const DEPLOYED_URL = 'https://phoneshop-mgr-pro-2026.web.app';
+const DEPLOYED_URL = 'https://ecomeweb-91a7e.web.app';
 
 // Origins allowed to host the top frame, and therefore to reach the print IPC.
 // A Firebase preview channel (preview--<site>.web.app) or a custom domain needs

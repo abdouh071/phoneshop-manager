@@ -19,7 +19,7 @@
  * best-effort and reported back, because a corrected invoice that failed to
  * notify the manager is still a corrected invoice.
  */
-import { addDoc, collection, doc, getDoc, getDocs, limit, query, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, limit, query, runTransaction, updateDoc, where, type DocumentReference, type Transaction } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
 import { openDebtTotal, surplusShiftOf, type SaleEditPlan } from '../utils/saleEdit';
@@ -27,8 +27,21 @@ import type { SaleTransaction } from '../types';
 import { activityLogService } from './activityLogService';
 import { customerService } from './customerService';
 import { notificationService } from './notificationService';
-import { offlineSyncService } from './offlineSyncService';
-import { applyStockLines, readStockLevels, type StockLine } from './stockService';
+import { readStockLevels } from './stockService';
+import { runSaleEditClaimAndStockTx, type FirestoreTxOps, type TxRef } from './stockTransactionCore';
+
+const toTxOps = (tx: Transaction): FirestoreTxOps => ({
+  doc: (col, id) => doc(db, col, id) as unknown as TxRef,
+  get: async (ref) => {
+    const snap = await tx.get(ref as unknown as DocumentReference);
+    return {
+      exists: () => snap.exists(),
+      data: () => snap.data() as Record<string, unknown> | undefined,
+    };
+  },
+  update: (ref, data) => tx.update(ref as unknown as DocumentReference, data),
+  set: (ref, data) => tx.set(ref as unknown as DocumentReference, data),
+});
 
 export interface SaleEditFailure {
   name: string;
@@ -351,39 +364,23 @@ export const applySaleEdit = async (
   // which over-counts a giveaway rather than hiding it.
   if (plan.lineDiscounts.length > 0) updates.lineDiscounts = plan.lineDiscounts;
 
-  await updateDoc(doc(db, 'transactions', tx.id), updates);
+  const { appliedDeducts, nextRevision } = await runTransaction(db, async (t) =>
+    runSaleEditClaimAndStockTx(toTxOps(t), {
+      txId: tx.id,
+      expectedRevision: Number(tx.financialRevision) || 0,
+      restockLines: plan.restock,
+      deductLines: plan.deduct,
+      saleUpdates: updates,
+    })
+  );
 
   const stockFailures: SaleEditFailure[] = [];
-  const queued: { line: StockLine; delta: number }[] = [];
-
-  const restock = await applyStockLines(plan.restock, 1);
-  for (const f of restock.failed) {
-    stockFailures.push({ name: f.line.name, quantity: f.line.quantity, error: f.error });
-    queued.push({ line: f.line, delta: f.line.quantity });
-  }
-
-  const deduct = await applyStockLines(plan.deduct, -1);
-  for (const f of deduct.failed) {
-    stockFailures.push({ name: f.line.name, quantity: f.line.quantity, error: f.error });
-    queued.push({ line: f.line, delta: -f.line.quantity });
-  }
-  for (const applied of deduct.ok) {
-    if (applied.result.stockStatus !== 'in_stock') {
+  for (const applied of appliedDeducts) {
+    if (applied.stockStatus !== 'in_stock') {
       notificationService
-        .notifyLowStock(applied.line.name, applied.result.stock)
+        .notifyLowStock(applied.line.name, applied.stock)
         .catch(err => console.warn('[SaleEdit] Low stock notification error:', err));
     }
-  }
-
-  for (const miss of queued) {
-    await offlineSyncService
-      .saveOfflineStockDelta({
-        productId: miss.line.productId,
-        name: miss.line.name,
-        delta: miss.delta,
-        reason: `Edited sale ${tx.invoiceNumber || tx.id.slice(-6)}`,
-      })
-      .catch(err => console.warn('[SaleEdit] Could not queue a missed stock delta:', err));
   }
 
   let debtSynced = false;
@@ -424,7 +421,8 @@ export const applySaleEdit = async (
             surplusShift > 0
               ? `Over-collection on corrected Receipt #${receipt} held as Avoir`
               : `Avoir released by corrected Receipt #${receipt}`,
-            user?.name || 'Staff'
+            user?.name || 'Staff',
+            `edit_${tx.id}_r${nextRevision}`
           );
           avoirHeld = Math.max(0, surplusShift);
         } catch (err) {

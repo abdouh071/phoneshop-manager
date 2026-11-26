@@ -7,7 +7,7 @@ export default defineConfig({
     // Glob patterns for test files
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/**/*.spec.ts'],
     // Report per-file with per-test durations
-    reporter: ['verbose'],
+    reporters: ['verbose'],
     // Fail fast on first error in CI
     bail: 0,
     // Code coverage (run with `vitest --coverage`)

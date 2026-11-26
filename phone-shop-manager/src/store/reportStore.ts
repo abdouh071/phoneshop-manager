@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { reportsService } from '../services/reportsService';
 import { useSettingsStore } from './settingsStore';
-import type { ReportData, ReportFilterOptions } from '../services/reportsService';
+import type { ReportData, ReportFetchOptions, ReportFilterOptions } from '../services/reportsService';
 import { errorMessage } from '../utils/errorUtils';
 
 /** Only the newest requested report may finish the load — see fetchData. */
@@ -12,7 +12,7 @@ interface ReportState {
   isLoading: boolean;
   error: string | null;
   activeOptions: ReportFilterOptions;
-  fetchData: (options?: ReportFilterOptions | string) => Promise<void>;
+  fetchData: (options?: ReportFilterOptions | string, fetchOptions?: ReportFetchOptions) => Promise<void>;
   setFilterOptions: (options: Partial<ReportFilterOptions>) => void;
 }
 
@@ -24,7 +24,7 @@ export const useReportStore = create<ReportState>((set, get) => ({
     dateRange: 'last_7_days'
   },
 
-  fetchData: async (options?: ReportFilterOptions | string) => {
+  fetchData: async (options?: ReportFilterOptions | string, fetchOptions?: ReportFetchOptions) => {
     const rawActive = options
       ? (typeof options === 'string' ? { dateRange: options } : options)
       : get().activeOptions;
@@ -40,7 +40,9 @@ export const useReportStore = create<ReportState>((set, get) => ({
     const sequence = ++fetchSequence;
     set({ isLoading: true, error: null, activeOptions: active });
     try {
-      const data = await reportsService.getDashboardData(active);
+      const data = fetchOptions
+        ? await reportsService.getDashboardData(active, fetchOptions)
+        : await reportsService.getDashboardData(active);
       if (sequence !== fetchSequence) return;
       set({ data, isLoading: false });
     } catch (err: unknown) {

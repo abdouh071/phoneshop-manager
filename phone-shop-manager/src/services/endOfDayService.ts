@@ -10,6 +10,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { invalidateReportsCache } from './reportCacheInvalidation';
 
 /**
  * Bumped when a seal starts storing provenance (`sealedAt`, `sealScope`). Records without
@@ -134,11 +135,13 @@ export const endOfDayService = {
       const ref = await addDoc(collection(db, COLLECTION), sealed);
       const created = { ...sealed, id: ref.id };
       saveLocal([created, ...local]);
+      invalidateReportsCache();
       return created;
     } catch {
       const id = `${OFFLINE_EOD_ID_PREFIX}${Date.now()}`;
       const created = { ...sealed, id };
       saveLocal([created, ...local]);
+      invalidateReportsCache();
       return created;
     }
   },
@@ -170,8 +173,21 @@ export const endOfDayService = {
    * fall back to live numbers for closed days it never saw. Dates are YYYY-MM-DD, so a
    * string range is the same as a date range.
    */
-  getRange: async (fromDateStr: string, toDateStr: string): Promise<EndOfDayRecord[]> => {
+  getRange: async (
+    fromDateStr: string,
+    toDateStr: string,
+    options?: { allowLocalFallback?: boolean }
+  ): Promise<EndOfDayRecord[]> => {
+    const mayFallBack = options?.allowLocalFallback !== false;
     const inRange = (r: EndOfDayRecord): boolean => r.date >= fromDateStr && r.date <= toDateStr;
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      if (!mayFallBack) {
+        throw new Error('Offline: End-of-Day records on this device are cached, not live server records.');
+      }
+      return getLocal().filter(inRange);
+    }
+
     try {
       const q = query(
         collection(db, COLLECTION),
@@ -187,7 +203,8 @@ export const endOfDayService = {
         r => r.id.startsWith(OFFLINE_EOD_ID_PREFIX) && !serverDates.has(r.date) && inRange(r)
       );
       return [...items, ...localOnly];
-    } catch {
+    } catch (err) {
+      if (!mayFallBack) throw err;
       return getLocal().filter(inRange);
     }
   },

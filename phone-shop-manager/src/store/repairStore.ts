@@ -408,7 +408,11 @@ export const useRepairStore = create<RepairState>((set, get) => ({
     }
   },
 
-  updateTicket: async (id, updates) => {
+  updateTicket: async (
+    id,
+    updates,
+    options?: { onOutcome?: (outcome: 'committed' | 'queued') => void }
+  ) => {
     const existing = get().tickets.find(t => t.id === id);
     if (!existing) return;
 
@@ -419,7 +423,7 @@ export const useRepairStore = create<RepairState>((set, get) => ({
     }));
 
     try {
-      const updated = await repairService.updateTicket(id, updates);
+      const updated = await repairService.updateTicket(id, updates, { onOutcome: options?.onOutcome });
       set(state => ({
         tickets: state.tickets.map(t => t.id === id ? { ...t, ...updated } : t),
       }));

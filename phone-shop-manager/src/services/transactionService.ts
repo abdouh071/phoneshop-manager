@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   updateDoc,
   addDoc,
@@ -14,6 +15,10 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { newIdempotencyKey } from './idempotentReplay';
+import { offlineQueueMirror } from './offlineQueueMirror';
+import { invalidateReportsCache } from './reportCacheInvalidation';
+import { UnrecoverableSyncActionError } from './offlineQueue';
+import { withTimeout } from '../utils/withTimeout';
 import type { Customer, CustomerDebtEntry, PhoneModel, SaleTransaction } from '../types';
 import { foldStockDeltas } from '../utils/stockDeltas';
 import { computeStockStatus } from '../utils/stockStatus';
@@ -27,7 +32,37 @@ export interface SaleRefundResult {
   debt?: CustomerDebtEntry;
 }
 
+export interface PendingSaleRefund {
+  operationId: string;
+  transactionId: string;
+  expected: SaleTransaction;
+  actor: { id: string; name: string; role: string };
+  refundedAt: string;
+  stage: 'claimed' | 'uncertain';
+  createdAt: string;
+  errorMessage?: string;
+}
+
+export interface PendingSaleEdit {
+  operationId: string;
+  transactionId: string;
+  expected: SaleTransaction;
+  edit: SaleEditRequest;
+  status: 'pending' | 'queued' | 'uncertain' | 'conflict';
+  createdAt: string;
+  errorMessage?: string;
+}
+
+export interface SaleEditResult {
+  transaction: SaleTransaction;
+  stock: PhoneModel[];
+  customer?: Customer;
+  debt?: CustomerDebtEntry;
+}
+
 export interface SaleEditRequest {
+  /** Stable identifier per edit attempt/submission so conflicting replays from stale tills fail loudly. */
+  operationId?: string;
   updates: Partial<SaleTransaction>;
   stockDeltas: { productId: string; delta: number }[];
   /** Positive grants Avoir for an over-collection, negative takes it back. */
@@ -41,6 +76,24 @@ export interface SaleEditRequest {
     expectedPaid: number;
   };
 }
+
+const stableEditValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stableEditValue);
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b));
+    return Object.fromEntries(entries.map(([k, v]) => [k, stableEditValue(v)]));
+  }
+  return value;
+};
+
+const editRequestFingerprint = (edit: SaleEditRequest): string => JSON.stringify(stableEditValue({
+  updates: edit.updates,
+  stockDeltas: edit.stockDeltas,
+  creditShift: edit.creditShift ?? null,
+  debtUpdate: edit.debtUpdate ?? null,
+}));
 
 export interface SaleEditResult {
   transaction: SaleTransaction;
@@ -83,11 +136,62 @@ const cacheSaleDocuments = <T extends { transaction: SaleTransaction; stock: Pho
       console.warn('Sale confirmed; could not refresh the local cache:', key, error);
     }
   }
+  invalidateReportsCache();
   return result;
 };
 
 const COLLECTION = 'transactions';
 const LOCAL_STORAGE_KEY = 'offline_transactions';
+const REFUND_JOURNAL_KEY = 'sale_refund_journal';
+const EDIT_JOURNAL_KEY = 'sale_edit_journal';
+
+const readJournal = <T>(key: 'sale_refund_journal' | 'sale_edit_journal'): T[] => {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeJournal = <T>(key: 'sale_refund_journal' | 'sale_edit_journal', entries: T[]): void => {
+  const raw = JSON.stringify(entries);
+  try {
+    localStorage.setItem(key, raw);
+  } catch (err) {
+    console.warn(`Failed to persist ${key}:`, err);
+  }
+  offlineQueueMirror.write(key, raw);
+};
+
+const isDefiniteDomainError = (err: unknown): boolean => {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  const code = (err as { code?: unknown })?.code;
+  if (code === 'permission-denied') return true;
+  return (
+    msg.includes('permission-denied') ||
+    msg.includes('Connect and sync') ||
+    msg.includes('Connect to the server') ||
+    msg.includes('no longer exists') ||
+    msg.includes('changed on another device') ||
+    msg.includes('closed and cannot be edited') ||
+    msg.includes('not fully processed') ||
+    msg.includes('not finished syncing') ||
+    msg.includes('earlier debts') ||
+    msg.includes('invalid item quantities') ||
+    msg.includes('invalid amount') ||
+    msg.includes('invalid revision') ||
+    msg.includes('missing or ambiguous') ||
+    msg.includes('missing or merged') ||
+    msg.includes('already been spent') ||
+    msg.includes('Not enough stock') ||
+    msg.includes('Insufficient or invalid stock') ||
+    msg.includes('explicitly linked customer') ||
+    msg.includes('received a payment on another device') ||
+    msg.includes('does not match this invoice')
+  );
+};
 
 const docToTx = (id: string, data: Record<string, unknown>): SaleTransaction => ({
   ...(data as Omit<SaleTransaction, 'id' | 'items' | 'payments'>),
@@ -216,8 +320,17 @@ export const transactionService = {
     }
   },
 
-  getByDateRange: async (startDate: Date, endDate: Date): Promise<SaleTransaction[]> => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+  getByDateRange: async (
+    startDate: Date,
+    endDate: Date,
+    options?: { allowLocalFallback?: boolean }
+  ): Promise<SaleTransaction[]> => {
+    const mayFallBack = options?.allowLocalFallback !== false;
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      if (!mayFallBack) {
+        throw new Error("Offline: transactions on this device are cached, not live server records.");
+      }
       const local = getLocalTransactions();
       return local.filter(l => {
         const tMs = new Date(l.date).getTime();
@@ -249,6 +362,7 @@ export const transactionService = {
         (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
       );
     } catch (err) {
+      if (!mayFallBack) throw err;
       console.warn('Firestore transactions by date range fetch failed, using local cache:', err);
       const local = getLocalTransactions();
       return local.filter(l => {
@@ -259,6 +373,7 @@ export const transactionService = {
   },
 
   save: async (tx: Omit<SaleTransaction, 'id'>): Promise<SaleTransaction> => {
+    invalidateReportsCache();
     const local = getLocalTransactions();
     // Minted before the first attempt and carried by every copy of this sale, so a
     // replay can recognise the document the counter only *thinks* it failed to write.
@@ -294,120 +409,361 @@ export const transactionService = {
     expected: SaleTransaction,
     actor: { id: string; name: string; role: string },
   ): Promise<SaleRefundResult> => {
-    if (!navigator.onLine || expected.id.startsWith('offline_')) throw new Error('Connect and sync this invoice before refunding it. No refund has been submitted.');
-    const refundedAt = new Date().toISOString();
+    if ((typeof navigator !== 'undefined' && navigator.onLine === false) || expected.id.startsWith('offline_')) {
+      throw new Error('Connect and sync this invoice before refunding it. No refund has been submitted.');
+    }
+
+    const existingEntry = readJournal<PendingSaleRefund>(REFUND_JOURNAL_KEY)
+      .find(r => r.transactionId === expected.id);
+    const operationId = existingEntry?.operationId || `refund_${expected.id}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const refundedAt = existingEntry?.refundedAt || new Date().toISOString();
     const receiptId = `sale_refund_${encodeURIComponent(expected.id)}`;
-    const result = await runTransaction(db, async tx => {
-      const saleRef = doc(db, COLLECTION, expected.id);
-      const receiptRef = doc(db, 'operation_receipts', receiptId);
-      const saleSnap = await tx.get(saleRef);
-      const receipt = await tx.get(receiptRef);
-      if (!saleSnap.exists()) throw new Error('This invoice no longer exists.');
-      const sale = docToTx(saleSnap.id, saleSnap.data());
-      if (receipt.exists()) {
-        const saved = receipt.data();
-        if (saved.kind !== 'sale_refund' || saved.transactionId !== sale.id || sale.status !== 'refunded') throw new Error('The refund record does not match this invoice. Do not repeat the refund.');
-        const stock: PhoneModel[] = [];
-        for (const source of saved.stockSources as { collection: string; id: string }[]) {
-          const snap = await tx.get(doc(db, source.collection, source.id));
-          if (snap.exists()) stock.push({ ...snap.data(), id: snap.id } as PhoneModel);
-        }
-        const customer = saved.customerId ? await tx.get(doc(db, 'customers', saved.customerId)) : null;
-        const debt = saved.debtId ? await tx.get(doc(db, 'customer_debts', saved.debtId)) : null;
-        return {
-          outcome: 'refunded' as const, transaction: sale, stock,
-          customer: customer?.exists() ? { ...customer.data(), id: customer.id } as Customer : undefined,
-          debt: debt?.exists() ? { ...debt.data(), id: debt.id } as CustomerDebtEntry : undefined,
-        };
-      }
-      if (['refunded', 'voided', 'cancelled'].includes(sale.status || '')) {
-        return { outcome: 'already_closed' as const, transaction: sale, stock: [] };
-      }
-      if (refundSnapshot(sale) !== refundSnapshot(expected)) throw new Error('This invoice changed on another device. Refresh and review it before refunding.');
-      if (sale.status === 'pending_approval' || sale.stockApplied === false) throw new Error('This invoice is not fully processed yet. Finish its sync before refunding.');
-      if (sale.total < 0 && sale.exchangeSummary?.refundType === 'debt_deduction') throw new Error('This exchange reduced earlier debts without recording which payments to reverse. Review those account entries manually before closing it.');
-      if (!sale.items.length || sale.items.some(item => !item.product?.id || !Number.isSafeInteger(item.quantity) || item.quantity <= 0)) throw new Error('This invoice has invalid item quantities. Review it before refunding.');
 
-      const stockWrites = [];
-      const movements = foldStockDeltas(sale.items.map(item => ({
-        productId: item.product.id,
-        delta: item.isReturn ? (item.restock !== false ? -item.quantity : 0) : item.quantity,
-      })));
-      for (const { productId, delta } of movements) {
-        let source = 'inventory';
-        let ref = doc(db, source, productId);
-        let snap = await tx.get(ref);
-        if (!snap.exists()) {
-          source = 'products';
-          ref = doc(db, source, productId);
-          snap = await tx.get(ref);
-        }
-        if (!snap.exists()) throw new Error(`Product ${productId} no longer exists. Review its stock before refunding.`);
-        const data = snap.data();
-        const stock = data.stock + delta;
-        if (!Number.isSafeInteger(data.stock) || data.stock < 0 || !Number.isSafeInteger(stock) || stock < 0) throw new Error(`Insufficient or invalid stock to reverse ${data.name || productId}.`);
-        stockWrites.push({ ref, source, product: { ...data, id: productId, stock, stockStatus: computeStockStatus(stock, data.lowStockThreshold ?? 1) } as PhoneModel });
-      }
+    // Persist a local claimed marker before sending so any crash, restart, or lost ack
+    // keeps the claimed refund visible instead of silently disappearing or double-refunding.
+    const claimedEntry: PendingSaleRefund = {
+      operationId,
+      transactionId: expected.id,
+      expected,
+      actor,
+      refundedAt,
+      stage: 'claimed',
+      createdAt: existingEntry?.createdAt || refundedAt,
+    };
+    writeJournal<PendingSaleRefund>(REFUND_JOURNAL_KEY, [
+      claimedEntry,
+      ...readJournal<PendingSaleRefund>(REFUND_JOURNAL_KEY).filter(r => r.transactionId !== expected.id),
+    ]);
 
-      const customerRef = sale.customerId ? doc(db, 'customers', sale.customerId) : null;
-      const customerSnap = customerRef ? await tx.get(customerRef) : null;
-      let customer = customerSnap?.exists() ? { ...customerSnap.data(), id: customerSnap.id } as Customer : undefined;
-      if (customerRef && (!customer || customer.mergedIntoId)) throw new Error('The linked customer is missing or merged. Review the account manually before refunding.');
-      const debts: CustomerDebtEntry[] = [];
-      if (sale.customerId) {
-        const matches = await getDocsFromServer(query(collection(db, 'customer_debts'), where('customerId', '==', sale.customerId)));
-        for (const match of matches.docs) {
-          const snap = await tx.get(match.ref);
-          if (snap.exists() && snap.data().customerId === sale.customerId) debts.push({ ...snap.data(), id: snap.id } as CustomerDebtEntry);
+    try {
+      const result = await withTimeout(runTransaction(db, async tx => {
+        const saleRef = doc(db, COLLECTION, expected.id);
+        const receiptRef = doc(db, 'operation_receipts', receiptId);
+        const saleSnap = await tx.get(saleRef);
+        const receipt = await tx.get(receiptRef);
+        if (!saleSnap.exists()) throw new Error('This invoice no longer exists.');
+        const sale = docToTx(saleSnap.id, saleSnap.data());
+        if (receipt.exists()) {
+          const saved = receipt.data();
+          if (saved.kind !== 'sale_refund' || saved.transactionId !== sale.id) {
+            throw new Error('The refund record does not match this invoice. Do not repeat the refund.');
+          }
+          // Complete an uncompleted claim (`stage === 'claimed'` while `sale.status !== 'refunded'`)
+          // rather than falsely rejecting or claiming completion.
+          if (saved.stage !== 'claimed') {
+            if (sale.status !== 'refunded') {
+              throw new Error('The refund record does not match this invoice. Do not repeat the refund.');
+            }
+            const stock: PhoneModel[] = [];
+            for (const source of (saved.stockSources as { collection: string; id: string }[] | undefined) || []) {
+              const snap = await tx.get(doc(db, source.collection, source.id));
+              if (snap.exists()) stock.push({ ...snap.data(), id: snap.id } as PhoneModel);
+            }
+            const customer = saved.customerId ? await tx.get(doc(db, 'customers', saved.customerId)) : null;
+            const debt = saved.debtId ? await tx.get(doc(db, 'customer_debts', saved.debtId)) : null;
+            return {
+              outcome: 'refunded' as const, transaction: sale, stock,
+              customer: customer?.exists() ? { ...customer.data(), id: customer.id } as Customer : undefined,
+              debt: debt?.exists() ? { ...debt.data(), id: debt.id } as CustomerDebtEntry : undefined,
+            };
+          }
         }
-      }
-      const linked = debts.filter(debt => debt.id === sale.accountSettlement?.debtEntryId || debt.transactionId === sale.id ||
-        (!debt.transactionId && !sale.invoiceNumberProvisional && sale.invoiceNumber && debt.invoiceNumber === sale.invoiceNumber));
-      const charged = refundCents(sale.accountSettlement?.chargedAmount ?? 0) + (sale.payments || []).filter(p => p.method === 'debt').reduce((sum, p) => sum + refundCents(p.amount), 0);
-      if (linked.length > 1 || ((charged > 0 || sale.accountSettlement?.debtEntryId) && linked.length !== 1)) throw new Error('The linked credit record is missing or ambiguous. Review it manually before refunding.');
-      const originalDebt = linked[0];
-      const restoredCredit = refundCents(sale.exchangeSummary?.storeCreditUsed ?? 0);
-      const reversedCredit = sale.total < 0 && sale.exchangeSummary?.refundType === 'store_credit' ? refundCents(-sale.total) : 0;
-      // Earlier corrections may already have transferred over-collections to Avoir.
-      const paidToCredit = originalDebt ? Math.min(refundCents(originalDebt.amountPaid), refundCents(Math.max(0, sale.total))) : 0;
-      const creditDelta = paidToCredit + restoredCredit - reversedCredit;
-      if (creditDelta !== 0 && !customer) throw new Error('This refund needs its explicitly linked customer account.');
-      let debt: CustomerDebtEntry | undefined;
-      const refunded: SaleTransaction = { ...sale, status: 'refunded', refundedAt, financialRevision: (sale.financialRevision ?? 0) + 1 };
-      if (originalDebt) debt = { ...originalDebt, totalAmount: 0, amountPaid: 0, remainingBalance: 0, status: 'paid', updatedAt: refundedAt };
-      if (customer) {
-        const credit = refundCents(customer.storeCredit ?? 0) + creditDelta;
-        if (!Number.isSafeInteger(credit) || credit < 0) throw new Error('The Avoir issued by this invoice has already been spent. Review the account before reversing it.');
-        const totalDebt = debts.filter(d => d.id !== originalDebt?.id && d.status !== 'paid').reduce((sum, d) => sum + refundCents(d.remainingBalance), 0);
-        const before = calculateCustomerFinancials(customer, [], [sale], originalDebt ? [originalDebt] : []);
-        const after = calculateCustomerFinancials(customer, [], [refunded], debt ? [debt] : []);
-        customer = {
-          ...customer, storeCredit: credit / 100, totalDebt: totalDebt / 100,
-          totalSpent: Math.max(0, Math.round(((customer.totalSpent ?? 0) + after.totalSpent - before.totalSpent) * 100) / 100),
-          totalPurchases: Math.max(0, (customer.totalPurchases ?? 0) + after.totalPurchases - before.totalPurchases),
-        };
-      }
+        if (['refunded', 'voided', 'cancelled'].includes(sale.status || '')) {
+          return { outcome: 'already_closed' as const, transaction: sale, stock: [] };
+        }
+        if (refundSnapshot(sale) !== refundSnapshot(expected)) throw new Error('This invoice changed on another device. Refresh and review it before refunding.');
+        if (sale.status === 'pending_approval' || sale.stockApplied === false) throw new Error('This invoice is not fully processed yet. Finish its sync before refunding.');
+        if (sale.total < 0 && sale.exchangeSummary?.refundType === 'debt_deduction') throw new Error('This exchange reduced earlier debts without recording which payments to reverse. Review those account entries manually before closing it.');
+        if (!sale.items.length || sale.items.some(item => !item.product?.id || !Number.isSafeInteger(item.quantity) || item.quantity <= 0)) throw new Error('This invoice has invalid item quantities. Review it before refunding.');
 
-      for (const { ref, product } of stockWrites) tx.update(ref, { stock: product.stock, stockStatus: product.stockStatus });
-      if (debt) tx.update(doc(db, 'customer_debts', debt.id), { totalAmount: 0, amountPaid: 0, remainingBalance: 0, status: 'paid', updatedAt: refundedAt });
-      if (customer && customerRef) {
-        tx.update(customerRef, { storeCredit: customer.storeCredit, totalDebt: customer.totalDebt, totalSpent: customer.totalSpent, totalPurchases: customer.totalPurchases });
-        tx.set(doc(db, 'customer_activity_logs', receiptId), {
-          customerId: customer.id, customerName: customer.name || sale.customerName || 'Customer',
-          actionType: 'item_return', actionTitle: `Full Refund — Receipt #${sale.invoiceNumber || sale.id}`,
-          actionDescription: 'Invoice, stock and account reversed together.',
-          actorId: actor.id, actorName: actor.name, actorRole: actor.role, date: refundedAt, createdAt: refundedAt,
-          metadata: { transactionId: sale.id, refundedTotal: sale.total, storeCreditChange: creditDelta / 100, debtId: debt?.id ?? null },
+        const stockWrites = [];
+        const movements = foldStockDeltas(sale.items.map(item => ({
+          productId: item.product.id,
+          delta: item.isReturn ? (item.restock !== false ? -item.quantity : 0) : item.quantity,
+        })));
+        for (const { productId, delta } of movements) {
+          let source = 'inventory';
+          let ref = doc(db, source, productId);
+          let snap = await tx.get(ref);
+          if (!snap.exists()) {
+            source = 'products';
+            ref = doc(db, source, productId);
+            snap = await tx.get(ref);
+          }
+          if (!snap.exists()) throw new Error(`Product ${productId} no longer exists. Review its stock before refunding.`);
+          const data = snap.data();
+          const stock = data.stock + delta;
+          if (!Number.isSafeInteger(data.stock) || data.stock < 0 || !Number.isSafeInteger(stock) || stock < 0) throw new Error(`Insufficient or invalid stock to reverse ${data.name || productId}.`);
+          stockWrites.push({ ref, source, product: { ...data, id: productId, stock, stockStatus: computeStockStatus(stock, data.lowStockThreshold ?? 1) } as PhoneModel });
+        }
+
+        const customerRef = sale.customerId ? doc(db, 'customers', sale.customerId) : null;
+        const customerSnap = customerRef ? await tx.get(customerRef) : null;
+        let customer = customerSnap?.exists() ? { ...customerSnap.data(), id: customerSnap.id } as Customer : undefined;
+        if (customerRef && (!customer || customer.mergedIntoId)) throw new Error('The linked customer is missing or merged. Review the account manually before refunding.');
+        const debts: CustomerDebtEntry[] = [];
+        if (sale.customerId) {
+          const matches = await getDocsFromServer(query(collection(db, 'customer_debts'), where('customerId', '==', sale.customerId)));
+          for (const match of matches.docs) {
+            const snap = await tx.get(match.ref);
+            if (snap.exists() && snap.data().customerId === sale.customerId) debts.push({ ...snap.data(), id: snap.id } as CustomerDebtEntry);
+          }
+        }
+        const linked = debts.filter(debt => debt.id === sale.accountSettlement?.debtEntryId || debt.transactionId === sale.id ||
+          (!debt.transactionId && !sale.invoiceNumberProvisional && sale.invoiceNumber && debt.invoiceNumber === sale.invoiceNumber));
+        const charged = refundCents(sale.accountSettlement?.chargedAmount ?? 0) + (sale.payments || []).filter(p => p.method === 'debt').reduce((sum, p) => sum + refundCents(p.amount), 0);
+        if (linked.length > 1 || ((charged > 0 || sale.accountSettlement?.debtEntryId) && linked.length !== 1)) throw new Error('The linked credit record is missing or ambiguous. Review it manually before refunding.');
+        const originalDebt = linked[0];
+        const restoredCredit = refundCents(sale.exchangeSummary?.storeCreditUsed ?? 0);
+        const reversedCredit = sale.total < 0 && sale.exchangeSummary?.refundType === 'store_credit' ? refundCents(-sale.total) : 0;
+        // Earlier corrections may already have transferred over-collections to Avoir.
+        const paidToCredit = originalDebt ? Math.min(refundCents(originalDebt.amountPaid), refundCents(Math.max(0, sale.total))) : 0;
+        const creditDelta = paidToCredit + restoredCredit - reversedCredit;
+        if (creditDelta !== 0 && !customer) throw new Error('This refund needs its explicitly linked customer account.');
+        let debt: CustomerDebtEntry | undefined;
+        const refunded: SaleTransaction = { ...sale, status: 'refunded', refundedAt, financialRevision: (sale.financialRevision ?? 0) + 1 };
+        if (originalDebt) debt = { ...originalDebt, totalAmount: 0, amountPaid: 0, remainingBalance: 0, status: 'paid', updatedAt: refundedAt };
+        if (customer) {
+          const credit = refundCents(customer.storeCredit ?? 0) + creditDelta;
+          if (!Number.isSafeInteger(credit) || credit < 0) throw new Error('The Avoir issued by this invoice has already been spent. Review the account before reversing it.');
+          const totalDebt = debts.filter(d => d.id !== originalDebt?.id && d.status !== 'paid').reduce((sum, d) => sum + refundCents(d.remainingBalance), 0);
+          const before = calculateCustomerFinancials(customer, [], [sale], originalDebt ? [originalDebt] : []);
+          const after = calculateCustomerFinancials(customer, [], [refunded], debt ? [debt] : []);
+          customer = {
+            ...customer, storeCredit: credit / 100, totalDebt: totalDebt / 100,
+            totalSpent: Math.max(0, Math.round(((customer.totalSpent ?? 0) + after.totalSpent - before.totalSpent) * 100) / 100),
+            totalPurchases: Math.max(0, (customer.totalPurchases ?? 0) + after.totalPurchases - before.totalPurchases),
+          };
+        }
+
+        for (const { ref, product } of stockWrites) tx.update(ref, { stock: product.stock, stockStatus: product.stockStatus });
+        if (debt) tx.update(doc(db, 'customer_debts', debt.id), { totalAmount: 0, amountPaid: 0, remainingBalance: 0, status: 'paid', updatedAt: refundedAt });
+        if (customer && customerRef) {
+          tx.update(customerRef, { storeCredit: customer.storeCredit, totalDebt: customer.totalDebt, totalSpent: customer.totalSpent, totalPurchases: customer.totalPurchases });
+          tx.set(doc(db, 'customer_activity_logs', receiptId), {
+            customerId: customer.id, customerName: customer.name || sale.customerName || 'Customer',
+            actionType: 'item_return', actionTitle: `Full Refund — Receipt #${sale.invoiceNumber || sale.id}`,
+            actionDescription: 'Invoice, stock and account reversed together.',
+            actorId: actor.id, actorName: actor.name, actorRole: actor.role, date: refundedAt, createdAt: refundedAt,
+            metadata: { transactionId: sale.id, refundedTotal: sale.total, storeCreditChange: creditDelta / 100, debtId: debt?.id ?? null },
+          });
+        }
+        tx.update(saleRef, { status: refunded.status, refundedAt, financialRevision: refunded.financialRevision });
+        tx.set(receiptRef, {
+          kind: 'sale_refund', stage: 'completed', operationId,
+          transactionId: sale.id, refundedAt, customerId: customer?.id ?? null, debtId: debt?.id ?? null,
+          stockSources: stockWrites.map(write => ({ collection: write.source, id: write.product.id })),
         });
+        tx.set(doc(db, 'activityLogs', receiptId), {
+          category: 'sales', message: `Refund processed for transaction #${sale.id}`, entityId: sale.id,
+          entityType: 'sale', userId: actor.id, userName: actor.name, timestamp: Timestamp.now(),
+        });
+        return { outcome: 'refunded' as const, transaction: refunded, stock: stockWrites.map(write => write.product), customer, debt };
+      }), 8000, 'saleRefundTransaction');
+
+      writeJournal<PendingSaleRefund>(
+        REFUND_JOURNAL_KEY,
+        readJournal<PendingSaleRefund>(REFUND_JOURNAL_KEY).filter(r => r.transactionId !== expected.id)
+      );
+      return cacheSaleDocuments(result);
+    } catch (err) {
+      if (isDefiniteDomainError(err)) {
+        writeJournal<PendingSaleRefund>(
+          REFUND_JOURNAL_KEY,
+          readJournal<PendingSaleRefund>(REFUND_JOURNAL_KEY).filter(r => r.transactionId !== expected.id)
+        );
+      } else {
+        const msg = err instanceof Error ? err.message : String(err ?? 'Unknown refund interruption');
+        writeJournal<PendingSaleRefund>(REFUND_JOURNAL_KEY, [
+          { ...claimedEntry, stage: 'claimed', errorMessage: msg },
+          ...readJournal<PendingSaleRefund>(REFUND_JOURNAL_KEY).filter(r => r.transactionId !== expected.id),
+        ]);
       }
-      tx.update(saleRef, { status: refunded.status, refundedAt, financialRevision: refunded.financialRevision });
-      tx.set(receiptRef, { kind: 'sale_refund', transactionId: sale.id, refundedAt, customerId: customer?.id ?? null, debtId: debt?.id ?? null,
-        stockSources: stockWrites.map(write => ({ collection: write.source, id: write.product.id })) });
-      tx.set(doc(db, 'activityLogs', receiptId), { category: 'sales', message: `Refund processed for transaction #${sale.id}`, entityId: sale.id,
-        entityType: 'sale', userId: actor.id, userName: actor.name, timestamp: Timestamp.now() });
-      return { outcome: 'refunded' as const, transaction: refunded, stock: stockWrites.map(write => write.product), customer, debt };
-    });
-    return cacheSaleDocuments(result);
+      throw err;
+    }
+  },
+
+  getPendingRefunds: (): PendingSaleRefund[] => readJournal<PendingSaleRefund>(REFUND_JOURNAL_KEY),
+
+  clearPendingRefund: (transactionId: string): void => {
+    writeJournal<PendingSaleRefund>(
+      REFUND_JOURNAL_KEY,
+      readJournal<PendingSaleRefund>(REFUND_JOURNAL_KEY).filter(r => r.transactionId !== transactionId)
+    );
+  },
+
+  reconcilePendingRefunds: async (): Promise<{
+    adopted: SaleRefundResult[];
+    pending: PendingSaleRefund[];
+  }> => {
+    const journal = readJournal<PendingSaleRefund>(REFUND_JOURNAL_KEY);
+    if (journal.length === 0 || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+      return { adopted: [], pending: journal };
+    }
+    const adopted: SaleRefundResult[] = [];
+    const remaining: PendingSaleRefund[] = [];
+
+    for (const entry of journal) {
+      try {
+        const receiptId = `sale_refund_${encodeURIComponent(entry.transactionId)}`;
+        const [receiptSnap, saleSnap] = await Promise.all([
+          getDoc(doc(db, 'operation_receipts', receiptId)),
+          getDoc(doc(db, COLLECTION, entry.transactionId)),
+        ]);
+        if (!saleSnap.exists()) {
+          remaining.push(entry);
+          continue;
+        }
+        const sale = docToTx(saleSnap.id, saleSnap.data() as Record<string, unknown>);
+        const saved = receiptSnap.exists() ? receiptSnap.data() : null;
+        if (saved && saved.kind === 'sale_refund' && saved.stage !== 'claimed' && sale.status === 'refunded') {
+          const stock: PhoneModel[] = [];
+          for (const source of (saved.stockSources as { collection: string; id: string }[] | undefined) || []) {
+            const snap = await getDoc(doc(db, source.collection, source.id));
+            if (snap.exists()) stock.push({ ...snap.data(), id: snap.id } as PhoneModel);
+          }
+          const custSnap = saved.customerId ? await getDoc(doc(db, 'customers', String(saved.customerId))) : null;
+          const debtSnap = saved.debtId ? await getDoc(doc(db, 'customer_debts', String(saved.debtId))) : null;
+          adopted.push(cacheSaleDocuments<SaleRefundResult>({
+            outcome: 'refunded',
+            transaction: sale,
+            stock,
+            customer: custSnap?.exists() ? ({ ...custSnap.data(), id: custSnap.id } as Customer) : undefined,
+            debt: debtSnap?.exists() ? ({ ...debtSnap.data(), id: debtSnap.id } as CustomerDebtEntry) : undefined,
+          }));
+          continue;
+        }
+        if (['refunded', 'voided', 'cancelled'].includes(sale.status || '')) {
+          adopted.push(cacheSaleDocuments<SaleRefundResult>({ outcome: 'already_closed', transaction: sale, stock: [] }));
+          continue;
+        }
+        remaining.push(entry);
+      } catch {
+        remaining.push(entry);
+      }
+    }
+
+    writeJournal<PendingSaleRefund>(REFUND_JOURNAL_KEY, remaining);
+    return { adopted, pending: remaining };
+  },
+
+  getPendingSaleEdits: (): PendingSaleEdit[] => readJournal<PendingSaleEdit>(EDIT_JOURNAL_KEY),
+
+  savePendingSaleEdit: (entry: PendingSaleEdit): void => {
+    writeJournal<PendingSaleEdit>(EDIT_JOURNAL_KEY, [
+      entry,
+      ...readJournal<PendingSaleEdit>(EDIT_JOURNAL_KEY).filter(e => e.transactionId !== entry.transactionId),
+    ]);
+  },
+
+  removePendingSaleEdit: (transactionId: string): void => {
+    writeJournal<PendingSaleEdit>(
+      EDIT_JOURNAL_KEY,
+      readJournal<PendingSaleEdit>(EDIT_JOURNAL_KEY).filter(e => e.transactionId !== transactionId)
+    );
+  },
+
+  reconcilePendingSaleEdits: async (): Promise<{
+    adopted: SaleEditResult[];
+    pending: PendingSaleEdit[];
+  }> => {
+    const journal = readJournal<PendingSaleEdit>(EDIT_JOURNAL_KEY);
+    if (journal.length === 0 || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+      return { adopted: [], pending: journal };
+    }
+    const adopted: SaleEditResult[] = [];
+    const remaining: PendingSaleEdit[] = [];
+
+    for (const entry of journal) {
+      if (entry.status === 'queued' || entry.status === 'conflict') {
+        remaining.push(entry);
+        continue;
+      }
+      try {
+        const nextRevision = (entry.expected.financialRevision ?? 0) + 1;
+        const receiptId = `sale_edit_${encodeURIComponent(entry.transactionId)}_${nextRevision}`;
+        const [receiptSnap, saleSnap] = await Promise.all([
+          getDoc(doc(db, 'operation_receipts', receiptId)),
+          getDoc(doc(db, COLLECTION, entry.transactionId)),
+        ]);
+        if (!saleSnap.exists()) {
+          remaining.push(entry);
+          continue;
+        }
+        const sale = docToTx(saleSnap.id, saleSnap.data() as Record<string, unknown>);
+        const saved = receiptSnap.exists() ? receiptSnap.data() : null;
+        if (saved && saved.kind === 'sale_edit' && (!saved.operationId || saved.operationId === entry.operationId)) {
+          const stock: PhoneModel[] = [];
+          for (const source of (saved.stockSources as { collection: string; id: string }[] | undefined) || []) {
+            const snap = await getDoc(doc(db, source.collection, source.id));
+            if (snap.exists()) stock.push({ ...snap.data(), id: snap.id } as PhoneModel);
+          }
+          const custSnap = saved.customerId ? await getDoc(doc(db, 'customers', String(saved.customerId))) : null;
+          const debtSnap = saved.debtId ? await getDoc(doc(db, 'customer_debts', String(saved.debtId))) : null;
+          adopted.push(cacheSaleDocuments<SaleEditResult>({
+            transaction: sale,
+            stock,
+            customer: custSnap?.exists() ? ({ ...custSnap.data(), id: custSnap.id } as Customer) : undefined,
+            debt: debtSnap?.exists() ? ({ ...debtSnap.data(), id: debtSnap.id } as CustomerDebtEntry) : undefined,
+          }));
+          continue;
+        }
+        if ((sale.financialRevision ?? 0) !== (entry.expected.financialRevision ?? 0)) {
+          remaining.push({ ...entry, status: 'conflict', errorMessage: 'Modified on another device.' });
+          continue;
+        }
+        remaining.push(entry);
+      } catch {
+        remaining.push(entry);
+      }
+    }
+
+    writeJournal<PendingSaleEdit>(EDIT_JOURNAL_KEY, remaining);
+    return { adopted, pending: remaining };
+  },
+
+  remapJournalIds: (remapped: Map<string, string>): void => {
+    if (remapped.size === 0) return;
+    const remapField = (v: string | undefined) => (v ? remapped.get(v) || v : v);
+    const refunds = readJournal<PendingSaleRefund>(REFUND_JOURNAL_KEY);
+    if (refunds.length > 0) {
+      writeJournal<PendingSaleRefund>(
+        REFUND_JOURNAL_KEY,
+        refunds.map(r => ({
+          ...r,
+          transactionId: remapField(r.transactionId) || r.transactionId,
+          expected: {
+            ...r.expected,
+            id: remapField(r.expected.id) || r.expected.id,
+            customerId: remapField(r.expected.customerId),
+          },
+        }))
+      );
+    }
+    const edits = readJournal<PendingSaleEdit>(EDIT_JOURNAL_KEY);
+    if (edits.length > 0) {
+      writeJournal<PendingSaleEdit>(
+        EDIT_JOURNAL_KEY,
+        edits.map(e => ({
+          ...e,
+          transactionId: remapField(e.transactionId) || e.transactionId,
+          expected: {
+            ...e.expected,
+            id: remapField(e.expected.id) || e.expected.id,
+            customerId: remapField(e.expected.customerId),
+          },
+          edit: {
+            ...e.edit,
+            creditShift: e.edit.creditShift
+              ? { ...e.edit.creditShift, customerId: remapField(e.edit.creditShift.customerId) || e.edit.creditShift.customerId }
+              : undefined,
+            debtUpdate: e.edit.debtUpdate
+              ? { ...e.edit.debtUpdate, debtId: remapField(e.edit.debtUpdate.debtId) || e.edit.debtUpdate.debtId }
+              : undefined,
+          },
+        }))
+      );
+    }
   },
 
   /**
@@ -419,12 +775,15 @@ export const transactionService = {
    * applying the correction twice.
    */
   editSale: async (expected: SaleTransaction, edit: SaleEditRequest): Promise<SaleEditResult> => {
-    if (!navigator.onLine || expected.id.startsWith('offline_')) throw new Error('Connect and sync this invoice before editing it.');
+    if ((typeof navigator !== 'undefined' && navigator.onLine === false) || expected.id.startsWith('offline_')) {
+      throw new Error('Connect and sync this invoice before editing it.');
+    }
     const nextRevision = (expected.financialRevision ?? 0) + 1;
     if (!Number.isSafeInteger(nextRevision) || nextRevision < 1) throw new Error('This invoice carries an invalid revision. Refresh it before editing.');
     const receiptId = `sale_edit_${encodeURIComponent(expected.id)}_${nextRevision}`;
+    const requestFingerprint = editRequestFingerprint(edit);
     const editedAt = new Date().toISOString();
-    const result = await runTransaction(db, async tx => {
+    const result = await withTimeout(runTransaction(db, async tx => {
       const saleRef = doc(db, COLLECTION, expected.id);
       const receiptRef = doc(db, 'operation_receipts', receiptId);
       const saleSnap = await tx.get(saleRef);
@@ -435,6 +794,11 @@ export const transactionService = {
         const saved = receipt.data();
         if (saved.kind !== 'sale_edit' || saved.transactionId !== sale.id || saved.appliedRevision !== nextRevision) {
           throw new Error('The edit record does not match this invoice. Do not repeat the correction.');
+        }
+        const mismatchedOperation = Boolean(edit.operationId && saved.operationId && saved.operationId !== edit.operationId);
+        const mismatchedPayload = typeof saved.requestFingerprint === 'string' && saved.requestFingerprint !== requestFingerprint;
+        if (mismatchedOperation || mismatchedPayload) {
+          throw new Error('This invoice was changed on another device. Refresh and review it before editing.');
         }
         const stock: PhoneModel[] = [];
         for (const source of (saved.stockSources as { collection: string; id: string }[]) || []) {
@@ -529,6 +893,8 @@ export const transactionService = {
       tx.update(saleRef, edit.updates);
       tx.set(receiptRef, {
         kind: 'sale_edit', transactionId: sale.id, appliedRevision: nextRevision, editedAt,
+        requestFingerprint,
+        ...(edit.operationId ? { operationId: edit.operationId } : {}),
         customerId: customer?.id ?? null, debtId: debt?.id ?? null,
         stockSources: stockWrites.map(write => ({ collection: write.source, id: write.product.id })),
         creditShift: edit.creditShift?.amount ?? 0,
@@ -537,15 +903,49 @@ export const transactionService = {
         transaction: { ...sale, ...edit.updates } as SaleTransaction,
         stock: stockWrites.map(write => write.product), customer, debt,
       };
-    });
+    }), 8000, 'saleEditTransaction');
     return cacheSaleDocuments(result);
   },
 
+  replayQueuedSaleEdit: async (payload: {
+    transactionId: string;
+    operationId: string;
+    expected: SaleTransaction;
+    edit: SaleEditRequest;
+  }): Promise<SaleEditResult> => {
+    try {
+      const result = await transactionService.editSale(payload.expected, {
+        ...payload.edit,
+        operationId: payload.operationId,
+      });
+      writeJournal<PendingSaleEdit>(
+        EDIT_JOURNAL_KEY,
+        readJournal<PendingSaleEdit>(EDIT_JOURNAL_KEY).filter(e => e.transactionId !== payload.transactionId)
+      );
+      return result;
+    } catch (err) {
+      if (isDefiniteDomainError(err)) {
+        const msg = err instanceof Error ? err.message : String(err ?? 'Conflict while replaying invoice edit');
+        writeJournal<PendingSaleEdit>(
+          EDIT_JOURNAL_KEY,
+          readJournal<PendingSaleEdit>(EDIT_JOURNAL_KEY).map(e =>
+            e.transactionId === payload.transactionId
+              ? { ...e, status: 'conflict' as const, errorMessage: msg }
+              : e
+          )
+        );
+        throw new UnrecoverableSyncActionError(msg);
+      }
+      throw err;
+    }
+  },
+
   updateTransaction: async (id: string, updates: Partial<SaleTransaction>): Promise<void> => {
+    invalidateReportsCache();
     const local = getLocalTransactions();
     saveLocalTransactions(local.map(t => t.id === id ? { ...t, ...updates } : t));
 
-    if (id.startsWith('offline_') || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+    if (id.startsWith('offline_') || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
       return;
     }
 

@@ -27,6 +27,7 @@ import { useCustomerStore } from '../../store/customerStore';
 import { useAuthStore } from '../../store/authStore';
 import { activityLogService } from '../../services/activityLogService';
 import { customerLogService } from '../../services/customerLogService';
+import { offlineQueue } from '../../services/offlineQueue';
 import styles from './RepairSettlementModal.module.css';
 import { errorMessage } from '../../utils/errorUtils';
 
@@ -218,29 +219,26 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
         }
       }
 
+      const queueBefore = offlineQueue.getPendingCount();
+      let settledOfflineOrQueued = typeof navigator !== 'undefined' && navigator.onLine === false;
+
       // 4. Record the money and the balance on the customer's account. A row that
       // already exists is synced to the new total AND told about the payment taken
-      // NOW — updating only the total used to leave the ledger holding the old
-      // balance while the ticket claimed more was paid, and a re-settle that pays the
-      // row off must close it, not stand beside it.
+      // NOW — failures propagate so an incomplete ledger save is never presented as done.
       let createdDebtId: string | undefined = ticket.debtEntryId;
       if (ticket.debtEntryId) {
-        try {
-          await updateDebtAmount(
-            ticket.debtEntryId,
-            finalPrice,
-            `Repair #${ticket.ticketNumber} re-settled: total adjusted to ${formatCurrency(finalPrice)}`
-          );
-          if (effectivePaidNow > 0) {
-            await recordDebtPayment(ticket.debtEntryId, {
-              amount: effectivePaidNow,
-              method: effectiveMethod,
-              note: `Handover payment for Repair #${ticket.ticketNumber}`,
-              receivedByName: actor?.name || 'Staff',
-            });
-          }
-        } catch (debtErr) {
-          console.error('Failed to update existing debt entry:', debtErr);
+        await updateDebtAmount(
+          ticket.debtEntryId,
+          finalPrice,
+          `Repair #${ticket.ticketNumber} re-settled: total adjusted to ${formatCurrency(finalPrice)}`
+        );
+        if (effectivePaidNow > 0) {
+          await recordDebtPayment(ticket.debtEntryId, {
+            amount: effectivePaidNow,
+            method: effectiveMethod,
+            note: `Handover payment for Repair #${ticket.ticketNumber}`,
+            receivedByName: actor?.name || 'Staff',
+          });
         }
       } else if (effectiveIsDebt && (matchedCustomer || customerId)) {
           const targetCustId = matchedCustomer?.id || customerId!;
@@ -293,6 +291,13 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
 
           const newDebt = await addDebt(debtPayload);
           createdDebtId = newDebt.id;
+          if (newDebt.id.startsWith('offline_')) {
+            settledOfflineOrQueued = true;
+          }
+      }
+
+      if (ticket.id.startsWith('offline_') || offlineQueue.getPendingCount() > queueBefore) {
+        settledOfflineOrQueued = true;
       }
 
       // 5. Append status history entry
@@ -331,7 +336,15 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
         statusHistory: updatedHistory,
       };
 
-      await updateTicket(ticket.id, updates);
+      await (updateTicket as (
+        id: string,
+        u: Partial<RepairTicket>,
+        opts?: { onOutcome?: (o: 'committed' | 'queued') => void }
+      ) => Promise<void>)(ticket.id, updates, {
+        onOutcome: (outcome) => {
+          if (outcome === 'queued') settledOfflineOrQueued = true;
+        },
+      });
 
       // 6b. Synchronize Parent Ticket if this is a Return Child Ticket
       const storeTickets = useRepairStore.getState().tickets;
@@ -433,8 +446,15 @@ export const RepairSettlementModal: React.FC<RepairSettlementModalProps> = ({
         recalculateCustomer(targetCustomer.id).catch(console.error);
       }
 
-      // 8. Success Feedback
-      if (effectiveIsFullyPaid || isZeroPrice) {
+      // 8. Feedback distinguishing synchronized server confirmation vs offline queued save
+      if (settledOfflineOrQueued) {
+        toast.info(
+          'Handover Saved Offline — Queued for Sync',
+          effectiveIsFullyPaid || isZeroPrice
+            ? `Ticket #${ticket.ticketNumber} settled locally (${formatCurrency(effectiveTotalPaid)}) and queued to sync when online.`
+            : `Debt of ${formatCurrency(effectiveRemainingDebt)} for Ticket #${ticket.ticketNumber} saved locally and queued to sync when online.`
+        );
+      } else if (effectiveIsFullyPaid || isZeroPrice) {
         toast.success(
           'Phone Handed Over & Fully Paid! 🟢',
           `Ticket #${ticket.ticketNumber} marked as completed and fully paid (${formatCurrency(effectiveTotalPaid)}).`

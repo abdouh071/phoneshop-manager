@@ -4,6 +4,7 @@ import { renderToString } from 'react-dom/server';
 import { QRCodeSVG } from 'qrcode.react';
 import type { CustomTicketData } from './customTicketTypes';
 import { escapeHtml } from '../../utils/escapeHtml';
+import { computeFreeTextStickerLayout } from '../../utils/customLabelWrap';
 
 export function buildCustomTicketHTML(
   data: CustomTicketData,
@@ -102,8 +103,10 @@ export function buildCustomTicketHTML(
     const is30mm = data.stickerSize === '50x30';
     const is25mm = data.stickerSize === '50x25';
     const stickerHeight = is30mm ? '30mm' : is25mm ? '25mm' : '20mm';
+    const layout = computeFreeTextStickerLayout(data, storeName);
+    const wrappedText = text ? layout.wrappedLines.join('\n') : '';
     const fontSizeMap: Record<string, string> = {
-      auto: text.length > 60 ? '9px' : text.length > 30 ? '11px' : text.length > 15 ? '13px' : '15px',
+      auto: wrappedText.length > 60 ? '9px' : wrappedText.length > 30 ? '11px' : wrappedText.length > 15 ? '13px' : '15px',
       normal: '10px',
       large: '12px',
       huge: '15px',
@@ -117,7 +120,7 @@ export function buildCustomTicketHTML(
           ${data.showStoreNameOnSticker ? `<div style="font-size:9px;font-weight:900;text-transform:uppercase;color:#555;margin-bottom:2px;border-bottom:1px solid #ccc;width:100%;text-align:center;">${escapeHtml((storeName || 'PhoneShop Pro').substring(0, 24))}</div>` : ''}
           <div style="flex:1;display:flex;justify-content:center;align-items:center;width:100%;">
             <div style="font-size:${fSize};font-weight:${isBold ? '900' : 'normal'};color:#111;white-space:pre-wrap;word-break:break-word;line-height:1.25;width:100%;">
-              ${text ? escapeHtml(text) : '<span style="color:#aaa;font-size:10px;font-style:italic;">Type on keyboard to print here...</span>'}
+              ${wrappedText ? escapeHtml(wrappedText) : '<span style="color:#aaa;font-size:10px;font-style:italic;">Type on keyboard to print here...</span>'}
             </div>
           </div>
           ${barcodeHtml ? `<div style="margin-top:2px;width:100%;">${barcodeHtml}</div>` : ''}

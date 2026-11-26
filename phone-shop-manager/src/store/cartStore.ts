@@ -2,13 +2,18 @@ import { create } from 'zustand';
 import type { CartItem, Customer, PaymentMethod, PhoneModel, SaleTransaction, SuspendedCart, CustomerDebtEntry } from '../types';
 import { useInventoryStore } from './inventoryStore';
 import { inventoryService, commitSaleStockEffects } from '../services/inventoryService';
-import { transactionService } from '../services/transactionService';
+import { transactionService, type SaleEditRequest } from '../services/transactionService';
+import { offlineQueue } from '../services/offlineQueue';
+import { computeStockStatus } from '../utils/stockStatus';
 import { claimInvoiceNumber } from '../services/invoiceCounter';
 import { activityLogService } from '../services/activityLogService';
 import { customerLogService } from '../services/customerLogService';
 import { useAuthStore } from './authStore';
 import { useCustomerStore } from './customerStore';
 import { cartService } from '../services/cartService';
+import { mergeSuspendedFetchResult } from '../services/suspendedCartSync';
+import { retailCheckoutService, type PendingRetailCheckout, type RetailCheckoutResult } from '../services/retailCheckoutService';
+import { errorMessage } from '../utils/errorUtils';
 import { formatCurrency } from '../utils/formatCurrency';
 import { discountAmountOf, lineDiscountOf } from '../utils/discountPolicy';
 import { planSaleEditStock } from '../utils/saleEditStock';
@@ -75,19 +80,23 @@ const moveSaleStock = async (
 const STORAGE_KEY_ACTIVE = 'pos_active_cart';
 const STORAGE_KEY_SUSPENDED = 'pos_suspended_carts';
 
-const loadLocalActiveCart = (): { items: CartItem[]; customerName: string; customerPhone: string; discount: { type: 'percent' | 'flat'; value: number } | null } => {
+let cartsFetchGeneration = 0;
+const suspendedFetchRemovals = new Set<Set<string>>();
+
+const loadLocalActiveCart = (): { items: CartItem[]; customerName: string; customerPhone: string; customerId: string | null; discount: { type: 'percent' | 'flat'; value: number } | null } => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_ACTIVE);
-    if (!raw) return { items: [], customerName: '', customerPhone: '', discount: null };
+    if (!raw) return { items: [], customerName: '', customerPhone: '', customerId: null, discount: null };
     const parsed = JSON.parse(raw);
     return {
       items: Array.isArray(parsed.items) ? parsed.items : [],
       customerName: typeof parsed.customerName === 'string' ? parsed.customerName : '',
       customerPhone: typeof parsed.customerPhone === 'string' ? parsed.customerPhone : '',
+      customerId: typeof parsed.customerId === 'string' ? parsed.customerId : null,
       discount: parsed.discount || null,
     };
   } catch {
-    return { items: [], customerName: '', customerPhone: '', discount: null };
+    return { items: [], customerName: '', customerPhone: '', customerId: null, discount: null };
   }
 };
 
@@ -102,12 +111,18 @@ const loadLocalSuspendedCarts = (): SuspendedCart[] => {
   }
 };
 
-const saveLocalActiveCart = (items: CartItem[], customerName: string, customerPhone: string, discount: { type: 'percent' | 'flat'; value: number } | null) => {
+const saveLocalActiveCart = (
+  items: CartItem[],
+  customerName: string,
+  customerPhone: string,
+  discount: { type: 'percent' | 'flat'; value: number } | null,
+  customerId: string | null = null
+) => {
   try {
-    if (items.length === 0 && !customerName && !customerPhone) {
+    if (items.length === 0 && !customerName && !customerPhone && !customerId) {
       localStorage.removeItem(STORAGE_KEY_ACTIVE);
     } else {
-      localStorage.setItem(STORAGE_KEY_ACTIVE, JSON.stringify({ items, customerName, customerPhone, discount }));
+      localStorage.setItem(STORAGE_KEY_ACTIVE, JSON.stringify({ items, customerName, customerPhone, customerId, discount }));
     }
   } catch (e) {
     console.error('Failed to save active cart to localStorage', e);
@@ -136,6 +151,7 @@ export interface CheckoutOptions {
 interface CartState {
   items: CartItem[];
   payments: { method: PaymentMethod; amount: number }[];
+  customerId: string | null;
   customerName: string;
   customerPhone: string;
   transactions: SaleTransaction[];
@@ -143,6 +159,10 @@ interface CartState {
   error: string | null;
   discount: { type: 'percent' | 'flat'; value: number } | null;
   isCheckingOut: boolean;
+  pendingCheckout: PendingRetailCheckout | null;
+  checkoutRecoveryError: string | null;
+  refreshPendingCheckout: () => void;
+  resolvePendingCheckout: () => Promise<RetailCheckoutResult | null>;
   // Actions
   addToCart: (product: PhoneModel) => { success: boolean; reason?: 'out_of_stock' | 'max_reached'; availableStock?: number };
   addReturnItem: (
@@ -153,6 +173,8 @@ interface CartState {
   updateQuantity: (productId: string, quantity: number, isReturn?: boolean) => { success: boolean; reason?: 'max_reached'; availableStock?: number };
   clearCart: () => void;
   setPayments: (payments: { method: PaymentMethod; amount: number }[]) => void;
+  setCustomerId: (customerId: string | null) => void;
+  setSelectedCustomer: (customer: Customer | null) => void;
   setCustomerName: (name: string) => void;
   setCustomerPhone: (phone: string) => void;
   setDiscount: (discount: { type: 'percent' | 'flat'; value: number } | null) => void;
@@ -160,7 +182,7 @@ interface CartState {
   // Suspend Cart Actions
   suspendedCarts: SuspendedCart[];
   suspendCart: () => void;
-  resumeCart: (id: string) => { success: boolean; warnings?: string[] };
+  resumeCart: (id: string) => { success: boolean; warnings?: string[]; requiresCustomerSelection?: boolean };
   discardSuspendedCart: (id: string) => void;
 
   fetchCarts: () => Promise<void>;
@@ -222,6 +244,7 @@ export const cartTotalsOf = (
 export const useCartStore = create<CartState>((set, get) => ({
   items: initialActive.items,
   payments: [{ method: 'cash', amount: 0 }],
+  customerId: initialActive.customerId,
   customerName: initialActive.customerName,
   customerPhone: initialActive.customerPhone,
   transactions: [],
@@ -230,20 +253,87 @@ export const useCartStore = create<CartState>((set, get) => ({
   discount: initialActive.discount,
   suspendedCarts: initialSuspended,
   isCheckingOut: false,
+  pendingCheckout: null,
+  checkoutRecoveryError: null,
+
+  refreshPendingCheckout: () => {
+    const actorId = useAuthStore.getState().user?.id || 'local-cashier';
+    try {
+      set({ pendingCheckout: retailCheckoutService.getPending(actorId), checkoutRecoveryError: null });
+    } catch (error) {
+      set({ pendingCheckout: null, checkoutRecoveryError: errorMessage(error) });
+    }
+  },
+
+  resolvePendingCheckout: async () => {
+    const actorId = useAuthStore.getState().user?.id || 'local-cashier';
+    if (get().isCheckingOut) return null;
+    set({ isCheckingOut: true });
+    try {
+      const result = await retailCheckoutService.resolve(actorId);
+      if (result) {
+        if (result.transaction) {
+          const tx = result.transaction;
+          useCartStore.setState(state => ({
+            transactions: [tx, ...state.transactions.filter(existing => existing.id !== tx.id)],
+          }));
+        }
+        if (result.stock.length) {
+          const byId = new Map(result.stock.map(product => [product.id, product]));
+          useInventoryStore.setState(state => ({
+            products: state.products.map(product => byId.get(product.id) ?? product),
+            parts: state.parts.map(product => byId.get(product.id) ?? product),
+          }));
+        }
+        if (result.customer || result.debtEntry || result.updatedDebts?.length) {
+          const updatedDebtMap = new Map((result.updatedDebts ?? []).map(d => [d.id, d]));
+          useCustomerStore.setState(state => ({
+            ...(result.customer ? { customers: state.customers.map(c => c.id === result.customer!.id ? result.customer! : c) } : {}),
+            debts: [
+              ...(result.debtEntry ? [result.debtEntry] : []),
+              ...state.debts
+                .filter(d => d.id !== result.debtEntry?.id)
+                .map(d => updatedDebtMap.get(d.id) ?? d),
+            ],
+          }));
+        }
+        const current = get();
+        const currentDraftKey = JSON.stringify({
+          items: current.items.map(i => ({ id: i.product.id, quantity: i.quantity, isReturn: i.isReturn === true })),
+          customerId: current.customerId,
+          customerName: current.customerName,
+          customerPhone: current.customerPhone,
+          discount: current.discount,
+        });
+        if (result.transaction && currentDraftKey === result.pending.draftKey) {
+          set({ items: [], customerId: null, customerName: '', customerPhone: '', discount: null, payments: [{ method: 'cash', amount: 0 }] });
+          saveLocalActiveCart([], '', '', null, null);
+          cartService.clearActiveCart().catch(console.error);
+        }
+        await retailCheckoutService.acknowledge(actorId, result.pending.transaction.id).catch(console.error);
+      }
+      get().refreshPendingCheckout();
+      return result;
+    } finally {
+      set({ isCheckingOut: false });
+    }
+  },
 
   fetchCarts: async () => {
+    const before = get().suspendedCarts;
+    const generation = ++cartsFetchGeneration;
+    const removedIds = new Set<string>();
+    suspendedFetchRemovals.add(removedIds);
     try {
-      // Problem 13 fix: Suspended carts are synced across terminals, while active draft carts remain strictly local
-      const suspended = await cartService.getAllSuspendedCarts();
-      const currentSuspended = get().suspendedCarts;
-      const finalSuspended = suspended && suspended.length > 0 ? suspended : currentSuspended;
-
-      set(state => ({
-        ...state,
-        suspendedCarts: finalSuspended,
-      }));
+      const suspended = await cartService.getAllSuspendedCarts(before);
+      if (generation !== cartsFetchGeneration) return;
+      const finalSuspended = mergeSuspendedFetchResult(suspended, before, get().suspendedCarts, removedIds);
+      set({ suspendedCarts: finalSuspended });
+      saveLocalSuspendedCarts(finalSuspended);
     } catch (err) {
       console.error('Failed to fetch carts', err);
+    } finally {
+      suspendedFetchRemovals.delete(removedIds);
     }
   },
 
@@ -273,7 +363,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       updatedItems = [...state.items, { product: invProduct, quantity: 1, isReturn: false }];
     }
     set({ items: updatedItems });
-    saveLocalActiveCart(updatedItems, state.customerName, state.customerPhone, state.discount);
+    saveLocalActiveCart(updatedItems, state.customerName, state.customerPhone, state.discount, state.customerId);
     cartService.saveActiveCart(updatedItems, state.customerName).catch(console.error);
     return { success: true, availableStock: invProduct.stock };
   },
@@ -313,7 +403,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
 
     set({ items: updatedItems });
-    saveLocalActiveCart(updatedItems, state.customerName, state.customerPhone, state.discount);
+    saveLocalActiveCart(updatedItems, state.customerName, state.customerPhone, state.discount, state.customerId);
     cartService.saveActiveCart(updatedItems, state.customerName).catch(console.error);
   },
 
@@ -322,7 +412,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       const updated = state.items.filter(
         i => !(i.product.id === productId && (isReturn === undefined || Boolean(i.isReturn) === Boolean(isReturn)))
       );
-      saveLocalActiveCart(updated, state.customerName, state.customerPhone, state.discount);
+      saveLocalActiveCart(updated, state.customerName, state.customerPhone, state.discount, state.customerId);
       cartService.saveActiveCart(updated, state.customerName).catch(console.error);
       return { items: updated };
     });
@@ -340,7 +430,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         i => !(i.product.id === productId && (isReturn === undefined || Boolean(i.isReturn) === Boolean(isReturn)))
       );
       set({ items: updated });
-      saveLocalActiveCart(updated, state.customerName, state.customerPhone, state.discount);
+      saveLocalActiveCart(updated, state.customerName, state.customerPhone, state.discount, state.customerId);
       cartService.saveActiveCart(updated, state.customerName).catch(console.error);
       return { success: true };
     }
@@ -359,57 +449,79 @@ export const useCartStore = create<CartState>((set, get) => ({
         : item
     );
     set({ items: updated });
-    saveLocalActiveCart(updated, state.customerName, state.customerPhone, state.discount);
+    saveLocalActiveCart(updated, state.customerName, state.customerPhone, state.discount, state.customerId);
     cartService.saveActiveCart(updated, state.customerName).catch(console.error);
     return { success: true };
   },
 
   clearCart: () => {
-    set({ items: [], customerName: '', customerPhone: '', discount: null, payments: [{ method: 'cash', amount: 0 }] });
-    saveLocalActiveCart([], '', '', null);
+    set({ items: [], customerId: null, customerName: '', customerPhone: '', discount: null, payments: [{ method: 'cash', amount: 0 }] });
+    saveLocalActiveCart([], '', '', null, null);
     cartService.clearActiveCart().catch(console.error);
   },
 
   setPayments: (payments) => set({ payments }),
 
+  setCustomerId: (customerId) => {
+    const state = get();
+    set({ customerId });
+    saveLocalActiveCart(state.items, state.customerName, state.customerPhone, state.discount, customerId);
+  },
+
+  setSelectedCustomer: (customer) => {
+    const state = get();
+    const customerId = customer?.id ?? null;
+    const customerName = customer?.name ?? '';
+    const customerPhone = customer?.phone ?? '';
+    set({ customerId, customerName, customerPhone });
+    saveLocalActiveCart(state.items, customerName, customerPhone, state.discount, customerId);
+    cartService.saveActiveCart(state.items, customerName).catch(console.error);
+  },
+
   setCustomerName: (customerName) => {
-    set({ customerName });
-    saveLocalActiveCart(get().items, customerName, get().customerPhone, get().discount);
-    cartService.saveActiveCart(get().items, customerName).catch(console.error);
+    const state = get();
+    set({ customerName, customerId: null });
+    saveLocalActiveCart(state.items, customerName, state.customerPhone, state.discount, null);
+    cartService.saveActiveCart(state.items, customerName).catch(console.error);
   },
 
   setCustomerPhone: (customerPhone) => {
+    const state = get();
     set({ customerPhone });
-    saveLocalActiveCart(get().items, get().customerName, customerPhone, get().discount);
+    saveLocalActiveCart(state.items, state.customerName, customerPhone, state.discount, state.customerId);
   },
 
   setDiscount: (discount) => {
+    const state = get();
     set({ discount });
-    saveLocalActiveCart(get().items, get().customerName, get().customerPhone, discount);
+    saveLocalActiveCart(state.items, state.customerName, state.customerPhone, discount, state.customerId);
   },
 
   suspendCart: () => {
     const state = get();
     if (state.items.length === 0) return;
     const newSuspended: SuspendedCart = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: `pos_cart_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       date: new Date().toISOString(),
       items: [...state.items],
+      customerId: state.customerId ?? null,
       customerName: state.customerName || '',
+      customerPhone: state.customerPhone || '',
       discount: state.discount || null,
     };
     const updatedSuspended = [newSuspended, ...state.suspendedCarts];
     set({
       suspendedCarts: updatedSuspended,
       items: [],
+      customerId: null,
       customerName: '',
       customerPhone: '',
       discount: null,
       payments: [{ method: 'cash', amount: 0 }],
     });
     saveLocalSuspendedCarts(updatedSuspended);
-    saveLocalActiveCart([], '', '', null);
-    
+    saveLocalActiveCart([], '', '', null, null);
+
     Promise.all([
       cartService.saveSuspendedCart(newSuspended),
       cartService.clearActiveCart()
@@ -420,16 +532,19 @@ export const useCartStore = create<CartState>((set, get) => ({
     const state = get();
     const cartToResume = state.suspendedCarts.find(c => c.id === id);
     if (!cartToResume) return { success: false, warnings: ['Cart not found'] };
-    
+
+    for (const removedIds of suspendedFetchRemovals) removedIds.add(id);
     let updatedSuspended = state.suspendedCarts.filter(c => c.id !== id);
 
     // If the current active cart has items, safely place it on hold instead of losing it
     if (state.items.length > 0) {
       const activeAsSuspended: SuspendedCart = {
-        id: Math.random().toString(36).substr(2, 9),
+        id: `pos_cart_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         date: new Date().toISOString(),
         items: [...state.items],
+        customerId: state.customerId ?? null,
         customerName: state.customerName || '',
+        customerPhone: state.customerPhone || '',
         discount: state.discount || null,
       };
       updatedSuspended = [activeAsSuspended, ...updatedSuspended];
@@ -464,30 +579,47 @@ export const useCartStore = create<CartState>((set, get) => ({
       }
     });
 
+    const matchedCustomer = cartToResume.customerId
+      ? useCustomerStore.getState().customers.find(c => c.id === cartToResume.customerId && !c.mergedIntoId) ?? null
+      : null;
+    const customerId = matchedCustomer ? matchedCustomer.id : null;
+    const customerName = matchedCustomer ? matchedCustomer.name : (cartToResume.customerName || '');
+    const customerPhone = matchedCustomer?.phone ?? cartToResume.customerPhone ?? '';
+    const requiresCustomerSelection = Boolean(
+      (cartToResume.customerId && !matchedCustomer)
+      || (cartToResume.customerId === undefined && cartToResume.customerName)
+    );
+
     set({
       suspendedCarts: updatedSuspended,
       items: validatedItems,
-      customerName: cartToResume.customerName || '',
-      customerPhone: '',
+      customerId,
+      customerName,
+      customerPhone,
       discount: cartToResume.discount || null,
       payments: [{ method: 'cash', amount: 0 }]
     });
 
     saveLocalSuspendedCarts(updatedSuspended);
-    saveLocalActiveCart(validatedItems, cartToResume.customerName || '', '', cartToResume.discount || null);
-    
+    saveLocalActiveCart(validatedItems, customerName, customerPhone, cartToResume.discount || null, customerId);
+
     Promise.all([
       cartService.deleteSuspendedCart(id),
-      cartService.saveActiveCart(validatedItems, cartToResume.customerName || '')
+      cartService.saveActiveCart(validatedItems, customerName)
     ]).catch(console.error);
 
-    return { success: true, warnings: warnings.length > 0 ? warnings : undefined };
+    return {
+      success: true,
+      warnings: warnings.length > 0 ? warnings : undefined,
+      requiresCustomerSelection,
+    };
   },
 
   discardSuspendedCart: (id) => {
     const state = get();
     const target = state.suspendedCarts.find(c => c.id === id);
     if (!target) return;
+    for (const removedIds of suspendedFetchRemovals) removedIds.add(id);
     const updated = state.suspendedCarts.filter(c => c.id !== id);
     set({
       suspendedCarts: updated
@@ -543,6 +675,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         : payments;
       const hasReturn = itemsSnapshot.some(i => i.isReturn === true);
       const actor = useAuthStore.getState().user;
+      const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
 
       let matchedOrCreatedCustomer: Customer | null | undefined = null;
       const isDebt = recordedPayments.some(p => p.method === 'debt');
@@ -550,18 +683,26 @@ export const useCartStore = create<CartState>((set, get) => ({
       const isSurplusAccount = total < 0 && !!(options?.refundType && options.refundType !== 'cash');
 
       // Only look up or create a customer profile if explicitly attached OR if transaction requires an account (debt/credit)
-      const requiresCustomerAccount = options?.customerAttached || isDebt || isCreditUsed || isSurplusAccount;
+      const requiresCustomerAccount = options?.customerAttached || Boolean(get().customerId) || isDebt || isCreditUsed || isSurplusAccount;
 
-      if (customerName && customerName.trim() && requiresCustomerAccount) {
-        try {
-          matchedOrCreatedCustomer = await useCustomerStore.getState().findOrCreateCustomer({
-            name: customerName.trim(),
-            phone: customerPhone?.trim() || '',
-            accountType: 'retail',
-          });
-        } catch (err) {
-          console.error('Failed to find or create customer:', err);
+      if (isOffline && (isCreditUsed || isSurplusAccount)) {
+        throw new Error('Connect to the server before redeeming or issuing Store Credit (Avoir).');
+      }
+
+      const explicitCustomerId = get().customerId;
+      if (explicitCustomerId) {
+        matchedOrCreatedCustomer = useCustomerStore.getState().customers.find(
+          c => c.id === explicitCustomerId && !c.mergedIntoId
+        ) ?? null;
+        if (!matchedOrCreatedCustomer && requiresCustomerAccount) {
+          throw new Error('Select an active, synced customer account manually.');
         }
+      } else if (customerName && customerName.trim() && requiresCustomerAccount) {
+        matchedOrCreatedCustomer = await useCustomerStore.getState().findOrCreateCustomer({
+          name: customerName.trim(),
+          phone: customerPhone?.trim() || '',
+          accountType: 'retail',
+        });
       }
 
       // Avoir and debt deductions live on an account. With no account the settlement
@@ -604,15 +745,16 @@ export const useCartStore = create<CartState>((set, get) => ({
         discount: discountAmount > 0 ? { type: 'flat', value: discountAmount } : undefined,
         total,
         payments: recordedPayments,
-        customerName: customerName || matchedOrCreatedCustomer?.name || undefined,
-        customerPhone: customerPhone || matchedOrCreatedCustomer?.phone || undefined,
+        customerName: matchedOrCreatedCustomer?.name || customerName || undefined,
+        customerPhone: matchedOrCreatedCustomer?.phone || customerPhone || undefined,
         customerId: matchedOrCreatedCustomer?.id,
         saleType: 'retail',
-        stockApplied: false,
+        stockApplied: !isOffline,
+        validationStatus: isOffline ? 'pending_validation' : 'confirmed',
         invoiceNumber,
         invoiceNumberProvisional: numberGuessed || undefined,
         status: 'completed',
-        processedById: actor?.id,
+        processedById: actor?.id || 'local-cashier',
         processedByName: actor?.name,
         exchangeSummary: hasReturn
           ? {
@@ -625,49 +767,19 @@ export const useCartStore = create<CartState>((set, get) => ({
             }
           : undefined,
       };
-      
-      // 1. Save transaction to Firebase
-      const saved = await transactionService.save(txData);
 
-      // 2. Handle Surplus Settlement (When Shop owes customer, total < 0)
-      if (total < 0 && matchedOrCreatedCustomer) {
-        const refundAmount = Math.abs(total);
+      let saved: SaleTransaction;
+      if (isOffline) {
+        // Offline device cannot verify cross-device stock or Avoir availability; mark pending validation
+        txData.stockApplied = false;
+        txData.validationStatus = 'pending_validation';
+        saved = await transactionService.save(txData);
 
-        if (refundType === 'store_credit') {
-          await useCustomerStore.getState().addStoreCredit(
-            matchedOrCreatedCustomer.id,
-            refundAmount,
-            `Exchange Surplus from Receipt #${saved.id.slice(0, 8)}`,
-            `${saved.id}_checkout_credit`
-          ).catch(console.error);
-        } else if (refundType === 'debt_deduction') {
-          await useCustomerStore.getState().deductFromDebt(
-            matchedOrCreatedCustomer.id,
-            refundAmount,
-            `Exchange Surplus applied from Receipt #${saved.id.slice(0, 8)}`,
-            `${saved.id}_checkout_debt_deduction`
-          ).catch(console.error);
-        }
-      }
-
-      // 3. Handle Store Credit Used on Checkout (total > 0)
-      if (options?.storeCreditUsed && options.storeCreditUsed > 0 && matchedOrCreatedCustomer) {
-        await useCustomerStore.getState().useStoreCredit(
-          matchedOrCreatedCustomer.id,
-          options.storeCreditUsed,
-          `POS Sale #${saved.id.slice(0, 8)}`,
-          `${saved.id}_checkout_redeem`
-        ).catch(console.error);
-      }
-
-      // 4. If any amount was put on Debt / Credit Tab, automatically log it in the Customer Debt Ledger (Problem 2 & 8 fix)
-      let createdDebt: CustomerDebtEntry | undefined;
-      if (debtAmount > 0 && matchedOrCreatedCustomer) {
-        try {
+        if (debtAmount > 0 && matchedOrCreatedCustomer) {
           const itemsSummary = itemsSnapshot
             .map(i => `${i.isReturn ? '[RETURN] ' : ''}${i.quantity}x ${i.product.name} ${i.product.model}`)
             .join(', ');
-          createdDebt = await useCustomerStore.getState().addDebt({
+          const createdDebt = await useCustomerStore.getState().addDebt({
             customerId: matchedOrCreatedCustomer.id,
             customerName: matchedOrCreatedCustomer.name,
             customerPhone: matchedOrCreatedCustomer.phone || customerPhone || '',
@@ -677,16 +789,10 @@ export const useCartStore = create<CartState>((set, get) => ({
             date: txData.date,
             notes: `POS Sale Receipt #${saved.id}`,
             transactionId: saved.id,
-            // The receipt's own reference, so a retail balance is findable by the
-            // number printed on the paper the customer holds — not only by the
-            // document id, which nobody in the shop reads.
             invoiceNumber: txData.invoiceNumber,
-            // The down payment in the tender it was actually given in; the drawer
-            // counts it on the sale above, not again on this ledger row.
             payments: saleOpeningPayments(recordedPayments, txData.date, actor?.name),
             allowCreditLimitOverride: options?.allowCreditLimitOverride,
           });
-
           if (createdDebt) {
             const settlement = {
               type: Math.max(0, total - debtAmount) > 0 ? ('partial_payment' as const) : ('charged_to_account' as const),
@@ -694,38 +800,78 @@ export const useCartStore = create<CartState>((set, get) => ({
               chargedAmount: debtAmount,
               debtEntryId: createdDebt.id,
             };
-            await transactionService.updateTransaction(saved.id, {
-              accountSettlement: settlement
-            }).catch(console.error);
+            await transactionService.updateTransaction(saved.id, { accountSettlement: settlement });
             saved.accountSettlement = settlement;
           }
-        } catch (err) {
-          console.error('Failed to log customer debt on checkout:', err);
-          throw err;
         }
-      }
 
-      // 5. Update Retail Customer Statistics (Authoritative recalculation)
-      if (matchedOrCreatedCustomer) {
-        useCustomerStore.getState().recalculateCustomer(matchedOrCreatedCustomer.id).catch(console.error);
+        if (matchedOrCreatedCustomer) {
+          useCustomerStore.getState().recalculateCustomer(matchedOrCreatedCustomer.id).catch(console.error);
+        }
+        await moveSaleStock(saved, itemsSnapshot, 'retail');
+      } else {
+        const draftKey = JSON.stringify({
+          items: itemsSnapshot.map(i => ({ id: i.product.id, quantity: i.quantity, isReturn: i.isReturn === true })),
+          customerId: explicitCustomerId,
+          customerName,
+          customerPhone,
+          discount: get().discount,
+        });
+
+        let result: RetailCheckoutResult;
+        try {
+          result = await retailCheckoutService.checkout(txData, {
+            draftKey,
+            actorRole: actor?.role,
+            refundType,
+            storeCreditUsed: options?.storeCreditUsed,
+            allowCreditLimitOverride: options?.allowCreditLimitOverride,
+          });
+        } finally {
+          get().refreshPendingCheckout();
+        }
+
+        if (!result.transaction) {
+          throw new Error('Checkout did not return a confirmed sale.');
+        }
+        saved = result.transaction;
+
+        if (result.stock.length) {
+          const byId = new Map(result.stock.map(product => [product.id, product]));
+          useInventoryStore.setState(state => ({
+            products: state.products.map(product => byId.get(product.id) ?? product),
+            parts: state.parts.map(product => byId.get(product.id) ?? product),
+          }));
+        }
+        if (result.customer || result.debtEntry || result.updatedDebts?.length) {
+          const updatedDebtMap = new Map((result.updatedDebts ?? []).map(d => [d.id, d]));
+          useCustomerStore.setState(state => ({
+            ...(result.customer ? { customers: state.customers.map(c => c.id === result.customer!.id ? result.customer! : c) } : {}),
+            debts: [
+              ...(result.debtEntry ? [result.debtEntry] : []),
+              ...state.debts
+                .filter(d => d.id !== result.debtEntry?.id)
+                .map(d => updatedDebtMap.get(d.id) ?? d),
+            ],
+          }));
+        }
+
+        await retailCheckoutService.acknowledge(txData.processedById!, saved.id).catch(console.error);
+        get().refreshPendingCheckout();
       }
-      
-      // 6. Authoritative Stock Adjustments in Zustand & Firestore (executed ONCE per transaction):
-      // Regular purchases -> deduct stock (-qty); returned items -> restock (+qty). One movement
-      // per product, stamped on the invoice so a crash between the sale and the shelf is healed.
-      await moveSaleStock(saved, itemsSnapshot, 'retail');
 
       set(state => ({
-        transactions: [saved, ...state.transactions],
+        transactions: [saved, ...state.transactions.filter(existing => existing.id !== saved.id)],
         items: [],
+        customerId: null,
         customerName: '',
         customerPhone: '',
         discount: null,
         payments: [{ method: 'cash', amount: 0 }],
       }));
-      
-      // 7. Clear active cart from local storage and DB after checkout
-      saveLocalActiveCart([], '', '', null);
+
+      // Clear active cart from local storage and DB after checkout
+      saveLocalActiveCart([], '', '', null, null);
       cartService.clearActiveCart().catch(console.error);
 
       // 7. Log to Activity Log & Customer Audit Log
@@ -1024,65 +1170,180 @@ export const useCartStore = create<CartState>((set, get) => ({
     }
 
     // ── The writes ──
-    // Online, the whole correction — invoice, shelf, credit record and Avoir — lands
-    // in one server transaction keyed by the revision this till saw; a stale till is
-    // refused before anything moves. Offline (or an invoice only this device knows)
-    // the durable per-product queue and keyed Avoir moves keep the legacy sequence,
-    // because there is no server to run one atomic correction on.
-    let confirmed: { transaction: SaleTransaction; stock: PhoneModel[]; customer?: Customer; debt?: CustomerDebtEntry } | null = null;
-    if (!navigator.onLine || txId.startsWith('offline_')) {
-      const stockPromises = deltas.map(({ productId, delta }) =>
-        inventoryService.adjustStockAsync(productId, delta)
-      );
+    // Online: the whole correction — invoice, shelf, credit record and Avoir — lands
+    // in one server transaction keyed by the revision this till saw and a durable operationId.
+    // Offline for an existing server invoice: queue ONE atomic EDIT_SALE_TRANSACTION action
+    // and update local mirrors as `pending_validation` (never uncoordinated split mutations).
+    // Offline for a local-only offline_tx_* invoice: await every financial change without swallowing errors.
+    const nextRevision = (tx.financialRevision ?? 0) + 1;
+    const stockDeltas = deltas.map(({ productId, delta }) => ({ productId, delta }));
+    const creditShift = surplusShift !== 0 && creditHolder
+      ? {
+          customerId: creditHolder,
+          amount: surplusShift,
+          note: surplusShift > 0
+            ? `Over-collection on corrected Receipt #${receipt} held as Avoir`
+            : `Avoir released by corrected Receipt #${receipt}`,
+        }
+      : undefined;
+    const debtUpdate = linkedDebt
+      ? { debtId: linkedDebt.id, total, charged: newCharged, itemsSummary, expectedPaid: paid }
+      : undefined;
 
-      if (stockPromises.length > 0) {
-        await Promise.all(stockPromises).catch(console.error);
-        await useInventoryStore.getState().fetchProducts().catch(console.error);
+    const existingJournal = transactionService.getPendingSaleEdits().find(
+      e => e.transactionId === txId && (e.expected.financialRevision ?? 0) === (tx.financialRevision ?? 0)
+    );
+    const operationId = existingJournal?.operationId || `edit_${txId}_${nextRevision}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const isOfflineNow = typeof navigator !== 'undefined' && navigator.onLine === false;
+
+    let confirmed: { transaction: SaleTransaction; stock: PhoneModel[]; customer?: Customer; debt?: CustomerDebtEntry } | null = null;
+    let optimisticStatusOverride: Partial<SaleTransaction> = {};
+
+    if (isOfflineNow && !txId.startsWith('offline_')) {
+      const serverEditRequest: SaleEditRequest = {
+        operationId,
+        updates: { ...updates, validationStatus: 'confirmed' },
+        stockDeltas,
+        creditShift,
+        debtUpdate,
+      };
+      transactionService.savePendingSaleEdit({
+        operationId,
+        transactionId: txId,
+        expected: tx,
+        edit: serverEditRequest,
+        status: 'queued',
+        createdAt: existingJournal?.createdAt || new Date().toISOString(),
+      });
+      await offlineQueue.enqueue({
+        type: 'EDIT_SALE_TRANSACTION',
+        payload: {
+          transactionId: txId,
+          operationId,
+          expected: tx,
+          edit: serverEditRequest,
+        },
+      });
+
+      optimisticStatusOverride = { validationStatus: 'pending_validation' };
+      await transactionService.updateTransaction(txId, { ...updates, ...optimisticStatusOverride });
+
+      if (stockDeltas.length > 0) {
+        const localInv = inventoryService.getLocalInventory();
+        const deltaMap = new Map(stockDeltas.map(d => [d.productId, d.delta]));
+        const nextLocalInv = localInv.map(p => {
+          const d = deltaMap.get(p.id);
+          if (!d) return p;
+          const nextStock = Math.max(0, p.stock + d);
+          return {
+            ...p,
+            stock: nextStock,
+            stockStatus: computeStockStatus(nextStock, p.lowStockThreshold ?? 1),
+          };
+        });
+        inventoryService.saveLocalInventory(nextLocalInv);
+        const mapById = new Map(nextLocalInv.map(p => [p.id, p]));
+        useInventoryStore.setState(state => ({
+          products: state.products.map(p => mapById.get(p.id) ?? p),
+          parts: state.parts.map(p => mapById.get(p.id) ?? p),
+        }));
+      }
+
+      if (linkedDebt) {
+        try {
+          const rawDebts = localStorage.getItem('offline_customer_debts');
+          const localDebts: CustomerDebtEntry[] = rawDebts ? JSON.parse(rawDebts) : [];
+          const nextDebt: CustomerDebtEntry = {
+            ...linkedDebt,
+            totalAmount: Math.round(total * 100) / 100,
+            remainingBalance: Math.max(0, Math.round(newCharged * 100) / 100),
+            status: newCharged <= 0 ? 'paid' : (linkedDebt.amountPaid || 0) > 0 ? 'partially_paid' : 'unpaid',
+            updatedAt: new Date().toISOString(),
+            itemsSummary,
+            productOrService: itemsSummary,
+          };
+          localStorage.setItem(
+            'offline_customer_debts',
+            JSON.stringify(localDebts.map(d => (d.id === linkedDebt.id ? nextDebt : d)))
+          );
+          customerStore.debts = customerStore.debts.map(d => (d.id === linkedDebt.id ? nextDebt : d));
+          useCustomerStore.setState(state => ({
+            debts: state.debts.map(d => (d.id === linkedDebt.id ? nextDebt : d)),
+          }));
+        } catch (err) {
+          console.warn('Could not update optimistic debt mirror for queued edit:', err);
+        }
+      }
+    } else if (txId.startsWith('offline_')) {
+      if (deltas.length > 0) {
+        await Promise.all(deltas.map(({ productId, delta }) => inventoryService.adjustStockAsync(productId, delta)));
+        await useInventoryStore.getState().fetchProducts();
       }
 
       if (linkedDebt) {
         if (surplusShift > 0 && creditHolder) {
-          await customerStore
-            .addStoreCredit(
-              creditHolder,
-              surplusShift,
-              `Over-collection on corrected Receipt #${receipt} held as Avoir`,
-              `${txId}_edit_${(tx.financialRevision ?? 0) + 1}_credit`
-            )
-            .catch(console.error);
+          await customerStore.addStoreCredit(
+            creditHolder,
+            surplusShift,
+            `Over-collection on corrected Receipt #${receipt} held as Avoir`,
+            `${txId}_edit_${nextRevision}_credit`
+          );
         } else if (surplusShift < 0 && creditHolder) {
-          // The invoice came back up to what was already paid, so the Avoir written
-          // by the earlier correction is money the shop has now handed over twice.
-          await customerStore
-            .useStoreCredit(
-              creditHolder,
-              Math.abs(surplusShift),
-              `Avoir released by corrected Receipt #${receipt}`,
-              `${txId}_edit_${(tx.financialRevision ?? 0) + 1}_credit`
-            )
-            .catch(console.error);
+          await customerStore.useStoreCredit(
+            creditHolder,
+            Math.abs(surplusShift),
+            `Avoir released by corrected Receipt #${receipt}`,
+            `${txId}_edit_${nextRevision}_credit`
+          );
         }
-        customerStore.updateDebtAmount(linkedDebt.id, total, itemsSummary, newCharged).catch(console.error);
+        await customerStore.updateDebtAmount(linkedDebt.id, total, itemsSummary, newCharged);
       }
 
       await transactionService.updateTransaction(txId, updates);
     } else {
-      confirmed = await transactionService.editSale(tx, {
+      const serverEditRequest: SaleEditRequest = {
+        operationId,
         updates,
-        stockDeltas: deltas.map(({ productId, delta }) => ({ productId, delta })),
-        creditShift: surplusShift !== 0 && creditHolder
-          ? {
-              customerId: creditHolder,
-              amount: surplusShift,
-              note: surplusShift > 0
-                ? `Over-collection on corrected Receipt #${receipt} held as Avoir`
-                : `Avoir released by corrected Receipt #${receipt}`,
-            }
-          : undefined,
-        debtUpdate: linkedDebt
-          ? { debtId: linkedDebt.id, total, charged: newCharged, itemsSummary, expectedPaid: paid }
-          : undefined,
+        stockDeltas,
+        creditShift,
+        debtUpdate,
+      };
+      transactionService.savePendingSaleEdit({
+        operationId,
+        transactionId: txId,
+        expected: tx,
+        edit: serverEditRequest,
+        status: 'pending',
+        createdAt: existingJournal?.createdAt || new Date().toISOString(),
       });
+      try {
+        confirmed = await transactionService.editSale(tx, serverEditRequest);
+        transactionService.removePendingSaleEdit(txId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err ?? '');
+        const definiteReject =
+          msg.includes('changed on another device') ||
+          msg.includes('closed') ||
+          msg.includes('Not enough stock') ||
+          msg.includes('already been spent') ||
+          msg.includes('received a payment') ||
+          msg.includes('no longer exists') ||
+          msg.includes('permission-denied');
+        if (definiteReject) {
+          transactionService.removePendingSaleEdit(txId);
+        } else {
+          transactionService.savePendingSaleEdit({
+            operationId,
+            transactionId: txId,
+            expected: tx,
+            edit: serverEditRequest,
+            status: 'uncertain',
+            createdAt: existingJournal?.createdAt || new Date().toISOString(),
+            errorMessage: msg,
+          });
+        }
+        throw err;
+      }
     }
 
     // If this transaction has an attached customer, recalculate stats authoritatively
@@ -1090,7 +1351,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       useCustomerStore.getState().recalculateCustomer(tx.customerId).catch(console.error);
     }
 
-    const finalTx: SaleTransaction = confirmed?.transaction ?? { ...tx, ...updates };
+    const finalTx: SaleTransaction = confirmed?.transaction ?? { ...tx, ...updates, ...optimisticStatusOverride };
     if (isPartsB2B) {
       const { usePartsCartStore } = await import('./partsCartStore');
       usePartsCartStore.setState(state => ({

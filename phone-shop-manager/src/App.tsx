@@ -71,6 +71,12 @@ function App() {
   const { isAuthenticated, isInitializing } = useAuthStore();
 
   useEffect(() => {
+    // Only start background authenticated synchronization when a session is ready.
+    // On logout or while unauthenticated, listeners/timers stop without clearing queued work.
+    if (isInitializing || !isAuthenticated) {
+      return;
+    }
+
     let abandoned = false;
     const cleanups: Array<() => void> = [];
 
@@ -96,7 +102,7 @@ function App() {
       abandoned = true;
       cleanups.forEach(cleanup => cleanup());
     };
-  }, []);
+  }, [isAuthenticated, isInitializing]);
 
   return (
     <ErrorBoundary>

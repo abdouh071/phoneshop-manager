@@ -16,10 +16,13 @@ import { db } from '../lib/firebase';
 import type { PhoneModel, StockStatus } from '../types';
 import type { StockDelta } from '../utils/stockDeltas';
 import { computeStockStatus } from '../utils/stockStatus';
+import { extractBaseValues, findConflictingField } from '../utils/conflictCheck';
 import { withTimeout } from '../utils/withTimeout';
-import { offlineQueue } from './offlineQueue';
+import { offlineQueue, UnrecoverableSyncActionError } from './offlineQueue';
 import { offlineQueueMirror } from './offlineQueueMirror';
+import { offlineDeadLetterStore } from './offlineDeadLetterStore';
 import { newIdempotencyKey } from './idempotentReplay';
+import { invalidateReportsCache } from './reportCacheInvalidation';
 
 const COLLECTION = 'inventory';
 const LOCAL_STORAGE_KEY = 'offline_inventory';
@@ -42,6 +45,10 @@ export interface PendingStockAdjustment {
    * Absent on records queued before this field existed: treated as 'absolute', the old behaviour.
    */
   mode?: 'relative' | 'absolute';
+  /** True when only writing off damaged stock (caps reduction at remaining units). */
+  clampAtZero?: boolean;
+  /** True when a network/timeout interrupted submission and receipt reconciliation is required before retry. */
+  uncertain?: boolean;
   timestamp: string;
 }
 
@@ -115,6 +122,7 @@ export const commitStockDelta = async (
   id: string,
   delta: number,
   replayKey: string,
+  options?: { clampAtZero?: boolean }
 ): Promise<{ previousStock: number; stock: number; stockStatus: StockStatus }> => {
   if (!Number.isSafeInteger(delta) || !replayKey?.trim()) throw new Error('A stock movement needs an integer delta and a stable operation ID.');
   return runTransaction(db, async tx => {
@@ -133,8 +141,18 @@ export const commitStockDelta = async (
     }
     // Keep recognizing existing queued movements written by older builds.
     const adopted = Array.isArray(data.appliedStockKeys) && data.appliedStockKeys.includes(replayKey);
-    const nextStock = adopted ? currentStock : Math.max(0, currentStock + delta);
-    if (!Number.isSafeInteger(nextStock)) throw new Error(`Invalid stock balance: ${id}`);
+    let nextStock: number;
+    if (adopted) {
+      nextStock = currentStock;
+    } else if (delta < 0 && currentStock + delta < 0) {
+      if (!options?.clampAtZero) {
+        throw new Error(`INSUFFICIENT_STOCK:${id}:requested=${Math.abs(delta)}:available=${currentStock}`);
+      }
+      nextStock = 0;
+    } else {
+      nextStock = currentStock + delta;
+    }
+    if (!Number.isSafeInteger(nextStock) || nextStock < 0) throw new Error(`Invalid stock balance: ${id}`);
     const stockStatus = computeStockStatus(nextStock, threshold);
     if (!adopted) tx.update(ref, { stock: nextStock, stockStatus });
     tx.set(receiptRef, { kind: 'stock', productId: id, delta, previousStock: currentStock, stock: nextStock, createdAt: new Date().toISOString() });
@@ -179,7 +197,8 @@ export interface SaleStockOutcome {
  */
 export const commitSaleStockEffects = async (
   saleId: string,
-  deltas: StockDelta[]
+  deltas: StockDelta[],
+  options?: { allowClamp?: boolean }
 ): Promise<SaleStockOutcome> => {
   let applied: SaleStockApplied[] = [];
   let missed: { productId: string; delta: number; error: string }[] = [];
@@ -216,7 +235,15 @@ export const commitSaleStockEffects = async (
         const data = snap.data() as Record<string, unknown>;
         const previousStock = typeof data.stock === 'number' ? data.stock : 0;
         const threshold = typeof data.lowStockThreshold === 'number' ? data.lowStockThreshold : 1;
-        const stock = Math.max(0, previousStock + delta);
+        let stock: number;
+        if (delta < 0 && previousStock + delta < 0) {
+          if (!options?.allowClamp) {
+            throw new Error(`INSUFFICIENT_STOCK:${productId}:requested=${Math.abs(delta)}:available=${previousStock}`);
+          }
+          stock = 0;
+        } else {
+          stock = previousStock + delta;
+        }
         const stockStatus = computeStockStatus(stock, threshold);
         stockWrites.push({ ref, stock, stockStatus });
         applied.push({ productId, previousStock, stock, stockStatus });
@@ -244,6 +271,128 @@ export const commitSaleStockEffects = async (
   }
 
   return { applied, missed, adopted };
+};
+
+const isDefiniteStockRejection = (err: unknown): boolean => {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  return (
+    msg.startsWith('INSUFFICIENT_STOCK:')
+    || msg.includes('Product no longer exists:')
+    || msg.includes('Invalid stock balance:')
+    || msg.includes('different movement')
+  );
+};
+
+export interface StockReconcileResult {
+  adopted: number;
+  retried: number;
+  dropped: number;
+  totalSynced: number;
+}
+
+/**
+ * Reconciles uncertain or queued stock movements by checking `operation_receipts`
+ * before retrying or compensating so a late commit never moves the shelf twice.
+ */
+export const reconcilePendingStockAdjustments = async (): Promise<StockReconcileResult> => {
+  const adjustments = getPendingStockAdjustments();
+  if (adjustments.length === 0) return { adopted: 0, retried: 0, dropped: 0, totalSynced: 0 };
+
+  let adopted = 0;
+  let retried = 0;
+  let dropped = 0;
+  const resolvedIds = new Set<string>();
+  const latestProducts = new Map<string, PhoneModel>();
+
+  for (const adj of adjustments) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
+    try {
+      const ref = doc(db, COLLECTION, adj.productId);
+      const snap = await getDoc(ref);
+
+      if (!snap.exists()) {
+        offlineDeadLetterStore.record({
+          source: 'stock_adjustment',
+          type: 'inventory',
+          payload: { ...adj },
+          reason: 'document_missing',
+          attempts: 0,
+          enqueuedAt: adj.timestamp,
+          detail: `inventory/${adj.productId} no longer exists`,
+        });
+        resolvedIds.add(adj.id);
+        dropped++;
+        continue;
+      }
+
+      const data = snap.data() as Record<string, unknown>;
+      if (adj.mode === 'relative') {
+        const receiptSnap = await getDoc(doc(db, 'operation_receipts', `stock_${encodeURIComponent(adj.id)}`));
+        if (receiptSnap.exists()) {
+          const threshold = typeof data.lowStockThreshold === 'number' ? data.lowStockThreshold : 1;
+          const authoritativeStock = typeof data.stock === 'number' ? data.stock : 0;
+          latestProducts.set(adj.productId, docToProduct(snap.id, {
+            ...data,
+            stock: authoritativeStock,
+            stockStatus: computeStockStatus(authoritativeStock, threshold),
+          }));
+          resolvedIds.add(adj.id);
+          adopted++;
+          continue;
+        }
+        try {
+          const committed = await withTimeout(
+            commitStockDelta(adj.productId, adj.delta, adj.id, { clampAtZero: adj.clampAtZero }),
+            SALE_STOCK_TX_TIMEOUT_MS,
+            'Firestore stock reconcile timeout'
+          );
+          latestProducts.set(adj.productId, docToProduct(snap.id, {
+            ...data,
+            stock: committed.stock,
+            stockStatus: committed.stockStatus,
+          }));
+          resolvedIds.add(adj.id);
+          retried++;
+        } catch (commitErr) {
+          if (isDefiniteStockRejection(commitErr)) {
+            offlineDeadLetterStore.record({
+              source: 'stock_adjustment',
+              type: 'inventory',
+              payload: { ...adj },
+              reason: 'unrecoverable',
+              attempts: 1,
+              enqueuedAt: adj.timestamp,
+              detail: commitErr instanceof Error ? commitErr.message : `Stock adjustment rejected for ${adj.productId}`,
+            });
+            resolvedIds.add(adj.id);
+            dropped++;
+          } else {
+            throw commitErr;
+          }
+        }
+      } else {
+        const currentStock = typeof data.stock === 'number' ? data.stock : 0;
+        const threshold = typeof data.lowStockThreshold === 'number' ? data.lowStockThreshold : 1;
+        const newStock = adj.newStock !== undefined ? adj.newStock : Math.max(0, currentStock + adj.delta);
+        const stockStatus = computeStockStatus(newStock, threshold);
+        await updateDoc(ref, { stock: newStock, stockStatus });
+        latestProducts.set(adj.productId, docToProduct(snap.id, { ...data, stock: newStock, stockStatus }));
+        resolvedIds.add(adj.id);
+        retried++;
+      }
+    } catch (err) {
+      console.error(`[InventoryService] Failed to reconcile stock adjustment ${adj.id}:`, err);
+    }
+  }
+
+  if (resolvedIds.size > 0) {
+    savePendingStockAdjustments(getPendingStockAdjustments().filter(a => !resolvedIds.has(a.id)));
+  }
+  if (latestProducts.size > 0) {
+    saveLocalInventory(getLocalInventory().map(p => latestProducts.get(p.id) ?? p));
+  }
+
+  return { adopted, retried, dropped, totalSynced: adopted + retried + dropped };
 };
 
 export const inventoryService = {
@@ -331,8 +480,13 @@ export const inventoryService = {
     }
   },
 
-  getAll: async (): Promise<PhoneModel[]> => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+  getAll: async (options?: { allowLocalFallback?: boolean }): Promise<PhoneModel[]> => {
+    const mayFallBack = options?.allowLocalFallback !== false;
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      if (!mayFallBack) {
+        throw new Error('Offline: inventory items on this device are cached, not live server records.');
+      }
       return getLocalInventory().sort((a, b) => a.name.localeCompare(b.name));
     }
 
@@ -349,6 +503,7 @@ export const inventoryService = {
       saveLocalInventory(merged);
       return merged;
     } catch (err) {
+      if (!mayFallBack) throw err;
       console.warn('Firestore getAll inventory failed, using local cache:', err);
       return getLocalInventory().sort((a, b) => a.name.localeCompare(b.name));
     }
@@ -378,6 +533,7 @@ export const inventoryService = {
   },
 
   updateStock: async (id: string, newStock: number): Promise<PhoneModel> => {
+    invalidateReportsCache();
     const local = getLocalInventory();
     const existing = local.find(p => p.id === id);
     const threshold = existing?.lowStockThreshold ?? 1;
@@ -421,12 +577,14 @@ export const inventoryService = {
    * Apply a stock delta without trusting this device's mirror. The server document is read
    * inside the transaction, so two tills selling the same model compose instead of clobbering.
    * `previousStock` is the value the delta was applied to, and `atomic` says whether it came
-   * from Firestore or from the local mirror (offline / write failed).
+   * from Firestore or from the local mirror (offline / uncertain timeout).
    */
   applyStockDelta: async (
     id: string,
-    delta: number
-  ): Promise<{ updated: PhoneModel; previousStock: number; atomic: boolean }> => {
+    delta: number,
+    options?: { clampAtZero?: boolean }
+  ): Promise<{ updated: PhoneModel; previousStock: number; atomic: boolean; uncertain?: boolean }> => {
+    invalidateReportsCache();
     const local = getLocalInventory();
     const existing = local.find(p => p.id === id);
     const currentStock = existing?.stock ?? 0;
@@ -442,7 +600,15 @@ export const inventoryService = {
     // Persist before submission so restarting during a commit cannot lose its identity.
     savePendingStockAdjustments([
       ...getPendingStockAdjustments(),
-      { id: replayKey, productId: id, delta, newStock, mode: 'relative', timestamp: new Date().toISOString() },
+      {
+        id: replayKey,
+        productId: id,
+        delta,
+        newStock,
+        mode: 'relative',
+        ...(options?.clampAtZero ? { clampAtZero: true } : {}),
+        timestamp: new Date().toISOString(),
+      },
     ]);
     saveLocalInventory(local.map(p => p.id === id ? updatedLocal : p));
 
@@ -451,14 +617,28 @@ export const inventoryService = {
     }
 
     try {
-      const authoritative = await commitStockDelta(id, delta, replayKey);
+      const authoritative = await withTimeout(
+        commitStockDelta(id, delta, replayKey, options),
+        SALE_STOCK_TX_TIMEOUT_MS,
+        'Firestore commitStockDelta timeout'
+      );
       const reconciled: PhoneModel = { ...updatedLocal, stock: authoritative.stock, stockStatus: authoritative.stockStatus };
       saveLocalInventory(getLocalInventory().map(p => (p.id === id ? reconciled : p)));
       savePendingStockAdjustments(getPendingStockAdjustments().filter(entry => entry.id !== replayKey));
       return { updated: reconciled, previousStock: authoritative.previousStock, atomic: true };
     } catch (err) {
-      console.warn(`Firestore applyStockDelta failed for ${id}, queued for sync:`, err);
-      return { updated: updatedLocal, previousStock: currentStock, atomic: false };
+      if (isDefiniteStockRejection(err)) {
+        savePendingStockAdjustments(getPendingStockAdjustments().filter(entry => entry.id !== replayKey));
+        saveLocalInventory(local);
+        throw err;
+      }
+      console.warn(`Firestore applyStockDelta uncertain/failed for ${id}, marked for receipt reconciliation:`, err);
+      savePendingStockAdjustments(
+        getPendingStockAdjustments().map(entry =>
+          entry.id === replayKey ? { ...entry, uncertain: true } : entry
+        )
+      );
+      return { updated: updatedLocal, previousStock: currentStock, atomic: false, uncertain: true };
     }
   },
 
@@ -468,6 +648,7 @@ export const inventoryService = {
   },
 
   addProduct: async (product: Omit<PhoneModel, 'id'>): Promise<PhoneModel> => {
+    invalidateReportsCache();
     const threshold = product.lowStockThreshold ?? 1;
     const stockStatus = computeStockStatus(product.stock, threshold);
     const local = getLocalInventory();
@@ -531,10 +712,17 @@ export const inventoryService = {
 
     // Save locally immediately
     saveLocalInventory(local.map(p => p.id === id ? merged : p));
+    invalidateReportsCache();
+
+    const baseValues = extractBaseValues(
+      existing as unknown as Record<string, unknown> | undefined,
+      cleanUpdates,
+      new Set(['updatedAt', 'syncedAt', 'stockStatus'])
+    );
 
     // If offline or id is an offline temp id, queue in offlineQueue
-    if ((typeof navigator !== 'undefined' && !navigator.onLine) || id.startsWith('offline_')) {
-      offlineQueue.enqueue('UPDATE_PRODUCT', { id, updates: cleanUpdates });
+    if ((typeof navigator !== 'undefined' && navigator.onLine === false) || id.startsWith('offline_')) {
+      offlineQueue.enqueue('UPDATE_PRODUCT', { id, updates: cleanUpdates, ...(baseValues ? { baseValues } : {}) });
       return { product: merged, outcome: 'queued' };
     }
 
@@ -548,9 +736,44 @@ export const inventoryService = {
       return { product: merged, outcome: 'committed' };
     } catch (err) {
       console.warn(`Failed to update product ${id} in Firestore, queued for sync:`, err);
-      offlineQueue.enqueue('UPDATE_PRODUCT', { id, updates: cleanUpdates });
+      offlineQueue.enqueue('UPDATE_PRODUCT', { id, updates: cleanUpdates, ...(baseValues ? { baseValues } : {}) });
       return { product: merged, outcome: 'failed' };
     }
+  },
+
+  replayQueuedProductUpdate: async (payload: {
+    id: string;
+    updates: Record<string, unknown>;
+    baseValues?: Record<string, unknown>;
+  }): Promise<PhoneModel> => {
+    const cleanPatch = Object.entries(payload.updates || {}).reduce((acc, [key, val]) => {
+      if (val !== undefined) acc[key] = val;
+      return acc;
+    }, {} as Record<string, unknown>);
+    const updated = await runTransaction(db, async tx => {
+      const ref = doc(db, COLLECTION, payload.id);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) {
+        throw new UnrecoverableSyncActionError(`Product ${payload.id} no longer exists on the server.`);
+      }
+      const server = { ...snap.data(), id: snap.id } as PhoneModel;
+      const conflictKey = findConflictingField(
+        server as unknown as Record<string, unknown>,
+        cleanPatch,
+        payload.baseValues,
+        new Set(['updatedAt', 'syncedAt', 'stockStatus'])
+      );
+      if (conflictKey) {
+        throw new UnrecoverableSyncActionError(
+          `Product field "${conflictKey}" changed on another device while offline. Review before overwriting.`
+        );
+      }
+      tx.update(ref, cleanPatch);
+      return { ...server, ...cleanPatch, id: payload.id } as PhoneModel;
+    });
+    const local = getLocalInventory();
+    saveLocalInventory(local.some(p => p.id === payload.id) ? local.map(p => (p.id === payload.id ? updated : p)) : [updated, ...local]);
+    return updated;
   },
 
   /**
@@ -558,6 +781,7 @@ export const inventoryService = {
    * selling the product but the database still has it, which callers must not report as deleted.
    */
   deleteProduct: async (id: string): Promise<ProductWriteOutcome> => {
+    invalidateReportsCache();
     const local = getLocalInventory();
     saveLocalInventory(local.filter(p => p.id !== id));
     savePendingProducts(getPendingProducts().filter(p => p.id !== id));

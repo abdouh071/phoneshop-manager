@@ -10,7 +10,7 @@
  * rounded, and then a receipt prints lines that do not add up to its own total.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { CartItem, PhoneModel, SaleTransaction } from '../types';
+import type { CartItem, PhoneModel, SaleTransaction, SuspendedCart } from '../types';
 import { buildCorrectedLines } from '../utils/saleEditLines';
 import { computeDayFigures } from '../utils/dayFigures';
 import { toDateStr } from '../utils/localDate';
@@ -50,6 +50,61 @@ const captured = vi.hoisted(() => ({
   settled: [] as string[],
   /** Every atomic shelf movement a checkout anchored to its sale, in order. */
   saleStock: [] as Array<{ saleId: string; deltas: Array<{ productId: string; delta: number }> }>,
+  checkoutError: null as Error | null,
+  pendingCheckout: null as unknown,
+  pendingResolveResult: null as unknown,
+  customers: [] as Array<Record<string, unknown>>,
+  saveSuspendedCart: vi.fn(async (_cart: unknown) => undefined),
+  deleteSuspendedCart: vi.fn(async (_id: string) => undefined),
+  fetchSuspendedCarts: vi.fn(async (_local?: unknown) => [] as SuspendedCart[]),
+}));
+
+vi.mock('../services/retailCheckoutService', () => ({
+  retailCheckoutService: {
+    getPending: () => captured.pendingCheckout,
+    acknowledge: vi.fn(async () => undefined),
+    resolve: vi.fn(async () => captured.pendingResolveResult),
+    checkout: async (
+      tx: Omit<SaleTransaction, 'id'>,
+      options: { draftKey: string; refundType?: string; storeCreditUsed?: number }
+    ) => {
+      if (captured.checkoutError) throw captured.checkoutError;
+      const saved = { ...tx, id: `tx_${captured.transactions.length + 1}` } as SaleTransaction;
+      captured.transactions.push(saved as unknown as Record<string, unknown>);
+      const map = new Map<string, number>();
+      for (const item of saved.items) {
+        const d = item.isReturn ? (item.restock === false ? 0 : item.quantity) : -item.quantity;
+        if (d !== 0) map.set(item.product.id, (map.get(item.product.id) ?? 0) + d);
+      }
+      const deltas = [...map.entries()].filter(([, delta]) => delta !== 0).map(([productId, delta]) => ({ productId, delta }));
+      captured.saleStock.push({ saleId: saved.id, deltas });
+      if (options.storeCreditUsed && saved.customerId) {
+        captured.credit.push({ kind: 'use', customerId: saved.customerId, amount: options.storeCreditUsed, note: 'redeem' });
+      }
+      if (saved.total < 0 && saved.customerId) {
+        if (options.refundType === 'store_credit') {
+          captured.credit.push({ kind: 'add', customerId: saved.customerId, amount: Math.abs(saved.total), note: 'surplus' });
+        } else if (options.refundType === 'debt_deduction') {
+          captured.debtDeductions.push({ customerId: saved.customerId, amount: Math.abs(saved.total), note: 'deduct' });
+        }
+      }
+      const debtLine = saved.payments.find(p => p.method === 'debt' && p.amount > 0);
+      if (debtLine && saved.customerId) {
+        captured.newDebts.push({
+          customerId: saved.customerId,
+          invoiceNumber: saved.invoiceNumber,
+          totalAmount: saved.total,
+          remainingBalance: debtLine.amount,
+        });
+      }
+      return {
+        transaction: saved,
+        stock: [],
+        cancelled: false,
+        pending: { ...options, transaction: saved, requestKey: 'req' },
+      };
+    },
+  },
 }));
 
 vi.mock('../services/invoiceCounter', () => ({
@@ -68,6 +123,12 @@ vi.mock('../services/transactionService', () => ({
       return true;
     },
     getRetailTransactions: async () => [],
+    getPendingSaleEdits: () => [],
+    savePendingSaleEdit: () => undefined,
+    removePendingSaleEdit: () => undefined,
+    getPendingRefunds: () => [],
+    reconcilePendingRefunds: async () => ({ adopted: [], pending: [] }),
+    reconcilePendingSaleEdits: async () => ({ adopted: [], pending: [] }),
     editSale: async (expected: SaleTransaction, edit: {
       updates: Record<string, unknown>;
       stockDeltas: { productId: string; delta: number }[];
@@ -113,9 +174,9 @@ vi.mock('../services/cartService', () => ({
   cartService: {
     saveActiveCart: async () => undefined,
     clearActiveCart: async () => undefined,
-    saveSuspendedCart: async () => undefined,
-    deleteSuspendedCart: async () => undefined,
-    getAllSuspendedCarts: async () => [],
+    saveSuspendedCart: (cart: unknown) => captured.saveSuspendedCart(cart),
+    deleteSuspendedCart: (id: string) => captured.deleteSuspendedCart(id),
+    getAllSuspendedCarts: (local?: unknown) => captured.fetchSuspendedCarts(local),
   },
 }));
 
@@ -160,7 +221,7 @@ vi.mock('./customerStore', () => ({
   useCustomerStore: {
     setState: () => undefined,
     getState: () => ({
-      customers: [],
+      customers: captured.customers,
       debts: captured.debts,
       recalculateCustomer: async () => undefined,
       findOrCreateCustomer: async (who: { name: string; phone: string }) => ({
@@ -268,6 +329,14 @@ beforeEach(() => {
   captured.stockBy.length = 0;
   captured.settled.length = 0;
   captured.saleStock.length = 0;
+  captured.checkoutError = null;
+  captured.pendingCheckout = null;
+  captured.pendingResolveResult = null;
+  captured.customers.length = 0;
+  vi.stubGlobal('navigator', { onLine: true });
+  captured.saveSuspendedCart.mockReset().mockResolvedValue(undefined);
+  captured.deleteSuspendedCart.mockReset().mockResolvedValue(undefined);
+  captured.fetchSuspendedCarts.mockReset().mockResolvedValue([]);
   captured.refundError = null;
   captured.refundSnapshots.length = 0;
   captured.refundCustomers.length = 0;
@@ -386,20 +455,50 @@ describe('the sale as it is written down', () => {
   });
 });
 
-describe('the shelf movement anchored to the sale (B8)', () => {
-  it('writes the invoice unfinished, then moves the shelf in one call keyed to that invoice', async () => {
+describe('the shelf movement anchored to the sale (B8 & atomic online)', () => {
+  it('commits online sales confirmed and atomically applied', async () => {
     add(phone);
     await useCartStore.getState().checkout();
 
-    const tx = captured.transactions[0] as { stockApplied?: boolean };
-    // The document is born owing the shelf a movement. If the till dies between the
-    // write and the deduction, this false stamp is what the sweep finds to finish it.
-    expect(tx.stockApplied).toBe(false);
+    const tx = captured.transactions[0] as { stockApplied?: boolean; validationStatus?: string };
+    expect(tx.stockApplied).toBe(true);
+    expect(tx.validationStatus).toBe('confirmed');
     expect(captured.saleStock).toHaveLength(1);
     expect(captured.saleStock[0]).toEqual({
       saleId: 'tx_1',
       deltas: [{ productId: 'sku_phone', delta: -1 }],
     });
+  });
+
+  it('writes an offline sale unfinished as pending_validation until server sync confirms stock', async () => {
+    vi.stubGlobal('navigator', { onLine: false });
+    add(phone);
+    const saved = await useCartStore.getState().checkout();
+
+    const tx = captured.transactions[0] as { stockApplied?: boolean; validationStatus?: string };
+    expect(tx.stockApplied).toBe(false);
+    expect(tx.validationStatus).toBe('pending_validation');
+    expect(saved?.validationStatus).toBe('pending_validation');
+  });
+
+  it('propagates online overselling / Avoir failures and preserves the cart intact', async () => {
+    add(phone);
+    captured.checkoutError = new Error('INSUFFICIENT_STOCK:sku_phone:requested=1:available=0');
+
+    await expect(useCartStore.getState().checkout()).rejects.toThrow('INSUFFICIENT_STOCK');
+    expect(useCartStore.getState().items).toHaveLength(1);
+    expect(useCartStore.getState().isCheckingOut).toBe(false);
+  });
+
+  it('refuses Avoir store credit redemption or issuance while offline', async () => {
+    vi.stubGlobal('navigator', { onLine: false });
+    add(phone);
+    useCartStore.setState({ customerName: 'Yacine' });
+    await expect(useCartStore.getState().checkout({ storeCreditUsed: 500 })).rejects.toThrow(/Connect to the server/);
+    expect(captured.transactions).toHaveLength(0);
+
+    useCartStore.setState({ items: [{ product: phone, quantity: 1, isReturn: true, restock: true, customReturnPrice: 300 }] });
+    await expect(useCartStore.getState().checkout({ refundType: 'store_credit' })).rejects.toThrow(/Connect to the server/);
   });
 
   it('folds a sale line and a return line of one model into the net the shelf owes', async () => {
@@ -1125,5 +1224,131 @@ describe('a refund only the server lets through (B5)', () => {
     expect(captured.refundSnapshots).toEqual([]);
     expect(captured.stockBy).toEqual([]);
     expect(captured.settled).toEqual([]);
+  });
+});
+
+describe('retail held-cart customer ownership and reconciliation', () => {
+  const retailCustomer = (id: string, name: string, phoneNum: string) => ({
+    id,
+    name,
+    phone: phoneNum,
+    accountType: 'retail',
+    totalPurchases: 0,
+    totalSpent: 0,
+    lastVisitDate: '',
+    joinDate: '',
+  });
+
+  it('restores explicitly selected customer A and preserves customer B on hold instead of keeping B', () => {
+    const a = retailCustomer('cust_a', 'Amine', '0555111111');
+    const b = retailCustomer('cust_b', 'Amine', '0555222222');
+    captured.customers.push(a, b);
+
+    add(cable);
+    useCartStore.getState().setSelectedCustomer(a as never);
+    useCartStore.getState().suspendCart();
+
+    const heldA = useCartStore.getState().suspendedCarts[0];
+    expect(heldA).toMatchObject({ customerId: a.id, customerName: a.name, customerPhone: a.phone });
+    expect(captured.saveSuspendedCart).toHaveBeenCalledWith(heldA);
+
+    add(phone);
+    useCartStore.getState().setSelectedCustomer(b as never);
+    const result = useCartStore.getState().resumeCart(heldA.id);
+
+    expect(result).toMatchObject({ success: true, requiresCustomerSelection: false });
+    expect(useCartStore.getState()).toMatchObject({
+      customerId: a.id,
+      customerName: a.name,
+      customerPhone: a.phone,
+    });
+
+    const heldB = useCartStore.getState().suspendedCarts[0];
+    expect(heldB).toMatchObject({ customerId: b.id, customerName: b.name, customerPhone: b.phone });
+  });
+
+  it('clears the previous customer B and requires manual attachment for legacy carts without customerId', () => {
+    const a = retailCustomer('cust_a', 'Yacine', '0555111111');
+    const b = retailCustomer('cust_b', 'Karim', '0555222222');
+    captured.customers.push(a, b);
+
+    useCartStore.getState().setSelectedCustomer(b as never);
+    useCartStore.setState({
+      suspendedCarts: [{
+        id: 'legacy_retail',
+        date: '2026-11-10T10:00:00Z',
+        items: [{ product: cable, quantity: 1 }],
+        customerName: a.name,
+        discount: null,
+      }],
+    });
+
+    const result = useCartStore.getState().resumeCart('legacy_retail');
+
+    expect(result).toMatchObject({ success: true, requiresCustomerSelection: true });
+    expect(useCartStore.getState()).toMatchObject({
+      customerId: null,
+      customerName: a.name,
+      customerPhone: '',
+    });
+  });
+
+  it('clears customerId and requires manual selection when saved account is missing or merged', () => {
+    const a = { ...retailCustomer('cust_a', 'Amine', '0555111111'), mergedIntoId: 'cust_primary' };
+    captured.customers.push(a);
+
+    useCartStore.setState({
+      suspendedCarts: [{
+        id: 'merged_retail',
+        date: '2026-11-10T10:00:00Z',
+        items: [{ product: cable, quantity: 1 }],
+        customerId: 'cust_a',
+        customerName: 'Amine',
+        customerPhone: '0555111111',
+        discount: null,
+      }],
+    });
+
+    const result = useCartStore.getState().resumeCart('merged_retail');
+
+    expect(result).toMatchObject({ success: true, requiresCustomerSelection: true });
+    expect(useCartStore.getState().customerId).toBeNull();
+  });
+
+  it('replaces stale local held carts when authoritative server fetch returns empty and survives concurrent removals/additions', async () => {
+    const stale: SuspendedCart = {
+      id: 'stale_retail',
+      date: '2026-11-10T10:00:00Z',
+      items: [],
+      customerName: 'Old',
+      discount: null,
+    };
+    const removeItem = vi.fn();
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: { getItem: () => null, setItem: vi.fn(), removeItem },
+    });
+
+    useCartStore.setState({ suspendedCarts: [stale] });
+    await useCartStore.getState().fetchCarts();
+    expect(useCartStore.getState().suspendedCarts).toEqual([]);
+    expect(removeItem).toHaveBeenCalledWith('pos_suspended_carts');
+
+    // Concurrent discard during a delayed fetch must not resurrect the discarded cart,
+    // while a newly suspended cart must survive.
+    let finish!: (rows: SuspendedCart[]) => void;
+    captured.fetchSuspendedCarts.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    useCartStore.setState({ suspendedCarts: [stale] });
+
+    const req = useCartStore.getState().fetchCarts();
+    useCartStore.getState().discardSuspendedCart(stale.id);
+    add(cable);
+    useCartStore.getState().suspendCart();
+    const added = useCartStore.getState().suspendedCarts[0];
+
+    finish([stale]);
+    await req;
+
+    expect(useCartStore.getState().suspendedCarts.map(c => c.id)).toEqual([added.id]);
   });
 });

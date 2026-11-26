@@ -10,23 +10,28 @@
  */
 import { offlineQueue, UnrecoverableSyncActionError } from './offlineQueue';
 import { repairService } from './repairService';
-import { transactionService } from './transactionService';
-import type { PhoneModel, RepairStatusHistoryEntry, RepairTicket, SaleTransaction } from '../types';
+import { transactionService, type SaleEditRequest } from './transactionService';
+import { debtService } from './debtService';
+import { customerService } from './customerService';
+import type {
+  Customer,
+  CustomerDebtPayment,
+  PhoneModel,
+  RepairStatusHistoryEntry,
+  RepairTicket,
+  SaleTransaction,
+} from '../types';
 
 let registered = false;
 
 /**
- * An id starting with `offline_` names a ticket this device invented and never uploaded:
- * the document it points at does not exist and never will, so no retry can land it. The
- * ticket's own data is not lost — the sync creates the document from the local copy, which
- * already carries these changes. Before this guard the service re-queued such an action and
- * returned success, so it was re-born on every pass and the shop was told each time that the
- * sync had completed.
+ * An id starting with `offline_` names a record this device invented and never uploaded:
+ * the document it points at does not exist and never will, so no retry can land it.
  */
-function assertUploadedTicketId(id: unknown, actionType: string): void {
+function assertUploadedId(id: unknown, actionType: string, entityLabel = 'record'): void {
   if (typeof id === 'string' && id.startsWith('offline_')) {
     throw new UnrecoverableSyncActionError(
-      `${actionType} targets ${id}, a ticket id that only ever existed on this device.`
+      `${actionType} targets ${id}, a ${entityLabel} id that only ever existed on this device.`
     );
   }
 }
@@ -48,7 +53,7 @@ export function registerOfflineHandlers(): void {
     history?: RepairStatusHistoryEntry[];
     completedAt?: string;
   }) => {
-    assertUploadedTicketId(payload.id, 'UPDATE_REPAIR_STATUS');
+    assertUploadedId(payload.id, 'UPDATE_REPAIR_STATUS', 'ticket');
     await repairService.updateStatus(payload.id, payload.status, payload.history, {
       throwOnError: true,
       completedAt: payload.completedAt,
@@ -62,9 +67,14 @@ export function registerOfflineHandlers(): void {
   offlineQueue.registerHandler('UPDATE_REPAIR_TICKET', async (payload: {
     id: string;
     updates: Partial<RepairTicket>;
+    baseValues?: Record<string, unknown>;
   }) => {
-    assertUploadedTicketId(payload.id, 'UPDATE_REPAIR_TICKET');
-    await repairService.updateTicket(payload.id, payload.updates, { throwOnError: true });
+    assertUploadedId(payload.id, 'UPDATE_REPAIR_TICKET', 'ticket');
+    if (payload.baseValues) {
+      await repairService.replayQueuedTicketUpdate(payload);
+    } else {
+      await repairService.updateTicket(payload.id, payload.updates, { throwOnError: true });
+    }
   });
 
   /**
@@ -85,7 +95,7 @@ export function registerOfflineHandlers(): void {
   offlineQueue.registerHandler('DELETE_REPAIR_TICKET', async (payload: {
     id: string;
   }) => {
-    assertUploadedTicketId(payload.id, 'DELETE_REPAIR_TICKET');
+    assertUploadedId(payload.id, 'DELETE_REPAIR_TICKET', 'ticket');
     await repairService.deleteTicket(payload.id, { throwOnError: true });
   });
 
@@ -99,6 +109,122 @@ export function registerOfflineHandlers(): void {
     transaction: Omit<SaleTransaction, 'id'>;
   }) => {
     await transactionService.save(payload.transaction);
+  });
+
+  /**
+   * EDIT_SALE_TRANSACTION
+   * Atomic server replay of an invoice edit queued while offline.
+   */
+  offlineQueue.registerHandler('EDIT_SALE_TRANSACTION', async (payload: {
+    transactionId: string;
+    operationId: string;
+    expected: SaleTransaction;
+    edit: SaleEditRequest;
+  }) => {
+    assertUploadedId(payload.transactionId, 'EDIT_SALE_TRANSACTION', 'invoice');
+    const result = await transactionService.replayQueuedSaleEdit(payload);
+    try {
+      const [{ useCartStore }, { usePartsCartStore }, { useInventoryStore }, { useCustomerStore }] = await Promise.all([
+        import('../store/cartStore'),
+        import('../store/partsCartStore'),
+        import('../store/inventoryStore'),
+        import('../store/customerStore'),
+      ]);
+      useCartStore.setState(state => ({
+        transactions: state.transactions.map(t => (t.id === result.transaction.id ? result.transaction : t)),
+      }));
+      usePartsCartStore.setState(state => ({
+        invoices: state.invoices.map(t => (t.id === result.transaction.id ? result.transaction : t)),
+      }));
+      if (result.stock.length > 0) {
+        const stockMap = new Map(result.stock.map(p => [p.id, p]));
+        useInventoryStore.setState(state => ({
+          products: state.products.map(p => stockMap.get(p.id) ?? p),
+          parts: state.parts.map(p => stockMap.get(p.id) ?? p),
+        }));
+      }
+      if (result.customer || result.debt) {
+        useCustomerStore.setState(state => ({
+          customers: result.customer
+            ? [result.customer, ...state.customers.filter(c => c.id !== result.customer!.id)]
+            : state.customers,
+          debts: result.debt
+            ? [result.debt, ...state.debts.filter(d => d.id !== result.debt!.id)]
+            : state.debts,
+        }));
+      }
+    } catch {
+      // Stores not mounted yet during headless replay
+    }
+  });
+
+  // ─── CUSTOMER & DEBT LEDGER HANDLERS ────────────────────────────────────────
+
+  /**
+   * UPDATE_CUSTOMER
+   * Field-level profile update for an existing server customer with conflict check.
+   */
+  offlineQueue.registerHandler('UPDATE_CUSTOMER', async (payload: {
+    id: string;
+    updates: Partial<Customer>;
+    baseValues?: Record<string, unknown>;
+    baseUpdatedAt?: string;
+    operationId?: string;
+  }) => {
+    assertUploadedId(payload.id, 'UPDATE_CUSTOMER', 'customer');
+    const updated = await customerService.replayQueuedUpdate(payload);
+    try {
+      const { useCustomerStore } = await import('../store/customerStore');
+      useCustomerStore.setState(state => ({
+        customers: state.customers.map(c => (c.id === updated.id ? { ...c, ...updated } : c)),
+      }));
+    } catch {
+      // Store not mounted
+    }
+  });
+
+  /**
+   * RECORD_DEBT_PAYMENT
+   * Idempotent replay of a debt installment collected offline.
+   */
+  offlineQueue.registerHandler('RECORD_DEBT_PAYMENT', async (payload: {
+    debtId: string;
+    payment: CustomerDebtPayment;
+    operationId?: string;
+  }) => {
+    assertUploadedId(payload.debtId, 'RECORD_DEBT_PAYMENT', 'debt');
+    const updatedDebt = await debtService.replayQueuedPayment(payload.debtId, payload.payment);
+    try {
+      const { useCustomerStore } = await import('../store/customerStore');
+      useCustomerStore.setState(state => ({
+        debts: state.debts.map(d => (d.id === updatedDebt.id ? updatedDebt : d)),
+      }));
+    } catch {
+      // Store not mounted
+    }
+  });
+
+  /**
+   * UPDATE_DEBT_AMOUNT
+   * Replay of a debt balance adjustment queued while offline.
+   */
+  offlineQueue.registerHandler('UPDATE_DEBT_AMOUNT', async (payload: {
+    debtId: string;
+    newTotalAmount: number;
+    newItemsSummary?: string;
+    newChargedAmount?: number;
+    expectedPaid?: number;
+  }) => {
+    assertUploadedId(payload.debtId, 'UPDATE_DEBT_AMOUNT', 'debt');
+    const updatedDebt = await debtService.replayQueuedDebtAmount(payload);
+    try {
+      const { useCustomerStore } = await import('../store/customerStore');
+      useCustomerStore.setState(state => ({
+        debts: state.debts.map(d => (d.id === updatedDebt.id ? updatedDebt : d)),
+      }));
+    } catch {
+      // Store not mounted
+    }
   });
 
   // ─── INVENTORY & PRODUCT HANDLERS ───────────────────────────────────────────
@@ -122,9 +248,19 @@ export function registerOfflineHandlers(): void {
   offlineQueue.registerHandler('UPDATE_PRODUCT', async (payload: {
     id: string;
     updates: Partial<Omit<PhoneModel, 'id'>>;
+    baseValues?: Record<string, unknown>;
   }) => {
+    assertUploadedId(payload.id, 'UPDATE_PRODUCT', 'product');
     const { inventoryService } = await import('./inventoryService');
-    await inventoryService.updateProduct(payload.id, payload.updates);
+    if (payload.baseValues) {
+      await inventoryService.replayQueuedProductUpdate({
+        id: payload.id,
+        updates: payload.updates as Record<string, unknown>,
+        baseValues: payload.baseValues,
+      });
+    } else {
+      await inventoryService.updateProduct(payload.id, payload.updates);
+    }
   });
 
   /**

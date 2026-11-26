@@ -20,16 +20,30 @@
  * no credit ledger to write to, so the collected part simply leaves what the profile
  * has spent and the counter hands the cash back across the till.
  */
-import { addDoc, collection, doc, runTransaction, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, runTransaction, updateDoc, type DocumentReference, type Transaction } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
 import type { SaleTransaction } from '../types';
 import { activityLogService } from './activityLogService';
 import { offlineSyncService } from './offlineSyncService';
 import { applyStockLines } from './stockService';
+import { runSaleVoidClaimTx, type FirestoreTxOps, type TxRef } from './stockTransactionCore';
 import type { SaleStockLine } from '../utils/saleEdit';
 import { isSaleClosed, voidStockLines } from '../utils/saleVoid';
 import { findLinkedDebt, sumOpenDebt, writeCustomerTotals } from './saleEditService';
+
+const toTxOps = (tx: Transaction): FirestoreTxOps => ({
+  doc: (col, id) => doc(db, col, id) as unknown as TxRef,
+  get: async (ref) => {
+    const snap = await tx.get(ref as unknown as DocumentReference);
+    return {
+      exists: () => snap.exists(),
+      data: () => snap.data() as Record<string, unknown> | undefined,
+    };
+  },
+  update: (ref, data) => tx.update(ref as unknown as DocumentReference, data),
+  set: (ref, data) => tx.set(ref as unknown as DocumentReference, data),
+});
 
 /** Claiming the void is one read and one write; a till must not hang on a locked row. */
 const VOID_TX_TIMEOUT_MS = 6_000;
@@ -116,28 +130,31 @@ export const voidSale = async (
   const now = new Date().toISOString();
   const invoice = tx.invoiceNumber || tx.id.slice(-6);
 
+  const redeemedAvoir = (tx.payments || []).reduce(
+    (sum, p) => (p.method === 'store_credit' ? sum + (Number(p.amount) || 0) : sum),
+    0
+  );
+
   // Two phones on the same day, or an admin answering a stale request, both reach here
-  // holding `completed` for an invoice one of them is about to close. Reading the status
-  // and stamping it in one transaction makes the first void the only one that gets past
-  // this line, so the shelf moves once and the account is settled once.
-  const claimed = await withTimeout(
-    runTransaction(db, async (t) => {
-      const ref = doc(db, 'transactions', tx.id);
-      const snap = await t.get(ref);
-      if (!snap.exists()) throw new Error(`Invoice ${invoice} no longer exists.`);
-      if (isSaleClosed((snap.data() as { status?: string }).status)) return false;
-      t.update(ref, {
-        status: 'voided',
-        voidedAt: now,
+  // holding `completed` for an invoice one of them is about to close. Reading the status,
+  // checking financialRevision, restoring redeemed Avoir, and stamping voided inside one
+  // reads-before-writes transaction keeps both desktop and mobile ledgers consistent.
+  const voidOutcome = await withTimeout(
+    runTransaction(db, async (t) =>
+      runSaleVoidClaimTx(toTxOps(t), {
+        txId: tx.id,
+        expectedRevision: tx.financialRevision,
+        reason,
+        now,
         voidedBy: user ? { uid: user.id, name: user.name } : null,
-        voidReason: reason,
-      });
-      return true;
-    }),
+        customerId: tx.customerId,
+        storeCreditToRestore: redeemedAvoir,
+      })
+    ),
     VOID_TX_TIMEOUT_MS,
     'saleVoidTransaction'
   );
-  if (!claimed) return empty;
+  if (!voidOutcome.voided) return empty;
 
   // Purchases go back on the shelf, exchange lines come off it — the counter's refund
   // makes the same split, and an invoice a till edited can now carry both kinds.

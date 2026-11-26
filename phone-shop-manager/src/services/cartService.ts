@@ -1,6 +1,7 @@
-import { collection, doc, getDocs, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { CartItem, SuspendedCart } from '../types';
+import type { CartItem } from '../types';
+import { createSuspendedCartSync } from './suspendedCartSync';
 
 const SUSPENDED_COLLECTION = 'suspended_carts';
 const ACTIVE_CART_DOC = 'active_cart';
@@ -9,11 +10,18 @@ const CARTS_COLLECTION = 'carts';
 // Helper to remove any undefined properties which cause Firestore setDoc/addDoc to throw errors
 const cleanForFirestore = <T>(obj: T): T => JSON.parse(JSON.stringify(obj));
 
+const suspendedSync = createSuspendedCartSync({
+  collectionName: SUSPENDED_COLLECTION,
+  syncStorageKey: 'pos_suspended_carts_sync_v1',
+  localStorageKey: 'pos_suspended_carts',
+  invalidJournalMessage: 'Invalid retail suspended cart sync journal',
+});
+
 export const cartService = {
   // ==========================================
   // ACTIVE CART
   // ==========================================
-  
+
   getActiveCart: async (): Promise<{ items: CartItem[], customerName: string } | null> => {
     if (typeof navigator !== 'undefined' && !navigator.onLine) return null;
     try {
@@ -49,35 +57,7 @@ export const cartService = {
   // SUSPENDED CARTS
   // ==========================================
 
-  getAllSuspendedCarts: async (): Promise<SuspendedCart[]> => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) return [];
-    try {
-      const snap = await getDocs(collection(db, SUSPENDED_COLLECTION));
-      const carts = snap.docs.map(d => ({ ...d.data(), id: d.id } as SuspendedCart));
-      carts.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
-      return carts;
-    } catch (e) {
-      console.error('Failed to get suspended carts', e);
-      return [];
-    }
-  },
-
-  saveSuspendedCart: async (cart: SuspendedCart): Promise<void> => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
-    try {
-      const payload = cleanForFirestore(cart);
-      await setDoc(doc(db, SUSPENDED_COLLECTION, cart.id), payload);
-    } catch (e) {
-      console.error('Failed to save suspended cart', e);
-    }
-  },
-
-  deleteSuspendedCart: async (id: string): Promise<void> => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
-    try {
-      await deleteDoc(doc(db, SUSPENDED_COLLECTION, id));
-    } catch (e) {
-      console.error('Failed to delete suspended cart', e);
-    }
-  }
+  getAllSuspendedCarts: suspendedSync.getAllSuspendedCarts,
+  saveSuspendedCart: suspendedSync.saveSuspendedCart,
+  deleteSuspendedCart: suspendedSync.deleteSuspendedCart,
 };

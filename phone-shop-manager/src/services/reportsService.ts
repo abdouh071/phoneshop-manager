@@ -13,7 +13,30 @@ import {
   getClaimedRepairRevenue,
   getClaimedRepairPartsCost,
 } from '../utils/repairFinancials';
-import type { SaleTransaction, RepairTicket } from '../types';
+import type { SaleTransaction, RepairTicket, PhoneModel, CustomerDebtEntry } from '../types';
+import { getReportsCacheRevision, invalidateReportsCache } from './reportCacheInvalidation';
+
+export interface ReportFetchOptions {
+  forceRefresh?: boolean;
+}
+
+const REPORT_SESSION_CACHE_TTL_MS = 60_000;
+
+interface ReportsRawCache {
+  cachedAt: number;
+  revision: number;
+  txStartMs?: number;
+  txEndMs?: number;
+  transactions?: SaleTransaction[];
+  eodFromDate?: string;
+  eodToDate?: string;
+  eodRecords?: EndOfDayRecord[];
+  repairs?: RepairTicket[];
+  products?: PhoneModel[];
+  debts?: CustomerDebtEntry[];
+}
+
+let rawCache: ReportsRawCache | null = null;
 
 export interface ReportFilterOptions {
   dateRange: string; // 'today' | 'yesterday' | 'specific_day' | 'this_week' | 'last_7_days' | 'last_week' | 'this_month' | 'last_month' | 'specific_month' | 'year_to_date' | 'full_year' | 'custom'
@@ -114,10 +137,18 @@ export interface MonthlyIncomeDetail {
   totalPhysicalCash: number;
 }
 
+export type ReportSourceName = 'sales' | 'repairs' | 'inventory' | 'eod' | 'debts';
+
 export interface ReportData {
   timeframeLabel: string;
   startDate: string;
   endDate: string;
+  /** True when one or more collections were served from local cache rather than Firestore. */
+  isCached?: boolean;
+  /** True when a source failed both live and cached reads and had to be omitted. */
+  isIncomplete?: boolean;
+  cachedSources?: ReportSourceName[];
+  incompleteSources?: ReportSourceName[];
   
   // 1. Financial Summary
   financialSummary: {
@@ -242,11 +273,42 @@ export interface ReportData {
   monthlyBreakdown: MonthlyIncomeDetail[];
 }
 
+async function readReportSource<T>(
+  source: ReportSourceName,
+  readLive: () => Promise<T>,
+  readFallback: () => Promise<T>,
+  emptyValue: T,
+  cachedSources: ReportSourceName[],
+  incompleteSources: ReportSourceName[]
+): Promise<T> {
+  try {
+    return await readLive();
+  } catch (err) {
+    console.warn(`[ReportsService] Falling back to cached ${source}:`, err);
+    cachedSources.push(source);
+    try {
+      return await readFallback();
+    } catch {
+      incompleteSources.push(source);
+      return emptyValue;
+    }
+  }
+}
+
 export const reportsService = {
-  getDashboardData: async (options: ReportFilterOptions | string = 'last_7_days'): Promise<ReportData> => {
+  invalidateCache: (): void => {
+    rawCache = null;
+    invalidateReportsCache();
+  },
+
+  getDashboardData: async (
+    options: ReportFilterOptions | string = 'last_7_days',
+    fetchOptions?: ReportFetchOptions
+  ): Promise<ReportData> => {
     const opts: ReportFilterOptions = typeof options === 'string' ? { dateRange: options } : options;
     const { dateRange = 'last_7_days', specificDate, selectedYear, selectedMonth, customStartDate, customEndDate } = opts;
 
+    const callRevision = getReportsCacheRevision();
     const now = new Date();
 
     // 1. Determine Date Bounds [startRange, endRange]
@@ -383,13 +445,136 @@ export const reportsService = {
     // 2. Fetch live data (date-scoped transactions) & official End-of-Day records
     // The seals are read for the requested dates rather than "the 90 newest", so a report
     // longer than a quarter still compares each day against the record that closed it.
+    const fromDateStr = toDateStr(startRange);
+    const toDateStrVal = toDateStr(endRange);
+    const cachedSources: ReportSourceName[] = [];
+    const incompleteSources: ReportSourceName[] = [];
+
+    const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
+    const activeCache =
+      !fetchOptions?.forceRefresh &&
+      isOnline &&
+      rawCache !== null &&
+      rawCache.revision === callRevision &&
+      now.getTime() - rawCache.cachedAt <= REPORT_SESSION_CACHE_TTL_MS
+        ? rawCache
+        : null;
+
+    const canReuseSales = Boolean(
+      activeCache?.transactions &&
+      activeCache.txStartMs !== undefined &&
+      activeCache.txEndMs !== undefined &&
+      startMs >= activeCache.txStartMs &&
+      endMs <= activeCache.txEndMs
+    );
+    const canReuseRepairs = Boolean(activeCache?.repairs);
+    const canReuseInventory = Boolean(activeCache?.products);
+    const canReuseEod = Boolean(
+      activeCache?.eodRecords &&
+      activeCache.eodFromDate !== undefined &&
+      activeCache.eodToDate !== undefined &&
+      fromDateStr >= activeCache.eodFromDate &&
+      toDateStrVal <= activeCache.eodToDate
+    );
+    const canReuseDebts = Boolean(activeCache?.debts);
+
     const [transactions, repairs, products, eodRecords, debts] = await Promise.all([
-      transactionService.getByDateRange(startRange, endRange),
-      repairService.getAll(),
-      inventoryService.getAll(),
-      endOfDayService.getRange(toDateStr(startRange), toDateStr(endRange)),
-      debtService.getAll(),
+      canReuseSales && activeCache?.transactions
+        ? Promise.resolve(
+            activeCache.transactions.filter(t => {
+              const tMs = new Date(t.date).getTime();
+              return tMs >= startMs && tMs <= endMs;
+            })
+          )
+        : readReportSource(
+            'sales',
+            () => transactionService.getByDateRange(startRange, endRange, { allowLocalFallback: false }),
+            () => transactionService.getByDateRange(startRange, endRange, { allowLocalFallback: true }),
+            [],
+            cachedSources,
+            incompleteSources
+          ),
+      canReuseRepairs && activeCache?.repairs
+        ? Promise.resolve(activeCache.repairs)
+        : readReportSource(
+            'repairs',
+            () => repairService.getAll({ allowLocalFallback: false }),
+            () => repairService.getAll({ allowLocalFallback: true }),
+            [],
+            cachedSources,
+            incompleteSources
+          ),
+      canReuseInventory && activeCache?.products
+        ? Promise.resolve(activeCache.products)
+        : readReportSource(
+            'inventory',
+            () => inventoryService.getAll({ allowLocalFallback: false }),
+            () => inventoryService.getAll({ allowLocalFallback: true }),
+            [],
+            cachedSources,
+            incompleteSources
+          ),
+      canReuseEod && activeCache?.eodRecords
+        ? Promise.resolve(
+            activeCache.eodRecords.filter(r => r.date >= fromDateStr && r.date <= toDateStrVal)
+          )
+        : readReportSource(
+            'eod',
+            () => endOfDayService.getRange(fromDateStr, toDateStrVal, { allowLocalFallback: false }),
+            () => endOfDayService.getRange(fromDateStr, toDateStrVal, { allowLocalFallback: true }),
+            [],
+            cachedSources,
+            incompleteSources
+          ),
+      canReuseDebts && activeCache?.debts
+        ? Promise.resolve(activeCache.debts)
+        : readReportSource(
+            'debts',
+            () => debtService.getAll({ allowLocalFallback: false }),
+            () => debtService.getAll({ allowLocalFallback: true }),
+            [],
+            cachedSources,
+            incompleteSources
+          ),
     ]);
+
+    // Populate session cache only from clean live server responses under the same revision.
+    // Fallback/incomplete sources never poison the live cache.
+    if (isOnline && callRevision === getReportsCacheRevision()) {
+      const nextCache: ReportsRawCache = {
+        cachedAt: Date.now(),
+        revision: callRevision,
+        txStartMs: activeCache?.txStartMs,
+        txEndMs: activeCache?.txEndMs,
+        transactions: activeCache?.transactions,
+        eodFromDate: activeCache?.eodFromDate,
+        eodToDate: activeCache?.eodToDate,
+        eodRecords: activeCache?.eodRecords,
+        repairs: activeCache?.repairs,
+        products: activeCache?.products,
+        debts: activeCache?.debts,
+      };
+      if (!canReuseSales && !cachedSources.includes('sales') && !incompleteSources.includes('sales')) {
+        nextCache.txStartMs = startMs;
+        nextCache.txEndMs = endMs;
+        nextCache.transactions = transactions;
+      }
+      if (!canReuseRepairs && !cachedSources.includes('repairs') && !incompleteSources.includes('repairs')) {
+        nextCache.repairs = repairs;
+      }
+      if (!canReuseInventory && !cachedSources.includes('inventory') && !incompleteSources.includes('inventory')) {
+        nextCache.products = products;
+      }
+      if (!canReuseEod && !cachedSources.includes('eod') && !incompleteSources.includes('eod')) {
+        nextCache.eodFromDate = fromDateStr;
+        nextCache.eodToDate = toDateStrVal;
+        nextCache.eodRecords = eodRecords;
+      }
+      if (!canReuseDebts && !cachedSources.includes('debts') && !incompleteSources.includes('debts')) {
+        nextCache.debts = debts;
+      }
+      rawCache = nextCache;
+    }
 
     // 3. Build Detailed Day-by-Day Income List (respecting official End-of-Day records)
     const daysList: string[] = [];
@@ -1003,6 +1188,10 @@ export const reportsService = {
       timeframeLabel,
       startDate: startRange.toISOString(),
       endDate: endRange.toISOString(),
+      isCached: cachedSources.length > 0,
+      isIncomplete: incompleteSources.length > 0,
+      cachedSources,
+      incompleteSources,
       financialSummary: {
         grossRevenue,
         productSalesRevenue,

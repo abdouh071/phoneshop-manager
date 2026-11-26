@@ -13,11 +13,11 @@ const assert = require('node:assert/strict');
 const updater = require('./updater.cjs');
 const { compareVersions, parseManifest, isHttpsUrl, sha256Hex, fetchHttpsText, MAX_DOWNLOAD_BYTES } = updater;
 
-const FEED = 'https://phoneshop-mgr-pro-2026.web.app/desktop-update.json';
+const FEED = 'https://ecomeweb-91a7e.web.app/desktop-update.json';
 const KEY = 'darwin-arm64';
 const GOOD_SHA = 'a'.repeat(64);
 
-const manifest = (overrides = {}, platforms = { [KEY]: { url: 'https://phoneshop-mgr-pro-2026.web.app/updates/app-1.1.0.dmg', sha256: GOOD_SHA, sizeBytes: 1024 } }) =>
+const manifest = (overrides = {}, platforms = { [KEY]: { url: 'https://ecomeweb-91a7e.web.app/updates/app-1.1.0.dmg', sha256: GOOD_SHA, sizeBytes: 1024 } }) =>
   JSON.stringify({ schema: 1, version: '1.1.0', notes: 'Faster Z-report', platforms, ...overrides });
 
 const pick = (raw, current = '1.0.0') => parseManifest(raw, current, FEED, KEY);
@@ -60,12 +60,12 @@ test('anything malformed is refused rather than half-trusted', () => {
     ['no schema', manifest({ schema: undefined }).replace('{"schema":undefined,', '{')],
     ['version "latest"', manifest({ version: 'latest' })],
     ['version missing', manifest({ version: undefined }).replace('"version":undefined,', '')],
-    ['http asset url', manifest({}, { [KEY]: { url: 'http://phoneshop-mgr-pro-2026.web.app/a.dmg', sha256: GOOD_SHA, sizeBytes: 10 } })],
+    ['http asset url', manifest({}, { [KEY]: { url: 'http://ecomeweb-91a7e.web.app/a.dmg', sha256: GOOD_SHA, sizeBytes: 10 } })],
     ['asset on another host', manifest({}, { [KEY]: { url: 'https://attacker.test/a.dmg', sha256: GOOD_SHA, sizeBytes: 10 } })],
-    ['short sha', manifest({}, { [KEY]: { url: 'https://phoneshop-mgr-pro-2026.web.app/a.dmg', sha256: 'deadbeef', sizeBytes: 10 } })],
-    ['uppercase-but-valid sha accepted', manifest({}, { [KEY]: { url: 'https://phoneshop-mgr-pro-2026.web.app/a.dmg', sha256: GOOD_SHA.toUpperCase(), sizeBytes: 10 } })],
-    ['zero size', manifest({}, { [KEY]: { url: 'https://phoneshop-mgr-pro-2026.web.app/a.dmg', sha256: GOOD_SHA, sizeBytes: 0 } })],
-    ['absurd size', manifest({}, { [KEY]: { url: 'https://phoneshop-mgr-pro-2026.web.app/a.dmg', sha256: GOOD_SHA, sizeBytes: MAX_DOWNLOAD_BYTES + 1 } })],
+    ['short sha', manifest({}, { [KEY]: { url: 'https://ecomeweb-91a7e.web.app/a.dmg', sha256: 'deadbeef', sizeBytes: 10 } })],
+    ['uppercase-but-valid sha accepted', manifest({}, { [KEY]: { url: 'https://ecomeweb-91a7e.web.app/a.dmg', sha256: GOOD_SHA.toUpperCase(), sizeBytes: 10 } })],
+    ['zero size', manifest({}, { [KEY]: { url: 'https://ecomeweb-91a7e.web.app/a.dmg', sha256: GOOD_SHA, sizeBytes: 0 } })],
+    ['absurd size', manifest({}, { [KEY]: { url: 'https://ecomeweb-91a7e.web.app/a.dmg', sha256: GOOD_SHA, sizeBytes: MAX_DOWNLOAD_BYTES + 1 } })],
   ];
   for (const [label, raw] of cases) {
     const result = pick(raw);

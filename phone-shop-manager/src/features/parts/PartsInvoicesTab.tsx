@@ -13,6 +13,7 @@ import { EditTransactionModal } from '../pos/EditTransactionModal';
 import { RefundModal } from '../pos/RefundModal';
 import { AdminUnlockModal } from '../../components/ui/AdminUnlockModal';
 import { AccountStatementModal } from '../customers/AccountStatementModal';
+import { transactionService } from '../../services/transactionService';
 import styles from './PartsInvoicesTab.module.css';
 
 interface PartsInvoicesTabProps {
@@ -234,6 +235,7 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
         )}
           {filteredInvoices.map(tx => {
             const isRefunded = tx.status === 'refunded';
+            const hasPendingRefundClaim = !isRefunded && transactionService.getPendingRefunds().some(r => r.transactionId === tx.id);
             const settlement = tx.accountSettlement;
             const buyerName = tx.shopName || tx.customerName || t('parts.walkInCustomer');
             const isB2B = Boolean(tx.shopName || (tx.accountSettlement && tx.accountSettlement.type !== 'paid_full'));
@@ -304,6 +306,11 @@ export const PartsInvoicesTab: React.FC<PartsInvoicesTabProps> = ({
 
                   {/* Settlement Pill */}
                   <div className={styles.settlement}>
+                    {hasPendingRefundClaim && (
+                      <span style={{ backgroundColor: '#fef3c7', color: '#92400e', padding: '2px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, marginRight: '6px' }}>
+                        ⏳ Refund Claimed — Verify
+                      </span>
+                    )}
                     {!settlement || settlement.type === 'paid_full' ? (
                       <span className={`${styles.settlementPill} ${styles.settlementPaid}`}>
                         <CheckCircle2 size={13} aria-hidden="true" /> {t('parts.invoices.paidFull', { methods: tx.payments.map(p => p.method.toUpperCase()).join('+') || t('parts.invoices.cash') })}

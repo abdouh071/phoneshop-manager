@@ -51,6 +51,7 @@ const fake = vi.hoisted(() => {
       const writes: Array<{ key: string; data: FakeDoc }> = [];
       const tx: FakeTx = {
         get: async (ref: FakeRef) => {
+          if (writes.length) throw new Error('Read after write');
           if (fake.flags.failReads) throw new Error('Fake: unavailable');
           return snapshotOf(ref.key);
         },

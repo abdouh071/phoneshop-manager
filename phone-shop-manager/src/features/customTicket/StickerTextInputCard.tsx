@@ -65,7 +65,7 @@ export const StickerTextInputCard: React.FC<StickerTextInputCardProps> = (props)
           }}>
             <AlertTriangle size={16} style={{ flexShrink: 0 }} />
             <span>
-              <strong>Height Alert:</strong> Text has {blankStickerOverflowWarning.lineCount} lines, exceeding the safe height for a {blankStickerOverflowWarning.stickerSize}mm roll (~{blankStickerOverflowWarning.maxEstimatedLines} lines max at this font size). Switch font to "Normal" or use 50x25mm / 50x30mm to prevent text truncation on the physical printer.
+              <strong>Height Alert:</strong> Text wraps into {blankStickerOverflowWarning.lineCount} lines on the label, exceeding the safe height for a {blankStickerOverflowWarning.stickerSize}mm roll (~{blankStickerOverflowWarning.maxEstimatedLines} lines max at this font size). Shorten the text, pick "Normal", or switch to 50x25mm / 50x30mm to avoid clipping on print.
             </span>
           </div>
         )}

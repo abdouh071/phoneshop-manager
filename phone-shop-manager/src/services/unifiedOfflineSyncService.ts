@@ -21,7 +21,6 @@
 import {
   collection,
   doc,
-  getDoc,
   getDocs,
   limit,
   query,
@@ -34,10 +33,11 @@ import { offlineQueueMirror } from './offlineQueueMirror';
 import { db } from '../lib/firebase';
 import { offlineQueue } from './offlineQueue';
 import { offlineCustomerSyncService } from './offlineCustomerSyncService';
-import { inventoryService, commitStockDelta, commitSaleStockEffects } from './inventoryService';
+import { transactionService } from './transactionService';
+import { inventoryService, commitSaleStockEffects, reconcilePendingStockAdjustments } from './inventoryService';
 import { refreshTrackingMirrorById } from './trackingMirrorService';
+import { invalidateReportsCache } from './reportCacheInvalidation';
 import type { RepairTicket, SaleTransaction, CustomerDebtEntry, CustomerActivityLog } from '../types';
-import { computeStockStatus } from '../utils/stockStatus';
 import { saleStockDeltas } from '../utils/stockDeltas';
 import { toast } from '../components/ui/Toast';
 
@@ -180,6 +180,9 @@ export const unifiedOfflineSyncService = {
 
       const logs = getLocalList<CustomerActivityLog>(LOGS_LOCAL_KEY);
       count += logs.filter(l => l.id && l.id.startsWith('offline_')).length;
+
+      count += transactionService.getPendingRefunds().length;
+      count += transactionService.getPendingSaleEdits().filter(e => e.status !== 'queued').length;
     } catch (e) {
       console.warn('[UnifiedOfflineSync] Error calculating pending count:', e);
     }
@@ -203,7 +206,7 @@ export const unifiedOfflineSyncService = {
     const remapped = new Map<string, string>();
 
     for (const product of pending) {
-      if (!navigator.onLine) break;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
       try {
         const oldTempId = product.id;
         const { id: _, ...productData } = product;
@@ -277,6 +280,8 @@ export const unifiedOfflineSyncService = {
       console.warn('[UnifiedOfflineSync] Error remapping transaction product IDs:', e);
     }
 
+    offlineQueue.remapIds(remapped);
+    transactionService.remapJournalIds(remapped);
     return synced;
   },
 
@@ -284,65 +289,8 @@ export const unifiedOfflineSyncService = {
    * Sync offline stock adjustments to Firestore
    */
   syncOfflineStockAdjustments: async (): Promise<number> => {
-    const adjustments = inventoryService.getPendingStockAdjustments();
-    if (adjustments.length === 0) return 0;
-
-    let synced = 0;
-    const syncedIds = new Set<string>();
-
-    for (const adj of adjustments) {
-      if (!navigator.onLine) break;
-      try {
-        const ref = doc(db, 'inventory', adj.productId);
-        const snap = await getDoc(ref);
-        if (snap.exists()) {
-          if (adj.mode === 'relative') {
-            // A queued delta must be added to the server's stock at commit time — replaying the
-            // locally-computed absolute value would overwrite sales made from other devices.
-            // The entry's id is the key the first attempt stamped, so a write the server took
-            // while this device heard a timeout is recognised instead of applied twice.
-            await commitStockDelta(adj.productId, adj.delta, adj.id);
-          } else {
-            const currentStock = snap.data()?.stock ?? 0;
-            const threshold = snap.data()?.lowStockThreshold ?? 1;
-            const newStock = adj.newStock !== undefined
-              ? adj.newStock
-              : Math.max(0, currentStock + adj.delta);
-            const stockStatus = computeStockStatus(newStock, threshold);
-
-            await updateDoc(ref, { stock: newStock, stockStatus });
-          }
-        } else {
-          // The product was deleted, or never reached Firestore, while this adjustment waited.
-          // Discarding the entry is right — doing it silently is how stock disappears from the
-          // books with no trace, so the abandonment is logged instead.
-          offlineDeadLetterStore.record({
-            source: 'stock_adjustment',
-            type: 'inventory',
-            payload: { ...adj },
-            reason: 'document_missing',
-            attempts: 0,
-            enqueuedAt: adj.timestamp,
-            detail: `inventory/${adj.productId} no longer exists`,
-          });
-        }
-
-        syncedIds.add(adj.id);
-        synced++;
-      } catch (err) {
-        console.error(`[UnifiedOfflineSync] Failed to sync stock adjustment for ${adj.productId}:`, err);
-      }
-    }
-
-    // One write for the whole pass: savePendingStockAdjustments re-stringifies the queue and
-    // mirrors it to IndexedDB, which is quadratic when done per adjustment.
-    if (synced > 0) {
-      inventoryService.savePendingStockAdjustments(
-        inventoryService.getPendingStockAdjustments().filter(a => !syncedIds.has(a.id))
-      );
-    }
-
-    return synced;
+    const summary = await reconcilePendingStockAdjustments();
+    return summary.totalSynced;
   },
 
   /**
@@ -357,7 +305,7 @@ export const unifiedOfflineSyncService = {
     const remapped = new Map<string, string>();
 
     for (const ticket of pending) {
-      if (!navigator.onLine) break;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
       try {
         const oldTempId = ticket.id;
         const { id: _, ...ticketData } = ticket;
@@ -404,6 +352,8 @@ export const unifiedOfflineSyncService = {
       console.warn('[UnifiedOfflineSync] Error updating repairStore:', e);
     }
 
+    offlineQueue.remapIds(remapped);
+    transactionService.remapJournalIds(remapped);
     return synced;
   },
 
@@ -419,7 +369,7 @@ export const unifiedOfflineSyncService = {
     const remapped = new Map<string, string>();
 
     for (const tx of pending) {
-      if (!navigator.onLine) break;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
       try {
         const oldTempId = tx.id;
         const { id: _, ...txData } = tx;
@@ -434,8 +384,30 @@ export const unifiedOfflineSyncService = {
         // it false with nothing queued, so finish the shelf from the invoice here. The
         // transaction re-reads the server stamp, so an already-finished sale simply adopts.
         if (tx.stockApplied !== true) {
-          await commitSaleStockEffects(realDocId, saleStockDeltas(tx.items || [], tx.saleType))
-            .catch(err => console.warn(`[UnifiedOfflineSync] Could not heal stock for ${realDocId}:`, err));
+          try {
+            await commitSaleStockEffects(realDocId, saleStockDeltas(tx.items || [], tx.saleType));
+            if (tx.validationStatus === 'pending_validation') {
+              await updateDoc(doc(db, 'transactions', realDocId), { validationStatus: 'confirmed' }).catch(() => undefined);
+            }
+          } catch (stockErr) {
+            const msg = stockErr instanceof Error ? stockErr.message : String(stockErr ?? '');
+            if (msg.startsWith('INSUFFICIENT_STOCK:')) {
+              offlineDeadLetterStore.record({
+                source: 'stock_adjustment',
+                type: 'transactions',
+                payload: { id: realDocId, invoiceNumber: tx.invoiceNumber },
+                reason: 'unrecoverable',
+                attempts: 1,
+                enqueuedAt: tx.date,
+                detail: `Offline sale ${tx.invoiceNumber || realDocId} exceeded server stock: ${msg}`,
+              });
+              await updateDoc(doc(db, 'transactions', realDocId), { validationStatus: 'stock_conflict' }).catch(() => undefined);
+            } else {
+              console.warn(`[UnifiedOfflineSync] Could not finish stock for ${realDocId}:`, stockErr);
+            }
+          }
+        } else if (tx.validationStatus === 'pending_validation') {
+          await updateDoc(doc(db, 'transactions', realDocId), { validationStatus: 'confirmed' }).catch(() => undefined);
         }
       } catch (err) {
         console.error(`[UnifiedOfflineSync] Failed to sync offline transaction ${tx.id}:`, err);
@@ -472,6 +444,25 @@ export const unifiedOfflineSyncService = {
       console.warn('[UnifiedOfflineSync] Error updating sale stores:', e);
     }
 
+    // Update any local debt entries pointing to temp transactionId and remap queued actions
+    try {
+      const localDebts = getLocalList<CustomerDebtEntry>(DEBTS_LOCAL_KEY);
+      let debtsModified = false;
+      const updatedDebts = localDebts.map(d => {
+        const realTxId = d.transactionId ? remapped.get(d.transactionId) : undefined;
+        if (!realTxId) return d;
+        debtsModified = true;
+        return { ...d, transactionId: realTxId };
+      });
+      if (debtsModified) {
+        saveLocalList(DEBTS_LOCAL_KEY, updatedDebts);
+      }
+    } catch {
+      // ignore local remap error
+    }
+    offlineQueue.remapIds(remapped);
+    transactionService.remapJournalIds(remapped);
+
     return synced;
   },
 
@@ -487,7 +478,7 @@ export const unifiedOfflineSyncService = {
     const remapped = new Map<string, string>();
 
     for (const debt of pending) {
-      if (!navigator.onLine) break;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
       try {
         const oldTempId = debt.id;
         const { id: _, ...debtData } = debt;
@@ -524,6 +515,28 @@ export const unifiedOfflineSyncService = {
       console.warn('[UnifiedOfflineSync] Error updating customerStore debts:', e);
     }
 
+    // Update any local transaction settlement pointing to temp debtEntryId and remap queued actions
+    try {
+      const localTxs = getLocalList<SaleTransaction>(TRANSACTIONS_LOCAL_KEY);
+      let txsModified = false;
+      const updatedTxs = localTxs.map(t => {
+        const realDebtId = t.accountSettlement?.debtEntryId ? remapped.get(t.accountSettlement.debtEntryId) : undefined;
+        if (!realDebtId || !t.accountSettlement) return t;
+        txsModified = true;
+        return {
+          ...t,
+          accountSettlement: { ...t.accountSettlement, debtEntryId: realDebtId },
+        };
+      });
+      if (txsModified) {
+        saveLocalList(TRANSACTIONS_LOCAL_KEY, updatedTxs);
+      }
+    } catch {
+      // ignore local remap error
+    }
+    offlineQueue.remapIds(remapped);
+    transactionService.remapJournalIds(remapped);
+
     return synced;
   },
 
@@ -539,7 +552,7 @@ export const unifiedOfflineSyncService = {
     const remapped = new Map<string, string>();
 
     for (const log of pending) {
-      if (!navigator.onLine) break;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
       try {
         const oldTempId = log.id;
         const { id: _, ...logData } = log;
@@ -570,7 +583,7 @@ export const unifiedOfflineSyncService = {
    * MASTER SYNC: Triggers all domain syncs in correct sequence
    */
   syncAll: async (): Promise<{ totalSynced: number; errors: boolean }> => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       return { totalSynced: 0, errors: false };
     }
 
@@ -671,7 +684,15 @@ export const unifiedOfflineSyncService = {
         hadErrors = true;
       }
 
-      // 8. Flush action queue (status updates, ticket updates, refunds)
+      // 7b. Reconcile any uncertain/claimed refunds or invoice edits committed before ack
+      try {
+        await transactionService.reconcilePendingRefunds();
+        await transactionService.reconcilePendingSaleEdits();
+      } catch (e) {
+        console.warn('[UnifiedOfflineSync] Sale journal reconcile warning:', e);
+      }
+
+      // 8. Flush action queue (status updates, ticket updates, edits, customer updates, payments)
       try {
         const queueResult = await offlineQueue.flush();
         totalSynced += queueResult.success;
@@ -712,6 +733,7 @@ export const unifiedOfflineSyncService = {
 
         // 3. Trim stale synced records from localStorage now that we know Firestore is reachable
         pruneLocalCache();
+        invalidateReportsCache();
       }
 
       return { totalSynced, errors: hadErrors };

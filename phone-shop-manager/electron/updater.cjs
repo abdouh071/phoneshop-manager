@@ -31,7 +31,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const DEFAULT_FEED_URL = 'https://phoneshop-mgr-pro-2026.web.app/desktop-update.json';
+const DEFAULT_FEED_URL = 'https://ecomeweb-91a7e.web.app/desktop-update.json';
 const FEED_URL = String(process.env.PHONESHOP_UPDATE_URL || DEFAULT_FEED_URL).trim();
 const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const FIRST_CHECK_DELAY_MS = 30 * 1000;

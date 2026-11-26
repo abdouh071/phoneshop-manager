@@ -3,6 +3,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { useCartStore } from '../../store/cartStore';
 import { useToast } from '../../components/ui/Toast';
+import { transactionService } from '../../services/transactionService';
 import type { SaleTransaction } from '../../types';
 import { formatCurrency } from '../../utils/formatCurrency';
 
@@ -20,6 +21,7 @@ export const RefundModal: React.FC<RefundModalProps> = ({ isOpen, onClose, trans
   const [error, setError] = React.useState('');
 
   if (!transaction) return null;
+  const pendingClaim = transactionService.getPendingRefunds().find(r => r.transactionId === transaction.id);
 
   const handleClose = () => { if (!submitting.current) onClose(); };
   const handleRefund = async () => {
@@ -55,12 +57,30 @@ export const RefundModal: React.FC<RefundModalProps> = ({ isOpen, onClose, trans
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={isProcessing}>Cancel</Button>
-          <Button variant="danger" onClick={handleRefund} isLoading={isProcessing}>Process Refund</Button>
+          <Button variant="danger" onClick={handleRefund} isLoading={isProcessing}>
+            {pendingClaim ? 'Verify & Complete Refund' : 'Process Refund'}
+          </Button>
         </>
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', fontSize: 'var(--text-body-sm-size)' }}>
         <p>Are you sure you want to refund this transaction?</p>
+
+        {pendingClaim && (
+          <div
+            role="status"
+            style={{
+              background: '#fef3c7',
+              color: '#92400e',
+              padding: 'var(--space-2) var(--space-3)',
+              borderRadius: 'var(--radius)',
+              fontSize: 'var(--text-label-sm-size)',
+              fontWeight: 600,
+            }}
+          >
+            ⏳ A refund claim was already submitted ({pendingClaim.refundedAt.slice(0, 16).replace('T', ' ')}). Confirming below checks whether it landed on the server and finishes it once without double-refunding.
+          </div>
+        )}
         
         <div style={{ background: 'var(--color-surface-container-lowest)', padding: 'var(--space-3)', borderRadius: 'var(--radius)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>

@@ -163,6 +163,35 @@ describe('transactionService.editSale', () => {
     expect(row('transactions', 'tx1')?.financialRevision).toBe(1);
   });
 
+  it('refuses a stale till at revision 0 sending a different correction after revision 1 committed via editSale', async () => {
+    const initial = sale();
+    await edit(initial);
+
+    await expect(
+      transactionService.editSale(initial, {
+        updates: { total: 15000, financialRevision: 1 },
+        stockDeltas: [],
+        debtUpdate: undefined,
+      })
+    ).rejects.toThrow(/changed on another device/);
+
+    expect(row('transactions', 'tx1')).toMatchObject({ total: 10000, financialRevision: 1 });
+    expect(row('inventory', 'sku_phone')?.stock).toBe(7);
+    expect(row('customers', 'cust_1')?.storeCredit).toBe(10000);
+    expect(row('customer_debts', 'debt_1')?.remainingBalance).toBe(10000);
+  });
+
+  it('refuses a stale till with a different operationId even when revision 1 already committed', async () => {
+    const initial = sale();
+    await transactionService.editSale(initial, { ...editRequest(initial), operationId: 'till-A-op' });
+
+    await expect(
+      transactionService.editSale(initial, { ...editRequest(initial), operationId: 'till-B-op' })
+    ).rejects.toThrow(/changed on another device/);
+
+    expect(row('inventory', 'sku_phone')?.stock).toBe(7);
+  });
+
   it('refuses a closed invoice', async () => {
     fake.write('transactions/tx1', { status: 'refunded' });
     await expect(edit(sale({ status: 'refunded' }))).rejects.toThrow(/closed/);

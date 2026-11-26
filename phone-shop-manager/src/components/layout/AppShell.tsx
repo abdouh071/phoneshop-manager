@@ -26,7 +26,7 @@ interface AppShellProps {
 const IDLE_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
 
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
-  const { theme, colorTheme, currency, storeName, fetchSettings, isInitialized } = useSettingsStore();
+  const { theme, colorTheme, storeName, fetchSettings, isInitialized } = useSettingsStore();
   const { user, isHistoryUnlocked, lockHistory } = useAuthStore();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const toast = useToast();
@@ -37,13 +37,19 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const subscribeLiveRepairs = useRepairStore((s) => s.subscribeLiveRepairs);
   useEffect(() => subscribeLiveRepairs(), [subscribeLiveRepairs]);
 
-  // Fetch global settings on app load & set up real-time listener
+  // Fetch global settings on app load & tear down safely even across rapid unmount/logout
   useEffect(() => {
+    let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     fetchSettings().then(unsub => {
-      unsubscribe = unsub;
+      if (cancelled) {
+        unsub();
+      } else {
+        unsubscribe = unsub;
+      }
     });
     return () => {
+      cancelled = true;
       if (unsubscribe) unsubscribe();
     };
   }, [fetchSettings]);
@@ -130,7 +136,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
             </div>
           </header>
 
-          <div className={styles.content} key={`${currency}-${storeName}`}>
+          <div className={styles.content}>
             {!isInitialized ? (
               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
                 <div style={{

@@ -9,7 +9,6 @@ import {
 } from 'firebase/auth';
 import { initializeApp, deleteApp } from 'firebase/app';
 import type { FirebaseApp } from 'firebase/app';
-import type { UserCredential } from 'firebase/auth';
 import type { Timestamp } from 'firebase/firestore';
 import { auth, app } from '../lib/firebase';
 import { userService } from '../services/userService';
@@ -513,12 +512,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
         secondaryApp = initializeApp(app.options, secondaryAppName);
         const secondaryAuth = getAuth(secondaryApp);
 
-        let cred: UserCredential | null = null;
-        try {
-          cred = await createUserWithEmailAndPassword(secondaryAuth, email, pass);
-        } catch (authErr: unknown) {
-          throw authErr;
-        }
+        const cred = await createUserWithEmailAndPassword(secondaryAuth, email, pass);
 
         try {
           await userService.createUserProfile(cred.user.uid, {

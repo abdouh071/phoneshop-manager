@@ -4,6 +4,7 @@ import type { Customer, CustomerDebtEntry, PhoneModel, SaleTransaction } from '.
 import { computeStockStatus } from '../utils/stockStatus';
 import { saleOpeningPayments } from '../utils/debtPayments';
 import { offlineQueueMirror } from './offlineQueueMirror';
+import { invalidateReportsCache } from './reportCacheInvalidation';
 
 const JOURNAL_KEY = 'parts_checkout_journal';
 
@@ -213,6 +214,7 @@ function rememberConfirmed(result: PartsCheckoutResult): PartsCheckoutResult {
       console.warn('Checkout confirmed, but its local cache could not be updated:', error);
     }
   }
+  invalidateReportsCache();
   return result;
 }
 

@@ -11,10 +11,11 @@ import { printReceiptDirect } from '../../utils/printWindow';
 import { errorMessage } from '../../utils/errorUtils';
 
 export const ReceiptTab = () => {
-  const { receiptHeader, receiptFooter, storeName, currency, logoUrl: savedLogoUrl, updateSettingsBulk } = useSettingsStore();
+  const { receiptHeader, receiptFooter, storeName, currency, logoUrl: savedLogoUrl, error: settingsError, updateSettingsBulk } = useSettingsStore();
   const [headerText, setHeaderText] = useState(receiptHeader !== undefined ? receiptHeader : 'Thank you for shopping with us!');
   const [footerText, setFooterText] = useState(receiptFooter !== undefined ? receiptFooter : 'Returns accepted within 14 days with original receipt.');
   const [logoUrl, setLogoUrl] = useState(savedLogoUrl || '');
+  const [hasEdited, setHasEdited] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isTestingPrint, setIsTestingPrint] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -22,10 +23,11 @@ export const ReceiptTab = () => {
   const toast = useToast();
 
   useEffect(() => {
+    if (hasEdited) return;
     if (receiptHeader !== undefined) setHeaderText(receiptHeader);
     if (receiptFooter !== undefined) setFooterText(receiptFooter);
     if (savedLogoUrl !== undefined) setLogoUrl(savedLogoUrl || '');
-  }, [receiptHeader, receiptFooter, savedLogoUrl]);
+  }, [receiptHeader, receiptFooter, savedLogoUrl, hasEdited]);
 
   /**
    * Normalize and optimize image to ESC/POS friendly PNG format.
@@ -78,6 +80,7 @@ export const ReceiptTab = () => {
           ctx.drawImage(img, 0, 0, targetW, targetH);
 
           const optimizedPng = canvas.toDataURL('image/png');
+          setHasEdited(true);
           setLogoUrl(optimizedPng);
           toast.success('Logo Loaded', `Optimized to ${targetW}x${targetH}px thermal-ready PNG. Click Save to persist.`);
         } catch (procErr: unknown) {
@@ -119,6 +122,7 @@ export const ReceiptTab = () => {
   };
 
   const handleRemoveLogo = () => {
+    setHasEdited(true);
     setLogoUrl('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -129,14 +133,19 @@ export const ReceiptTab = () => {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      await updateSettingsBulk({
+      const saved = await updateSettingsBulk({
         receiptHeader: headerText,
         receiptFooter: footerText,
         logoUrl: logoUrl,
       });
-      toast.success('Receipt Settings Saved', 'Receipt template and store logo saved successfully.');
+      if (saved) {
+        setHasEdited(false);
+        toast.success('Receipt Settings Saved', 'Receipt template and store logo saved successfully.');
+      } else {
+        toast.error('Save Failed', errorMessage(settingsError) || 'Could not save receipt settings. Your draft has been kept.');
+      }
     } catch (err: unknown) {
-      toast.error('Save Failed', errorMessage(err) || 'Could not save receipt settings.');
+      toast.error('Save Failed', errorMessage(err) || 'Could not save receipt settings. Your draft has been kept.');
     } finally {
       setIsSaving(false);
     }
@@ -269,7 +278,10 @@ export const ReceiptTab = () => {
             <TextArea 
               label="Header Message"
               value={headerText}
-              onChange={e => setHeaderText(e.target.value)}
+              onChange={e => {
+                setHasEdited(true);
+                setHeaderText(e.target.value);
+              }}
               placeholder="e.g. Thank you for choosing us! Welcome to our store."
               rows={2}
             />
@@ -277,7 +289,10 @@ export const ReceiptTab = () => {
             <TextArea 
               label="Footer Message / Policy"
               value={footerText}
-              onChange={e => setFooterText(e.target.value)}
+              onChange={e => {
+                setHasEdited(true);
+                setFooterText(e.target.value);
+              }}
               placeholder="e.g. Returns accepted within 14 days with original receipt. No cash refunds on opened electronics."
               rows={3}
             />

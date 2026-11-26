@@ -258,6 +258,9 @@ export interface SaleTransaction {
    */
   stockApplied?: boolean;
   profileApplied?: boolean;
+  financialRevision?: number;
+  refundedAt?: string;
+  voidedAt?: string;
   /**
    * The approval that authorised this void, refund or edit. Kept for the audit trail:
    * unlike `approvalRequestId` it survives the correction landing, so an invoice edited

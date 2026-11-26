@@ -2,6 +2,7 @@ import React from 'react';
 import { Copy, RotateCcw, Sparkles, Eye, Target } from 'lucide-react';
 import { BarcodePreview } from './BarcodePreview';
 import { getComputedFontSize } from './ticketPrintUtils';
+import { computeFreeTextStickerLayout } from '../../utils/customLabelWrap';
 import { useToast } from '../../components/ui/Toast';
 import styles from './CustomTicket.module.css';
 import type { CustomTicketData } from './customTicketTypes';
@@ -86,24 +87,31 @@ export const LivePreviewPanel: React.FC<LivePreviewPanelProps> = (props) => {
           )}
 
           <div className={styles.blankStickerCenterStage}>
-            <div
-              className={styles.blankStickerText}
-              style={{
-                fontSize: getComputedFontSize(ticket.freeText || '', ticket.fontSize, false),
-                fontWeight: ticket.isBold !== false ? 900 : 500,
-                textAlign: ticket.textAlign || 'center',
-                color: '#111827',
-                width: '100%',
-              }}
-            >
-              {ticket.freeText ? (
-                ticket.freeText
-              ) : (
-                <span style={{ color: '#94a3b8', fontStyle: 'italic', fontWeight: 400, fontSize: '14px' }}>
-                  (Sticker is blank. Type anything in the keyboard input on the left to see it centered here)
-                </span>
-              )}
-            </div>
+            {(() => {
+              const layout = computeFreeTextStickerLayout(ticket, storeName);
+              const wrappedText = ticket.freeText ? layout.wrappedLines.join('\n') : '';
+              return (
+                <div
+                  data-testid="blank-sticker-preview-text"
+                  className={styles.blankStickerText}
+                  style={{
+                    fontSize: getComputedFontSize(wrappedText, ticket.fontSize, false),
+                    fontWeight: ticket.isBold !== false ? 900 : 500,
+                    textAlign: ticket.textAlign || 'center',
+                    color: '#111827',
+                    width: '100%',
+                  }}
+                >
+                  {ticket.freeText ? (
+                    wrappedText
+                  ) : (
+                    <span style={{ color: '#94a3b8', fontStyle: 'italic', fontWeight: 400, fontSize: '14px' }}>
+                      (Sticker is blank. Type anything in the keyboard input on the left to see it centered here)
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {ticket.includeBarcode && ticket.barcodeValue && (

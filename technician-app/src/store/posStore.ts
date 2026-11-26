@@ -4,8 +4,6 @@ import {
   query,
   getDocs,
   addDoc,
-  doc,
-  updateDoc,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuthStore } from './authStore';
@@ -15,7 +13,7 @@ import { customerService } from '../services/customerService';
 import { isOfflineCustomerId, newIdempotencyKey } from '../services/offlineQueuePolicy';
 import { notificationService } from '../services/notificationService';
 import { claimInvoiceNumber } from '../services/invoiceCounter';
-import { commitSaleEffects, type StockLine } from '../services/stockService';
+import { commitPosSaleAtomic, type StockLine } from '../services/stockService';
 import { discountAmountOf } from '../utils/discountPolicy';
 import { checkCartStock, type CartStockResult } from '../utils/cartStock';
 import { creditAmountOf, salePayments } from '../utils/salePayments';
@@ -262,126 +260,114 @@ export const usePosStore = create<PosState>((set, get) => ({
 
     let realTx: SaleTransaction;
     let saleUploaded = false;
+    const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    const hasUnresolvedCustomer = Boolean(cust && isOfflineCustomerId(cust.id));
 
-    try {
-      const { id: _, ...dataToSave } = newTx;
-      const docRef = await addDoc(collection(db, 'transactions'), dataToSave);
-      realTx = { ...newTx, id: docRef.id };
-      saleUploaded = true;
+    const debtEntry: CustomerDebtEntry | undefined =
+      debtAmount > 0 && cust
+        ? {
+            id: '',
+            customerId: cust.id,
+            customerName: cust.name,
+            customerPhone: cust.phone,
+            productOrService: `POS Sale (${cart.map(i => `${i.product.name} x${i.quantity}`).join(', ')})`,
+            itemsSummary: cart.map(i => `${i.quantity}x ${i.product.name} ${i.product.model || ''}`.trim()).join(', '),
+            totalAmount: total,
+            amountPaid: params.paymentMethod === 'debt' ? 0 : (params.amountPaid || 0),
+            remainingBalance: debtAmount,
+            date: now,
+            status: debtAmount === total ? 'unpaid' : 'partially_paid',
+            type: 'sale',
+            notes: `Receipt #${invoiceNumber}`,
+            invoiceNumber,
+            idempotencyKey: debtKey,
+            createdAt: now,
+            updatedAt: now,
+          }
+        : undefined;
 
-      // Log sale activity
-      await activityLogService.log(
-        'sales',
-        `New POS Sale: ${total} DA (${cart.length} item${cart.length > 1 ? 's' : ''})`,
-        {
-          entityId: docRef.id,
-          entityType: 'sale',
-          detail: `Payment: ${params.paymentMethod.toUpperCase()} · Customer: ${realTx.customerName}`,
-          userName: currentUser?.name || 'Sales Agent',
-          userId: currentUser?.id || 'technician-app',
-        }
-      );
-    } catch (err) {
-      console.warn('[PosStore] Failed to save transaction to Firestore (offline), queueing:', err);
-      const offlineId = `offline_tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      realTx = { ...newTx, id: offlineId };
-      await offlineSyncService.saveOfflineSale(realTx);
-    }
+    const lines: StockLine[] = cart.map((item) => ({
+      productId: item.product.id,
+      name: item.product.name,
+      quantity: Math.max(1, Math.trunc(item.quantity || 1)),
+    }));
 
-    // The shelf and the customer's own numbers move in one transaction anchored to the
-    // invoice, which was stamped unfinished above. Only a sale this device actually wrote
-    // moves here: a queued sale is finished by the sync pass that creates its document, so
-    // deducting here as well would take the units off the shelf twice. If this transaction
-    // is interrupted the stamps stay false and the unfinished-sale sweep finishes them once
-    // — nothing is queued here as well, which would deduct the same units a second time.
-    if (saleUploaded) {
-      const lines: StockLine[] = cart.map((item) => ({
-        productId: item.product.id,
-        name: item.product.name,
-        quantity: Math.max(1, Math.trunc(item.quantity || 1)),
-      }));
-
+    if (!isOffline && !hasUnresolvedCustomer) {
       try {
-        const { applied, failed } = await commitSaleEffects(
-          realTx.id,
-          lines,
-          cust
-            ? { customerId: cust.id, paid: Math.max(0, total - debtAmount), charged: debtAmount }
-            : undefined
-        );
+        const { id: _, ...dataToSave } = newTx;
+        const debtPayload = debtEntry
+          ? (() => {
+              const { id: _debtId, ...rest } = debtEntry;
+              return rest;
+            })()
+          : undefined;
 
-        for (const a of applied) {
+        const atomicResult = await commitPosSaleAtomic({
+          lines,
+          saleData: dataToSave as Record<string, unknown>,
+          profile: cust
+            ? { customerId: cust.id, paid: Math.max(0, total - debtAmount), charged: debtAmount }
+            : undefined,
+          debtData: debtPayload as Record<string, unknown> | undefined,
+        });
+
+        realTx = {
+          ...newTx,
+          id: atomicResult.saleId,
+          stockApplied: true,
+          ...(cust ? { profileApplied: true } : {}),
+          financialRevision: 0,
+          ...(atomicResult.debtEntryId && newTx.accountSettlement
+            ? {
+                accountSettlement: {
+                  ...newTx.accountSettlement,
+                  debtEntryId: atomicResult.debtEntryId,
+                },
+              }
+            : {}),
+        };
+        saleUploaded = true;
+
+        for (const a of atomicResult.applied) {
           if (a.result.stockStatus !== 'in_stock') {
             notificationService.notifyLowStock(a.line.name, a.result.stock)
               .catch(err => console.warn('[PosStore] Low stock notification error:', err));
           }
         }
-        // A line whose product is on neither shelf is queued durably, as the per-line path did.
-        for (const f of failed) {
-          console.warn(`[PosStore] Stock delta failed for ${f.line.name}, queued:`, f.error);
-          await offlineSyncService.saveOfflineStockDelta({
-            productId: f.line.productId,
-            name: f.line.name,
-            delta: -f.line.quantity,
-            reason: `Sale ${invoiceNumber}`,
-          });
+
+        // Log sale activity
+        await activityLogService.log(
+          'sales',
+          `New POS Sale: ${total} DA (${cart.length} item${cart.length > 1 ? 's' : ''})`,
+          {
+            entityId: atomicResult.saleId,
+            entityType: 'sale',
+            detail: `Payment: ${params.paymentMethod.toUpperCase()} · Customer: ${realTx.customerName}`,
+            userName: currentUser?.name || 'Sales Agent',
+            userId: currentUser?.id || 'technician-app',
+          }
+        );
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err ?? '');
+        const code = (err as { code?: unknown })?.code;
+        if (msg.includes('INSUFFICIENT_STOCK') || code === 'permission-denied' || msg.includes('permission-denied')) {
+          throw err;
         }
-      } catch (err) {
-        // The stamps stay false; the sweep finishes this sale. Queueing here too would deduct twice.
-        console.warn('[PosStore] Could not move stock/profile for sale, leaving it for the sweep:', err);
+        console.warn('[PosStore] Failed atomic transaction (offline/network), queueing:', err);
+        const offlineId = `offline_tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        realTx = { ...newTx, id: offlineId };
+        await offlineSyncService.saveOfflineSale(realTx);
       }
+    } else {
+      const offlineId = `offline_tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      realTx = { ...newTx, id: offlineId };
+      await offlineSyncService.saveOfflineSale(realTx);
     }
 
-    // If debt payment or partial payment, record customer debt entry
-    if (debtAmount > 0 && cust) {
-      const itemsSummary = cart.map(i => `${i.quantity}x ${i.product.name} ${i.product.model || ''}`.trim()).join(', ');
-      const debtEntry: CustomerDebtEntry = {
-        id: '',
-        customerId: cust.id,
-        customerName: cust.name,
-        customerPhone: cust.phone,
-        productOrService: `POS Sale (${cart.map(i => `${i.product.name} x${i.quantity}`).join(', ')})`,
-        itemsSummary,
-        totalAmount: total,
-        amountPaid: params.paymentMethod === 'debt' ? 0 : (params.amountPaid || 0),
-        remainingBalance: debtAmount,
-        date: now,
-        status: debtAmount === total ? 'unpaid' : 'partially_paid',
-        type: 'sale',
-        notes: `Receipt #${invoiceNumber}`,
-        // Both keys, because each one outlives a different failure. The transaction id
-        // is the strongest link and the counter matches on it; the invoice number is
-        // minted at the till before the phone has a server id, so it is the only one
-        // that survives a sale that was written while the shop had no network. Without
-        // either, nothing in either app could find this debt again from the invoice.
-        invoiceNumber,
-        idempotencyKey: debtKey,
-        transactionId: saleUploaded ? realTx.id : undefined,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      try {
-        const { id: _, ...debtToSave } = debtEntry;
-        const debtDocRef = await addDoc(collection(db, 'customer_debts'), debtToSave);
-        if (realTx.accountSettlement) {
-          realTx.accountSettlement.debtEntryId = debtDocRef.id;
-          // The link has to exist on the invoice too, or the next device to read it —
-          // this phone replaying an edit, the counter refunding the sale — has to guess.
-          // A queued sale has no document to point at yet; its sync pass writes the
-          // settlement from this same object when it creates the transaction.
-          if (saleUploaded) {
-            await updateDoc(
-              doc(db, 'transactions', realTx.id),
-              { 'accountSettlement.debtEntryId': debtDocRef.id }
-            ).catch(err => console.warn('[PosStore] Debt link could not be written back:', err));
-          }
-        }
-      } catch (dErr) {
-        console.warn('[PosStore] Offline customer debt queueing:', dErr);
-        const offlineDebtId = `offline_debt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        await offlineSyncService.saveOfflineDebt({ ...debtEntry, id: offlineDebtId });
-      }
+    // Offline queued credit sales still queue their debt document for the sync pass.
+    if (!saleUploaded && debtEntry && cust) {
+      const offlineDebtId = `offline_debt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      await offlineSyncService.saveOfflineDebt({ ...debtEntry, id: offlineDebtId });
     }
 
     // Customer Activity Log

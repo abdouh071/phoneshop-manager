@@ -8,6 +8,7 @@ import { useToast } from '../../components/ui/Toast';
 import type { Customer, CustomerDebtEntry, RepairTicket } from '../../types';
 import { isShopCustomer } from '../../types';
 import type { User as AuthUser } from '../../store/authStore';
+import { useCartStore } from '../../store/cartStore';
 import { formatPrivateCurrency } from '../../utils/formatCurrency';
 import { getCustomerOverdueInfo, buildWhatsAppDebtReminderUrl } from '../../utils/debtAlerts';
 import { normalizePhoneDigits, formatWhatsAppUrl } from '../../utils/phoneUtils';
@@ -378,6 +379,7 @@ export const CustomerTableRow: React.FC<CustomerTableRowProps> = ({
                               e.stopPropagation();
                               setCustomerName(customer.name);
                               setCustomerPhone(customer.phone || '');
+                              useCartStore.getState().setCustomerId(customer.id);
                               toast.success(t('customers.customerAttachedToast', 'Customer Attached'), t('customers.customerAttachedDesc', '{{name}} attached to ticket / POS sale.', { name: customer.name }));
                               navigate('/pos');
                             }}

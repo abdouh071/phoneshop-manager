@@ -2,7 +2,9 @@ import { collection, doc, getDocs, addDoc, setDoc, deleteDoc, query, where, orde
 import { db } from '../lib/firebase';
 import type { Customer, CustomerActivityLog } from '../types';
 import { isPhoneMatch, normalizePhoneDigits, formatStandardPhone, getPhoneSearchVariants, isMoreDescriptiveName } from '../utils/phoneUtils';
+import { extractBaseValues, findConflictingField } from '../utils/conflictCheck';
 import { offlineCustomerSyncService } from './offlineCustomerSyncService';
+import { offlineQueue, UnrecoverableSyncActionError } from './offlineQueue';
 
 const COLLECTION = 'customers';
 const LOCAL_STORAGE_KEY = 'offline_customers';
@@ -345,8 +347,18 @@ export const customerService = {
     return result;
   },
 
-  updateCustomer: async (id: string, updates: Partial<Customer>): Promise<Customer> => {
-    const sanitizedUpdates: Partial<Customer> = { ...updates };
+  updateCustomer: async (
+    id: string,
+    updates: Partial<Customer>,
+    options?: { operationId?: string }
+  ): Promise<Customer> => {
+    const now = new Date().toISOString();
+    const sanitizedUpdates: Partial<Customer> = {};
+    for (const [k, v] of Object.entries(updates)) {
+      if (v !== undefined) {
+        (sanitizedUpdates as Record<string, unknown>)[k] = v;
+      }
+    }
     if (updates.phone !== undefined) {
       const cleanPhone = normalizePhoneDigits(updates.phone);
       sanitizedUpdates.phone = formatStandardPhone(updates.phone) || updates.phone;
@@ -354,9 +366,15 @@ export const customerService = {
         sanitizedUpdates.normalizedPhone = cleanPhone;
       }
     }
+    sanitizedUpdates.updatedAt = sanitizedUpdates.updatedAt || now;
 
     const local = getLocalCustomers();
     const existing = local.find(c => c.id === id);
+    const baseValues = extractBaseValues(
+      existing as unknown as Record<string, unknown> | undefined,
+      sanitizedUpdates as unknown as Record<string, unknown>
+    );
+
     const merged = { ...(existing || ({} as Customer)), ...sanitizedUpdates, id };
     saveLocalCustomers(local.map(c => c.id === id ? merged : c));
 
@@ -365,7 +383,21 @@ export const customerService = {
       return merged;
     }
 
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    const operationId = options?.operationId || `cust_upd_${id}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const enqueuePatch = () =>
+      offlineQueue.enqueue({
+        type: 'UPDATE_CUSTOMER',
+        payload: {
+          id,
+          updates: sanitizedUpdates,
+          ...(baseValues ? { baseValues } : {}),
+          ...(existing?.updatedAt ? { baseUpdatedAt: existing.updatedAt } : {}),
+          operationId,
+        },
+      });
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      await enqueuePatch();
       return merged;
     }
 
@@ -378,10 +410,68 @@ export const customerService = {
       await Promise.race([updatePromise, timeoutPromise]);
       return merged;
     } catch (err) {
-      console.warn('Failed to update customer on Firestore, stored locally:', err);
+      console.warn('Failed to update customer on Firestore, queued patch locally:', err);
+      await enqueuePatch();
     }
 
     return merged;
+  },
+
+  replayQueuedUpdate: async (payload: {
+    id: string;
+    updates: Partial<Customer>;
+    baseValues?: Record<string, unknown>;
+    baseUpdatedAt?: string;
+    operationId?: string;
+  }): Promise<Customer> => {
+    const cleanPatch: Partial<Customer> = {};
+    for (const [k, v] of Object.entries(payload.updates || {})) {
+      if (v !== undefined) (cleanPatch as Record<string, unknown>)[k] = v;
+    }
+    const result = await runTransaction(db, async tx => {
+      const custRef = doc(db, COLLECTION, payload.id);
+      const receiptRef = payload.operationId
+        ? doc(db, 'operation_receipts', `cust_upd_${encodeURIComponent(payload.operationId)}`)
+        : null;
+      const custSnap = await tx.get(custRef);
+      const receiptSnap = receiptRef ? await tx.get(receiptRef) : null;
+      if (!custSnap.exists()) {
+        throw new UnrecoverableSyncActionError(`Customer ${payload.id} no longer exists on the server.`);
+      }
+      const server = docToCustomer(custSnap.id, custSnap.data() as Record<string, unknown>);
+      if (server.mergedIntoId) {
+        throw new UnrecoverableSyncActionError('Customer profile was merged on another device. Review before updating.');
+      }
+      if (receiptSnap?.exists()) {
+        return server;
+      }
+
+      const conflictKey = findConflictingField(
+        server as unknown as Record<string, unknown>,
+        cleanPatch as unknown as Record<string, unknown>,
+        payload.baseValues
+      );
+      if (conflictKey) {
+        throw new UnrecoverableSyncActionError(
+          `Customer field "${conflictKey}" changed on another device while offline. Review before overwriting.`
+        );
+      }
+
+      tx.set(custRef, cleanPatch, { merge: true });
+      if (receiptRef) {
+        tx.set(receiptRef, {
+          kind: 'customer_update',
+          customerId: payload.id,
+          operationId: payload.operationId,
+          updatedAt: cleanPatch.updatedAt || new Date().toISOString(),
+        });
+      }
+      return { ...server, ...cleanPatch, id: payload.id } as Customer;
+    });
+
+    const local = getLocalCustomers();
+    saveLocalCustomers(local.some(c => c.id === payload.id) ? local.map(c => (c.id === payload.id ? result : c)) : [result, ...local]);
+    return result;
   },
 
   deleteCustomer: async (id: string): Promise<void> => {

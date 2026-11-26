@@ -92,6 +92,33 @@ function notifySyncListeners(): void {
   });
 }
 
+function remapValue(value: unknown, remapped: Map<string, string>): { next: unknown; changed: boolean } {
+  if (typeof value === 'string') {
+    const mapped = remapped.get(value);
+    return mapped ? { next: mapped, changed: true } : { next: value, changed: false };
+  }
+  if (Array.isArray(value)) {
+    let anyChanged = false;
+    const mappedArr = value.map(item => {
+      const res = remapValue(item, remapped);
+      if (res.changed) anyChanged = true;
+      return res.next;
+    });
+    return anyChanged ? { next: mappedArr, changed: true } : { next: value, changed: false };
+  }
+  if (value && typeof value === 'object') {
+    let anyChanged = false;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      const res = remapValue(v, remapped);
+      if (res.changed) anyChanged = true;
+      out[k] = res.next;
+    }
+    return anyChanged ? { next: out, changed: true } : { next: value, changed: false };
+  }
+  return { next: value, changed: false };
+}
+
 // A queue restored from the mirror is a queue whose pending count just changed.
 offlineQueueMirror.onRestored(notifySyncListeners);
 
@@ -172,7 +199,7 @@ export const offlineQueue = {
    * Actions are processed in order; failed ones are re-queued with a retry counter.
    */
   async flush(): Promise<{ success: number; failed: number }> {
-    if (isSyncing || !navigator.onLine) return { success: 0, failed: 0 };
+    if (isSyncing || (typeof navigator !== 'undefined' && navigator.onLine === false)) return { success: 0, failed: 0 };
     isSyncing = true;
 
     let success = 0;
@@ -292,6 +319,31 @@ export const offlineQueue = {
       window.removeEventListener('app:online', handleOnline);
       window.removeEventListener('online', handleOnline);
     };
+  },
+
+  /**
+   * Replace temporary `offline_*` identifiers inside any queued action payloads
+   * once the underlying documents have been synced and assigned Firestore IDs.
+   */
+  remapIds(remapped: Map<string, string>): number {
+    if (remapped.size === 0) return 0;
+    const queue = getQueue();
+    if (queue.length === 0) return 0;
+    let updatedCount = 0;
+    const updatedQueue = queue.map(action => {
+      const res = remapValue(action.payload, remapped);
+      if (!res.changed) return action;
+      updatedCount++;
+      return {
+        ...action,
+        payload: res.next as OfflineActionPayload,
+      };
+    });
+    if (updatedCount > 0) {
+      saveQueue(updatedQueue);
+      notifySyncListeners();
+    }
+    return updatedCount;
   },
 
   /**

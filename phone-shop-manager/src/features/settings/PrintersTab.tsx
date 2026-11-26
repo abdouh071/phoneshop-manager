@@ -24,23 +24,36 @@ export const PrintersTab: React.FC = () => {
 
   // Label Font state
   const [selectedLabelFont, setSelectedLabelFont] = useState<LabelFontKey>(settings.labelFont || '2');
+  const [hasEditedFont, setHasEditedFont] = useState(false);
+  const [hasEditedPrefs, setHasEditedPrefs] = useState(false);
   const [sampleType, setSampleType] = useState<'part' | 'product'>('part');
   const [isSavingFont, setIsSavingFont] = useState(false);
   const [testingFontKey, setTestingFontKey] = useState<string | null>(null);
 
   useEffect(() => {
-    if (settings.labelFont) {
+    if (!hasEditedFont && settings.labelFont) {
       setSelectedLabelFont(settings.labelFont);
     }
-  }, [settings.labelFont]);
+  }, [settings.labelFont, hasEditedFont]);
+
+  useEffect(() => {
+    if (hasEditedPrefs) return;
+    if (settings.receiptPaperWidth) setPaperWidth(settings.receiptPaperWidth);
+    if (settings.autoCutReceipt !== undefined) setAutoCut(settings.autoCutReceipt);
+  }, [settings.receiptPaperWidth, settings.autoCutReceipt, hasEditedPrefs]);
 
   const handleSaveFont = async (fontToSave?: LabelFontKey) => {
     const font = fontToSave || selectedLabelFont;
     setIsSavingFont(true);
     try {
-      await settings.updateSetting('labelFont', font);
-      const cfg = getLabelFontConfig(font);
-      toast.success('Label Font Saved', `Stickers will now print using ${cfg.label}.`);
+      const saved = await settings.updateSetting('labelFont', font);
+      if (saved) {
+        setHasEditedFont(false);
+        const cfg = getLabelFontConfig(font);
+        toast.success('Label Font Saved', `Stickers will now print using ${cfg.label}.`);
+      } else {
+        toast.error('Failed to Save', errorMessage(settings.error) || 'Could not save font preference. Your selection was kept.');
+      }
     } catch (err: unknown) {
       toast.error('Failed to Save', errorMessage(err) || 'Could not save font preference.');
     } finally {
@@ -94,12 +107,18 @@ export const PrintersTab: React.FC = () => {
   };
 
   const handleSavePrinterPrefs = async () => {
+    setHasEditedPrefs(true);
     try {
-      await settings.updateSettingsBulk({
+      const saved = await settings.updateSettingsBulk({
         receiptPaperWidth: paperWidth,
         autoCutReceipt: autoCut,
       });
-      toast.success('Printer Preferences Saved', 'Hardware printer preferences updated successfully.');
+      if (saved) {
+        setHasEditedPrefs(false);
+        toast.success('Printer Preferences Saved', 'Hardware printer preferences updated successfully.');
+      } else {
+        toast.error('Failed to Save', errorMessage(settings.error) || 'Could not save printer preferences. Your changes were kept.');
+      }
     } catch (err: unknown) {
       toast.error('Failed to Save', errorMessage(err) || 'Could not save printer preferences.');
     }
@@ -355,7 +374,10 @@ export const PrintersTab: React.FC = () => {
             <Select 
               label="Paper Roll Width"
               value={paperWidth}
-              onChange={(val) => setPaperWidth(val as '80mm' | '58mm')}
+              onChange={(val) => {
+                setHasEditedPrefs(true);
+                setPaperWidth(val as '80mm' | '58mm');
+              }}
               options={[
                 { value: '80mm', label: '80mm (Standard POS, 48 chars)' },
                 { value: '58mm', label: '58mm (Compact Mobile, 32 chars)' },
@@ -368,7 +390,10 @@ export const PrintersTab: React.FC = () => {
                 <input 
                   type="checkbox" 
                   checked={autoCut}
-                  onChange={(e) => setAutoCut(e.target.checked)}
+                  onChange={(e) => {
+                    setHasEditedPrefs(true);
+                    setAutoCut(e.target.checked);
+                  }}
                 />
                 <span className={styles.slider}></span>
                 <span style={{ fontSize: '12px', color: 'var(--color-on-surface-variant, #666)' }}>
@@ -517,7 +542,10 @@ export const PrintersTab: React.FC = () => {
                 return (
                   <div
                     key={font.key}
-                    onClick={() => setSelectedLabelFont(font.key)}
+                    onClick={() => {
+                      setHasEditedFont(true);
+                      setSelectedLabelFont(font.key);
+                    }}
                     style={{
                       padding: '14px',
                       borderRadius: '8px',
@@ -604,6 +632,7 @@ export const PrintersTab: React.FC = () => {
                         size="sm"
                         onClick={(e) => {
                           e.stopPropagation();
+                          setHasEditedFont(true);
                           setSelectedLabelFont(font.key);
                           handleTestFontPrint(font.key);
                         }}

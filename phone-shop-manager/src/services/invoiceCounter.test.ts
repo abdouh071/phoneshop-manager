@@ -27,12 +27,17 @@ vi.mock('firebase/firestore', () => ({
   doc: (_db: unknown, collection: string, id: string) => ({ collection, id }),
   runTransaction: async (_db: unknown, fn: (tx: FakeTransaction) => Promise<string>) => {
     if (store.unreachable) throw new Error('FireShell is offline');
+    let wrote = false;
     const tx: FakeTransaction = {
-      get: async (ref) => ({
-        exists: () => store.counters[ref.id] !== undefined,
-        data: () => store.counters[ref.id],
-      }),
+      get: async (ref) => {
+        if (wrote) throw new Error('Read after write');
+        return {
+          exists: () => store.counters[ref.id] !== undefined,
+          data: () => store.counters[ref.id],
+        };
+      },
       set: (ref, data) => {
+        wrote = true;
         store.writes.push({ path: `counters/${ref.id}`, data });
         store.counters[ref.id] = data;
       },

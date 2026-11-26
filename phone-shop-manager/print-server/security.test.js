@@ -242,9 +242,9 @@ test('an oversized PNG is refused before it is decoded', () => {
 test('the till and the desktop app may ask; a stranger may not', () => {
   assert.equal(internals.originAllowed(TEST_ORIGIN), true);
   assert.equal(internals.originAllowed('http://127.0.0.1:3355'), true);
-  assert.equal(internals.originAllowed('https://phoneshop-mgr-pro-2026.web.app'), true);
+  assert.equal(internals.originAllowed('https://ecomeweb-91a7e.web.app'), true);
   assert.equal(internals.originAllowed(EVIL_ORIGIN), false);
-  assert.equal(internals.originAllowed('https://phoneshop-mgr-pro-2026.web.app.evil.test'), false);
+  assert.equal(internals.originAllowed('https://ecomeweb-91a7e.web.app.evil.test'), false);
   assert.equal(internals.originAllowed('null'), false);
   assert.equal(internals.originAllowed('file:///tmp/x.html'), false);
   // A private address is only a friend when the operator opened the server to the LAN.

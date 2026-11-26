@@ -14,6 +14,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import { isReturnLine, returnedUnits, soldUnits } from '../../utils/saleEditLines';
 import { normalizeArabic } from '../../utils/normalizeText';
 import { usePermissions } from '../../hooks/usePermissions';
+import { transactionService } from '../../services/transactionService';
 
 type UnlockPurpose = 'refund' | 'edit';
 
@@ -189,6 +190,7 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
               );
               const isRefunded = t.status === 'refunded';
               const isPartial = t.status === 'partially_refunded';
+              const hasPendingRefundClaim = !isRefunded && transactionService.getPendingRefunds().some(r => r.transactionId === t.id);
               /** What came back is drawn after what was bought, and never hidden behind
                *  the "+N more" chip: on a corrected invoice it is the fact the counter
                *  is looking for. */
@@ -246,9 +248,12 @@ export const TransactionHistoryTab: React.FC<{ initialSearch?: string; initialFo
                       </span>
                     )}
                     {isRefunded && <span className={s.txRefundedBadge}>⚠️ Refunded</span>}
+                    {hasPendingRefundClaim && <span style={{ backgroundColor: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>⏳ Refund Claimed — Verify</span>}
                     {isPartial && <span className={s.txPartialBadge}>↩ Partial Return</span>}
                     {t.status === 'voided' && <span style={{ backgroundColor: '#fee2e2', color: '#b91c1c', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>🚫 Voided</span>}
                     {t.status === 'pending_approval' && <span style={{ backgroundColor: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>⏳ Approval Pending</span>}
+                    {t.validationStatus === 'pending_validation' && <span style={{ backgroundColor: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>⏳ Pending validation</span>}
+                    {t.validationStatus === 'stock_conflict' && <span style={{ backgroundColor: '#fee2e2', color: '#b91c1c', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>⚠️ Stock conflict</span>}
                   </div>
 
                   {/* Bottom: Meta + Actions */}

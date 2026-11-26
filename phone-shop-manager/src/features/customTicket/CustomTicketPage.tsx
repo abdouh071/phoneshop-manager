@@ -17,6 +17,7 @@ import { useToast } from '../../components/ui/Toast';
 import { getCurrencySymbol } from '../../utils/formatCurrency';
 import { buildCustomTicketHTML } from './customTicketTemplate';
 import { printCustomTicketDirect, calibrateLabelPrinter, openPrintWindow } from '../../utils/printWindow';
+import { computeFreeTextStickerLayout } from '../../utils/customLabelWrap';
 import type { CustomTicketData, TicketPrintMode } from './customTicketTypes';
 import type { PhoneModel } from '../../types';
 import styles from './CustomTicket.module.css';
@@ -192,43 +193,31 @@ export const CustomTicketPage: React.FC = () => {
     toast.info('Draft Cleared', 'Editor reset to blank note.');
   };
 
-  // Blank sticker height overflow warning calculation (Problem 12)
+  // Blank sticker height overflow warning calculation aligned with printer wrap & TSPL metrics
   const blankStickerOverflowWarning = useMemo(() => {
     if (ticket.format !== 'sticker' || ticket.mode !== 'free_text') return null;
-    const text = ticket.freeText || '';
-    const lines = text.split('\n');
-    const lineCount = lines.length;
-    const size = ticket.stickerSize || '50x20';
-    const totalDotsH = size === '50x30' ? 240 : size === '50x25' ? 200 : 160;
-
-    const fontSize = ticket.fontSize || 'auto';
-    let lineHeightDots = 18;
-    if (fontSize === 'normal') lineHeightDots = 16;
-    else if (fontSize === 'large') lineHeightDots = 22;
-    else if (fontSize === 'huge') lineHeightDots = 28;
-    else if (fontSize === 'giant') lineHeightDots = 38;
-    else {
-      lineHeightDots = lineCount <= 2 ? 30 : lineCount <= 4 ? 22 : 16;
-    }
-
-    const headerReserve = ticket.showStoreNameOnSticker ? 28 : 0;
-    const barcodeReserve = (ticket.includeBarcode && ticket.barcodeValue.trim())
-      ? (ticket.barcodeType === 'qr' ? 50 : 40)
-      : 0;
-    const availableHeightDots = totalDotsH - 12 - headerReserve - barcodeReserve;
-    const requiredHeightDots = lineCount * lineHeightDots;
-
-    if (requiredHeightDots > availableHeightDots) {
-      const maxEstimatedLines = Math.max(1, Math.floor(availableHeightDots / lineHeightDots));
-      return {
-        isOverflow: true,
-        lineCount,
-        maxEstimatedLines,
-        stickerSize: size,
-      };
-    }
-    return null;
-  }, [ticket.format, ticket.mode, ticket.freeText, ticket.stickerSize, ticket.fontSize, ticket.showStoreNameOnSticker, ticket.includeBarcode, ticket.barcodeValue, ticket.barcodeType]);
+    const layout = computeFreeTextStickerLayout(ticket, storeName);
+    if (!layout.isOverflow) return null;
+    const nonEmptyCount = layout.wrappedLines.filter(l => l.length > 0).length;
+    return {
+      isOverflow: true,
+      lineCount: Math.max(nonEmptyCount, layout.wrappedLines.length),
+      clippedLines: layout.clippedLines,
+      maxEstimatedLines: layout.maxLines,
+      stickerSize: layout.stickerSize,
+    };
+  }, [
+    ticket.format,
+    ticket.mode,
+    ticket.freeText,
+    ticket.stickerSize,
+    ticket.fontSize,
+    ticket.showStoreNameOnSticker,
+    ticket.includeBarcode,
+    ticket.barcodeValue,
+    ticket.barcodeType,
+    storeName,
+  ]);
 
   // Spec item row helpers
   const handleAddSpec = () => {
@@ -591,6 +580,7 @@ export const CustomTicketPage: React.FC = () => {
           printer={printer}
           labelPrinter={labelPrinter}
           isPrinting={isPrinting}
+          blankStickerOverflowWarning={blankStickerOverflowWarning}
           setShowPrintPreview={setShowPrintPreview}
           handleBrowserPrint={handleBrowserPrint}
           handleConfirmPrint={handleConfirmPrint}

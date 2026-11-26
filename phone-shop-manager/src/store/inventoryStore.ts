@@ -215,7 +215,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
       // Same short-circuit as before: a zero quantity or an already-empty local stock writes nothing off.
       if (quantity <= 0 || existing.stock === 0) return { outcome: 'unchanged', applied: 0 };
       // The clamp at zero now happens inside the transaction, against the server's stock.
-      const { updated, previousStock, atomic } = await inventoryService.applyStockDelta(id, -quantity);
+      const { updated, previousStock, atomic } = await inventoryService.applyStockDelta(id, -quantity, { clampAtZero: true });
       const stockBefore = previousStock;
       const stockAfter = updated.stock;
       const actualWrittenOff = stockBefore - stockAfter; // can't write off more than stock

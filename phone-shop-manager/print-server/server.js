@@ -226,7 +226,8 @@ const RATE_WINDOW_MS = intFrom(process.env.PRINT_SERVER_RATE_WINDOW_MS, 60000, 5
 const RATE_MAX_JOBS = intFrom(process.env.PRINT_SERVER_RATE_MAX_JOBS, 40, 1, 100000);
 
 const ALLOWED_ORIGINS = [
-  'https://phoneshop-mgr-pro-2026.web.app',
+  'https://ecomeweb-91a7e.web.app',
+  'https://ecomeweb-91a7e.firebaseapp.com',
   ...(process.env.PRINT_SERVER_ALLOWED_ORIGINS || '')
     .split(',')
     .map((s) => s.trim())
@@ -1080,6 +1081,48 @@ function padLeft(text, width) {
 
 // Calculate centered X position on 400-dot-wide label (50mm)
 // Subtracts LABEL_OFFSET_X to compensate for the printer's physical left margin
+/**
+ * Build TSPL commands for a non-part inventory barcode label (50mm x 20mm at 203 DPI).
+ * Shifts barcode and price 4mm up (-32 dots Y) and 5mm left (-40 dots X) while keeping
+ * shop header, divider bar, and product description lines in their original positions.
+ */
+function buildInventoryProductLabelTSPL({
+  shopX,
+  shopTitle,
+  textLines,
+  fontType,
+  fontCfg,
+  barcodeX,
+  narrow,
+  wide,
+  sku,
+  priceText,
+}) {
+  let tspl = '';
+  tspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
+  tspl += 'BAR 0,30,400,2\r\n';
+
+  // Keep product text lines at existing -16 dot shift; shift barcode 5mm left (-40 dots from +32 -> -8) and 4mm up (-32 dots Y)
+  const prodShiftDots = -16;
+  const prodBarcodeX = Math.max(0, barcodeX - 8);
+
+  if (textLines.length > 1) {
+    const line1X = Math.max(0, getCenteredX(textLines[0], fontType) - prodShiftDots);
+    const line2X = Math.max(0, getCenteredX(textLines[1], fontType) - prodShiftDots);
+    tspl += `TEXT ${line1X},40,"${fontCfg.font}",0,${fontCfg.mulX},${fontCfg.mulY},"${textLines[0]}"\r\n`;
+    tspl += `TEXT ${line2X},${40 + Math.min(24, fontCfg.lineHeight)},"${fontCfg.font}",0,${fontCfg.mulX},${fontCfg.mulY},"${textLines[1]}"\r\n`;
+    tspl += `BARCODE ${prodBarcodeX},78,"128",24,0,0,${narrow},${wide},"${sku}"\r\n`;
+  } else {
+    const nameSpecsX = Math.max(0, getCenteredX(textLines[0], fontType) - prodShiftDots);
+    tspl += `TEXT ${nameSpecsX},40,"${fontCfg.font}",0,${fontCfg.mulX},${fontCfg.mulY},"${textLines[0]}"\r\n`;
+    tspl += `BARCODE ${prodBarcodeX},70,"128",28,0,0,${narrow},${wide},"${sku}"\r\n`;
+  }
+
+  const priceX = Math.max(0, getCenteredX(priceText, '4') - 8);
+  tspl += `TEXT ${priceX},108,"4",0,1,1,"${priceText}"\r\n`;
+  return tspl;
+}
+
 function getCenteredX(text, font = '2', totalWidth = 400) {
   const charWidth = font === '5' ? 32 : font === '4' ? 24 : font === '3' ? 16 : font === '2' ? TSPL_FONT_2_WIDTH : font === '0' ? 10 : font === '1' ? TSPL_FONT_1_WIDTH : TSPL_FONT_2_WIDTH;
   const textWidth = (text || '').length * charWidth;
@@ -2240,27 +2283,19 @@ async function handlePrintBarcode(body) {
           const partsBarcodeX = Math.max(0, TEXT_START_X + Math.max(0, Math.floor((TEXT_MAX_DOTS - partsBp.width) / 2)) + 8);
           fullTspl += `BARCODE ${partsBarcodeX},${barcodeY},"128",${barcodeH},0,0,${partsBp.narrow},${partsBp.wide},"${sku}"\r\n`;
         } else {
-          fullTspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
-          fullTspl += 'BAR 0,30,400,2\r\n';
-
-          // Shift text and barcode left by 2mm (-16 dots: prodShiftDots -32 -> -16, prodBarcodeX +48 -> +32)
-          const prodShiftDots = -16;
-          const prodBarcodeX = Math.max(20, barcodeX + 32);
-
-          if (textLines.length > 1) {
-            const line1X = Math.max(0, getCenteredX(textLines[0], fontType) - prodShiftDots);
-            const line2X = Math.max(0, getCenteredX(textLines[1], fontType) - prodShiftDots);
-            fullTspl += `TEXT ${line1X},40,"${fontCfg.font}",0,${fontCfg.mulX},${fontCfg.mulY},"${textLines[0]}"\r\n`;
-            fullTspl += `TEXT ${line2X},${40 + Math.min(24, fontCfg.lineHeight)},"${fontCfg.font}",0,${fontCfg.mulX},${fontCfg.mulY},"${textLines[1]}"\r\n`;
-            fullTspl += `BARCODE ${prodBarcodeX},110,"128",24,0,0,${narrow},${wide},"${sku}"\r\n`;
-          } else {
-            const nameSpecsX = Math.max(0, getCenteredX(textLines[0], fontType) - prodShiftDots);
-            fullTspl += `TEXT ${nameSpecsX},40,"${fontCfg.font}",0,${fontCfg.mulX},${fontCfg.mulY},"${textLines[0]}"\r\n`;
-            fullTspl += `BARCODE ${prodBarcodeX},102,"128",28,0,0,${narrow},${wide},"${sku}"\r\n`;
-          }
           const priceText = tsplText(fmt(product.price), 20);
-          const priceX = Math.max(0, getCenteredX(priceText, '4') + 32);
-          fullTspl += `TEXT ${priceX},140,"4",0,1,1,"${priceText}"\r\n`;
+          fullTspl += buildInventoryProductLabelTSPL({
+            shopX,
+            shopTitle,
+            textLines,
+            fontType,
+            fontCfg,
+            barcodeX,
+            narrow,
+            wide,
+            sku,
+            priceText,
+          });
         }
 
         fullTspl += 'PRINT 1,1\r\n';
@@ -2345,6 +2380,127 @@ async function handlePrintBarcode(body) {
 
 app.post('/print-barcode', printRoute(handlePrintBarcode));
 
+function buildCustomFreeTextTSPL(params) {
+  const { storeName, ticketData = {}, copies = 1 } = params || {};
+  const numCopies = clampCopies(copies);
+  const stickerSize = ticketData.stickerSize || '50x20';
+  const is30mm = stickerSize === '50x30';
+  const is25mm = stickerSize === '50x25';
+  const labelMm = is30mm ? 30 : is25mm ? 25 : 20;
+  const totalDotsH = labelMm * 8;
+  const maxSafeY = totalDotsH - 4;
+  const totalW = 400; // 50mm * 8 dots/mm
+
+  const rawText = stripControlChars(ticketData.freeText, 2000).trim();
+  const hasStoreName = Boolean(ticketData.showStoreNameOnSticker);
+  const shopTitle = hasStoreName ? tsplText(removeAccents(storeName || 'PhoneShop Pro'), 24) : '';
+  const barcodeVal = tsplText(removeAccents(ticketData.barcodeValue || ''), 48);
+  const hasBarcode = Boolean(ticketData.includeBarcode && barcodeVal.length > 0);
+  const isQr = hasBarcode && ticketData.barcodeType === 'qr';
+
+  let fontType = '2';
+  let charW = TSPL_FONT_2_WIDTH;
+  let charH = 18;
+  let lineSpacing = 2;
+  const reqSize = ticketData.fontSize || 'auto';
+
+  if (reqSize === 'normal') {
+    fontType = '1'; charW = TSPL_FONT_1_WIDTH; charH = 14; lineSpacing = 2;
+  } else if (reqSize === 'large') {
+    fontType = '2'; charW = TSPL_FONT_2_WIDTH; charH = 18; lineSpacing = 2;
+  } else if (reqSize === 'huge') {
+    fontType = '3'; charW = 16; charH = 22; lineSpacing = 3;
+  } else if (reqSize === 'giant') {
+    fontType = '4'; charW = 24; charH = 28; lineSpacing = 4;
+  } else {
+    const rawLines = rawText.split('\n');
+    const maxLineLen = rawLines.reduce((acc, l) => Math.max(acc, l.trim().length), 0);
+    if (rawLines.length === 1 && maxLineLen <= 8 && labelMm > 20) {
+      fontType = '4'; charW = 24; charH = 28; lineSpacing = 4;
+    } else if (rawLines.length <= 2 && maxLineLen <= 12) {
+      fontType = '3'; charW = 16; charH = 22; lineSpacing = 3;
+    } else if (rawLines.length <= 3 && maxLineLen <= 22) {
+      fontType = '2'; charW = TSPL_FONT_2_WIDTH; charH = 18; lineSpacing = 2;
+    } else {
+      fontType = '1'; charW = TSPL_FONT_1_WIDTH; charH = 14; lineSpacing = 2;
+    }
+  }
+
+  const maxCharsPerLine = Math.max(4, Math.floor((totalW - 32) / charW));
+  const wrappedLines = wrapFreeTextLines(rawText, maxCharsPerLine);
+
+  let tspl = '';
+  tspl += `SIZE 50 mm, ${labelMm} mm\r\n`;
+  tspl += 'GAP 2 mm, 0 mm\r\n';
+  tspl += 'REFERENCE 0,0\r\n';
+  tspl += 'DIRECTION 1\r\n';
+  tspl += 'CLS\r\n';
+
+  let topReserved = 6;
+  if (hasStoreName && shopTitle) {
+    const shopX = Math.max(0, getCenteredX(shopTitle, '2') - 16);
+    tspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
+    tspl += 'BAR 0,28,400,2\r\n';
+    topReserved = 32;
+  }
+
+  let bottomReserved = 6;
+  if (hasBarcode && barcodeVal) {
+    bottomReserved = isQr ? 46 : 36;
+  }
+
+  const availableH = Math.max(16, maxSafeY - topReserved - bottomReserved);
+  const totalTextH = wrappedLines.length * charH + Math.max(0, wrappedLines.length - 1) * lineSpacing;
+  const startY = Math.max(topReserved, topReserved + Math.floor((availableH - totalTextH) / 2));
+
+  let lineY = startY;
+  let clippedLines = 0;
+  for (const line of wrappedLines) {
+    if (line && (lineY + charH <= maxSafeY - bottomReserved + 4)) {
+      const cleanLine = tsplText(line, 60);
+      let lineX = 16;
+      if (ticketData.textAlign === 'left') {
+        lineX = 16;
+      } else if (ticketData.textAlign === 'right') {
+        lineX = Math.max(16, totalW - (cleanLine.length * charW) - 16 - LABEL_OFFSET_X);
+      } else {
+        lineX = Math.max(0, getCenteredX(cleanLine, fontType));
+      }
+      tspl += `TEXT ${lineX},${lineY},"${fontType}",0,1,1,"${cleanLine}"\r\n`;
+    } else if (line) {
+      clippedLines++;
+    }
+    lineY += charH + lineSpacing;
+  }
+
+  if (hasBarcode && barcodeVal) {
+    if (isQr) {
+      const qrX = Math.max(0, Math.floor((400 - 44) / 2) - LABEL_OFFSET_X);
+      tspl += `QRCODE ${qrX},${maxSafeY - 44},M,2,A,0,"${barcodeVal}"\r\n`;
+    } else {
+      const { x: barcodeX, narrow, wide } = getBarcodeParams(barcodeVal);
+      tspl += `BARCODE ${barcodeX},${maxSafeY - 34},"128",22,0,0,${narrow},${wide},"${barcodeVal}"\r\n`;
+      const bTextX = Math.max(0, getCenteredX(barcodeVal, '1'));
+      tspl += `TEXT ${bTextX},${maxSafeY - 10},"1",0,1,1,"${barcodeVal}"\r\n`;
+    }
+  }
+
+  tspl += `PRINT ${numCopies},1\r\n`;
+  tspl += 'CLS\r\n';
+
+  return {
+    tspl,
+    labelMm,
+    fontType,
+    maxCharsPerLine,
+    wrappedLines,
+    clippedLines,
+    warning: clippedLines > 0
+      ? `${clippedLines} line(s) did not fit on the ${labelMm}mm label and were not printed. Shorten the text or pick a smaller font.`
+      : undefined,
+  };
+}
+
 // ============================================================
 // Print Custom Ticket / Phone Specs Slip (Fully Isolated)
 // ============================================================
@@ -2370,126 +2526,13 @@ async function handlePrintCustomTicket(body) {
 
       // ─── Free-Text Blank Sticker (Centered Horizontally & Vertically) ───
       if (ticketData.mode === 'free_text') {
-        const totalW = 400; // 50mm * 8 dots/mm
-
-        // Newlines are layout here — the per-line tsplText() below is what makes
-        // each one safe to put inside a quoted TSPL field.
-        const rawText = stripControlChars(ticketData.freeText, 2000).trim();
-        const hasStoreName = Boolean(ticketData.showStoreNameOnSticker);
-        const shopTitle = hasStoreName ? tsplText(removeAccents(storeName || 'PhoneShop Pro'), 24) : '';
-        const barcodeVal = tsplText(removeAccents(ticketData.barcodeValue || ''), 48);
-        const hasBarcode = ticketData.includeBarcode && barcodeVal.length > 0;
-        const isQr = hasBarcode && ticketData.barcodeType === 'qr';
-
-        // Font selection & line metrics
-        let fontType = '2';
-        let charW = TSPL_FONT_2_WIDTH;
-        let charH = 18;
-        let lineSpacing = 2;
-        const reqSize = ticketData.fontSize || 'auto';
-
-        if (reqSize === 'normal') {
-          fontType = '1'; charW = TSPL_FONT_1_WIDTH; charH = 14; lineSpacing = 2;
-        } else if (reqSize === 'large') {
-          fontType = '2'; charW = TSPL_FONT_2_WIDTH; charH = 18; lineSpacing = 2;
-        } else if (reqSize === 'huge') {
-          fontType = '3'; charW = 16; charH = 22; lineSpacing = 3;
-        } else if (reqSize === 'giant') {
-          fontType = '4'; charW = 24; charH = 28; lineSpacing = 4;
-        } else {
-          // Auto size: pick best readable font based on line lengths and label height
-          const rawLines = rawText.split('\n');
-          const maxLineLen = rawLines.reduce((acc, l) => Math.max(acc, l.trim().length), 0);
-          if (rawLines.length === 1 && maxLineLen <= 8 && labelMm > 20) {
-            fontType = '4'; charW = 24; charH = 28; lineSpacing = 4;
-          } else if (rawLines.length <= 2 && maxLineLen <= 12) {
-            fontType = '3'; charW = 16; charH = 22; lineSpacing = 3;
-          } else if (rawLines.length <= 3 && maxLineLen <= 22) {
-            fontType = '2'; charW = TSPL_FONT_2_WIDTH; charH = 18; lineSpacing = 2;
-          } else {
-            fontType = '1'; charW = TSPL_FONT_1_WIDTH; charH = 14; lineSpacing = 2;
-          }
-        }
-
-        // Wrap words to fit totalW (leaving margin on sides), the same way the
-        // on-screen preview wraps: by words, and a word longer than a whole line
-        // is split where the line ends (`word-break: break-word`) — otherwise the
-        // printer clips the overflow at the label's right edge.
-        const maxCharsPerLine = Math.max(4, Math.floor((totalW - 32) / charW));
-        const wrappedLines = wrapFreeTextLines(rawText, maxCharsPerLine);
-
-        // Preamble — strictly mirroring inventory label
-        let tspl = '';
-        tspl += `SIZE 50 mm, ${labelMm} mm\r\n`;
-        tspl += 'GAP 2 mm, 0 mm\r\n';
-        tspl += 'REFERENCE 0,0\r\n';
-        tspl += 'DIRECTION 1\r\n';
-        tspl += 'CLS\r\n';
-
-        // Top reserved zone
-        let topReserved = 6;
-        if (hasStoreName && shopTitle) {
-          const shopX = Math.max(0, getCenteredX(shopTitle, '2') - 16);
-          tspl += `TEXT ${shopX},6,"2",0,1,1,"${shopTitle}"\r\n`;
-          tspl += 'BAR 0,28,400,2\r\n';
-          topReserved = 32;
-        }
-
-        // Bottom reserved zone
-        let bottomReserved = 6;
-        if (hasBarcode && barcodeVal) {
-          bottomReserved = isQr ? 46 : 36;
-        }
-
-        const availableH = Math.max(16, maxSafeY - topReserved - bottomReserved);
-        const totalTextH = wrappedLines.length * charH + Math.max(0, wrappedLines.length - 1) * lineSpacing;
-        const startY = Math.max(topReserved, topReserved + Math.floor((availableH - totalTextH) / 2));
-
-        // Centered Text Lines
-        let lineY = startY;
-        let clippedLines = 0;
-        for (const line of wrappedLines) {
-          if (line && (lineY + charH <= maxSafeY - bottomReserved + 4)) {
-            const cleanLine = tsplText(line, 60);
-            let lineX = 16;
-            if (ticketData.textAlign === 'left') {
-              lineX = 16;
-            } else if (ticketData.textAlign === 'right') {
-              lineX = Math.max(16, totalW - (cleanLine.length * charW) - 16 - LABEL_OFFSET_X);
-            } else {
-              lineX = Math.max(0, getCenteredX(cleanLine, fontType));
-            }
-            tspl += `TEXT ${lineX},${lineY},"${fontType}",0,1,1,"${cleanLine}"\r\n`;
-          } else if (line) {
-            clippedLines++;
-          }
-          lineY += charH + lineSpacing;
-        }
-
-        // Optional Barcode / QR at bottom
-        if (hasBarcode && barcodeVal) {
-          if (isQr) {
-            const qrX = Math.max(0, Math.floor((400 - 44) / 2) - LABEL_OFFSET_X);
-            tspl += `QRCODE ${qrX},${maxSafeY - 44},M,2,A,0,"${barcodeVal}"\r\n`;
-          } else {
-            const { x: barcodeX, narrow, wide } = getBarcodeParams(barcodeVal);
-            tspl += `BARCODE ${barcodeX},${maxSafeY - 34},"128",22,0,0,${narrow},${wide},"${barcodeVal}"\r\n`;
-            const bTextX = Math.max(0, getCenteredX(barcodeVal, '1'));
-            tspl += `TEXT ${bTextX},${maxSafeY - 10},"1",0,1,1,"${barcodeVal}"\r\n`;
-          }
-        }
-
-        tspl += `PRINT ${numCopies},1\r\n`;
-        tspl += 'CLS\r\n';
-
-        await executeTSPLPrint(tspl, LABEL_PRINTER_NAME);
-        console.log(`[✓] Free-text sticker printed (${numCopies} copies, ${labelMm}mm) on ${LABEL_PRINTER_NAME}`);
+        const rendered = buildCustomFreeTextTSPL({ storeName, ticketData, copies: numCopies });
+        await executeTSPLPrint(rendered.tspl, LABEL_PRINTER_NAME);
+        console.log(`[✓] Free-text sticker printed (${numCopies} copies, ${rendered.labelMm}mm) on ${LABEL_PRINTER_NAME}`);
         return {
           ok: true,
           message: `Printed ${numCopies} sticker(s) on ${LABEL_PRINTER_NAME}`,
-          warning: clippedLines > 0
-            ? `${clippedLines} line(s) did not fit on the ${labelMm}mm label and were not printed. Shorten the text or pick a smaller font.`
-            : undefined,
+          warning: rendered.warning,
         };
       }
 
@@ -2858,6 +2901,7 @@ async function handleCalibrateLabels() {
 }
 
 app.post('/calibrate-labels', printRoute(() => handleCalibrateLabels()));
+app.post('/print-big-box-label', printRoute(handlePrintBigBoxLabel));
 
 // ============================================================
 // JSON fallbacks — never an HTML error page for a machine client
@@ -3133,8 +3177,6 @@ async function handlePrintBigBoxLabel(body) {
   }
 }
 
-app.post('/print-big-box-label', printRoute(handlePrintBigBoxLabel));
-
 // Auto-start only when run directly (node server.js), not when require()'d by Electron
 if (require.main === module) {
   startServer().catch((err) => {
@@ -3177,6 +3219,9 @@ module.exports = {
     tsplField,
     tsplInt,
     wrapFreeTextLines,
+    buildCustomFreeTextTSPL,
+    buildInventoryProductLabelTSPL,
+    getCenteredX,
     partsLabelText,
     wrapTsplToWidth,
     fitTsplLine,

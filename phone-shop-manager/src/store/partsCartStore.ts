@@ -18,6 +18,7 @@ import { claimInvoiceNumber } from '../services/invoiceCounter';
 import { activityLogService } from '../services/activityLogService';
 import { customerLogService } from '../services/customerLogService';
 import { partsCartService } from '../services/partsCartService';
+import { mergeSuspendedFetchResult } from '../services/suspendedCartSync';
 import { partsCheckoutService, type PartsCheckoutResult, type PendingPartsCheckout } from '../services/partsCheckoutService';
 import { formatCurrency } from '../utils/formatCurrency';
 import { discountAmountOf, lineDiscountOf, unitPriceAfterDiscount } from '../utils/discountPolicy';
@@ -361,13 +362,7 @@ export const usePartsCartStore = create<PartsCartState>((set, get) => ({
     try {
       const suspended = await partsCartService.getAllSuspendedCarts(before);
       if (generation !== cartsFetchGeneration) return;
-      const current = get().suspendedCarts;
-      const merged = new Map(suspended.map(cart => [cart.id, cart]));
-      if (current !== before) for (const cart of current) merged.set(cart.id, cart);
-      for (const id of removedIds) merged.delete(id);
-      const finalSuspended = [...merged.values()].sort(
-        (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
-      );
+      const finalSuspended = mergeSuspendedFetchResult(suspended, before, get().suspendedCarts, removedIds);
       set({ suspendedCarts: finalSuspended });
       saveLocalSuspendedCarts(finalSuspended);
     } catch (err) {
