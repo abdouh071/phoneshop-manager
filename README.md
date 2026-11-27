@@ -424,16 +424,18 @@ If you have a thermal printer connected to your workstation:
 Package PhoneShop Manager Pro into a standalone desktop application with an **embedded, auto-spawning thermal print server** (zero Node.js or printer driver setup required on counter machines).
 
 <details>
-<summary><b>▶ Click to expand Desktop Build Instructions (macOS & Windows)</b></summary>
+<summary><b>▶ Click to expand Electron Desktop Build Instructions (macOS & Windows)</b></summary>
 
-1. Ensure your production credentials are set in `phone-shop-manager/.env`.
-2. Compile the production web bundle:
+1. **Prerequisites & Environment**: Ensure **Node.js 18+** is installed and your production Firebase credentials are set in `phone-shop-manager/.env`.
+2. **Install Electron, Dependencies & Build Web Bundle**:
+   `npm install` inside `phone-shop-manager` automatically installs **Electron** and **`electron-builder`**. Install the embedded print server dependencies as well, then compile the production web bundle:
    ```bash
    cd phone-shop-manager
    npm install
+   cd print-server && npm install && cd ..
    npm run build
    ```
-3. Package the native installer for your platform:
+3. **Package the Native Electron Installer** for your platform:
 
    | Platform | Build Command | Output File | Architecture |
    |---|---|---|---|
@@ -442,7 +444,7 @@ Package PhoneShop Manager Pro into a standalone desktop application with an **em
    | 🪟 **Windows 64-bit** | `npm run electron:build:win` | `releases/PhoneShopPro-Setup-1.1.0-win-x64.exe` | Windows 10 & 11 |
    | 🪟 **Windows Legacy / 32-bit** | `npm run electron:build:win7` | `releases/win7-ia32/PhoneShopPro-Setup-1.1.0-win-ia32.exe` | Windows 7, 8, 10 & 11 |
 
-   Installers are output directly to `releases/`. Every packaged installer automatically bundles the hardware print server.
+   Installers are output directly to `releases/`. Every packaged installer automatically bundles Electron and the hardware print server.
 </details>
 
 ---
@@ -454,14 +456,16 @@ Compile the standalone native Android `.apk` for shop owners, managers, and tech
 <details>
 <summary><b>▶ Click to expand Android APK Build Guide (Free EAS Cloud)</b></summary>
 
-1. **Set Up Free Expo Account & EAS CLI**:
+1. **Create a Free Expo Account & Log In with EAS CLI**:
+   - First, create a free Expo account at **[expo.dev/signup](https://expo.dev/signup)** (required to run cloud builds).
+   - Install the EAS CLI globally, log in with your Expo account, and link the project:
    ```bash
    npm install -g eas-cli
    eas login
    cd android-management-app
    eas init
    ```
-   *(Select **Yes / Create new project** to link `app.json` to your personal Expo account).*
+   *(When prompted by `eas init`, select **Yes / Create new project** to link `app.json` to your personal Expo account).*
 
 2. **Configure Firebase Credentials**:
    Create `android-management-app/.env` (copy from `.env.example`) and fill in your Firebase project parameters:
