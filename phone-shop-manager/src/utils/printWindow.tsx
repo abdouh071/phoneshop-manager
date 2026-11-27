@@ -4,6 +4,12 @@ import { formatCurrency, formatCurrencyWith } from './formatCurrency';
 import { escapeHtml } from './escapeHtml';
 import { useSettingsStore } from '../store/settingsStore';
 import { getLabelFontConfig } from './labelFontConfig';
+import {
+  buildUnifiedReceiptFromSale,
+  formatReceiptAmount,
+  FRENCH_RECEIPT_LABELS,
+  type UnifiedReceiptData,
+} from './frenchReceiptFormat';
 import type { RepairTicket } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
 import i18n from '../i18n';
@@ -169,33 +175,69 @@ export async function printReceiptDirect(
   transaction: {
     id: string;
     date: string;
+    invoiceNumber?: string;
     customerName?: string;
+    customerPhone?: string;
+    customerAddress?: string;
     processedByName?: string;
-    items: { product: { name: string; model: string; price: number }; quantity: number }[];
+    items: {
+      product: { name: string; model: string; price: number };
+      quantity: number;
+      unitPrice?: number;
+      totalPrice?: number;
+      isReturn?: boolean;
+      customReturnPrice?: number;
+    }[];
     subtotal: number;
     discount?: { type: 'percent' | 'flat'; value: number };
     total: number;
     payments: { method: string; amount: number }[];
     status?: string;
+    balanceSnapshot?: {
+      previousBalance: number;
+      purchaseTotal: number;
+      paymentAmount: number;
+      newBalance: number;
+    };
+    accountSettlement?: {
+      type: 'paid_full' | 'charged_to_account' | 'partial_payment';
+      paidAmount: number;
+      chargedAmount: number;
+      debtEntryId?: string;
+    };
+    exchangeSummary?: {
+      purchasedTotal: number;
+      returnedTotal: number;
+      netDifference: number;
+    };
   },
   storeName: string,
   currency: string = 'USD',
   options?: {
+    storePhone?: string;
+    receiptData?: UnifiedReceiptData;
     headerMessage?: string;
     footerMessage?: string;
     logoUrl?: string;
   },
 ): Promise<{ method: 'direct' | 'browser'; error?: string }> {
-  // Resolve logo: passed option > settings store
   const settingsState = useSettingsStore.getState();
+  const storePhone = options?.storePhone ?? settingsState.storePhone ?? '';
   const logo = options?.logoUrl ?? settingsState.logoUrl ?? '';
   const headerMessage = options?.headerMessage ?? settingsState.receiptHeader;
   const footerMessage = options?.footerMessage ?? settingsState.receiptFooter;
 
+  const receiptData = options?.receiptData ?? buildUnifiedReceiptFromSale(
+    transaction,
+    { storeName, storePhone }
+  );
+
   const payload = {
     storeName,
+    storePhone,
     currency,
     transaction,
+    receiptData,
     headerMessage,
     footerMessage,
     logo: logo || undefined,
@@ -234,7 +276,7 @@ export async function printReceiptDirect(
   }
 
   // Fallback: browser print
-  const html = buildReceiptHTML(transaction, storeName, headerMessage, footerMessage);
+  const html = buildUnifiedReceiptHTML(receiptData);
   openPrintWindow(html, 'Receipt');
   return { method: 'browser' };
 }
@@ -502,16 +544,158 @@ export function openPrintWindow(htmlContent: string, title = 'Print') {
 }
 
 /**
+ * Builds the 80mm thermal HTML receipt matching the French POS slip reference.
+ * Reused by both POS sale fallback printing and Customer Operation receipts.
+ */
+export function buildUnifiedReceiptHTML(data: UnifiedReceiptData): string {
+  const L = FRENCH_RECEIPT_LABELS;
+
+  let barcodeSvg = '';
+  try {
+    const svgNode = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    JsBarcode(svgNode, data.ticketCode || '000001', {
+      format: 'CODE128',
+      width: 1.7,
+      height: 44,
+      margin: 0,
+      displayValue: false,
+      lineColor: '#111111',
+    });
+    barcodeSvg = svgNode.outerHTML;
+  } catch {
+    barcodeSvg = '';
+  }
+
+  const dashRule = '<div style="border-top:1px dashed #222222;margin:6px 0;"></div>';
+  const itemsRows = (data.items || []).map(item => {
+    const puFormatted = item.isReturn && item.unitPrice > 0
+      ? `-${formatReceiptAmount(Math.abs(item.unitPrice))}`
+      : formatReceiptAmount(item.unitPrice);
+    return `
+      <tr>
+        <td style="padding:3px 6px 3px 0;text-align:left;word-break:break-word;">${escapeHtml(item.label)}</td>
+        <td style="padding:3px 4px;text-align:center;white-space:nowrap;">${item.qty}</td>
+        <td style="padding:3px 0 3px 6px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;">${escapeHtml(puFormatted)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <div style="width:72mm;max-width:72mm;margin:0 auto;padding:4px 2px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111111;font-size:12px;line-height:1.35;background:#ffffff;box-sizing:border-box;">
+      ${dashRule}
+
+      <div style="text-align:center;margin:6px 0 18px 0;">
+        <div style="font-size:14px;font-weight:600;letter-spacing:0.03em;text-transform:uppercase;">${escapeHtml(data.storeName || 'PHONESHOP PRO')}</div>
+        ${data.storePhone ? `<div style="font-size:12px;margin-top:2px;font-variant-numeric:tabular-nums;">${escapeHtml(data.storePhone)}</div>` : ''}
+      </div>
+
+      <div style="text-align:center;margin:0 0 8px 0;font-size:12px;line-height:1.4;">
+        <div>${L.clientPrefix}${escapeHtml(data.clientName || 'Client comptoir')}</div>
+        ${data.clientAddress ? `<div>${escapeHtml(data.clientAddress)}</div>` : ''}
+        ${data.clientPhone ? `<div style="font-variant-numeric:tabular-nums;">${escapeHtml(data.clientPhone)}</div>` : ''}
+      </div>
+
+      ${data.status === 'refunded' ? '<div style="text-align:center;font-weight:700;font-size:11px;margin:4px 0;">*** REMBOURSE ***</div>' : ''}
+      ${data.status === 'partially_refunded' ? '<div style="text-align:center;font-weight:700;font-size:11px;margin:4px 0;">*** RETOUR PARTIEL ***</div>' : ''}
+
+      ${dashRule}
+
+      <table style="width:100%;border-collapse:collapse;font-size:11.5px;">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:2px 6px 4px 0;font-weight:500;">${L.libelle}</th>
+            <th style="text-align:center;padding:2px 4px 4px 4px;font-weight:500;width:42px;">${L.qte}</th>
+            <th style="text-align:right;padding:2px 0 4px 6px;font-weight:500;width:82px;">${L.pu}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="3" style="padding:0;"><div style="border-top:1px dashed #222222;margin:2px 0 4px 0;"></div></td></tr>
+          ${itemsRows}
+        </tbody>
+      </table>
+
+      ${dashRule}
+
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;font-size:11.5px;margin:4px 0;font-variant-numeric:tabular-nums;">
+        <div style="white-space:nowrap;padding-top:1px;">${L.nbreArticle} ${data.articleCount}</div>
+        <table style="border-collapse:collapse;margin-left:auto;">
+          <tbody>
+            <tr>
+              <td style="text-align:right;padding:1px 8px 1px 0;">${L.total}</td>
+              <td style="text-align:right;padding:1px 0;min-width:74px;">${escapeHtml(formatReceiptAmount(data.totalBeforeDiscount))}</td>
+            </tr>
+            <tr>
+              <td style="text-align:right;padding:1px 8px 1px 0;">${L.remise}</td>
+              <td style="text-align:right;padding:1px 0;min-width:74px;">${escapeHtml(formatReceiptAmount(data.discountAmount))}</td>
+            </tr>
+            <tr>
+              <td style="text-align:right;padding:1px 8px 1px 0;">${L.ttcAPayer}</td>
+              <td style="text-align:right;padding:1px 0;min-width:74px;">${escapeHtml(formatReceiptAmount(data.netPayable))}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      ${dashRule}
+
+      <div style="display:flex;justify-content:flex-end;font-size:12px;margin:4px 0;font-variant-numeric:tabular-nums;">
+        <table style="border-collapse:collapse;">
+          <tbody>
+            <tr>
+              <td style="text-align:right;padding:2px 10px 2px 0;">${L.ancSolde}</td>
+              <td style="text-align:right;padding:2px 0;min-width:78px;font-weight:700;">${escapeHtml(formatReceiptAmount(data.previousBalance))}</td>
+            </tr>
+            <tr>
+              <td style="text-align:right;padding:2px 10px 2px 0;">${L.totalAchat}</td>
+              <td style="text-align:right;padding:2px 0;min-width:78px;">${escapeHtml(formatReceiptAmount(data.purchaseTotal))}</td>
+            </tr>
+            <tr>
+              <td style="text-align:right;padding:2px 10px 2px 0;">${L.versement}</td>
+              <td style="text-align:right;padding:2px 0;min-width:78px;font-weight:700;">${escapeHtml(formatReceiptAmount(data.paymentAmount))}</td>
+            </tr>
+            <tr>
+              <td style="text-align:right;padding:2px 10px 2px 0;">${L.nouvSolde}</td>
+              <td style="text-align:right;padding:2px 0;min-width:78px;font-weight:700;">${escapeHtml(formatReceiptAmount(data.newBalance))}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      ${dashRule}
+
+      <div style="text-align:center;margin:8px 0 6px 0;">
+        ${barcodeSvg ? `<div style="display:flex;justify-content:center;align-items:center;overflow:hidden;">${barcodeSvg}</div>` : ''}
+        <div style="font-size:16px;font-weight:500;letter-spacing:0.06em;margin-top:4px;font-variant-numeric:tabular-nums;">${escapeHtml(data.ticketCode)}</div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;margin:4px 0;font-variant-numeric:tabular-nums;">
+        <span>${L.ticketPrefix} ${escapeHtml(data.ticketCode)}</span>
+        <span>${escapeHtml(data.formattedDate)}</span>
+      </div>
+
+      <div style="text-align:center;font-size:12px;margin-top:6px;">
+        ${L.caissierPrefix} ${escapeHtml(data.cashierName || 'VENDEUR')}
+      </div>
+    </div>
+  `;
+}
+
+/**
  * Builds a receipt HTML string from a transaction object.
  */
 export function buildReceiptHTML(transaction: {
   id: string;
   date: string;
+  invoiceNumber?: string;
   customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
   processedByName?: string;
   items: {
     product: { name: string; model: string; price: number };
     quantity: number;
+    unitPrice?: number;
+    totalPrice?: number;
     isReturn?: boolean;
     customReturnPrice?: number;
   }[];
@@ -520,164 +704,30 @@ export function buildReceiptHTML(transaction: {
   total: number;
   payments: { method: string; amount: number }[];
   status?: string;
+  balanceSnapshot?: {
+    previousBalance: number;
+    purchaseTotal: number;
+    paymentAmount: number;
+    newBalance: number;
+  };
+  accountSettlement?: {
+    type: 'paid_full' | 'charged_to_account' | 'partial_payment';
+    paidAmount: number;
+    chargedAmount: number;
+    debtEntryId?: string;
+  };
   exchangeSummary?: {
     purchasedTotal: number;
     returnedTotal: number;
     netDifference: number;
   };
-}, storeName: string, receiptHeader?: string, receiptFooter?: string) {
-  const tr = getTranslations();
-  const { receiptHeader: defaultHeader, receiptFooter: defaultFooter } = useSettingsStore.getState();
-  const activeHeader = receiptHeader || defaultHeader;
-  const activeFooter = receiptFooter || defaultFooter || tr.thanks;
-
-  const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString(i18n.language === 'ar' ? 'ar-DZ' : i18n.language === 'fr' ? 'fr-FR' : 'en-US', {
-      month: 'short', day: 'numeric', year: 'numeric',
-      hour: '2-digit', minute: '2-digit',
-    });
-
-  const discount = transaction.discount;
-  let discountAmount = 0;
-  if (discount && Number(discount.value) > 0) {
-    const base = transaction.exchangeSummary?.purchasedTotal ?? transaction.subtotal;
-    discountAmount =
-      discount.type === 'percent'
-        ? (base * Number(discount.value)) / 100
-        : Number(discount.value);
-  } else if (!transaction.exchangeSummary && transaction.subtotal > transaction.total && transaction.total >= 0) {
-    discountAmount = transaction.subtotal - transaction.total;
-  }
-
-  const itemsHTML = transaction.items.map(item => {
-    const isReturn = Boolean(item.isReturn);
-    const unitPrice = item.customReturnPrice ?? item.product.price;
-    const lineTotal = unitPrice * item.quantity;
-    return `
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;font-size:12px;line-height:1.35;">
-        <span style="flex:1;padding-right:8px;color:#111827;">
-          ${isReturn ? `<span style="display:inline-block;background:#fee2e2;color:#b91c1c;font-size:9.5px;font-weight:700;padding:0 3px;border-radius:2px;margin-right:3px;">${tr.returnItem}</span>` : ''}
-          <strong style="color:#374151;">${item.quantity}×</strong> ${escapeHtml(item.product.name)} ${escapeHtml(item.product.model || '')}
-        </span>
-        <span style="white-space:nowrap;font-variant-numeric:tabular-nums;${isReturn ? 'color:#b91c1c;font-weight:600;' : 'color:#111827;'}">
-          ${isReturn ? '−' : ''}${formatCurrency(Math.abs(lineTotal))}
-        </span>
-      </div>
-    `;
-  }).join('');
-
-  const formatMethodName = (m: string) => {
-    switch (m) {
-      case 'debt': return tr.creditTab;
-      case 'store_credit': return tr.storeCredit;
-      case 'cash': return tr.payCash;
-      case 'card': return tr.payCard;
-      case 'mobile': return tr.payMobile;
-      case 'transfer': return tr.payTransfer;
-      default: return m.charAt(0).toUpperCase() + m.slice(1);
-    }
-  };
-
-  const logoDataUrl = useSettingsStore.getState().logoUrl || '';
-
-  return `
-    <div style="max-width:74mm;margin:0 auto;padding:8px 4px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;font-size:12px;line-height:1.45;background:#ffffff;">
-      <!-- Store Header -->
-      <div style="text-align:center;margin-bottom:8px;">
-        ${logoDataUrl ? `<div style="text-align:center;margin-bottom:6px;"><img src="${logoDataUrl}" alt="Logo" style="max-width:140px;max-height:50px;object-fit:contain;" /></div>` : ''}
-        <h2 style="font-size:15px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;margin:0 0 2px 0;color:#111827;">${escapeHtml(storeName || 'PhoneShop')}</h2>
-        ${activeHeader ? `<p style="font-size:11px;color:#6b7280;margin:2px 0;">${escapeHtml(activeHeader)}</p>` : ''}
-        <div style="border-top:1px dashed #d1d5db;margin:8px 0;"></div>
-        <p style="font-size:11px;color:#6b7280;margin:0;">${formatDate(transaction.date)}</p>
-        <p style="font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:10.5px;color:#4b5563;font-weight:600;margin:2px 0 0 0;">#${transaction.id}</p>
-      </div>
-
-      <!-- Customer & Cashier Metadata -->
-      ${(transaction.customerName || transaction.processedByName) ? `
-        <div style="border-top:1px dashed #d1d5db;margin:8px 0;"></div>
-        <div style="font-size:11.5px;line-height:1.4;">
-          ${transaction.customerName ? `
-            <div style="display:flex;justify-content:space-between;padding:1px 0;">
-              <span style="color:#6b7280;">${tr.customer}</span><span style="font-weight:600;color:#1f2937;">${escapeHtml(transaction.customerName)}</span>
-            </div>
-          ` : ''}
-          ${transaction.processedByName ? `
-            <div style="display:flex;justify-content:space-between;padding:1px 0;">
-              <span style="color:#6b7280;">${tr.cashier}</span><span style="font-weight:600;color:#1f2937;">${escapeHtml(transaction.processedByName)}</span>
-            </div>
-          ` : ''}
-        </div>
-      ` : ''}
-
-      <!-- Status Badge -->
-      ${transaction.status === 'refunded' ? `
-        <div style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;padding:3px;text-align:center;font-size:10px;font-weight:700;letter-spacing:0.06em;border-radius:4px;margin:8px 0;">
-          ${tr.fullyRefunded}
-        </div>
-      ` : ''}
-      ${transaction.status === 'partially_refunded' ? `
-        <div style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:3px;text-align:center;font-size:10px;font-weight:700;letter-spacing:0.06em;border-radius:4px;margin:8px 0;">
-          ${tr.partiallyRefunded}
-        </div>
-      ` : ''}
-
-      <!-- Item Table -->
-      <div style="border-top:1px dashed #d1d5db;margin:8px 0;"></div>
-      <div style="font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#9ca3af;display:flex;justify-content:space-between;padding-bottom:3px;border-bottom:1px solid #f3f4f6;">
-        <span>${tr.item}</span><span>${tr.price}</span>
-      </div>
-      <div style="padding:4px 0;">
-        ${itemsHTML}
-      </div>
-
-      <!-- Totals & Discount -->
-      <div style="border-top:1px dashed #d1d5db;margin:6px 0;"></div>
-      <div style="font-size:12px;font-variant-numeric:tabular-nums;">
-        <div style="display:flex;justify-content:space-between;padding:2px 0;color:#4b5563;">
-          <span>${tr.subtotal}</span><span>${formatCurrency(transaction.subtotal)}</span>
-        </div>
-
-        ${discountAmount > 0 ? `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 6px;margin:3px 0;background:#ecfdf5;border:1px dashed #a7f3d0;border-radius:4px;color:#047857;font-weight:600;">
-            <span>
-              ${tr.discount}
-              ${discount?.type === 'percent' ? `<span style="background:#059669;color:#fff;font-size:9.5px;font-weight:700;padding:1px 4px;border-radius:2px;margin-left:3px;">${discount.value}%</span>` : ''}
-            </span>
-            <span>−${formatCurrency(discountAmount)}</span>
-          </div>
-        ` : ''}
-
-        ${transaction.exchangeSummary ? `
-          <div style="display:flex;justify-content:space-between;font-size:11px;color:#6b7280;font-style:italic;padding:1px 0;">
-            <span>${i18n.t('pos.exchangeAdj', 'Exchange adj.')}</span>
-            <span>${formatCurrency(transaction.exchangeSummary.purchasedTotal - transaction.exchangeSummary.returnedTotal)}</span>
-          </div>
-        ` : ''}
-
-        <div style="display:flex;justify-content:space-between;align-items:center;font-size:15px;font-weight:800;padding:7px 0 3px 0;border-top:1.5px solid #111827;margin-top:5px;color:#111827;">
-          <span>${transaction.total < 0 ? tr.refundDue : tr.total}</span>
-          <span>${transaction.total < 0 ? `−${formatCurrency(Math.abs(transaction.total))}` : formatCurrency(transaction.total)}</span>
-        </div>
-      </div>
-
-      <!-- Payment Breakdown -->
-      <div style="border-top:1px dashed #d1d5db;margin:8px 0;"></div>
-      <div style="font-size:11.5px;color:#4b5563;font-variant-numeric:tabular-nums;">
-        ${transaction.payments.map(p => `
-          <div style="display:flex;justify-content:space-between;padding:1px 0;">
-            <span>${p.method === 'cash' && p.amount < 0 ? tr.cashRefund : formatMethodName(p.method)}</span>
-            <span style="${p.amount < 0 ? 'color:#b91c1c;font-weight:600;' : ''}">${p.amount < 0 ? '−' : ''}${formatCurrency(Math.abs(p.amount))}</span>
-          </div>
-        `).join('')}
-      </div>
-
-      <!-- Footer Policy -->
-      <div style="border-top:1px dashed #d1d5db;margin:10px 0 8px 0;"></div>
-      <div style="text-align:center;font-size:11px;color:#6b7280;line-height:1.4;">
-        <p style="margin:0;">${escapeHtml(activeFooter)}</p>
-      </div>
-    </div>
-  `;
+}, storeName: string, _receiptHeader?: string, _receiptFooter?: string, storePhone?: string) {
+  const settings = useSettingsStore.getState();
+  const data = buildUnifiedReceiptFromSale(transaction, {
+    storeName,
+    storePhone: storePhone ?? settings.storePhone,
+  });
+  return buildUnifiedReceiptHTML(data);
 }
 
 /**

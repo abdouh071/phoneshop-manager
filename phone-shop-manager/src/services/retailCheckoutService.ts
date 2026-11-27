@@ -488,6 +488,26 @@ async function commitPending(pending: PendingRetailCheckout, cancel: boolean): P
     }
 
     const paidOnSale = Math.max(0, sale.total - chargedAmount);
+    const hasDebtMutation = chargedCents > 0 || refundType === 'debt_deduction';
+    const previousDebtBalance = customer
+      ? Math.max(
+          0,
+          Math.round((hasDebtMutation ? currentOpenDebtCents / 100 : Number(customer.totalDebt ?? 0)) * 100) / 100
+        )
+      : 0;
+    const newDebtBalance = customer
+      ? Math.max(
+          0,
+          Math.round((hasDebtMutation ? nextTotalDebtCents / 100 : previousDebtBalance) * 100) / 100
+        )
+      : 0;
+    const balanceSnapshot: SaleTransaction['balanceSnapshot'] = {
+      previousBalance: previousDebtBalance,
+      purchaseTotal: Math.round(sale.total * 100) / 100,
+      paymentAmount: Math.round((previousDebtBalance + sale.total - newDebtBalance) * 100) / 100,
+      newBalance: newDebtBalance,
+    };
+
     const nextCustomer: Customer | undefined = customer
       ? {
           ...customer,
@@ -510,6 +530,8 @@ async function commitPending(pending: PendingRetailCheckout, cancel: boolean): P
 
     const saved: SaleTransaction = clean({
       ...sale,
+      customerAddress: sale.customerAddress || customer?.address || undefined,
+      balanceSnapshot,
       stockApplied: true,
       validationStatus: 'confirmed',
       financialRevision: 0,

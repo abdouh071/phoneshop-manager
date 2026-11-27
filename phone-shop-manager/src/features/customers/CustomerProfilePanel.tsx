@@ -1712,6 +1712,8 @@ export const CustomerProfilePanel: React.FC<CustomerProfilePanelProps> = ({
         isOpen={!!selectedDebtForPayment}
         onClose={() => setSelectedDebtForPayment(null)}
         debt={selectedDebtForPayment}
+        customer={customer}
+        currentTotalDebt={totalDebtBalance}
       />
 
       {/* Receipt Modal for viewing retail transaction receipts */}

@@ -735,6 +735,11 @@ export const useCartStore = create<CartState>((set, get) => ({
       const moment = new Date();
       const { invoiceNumber, provisional: numberGuessed } = await claimInvoiceNumber('retail', moment);
 
+      const prevOfflineDebt = matchedOrCreatedCustomer
+        ? useCustomerStore.getState().getCustomerDebtTotal(matchedOrCreatedCustomer.id)
+        : 0;
+      const offlinePaidOnSale = Math.max(0, total - debtAmount);
+
       const txData: Omit<SaleTransaction, 'id'> = {
         date: moment.toISOString(),
         items: [...itemsSnapshot],
@@ -747,7 +752,14 @@ export const useCartStore = create<CartState>((set, get) => ({
         payments: recordedPayments,
         customerName: matchedOrCreatedCustomer?.name || customerName || undefined,
         customerPhone: matchedOrCreatedCustomer?.phone || customerPhone || undefined,
+        customerAddress: matchedOrCreatedCustomer?.address || undefined,
         customerId: matchedOrCreatedCustomer?.id,
+        balanceSnapshot: {
+          previousBalance: Math.round(prevOfflineDebt * 100) / 100,
+          purchaseTotal: Math.round(total * 100) / 100,
+          paymentAmount: total < 0 ? Math.round(total * 100) / 100 : Math.round(offlinePaidOnSale * 100) / 100,
+          newBalance: Math.round((prevOfflineDebt + debtAmount) * 100) / 100,
+        },
         saleType: 'retail',
         stockApplied: !isOffline,
         validationStatus: isOffline ? 'pending_validation' : 'confirmed',

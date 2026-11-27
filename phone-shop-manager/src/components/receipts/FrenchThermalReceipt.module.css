@@ -1,0 +1,268 @@
+.paper {
+  width: 100%;
+  max-width: 340px;
+  margin: 0 auto;
+  padding: 16px 14px 18px;
+  background: #ffffff;
+  color: #111111;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 12.5px;
+  line-height: 1.38;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  box-sizing: border-box;
+}
+
+.dashedRule {
+  border: none;
+  border-top: 1px dashed #222222;
+  margin: 6px 0;
+  width: 100%;
+}
+
+.storeHeader {
+  text-align: center;
+  margin: 6px 0 18px;
+}
+
+.storeName {
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #111111;
+}
+
+.storePhone {
+  font-size: 12.5px;
+  color: #111111;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.clientBlock {
+  text-align: center;
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.42;
+  color: #111111;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.statusNotice {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 6px;
+  margin: 6px 0;
+  border-radius: 4px;
+}
+
+.statusNotice[data-variant='danger'] {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.statusNotice[data-variant='warning'] {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.itemsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.colLibelle {
+  text-align: left;
+  padding: 2px 6px 4px 0;
+  font-weight: 500;
+  color: #111111;
+}
+
+.colQte {
+  text-align: center;
+  padding: 2px 4px 4px;
+  font-weight: 500;
+  width: 44px;
+  color: #111111;
+}
+
+.colPu {
+  text-align: right;
+  padding: 2px 0 4px 6px;
+  font-weight: 500;
+  width: 84px;
+  color: #111111;
+}
+
+.headerRuleRow td {
+  padding: 0;
+}
+
+.itemRow td {
+  vertical-align: top;
+}
+
+.cellLibelle {
+  padding: 3px 6px 3px 0;
+  text-align: left;
+  word-break: break-word;
+  color: #111111;
+}
+
+.cellQte {
+  padding: 3px 4px;
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: #111111;
+}
+
+.cellPu {
+  padding: 3px 0 3px 6px;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: #111111;
+}
+
+.totalsSplit {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  margin: 4px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.articleCount {
+  white-space: nowrap;
+  padding-top: 1px;
+  color: #111111;
+}
+
+.amountsTable {
+  border-collapse: collapse;
+  margin-left: auto;
+}
+
+.amountLabel {
+  text-align: right;
+  padding: 1px 8px 1px 0;
+  color: #111111;
+}
+
+.amountValue {
+  text-align: right;
+  padding: 1px 0;
+  min-width: 78px;
+  color: #111111;
+  font-variant-numeric: tabular-nums;
+}
+
+.balanceWrap {
+  display: flex;
+  justify-content: flex-end;
+  font-size: 12.5px;
+  margin: 4px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.balanceLabel {
+  text-align: right;
+  padding: 2px 10px 2px 0;
+  color: #111111;
+}
+
+.balanceValue {
+  text-align: right;
+  padding: 2px 0;
+  min-width: 82px;
+  color: #111111;
+  font-variant-numeric: tabular-nums;
+}
+
+.balanceValueBold {
+  text-align: right;
+  padding: 2px 0;
+  min-width: 82px;
+  font-weight: 700;
+  color: #111111;
+  font-variant-numeric: tabular-nums;
+}
+
+.barcodeBlock {
+  text-align: center;
+  margin: 8px 0 6px;
+}
+
+.barcodeSvgWrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.barcodeSvgWrap :global(svg) {
+  max-width: 100%;
+  height: auto;
+}
+
+.barcodeDigits {
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+  color: #111111;
+}
+
+.footerMeta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+  margin: 4px 0;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+  color: #111111;
+}
+
+.cashierLine {
+  text-align: center;
+  font-size: 12.5px;
+  margin-top: 6px;
+  color: #111111;
+}
+
+@media print {
+  :global(body *) {
+    visibility: hidden;
+  }
+
+  .paper,
+  .paper * {
+    visibility: visible;
+  }
+
+  .paper {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    max-width: 80mm;
+    padding: 0;
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+  }
+}

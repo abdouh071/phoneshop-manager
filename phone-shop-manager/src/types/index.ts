@@ -72,6 +72,7 @@ export interface SaleTransaction {
   payments: { method: PaymentMethod; amount: number }[];
   customerName?: string;
   customerPhone?: string;
+  customerAddress?: string;
   customerId?: string;
   shopName?: string;
   saleType?: 'retail' | 'parts_b2b';
@@ -128,6 +129,12 @@ export interface SaleTransaction {
   // Legacy flat fields read by receipt builders (WhatsApp text etc.)
   paymentMethod?: string;
   remainingBalance?: number;
+  balanceSnapshot?: {
+    previousBalance: number;
+    purchaseTotal: number;
+    paymentAmount: number;
+    newBalance: number;
+  };
   // Worker accountability
   processedById?: string;
   processedByName?: string;

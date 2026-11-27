@@ -5,6 +5,11 @@ import type { Customer } from '../types';
 import type { LedgerEvent } from '../features/customers/AccountStatementModal';
 import { errorMessage } from './errorUtils';
 import { creditUnit, isReturnLine } from './saleEditLines';
+import {
+  buildUnifiedReceiptFromOperation,
+  type UnifiedReceiptData,
+} from './frenchReceiptFormat';
+import { buildUnifiedReceiptHTML, openPrintWindow } from './printWindow';
 
 const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
 
@@ -41,21 +46,33 @@ export interface ReceiptPrintItem {
 
 export interface ReceiptPrintTransaction {
   id?: string;
+  invoiceNumber?: string;
   date?: string;
   customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
   processedByName?: string;
+  isCreditPayment?: boolean;
   items: ReceiptPrintItem[];
   subtotal?: number;
   discount?: number | { type: 'percent' | 'flat'; value: number };
   total?: number;
   payments: { method: string; amount: number }[];
   status?: string;
+  balanceSnapshot?: {
+    previousBalance: number;
+    purchaseTotal: number;
+    paymentAmount: number;
+    newBalance: number;
+  };
 }
 
 export interface PrintServerReceiptPayload {
   storeName?: string;
+  storePhone?: string;
   currency?: string;
   transaction?: ReceiptPrintTransaction | null;
+  receiptData?: UnifiedReceiptData;
   headerMessage?: string;
   footerMessage?: string;
   logo?: string;
@@ -73,6 +90,7 @@ export interface OperationReceiptPreviewData {
   dateStr: string;
   customerDisplayName: string;
   customerPhone?: string;
+  clientAddress?: string;
   items: OperationReceiptItem[];
   subtotal: number;
   discount?: number;
@@ -80,6 +98,7 @@ export interface OperationReceiptPreviewData {
   paidAmount: number;
   paymentMethod: string;
   currentTotalDebt: number;
+  unifiedReceipt: UnifiedReceiptData;
   repairDetails?: {
     deviceBrand?: string;
     deviceModel?: string;
@@ -378,16 +397,23 @@ export function buildOperationReceiptData({
     };
   }
 
-  const payload = {
-    storeName,
-    currency,
-    transaction: transactionData,
-    headerMessage,
-    footerMessage,
-    logo: logo || undefined,
-  };
+  const isCreditPayment = Boolean(event.type === 'payment' && !event.rawTicket && !event.rawTransaction);
+  const rawDateIso = transactionData?.date || event.date;
+  const cashierName = transactionData?.processedByName || event.rawPayment?.receivedByName || 'VENDEUR';
+  const purchaseTotal = isCreditPayment
+    ? 0
+    : (event.rawTransaction ? event.rawTransaction.total : event.debit);
+  const versementAmount = isCreditPayment
+    ? (event.credit || event.rawPayment?.amount || 0)
+    : paidAmount;
+  const newBalance = typeof event.runningBalance === 'number'
+    ? Math.max(0, Math.round(event.runningBalance * 100) / 100)
+    : Math.max(0, Math.round(currentTotalDebt * 100) / 100);
+  const previousBalance = typeof event.runningBalance === 'number'
+    ? Math.max(0, Math.round((event.runningBalance - event.netChange) * 100) / 100)
+    : Math.max(0, Math.round((newBalance + versementAmount - purchaseTotal) * 100) / 100);
 
-  return {
+  const previewDraft: OperationReceiptPreviewData = {
     storeName,
     storePhone,
     storeAddress,
@@ -399,15 +425,58 @@ export function buildOperationReceiptData({
     dateStr,
     customerDisplayName,
     customerPhone: customerPhone || undefined,
+    clientAddress: customer.address || undefined,
     items,
     subtotal,
     discount,
     total,
     paidAmount,
     paymentMethod,
-    currentTotalDebt,
+    currentTotalDebt: newBalance,
+    unifiedReceipt: null as unknown as UnifiedReceiptData,
     repairDetails,
     debtDetails,
+    payload: {},
+  };
+
+  const unifiedReceipt = buildUnifiedReceiptFromOperation(previewDraft, {
+    clientAddress: customer.address || '',
+    rawDateIso,
+    cashierName,
+    isCreditPayment,
+    previousBalance,
+    purchaseTotal,
+    paymentAmount: versementAmount,
+    newBalance,
+  });
+
+  if (transactionData) {
+    transactionData.invoiceNumber = unifiedReceipt.ticketCode;
+    transactionData.customerPhone = customerPhone || undefined;
+    transactionData.customerAddress = customer.address || undefined;
+    transactionData.isCreditPayment = isCreditPayment || undefined;
+    transactionData.balanceSnapshot = {
+      previousBalance: unifiedReceipt.previousBalance,
+      purchaseTotal: unifiedReceipt.purchaseTotal,
+      paymentAmount: unifiedReceipt.paymentAmount,
+      newBalance: unifiedReceipt.newBalance,
+    };
+  }
+
+  const payload: PrintServerReceiptPayload = {
+    storeName,
+    storePhone,
+    currency,
+    transaction: transactionData,
+    receiptData: unifiedReceipt,
+    headerMessage,
+    footerMessage,
+    logo: logo || undefined,
+  };
+
+  return {
+    ...previewDraft,
+    unifiedReceipt,
     payload,
   };
 }
@@ -478,7 +547,11 @@ export async function sendPayloadToPrintServer(
     );
     return { success: false, error: data.error };
   } catch (err: unknown) {
-    console.error('[Print Server Error]', err);
+    console.warn('[Print Server Error] Falling back to browser receipt window:', err);
+    if (payload.receiptData) {
+      openPrintWindow(buildUnifiedReceiptHTML(payload.receiptData), 'Receipt');
+      return { success: true };
+    }
     toast?.error(
       i18n.t('statementModal.printerUnreachable', 'Print Server Unreachable'),
       i18n.t('statementModal.printerCheckConnection', 'Please verify that the thermal printer is connected.')

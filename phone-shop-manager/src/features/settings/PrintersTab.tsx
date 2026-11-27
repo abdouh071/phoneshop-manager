@@ -129,9 +129,12 @@ export const PrintersTab: React.FC = () => {
     try {
       const demoTransaction = {
         id: `TEST-${Date.now().toString().slice(-4)}`,
+        invoiceNumber: 'INV-261126-002977',
         date: new Date().toISOString(),
         customerName: 'Test Customer (Hardware Check)',
-        processedByName: 'Store Admin',
+        customerAddress: 'Shop Counter',
+        customerPhone: '0561475540',
+        processedByName: 'VENDEUR',
         items: [
           {
             product: {
@@ -155,6 +158,12 @@ export const PrintersTab: React.FC = () => {
         total: 2000,
         payments: [{ method: 'cash', amount: 2000 }],
         status: 'completed',
+        balanceSnapshot: {
+          previousBalance: 38000,
+          purchaseTotal: 2000,
+          paymentAmount: 2000,
+          newBalance: 38000,
+        },
       };
 
       const result = await printReceiptDirect(
@@ -162,6 +171,7 @@ export const PrintersTab: React.FC = () => {
         settings.storeName || 'Phone Shop Pro',
         settings.currency || 'DZD',
         {
+          storePhone: settings.storePhone,
           headerMessage: settings.receiptHeader || 'Hardware Self-Test OK',
           footerMessage: settings.receiptFooter || 'Thank you for testing your hardware printer!',
         }

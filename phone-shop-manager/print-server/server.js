@@ -1218,6 +1218,128 @@ function twoColumnRow(left, right, totalWidth = 42) {
   return truncatedLeft + ' '.repeat(Math.max(padding, 1)) + right;
 }
 
+/**
+ * Formats numbers using space-separated thousands and 2 fixed decimals
+ * without currency suffix (e.g. `38000` -> `38 000.00`, `0` -> `0.00`).
+ */
+function formatReceiptAmount(amount) {
+  const num = Number(amount);
+  const safe = Number.isFinite(num) ? Math.round(num * 100) / 100 : 0;
+  const clean = Object.is(safe, -0) || Math.abs(safe) < 0.005 ? 0 : safe;
+  const sign = clean < 0 ? '-' : '';
+  const absFixed = Math.abs(clean).toFixed(2);
+  const [intPart, decPart] = absFixed.split('.');
+  const spacedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return `${sign}${spacedInt}.${decPart}`;
+}
+
+/**
+ * Formats an ISO timestamp as `DD/MM/YYYY-HH:MM:SS` (matching POS thermal receipts).
+ */
+function formatReceiptDateTime(isoString) {
+  const d = isoString ? new Date(isoString) : new Date();
+  const valid = Number.isNaN(d.getTime()) ? new Date() : d;
+  const dd = String(valid.getDate()).padStart(2, '0');
+  const mm = String(valid.getMonth() + 1).padStart(2, '0');
+  const yyyy = valid.getFullYear();
+  const hh = String(valid.getHours()).padStart(2, '0');
+  const min = String(valid.getMinutes()).padStart(2, '0');
+  const ss = String(valid.getSeconds()).padStart(2, '0');
+  return `${dd}/${mm}/${yyyy}-${hh}:${min}:${ss}`;
+}
+
+/**
+ * Normalizes a receipt/invoice reference to a compact printable Code128 string.
+ */
+function formatTicketCode(rawRef, fallbackId = '000001') {
+  const candidate = String(rawRef || fallbackId || '000001').trim();
+  let clean = candidate.replace(/^INV-(?:PARTS-)?/i, '');
+  clean = clean.replace(/[^\x20-\x7E]/g, '');
+  if (clean.length > 20) clean = clean.slice(-10);
+  return clean || '000001';
+}
+
+function wrapPlainText(text, maxWidth) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [''];
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    if (word.length > maxWidth) {
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+      for (let i = 0; i < word.length; i += maxWidth) {
+        lines.push(word.slice(i, i + maxWidth));
+      }
+      continue;
+    }
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= maxWidth) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/**
+ * Formats a 3-column receipt row (`LIBELLE | QTE | P.U`) inside `totalWidth` chars.
+ * Wraps long labels on prior lines so columns stay vertically aligned.
+ */
+function threeColumnRowLines(libelle, qte, pu, totalWidth = 42, centerQty = false) {
+  const qtyCol = 5;
+  const puCol = Math.max(12, String(pu).length + 1);
+  const labelCol = Math.max(10, totalWidth - qtyCol - puCol - 2);
+  const wrapped = wrapPlainText(libelle, labelCol);
+
+  const qteStr = String(qte);
+  let qteCell;
+  if (centerQty && qteStr.length < qtyCol) {
+    const leftPad = Math.floor((qtyCol - qteStr.length) / 2);
+    qteCell = ' '.repeat(leftPad) + qteStr + ' '.repeat(qtyCol - qteStr.length - leftPad);
+  } else {
+    qteCell = padLeft(qteStr, qtyCol);
+  }
+  const puCell = padLeft(String(pu), puCol);
+
+  const rows = [];
+  for (let i = 0; i < wrapped.length - 1; i++) {
+    rows.push(wrapped[i]);
+  }
+  const lastLabel = wrapped[wrapped.length - 1] || '';
+  const paddedLabel = lastLabel + ' '.repeat(Math.max(0, labelCol - lastLabel.length));
+  rows.push(`${paddedLabel} ${qteCell} ${puCell}`);
+  return rows;
+}
+
+/**
+ * Formats a summary/balance row with an optional left prefix (e.g. `NBRE ARTICLE : 1`),
+ * a right-aligned label, and a right-aligned numeric amount.
+ */
+function receiptSummaryParts(leftText, labelText, amountText, totalWidth = 42) {
+  const amtStr = String(amountText);
+  const amtWidth = Math.max(12, amtStr.length + 1);
+  const prefixWidth = totalWidth - amtWidth;
+  const left = leftText ? String(leftText) : '';
+  const label = String(labelText);
+  const spaceBetween = prefixWidth - left.length - label.length;
+  const prefix = spaceBetween >= 1
+    ? `${left}${' '.repeat(spaceBetween)}${label}`
+    : `${left} ${label}`.slice(0, prefixWidth);
+  const paddedPrefix = prefix.length < prefixWidth
+    ? `${prefix}${' '.repeat(prefixWidth - prefix.length)}`
+    : prefix;
+  return {
+    prefix: paddedPrefix,
+    amount: padLeft(amtStr, amtWidth),
+  };
+}
+
 // ============================================================
 // Routes
 // ============================================================
@@ -1276,161 +1398,245 @@ app.get('/status', (req, res) => {
  *   footerMessage?: string,
  * }
  */
+function buildReceiptPrinter(body) {
+  const { storeName, storePhone, transaction, receiptData } = body || {};
+
+  if (!receiptData && (!transaction || !Array.isArray(transaction.items))) {
+    const err = new Error('Missing transaction data');
+    err.status = 400;
+    throw err;
+  }
+  if (!receiptData && transaction.items.length === 0) {
+    const err = new Error('Receipt has no item lines');
+    err.status = 400;
+    throw err;
+  }
+
+  let data = receiptData;
+  if (!data) {
+    const tx = transaction;
+    const isCreditPayment = Boolean(tx.isCreditPayment);
+    const items = isCreditPayment
+      ? [{ label: 'credit', qty: 1, unitPrice: 0, isReturn: false }]
+      : tx.items.map((item) => {
+          const isReturn = Boolean(item.isReturn);
+          const unitPrice = item.customReturnPrice !== undefined
+            ? item.customReturnPrice
+            : (item.unitPrice ?? item.price ?? item.product?.price ?? 0);
+          const baseName = item.product?.name
+            ? `${item.product.name} ${item.product.model || ''}`.trim()
+            : (item.productName || 'Article');
+          const qty = Math.abs(Number(item.quantity) || 1);
+          return {
+            label: isReturn ? `[RETOUR] ${baseName}` : baseName,
+            qty: isReturn ? -qty : qty,
+            unitPrice: Number(unitPrice) || 0,
+            isReturn,
+          };
+        });
+
+    let discountAmount = 0;
+    if (typeof tx.discount === 'number' && tx.discount > 0) {
+      discountAmount = tx.discount;
+    } else if (tx.discount && Number(tx.discount.value) > 0) {
+      const base = tx.exchangeSummary?.purchasedTotal ?? tx.subtotal ?? tx.total ?? 0;
+      discountAmount = tx.discount.type === 'percent'
+        ? base * (Number(tx.discount.value) / 100)
+        : Number(tx.discount.value);
+    } else if (!tx.exchangeSummary && Number(tx.subtotal) > Number(tx.total) && Number(tx.total) >= 0) {
+      discountAmount = Number(tx.subtotal) - Number(tx.total);
+    }
+
+    const payments = Array.isArray(tx.payments) ? tx.payments : [];
+    const paidFromPayments = payments
+      .filter((p) => p.method !== 'debt')
+      .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    const netTotal = isCreditPayment ? 0 : Number(tx.total || 0);
+    const totalBeforeDiscount = isCreditPayment ? 0 : Number(tx.subtotal ?? netTotal);
+    const snap = tx.balanceSnapshot;
+    const chargedFallback = Math.max(0, netTotal - paidFromPayments);
+
+    data = {
+      storeName: String(storeName || 'PhoneShop Pro').toUpperCase(),
+      storePhone: String(storePhone || '').trim(),
+      clientName: String(tx.customerName || 'Client comptoir').trim(),
+      clientAddress: String(tx.customerAddress || '').trim(),
+      clientPhone: String(tx.customerPhone || '').trim(),
+      items,
+      articleCount: items.length,
+      totalBeforeDiscount,
+      discountAmount: isCreditPayment ? 0 : discountAmount,
+      netPayable: netTotal,
+      previousBalance: snap ? Number(snap.previousBalance || 0) : 0,
+      purchaseTotal: snap ? Number(snap.purchaseTotal || 0) : netTotal,
+      paymentAmount: snap ? Number(snap.paymentAmount || 0) : paidFromPayments,
+      newBalance: snap ? Number(snap.newBalance || 0) : chargedFallback,
+      ticketCode: formatTicketCode(tx.invoiceNumber, tx.id),
+      formattedDate: formatReceiptDateTime(tx.date),
+      cashierName: String(tx.processedByName || 'VENDEUR').trim(),
+      status: tx.status,
+    };
+  }
+
+  const safe = (v) => removeAccents(stripControlChars(v ?? '')).trim();
+  const printer = createPrinter();
+
+  // ---- Top Dashed Divider ----
+  printer.drawLine();
+
+  // ---- Store Header (Name + Phone only) ----
+  printer.alignCenter();
+  printer.bold(true);
+  printer.println(safe(data.storeName || 'PHONESHOP PRO').toUpperCase());
+  printer.bold(false);
+  if (safe(data.storePhone)) {
+    printer.println(safe(data.storePhone));
+  }
+  printer.newLine();
+
+  // ---- Centered Client Block ----
+  printer.println(`Client :${safe(data.clientName || 'Client comptoir')}`);
+  if (safe(data.clientAddress)) {
+    printer.println(safe(data.clientAddress));
+  }
+  if (safe(data.clientPhone)) {
+    printer.println(safe(data.clientPhone));
+  }
+
+  // ---- Status Alert (only on refunded / partially refunded tickets) ----
+  if (data.status === 'refunded') {
+    printer.bold(true);
+    printer.println('*** REMBOURSE ***');
+    printer.bold(false);
+  } else if (data.status === 'partially_refunded') {
+    printer.bold(true);
+    printer.println('*** RETOUR PARTIEL ***');
+    printer.bold(false);
+  }
+
+  // ---- 3-Column Items Table Header ----
+  printer.alignLeft();
+  printer.drawLine();
+  for (const hdrLine of threeColumnRowLines('LIBELLE', 'QTE', 'P.U', 42, true)) {
+    printer.println(hdrLine);
+  }
+  printer.drawLine();
+
+  // ---- Items ----
+  for (const item of (data.items || [])) {
+    const puText = item.isReturn && Number(item.unitPrice) > 0
+      ? `-${formatReceiptAmount(Math.abs(Number(item.unitPrice)))}`
+      : formatReceiptAmount(Number(item.unitPrice) || 0);
+    const lines = threeColumnRowLines(
+      safe(item.label || 'Article'),
+      String(item.qty ?? 1),
+      puText,
+      42,
+      true
+    );
+    for (const line of lines) {
+      printer.println(line);
+    }
+  }
+
+  printer.drawLine();
+
+  // ---- NBRE ARTICLE + Totals Summary ----
+  const articleLabel = `NBRE ARTICLE : ${Number(data.articleCount ?? (data.items || []).length)}`;
+  const totalParts = receiptSummaryParts(articleLabel, 'TOTAL :', formatReceiptAmount(data.totalBeforeDiscount || 0));
+  printer.println(`${totalParts.prefix}${totalParts.amount}`);
+
+  const remiseParts = receiptSummaryParts('', 'REMISE :', formatReceiptAmount(data.discountAmount || 0));
+  printer.println(`${remiseParts.prefix}${remiseParts.amount}`);
+
+  const ttcParts = receiptSummaryParts('', 'TTC A PAYER:', formatReceiptAmount(data.netPayable || 0));
+  printer.println(`${ttcParts.prefix}${ttcParts.amount}`);
+
+  printer.drawLine();
+
+  // ---- Solde / Balance Block (bold amounts matching reference ticket) ----
+  const ancParts = receiptSummaryParts('', 'Anc. solde:', formatReceiptAmount(data.previousBalance || 0));
+  printer.print(ancParts.prefix);
+  printer.bold(true);
+  printer.println(ancParts.amount);
+  printer.bold(false);
+
+  const achatParts = receiptSummaryParts('', 'Total achat:', formatReceiptAmount(data.purchaseTotal || 0));
+  printer.println(`${achatParts.prefix}${achatParts.amount}`);
+
+  const versParts = receiptSummaryParts('', 'Versement :', formatReceiptAmount(data.paymentAmount || 0));
+  printer.print(versParts.prefix);
+  printer.bold(true);
+  printer.println(versParts.amount);
+  printer.bold(false);
+
+  const nouvParts = receiptSummaryParts('', 'Nouv. solde:', formatReceiptAmount(data.newBalance || 0));
+  printer.print(nouvParts.prefix);
+  printer.bold(true);
+  printer.println(nouvParts.amount);
+  printer.bold(false);
+
+  printer.drawLine();
+
+  // ---- Code128 Barcode + Ticket Number ----
+  const ticketCode = safe(data.ticketCode || '000001') || '000001';
+  printer.alignCenter();
+  try {
+    const barModuleWidth = ticketCode.length > 13 ? 1 : 2;
+    printer.printBarcode(ticketCode, 73, {
+      width: barModuleWidth,
+      height: 55,
+      position: 'OFF',
+      font: 'A',
+      includeParity: true,
+    });
+  } catch (err) {
+    console.warn('[PrintServer] Receipt barcode fallback to text:', err.message);
+  }
+  printer.println(ticketCode);
+
+  // ---- Ticket Date/Time Split + Cashier ----
+  const formattedDate = safe(data.formattedDate || formatReceiptDateTime());
+  printer.alignLeft();
+  printer.println(twoColumnRow(`Ticket : ${ticketCode}`, formattedDate));
+
+  printer.alignCenter();
+  printer.println(`Caissier : ${safe(data.cashierName || 'VENDEUR')}`);
+
+  // ---- Feed & Cut ----
+  printer.newLine();
+  printer.newLine();
+  printer.newLine();
+
+  if (HAS_CUTTER) {
+    printer.cut();
+  } else {
+    printer.newLine();
+    printer.newLine();
+  }
+
+  return { printer, ticketCode };
+}
+
 async function handlePrintReceipt(body) {
   try {
-    const { storeName, currency, transaction, headerMessage, footerMessage, logo, translations = {} } = body || {};
-    const t = (key, defaultText) => translations[key] || defaultText;
-
-    if (!transaction || !Array.isArray(transaction.items)) {
+    const { receiptData, transaction } = body || {};
+    if (!receiptData && (!transaction || !Array.isArray(transaction.items))) {
       return { ok: false, status: 400, error: 'Missing transaction data' };
     }
-    // A receipt with no lines is a document that lost its items, not a sale of nothing.
-    // Printing it hands the customer a total for goods the paper never names, so the
-    // caller hears about it instead. Every real flow sends at least one line: a repair
-    // with no parts still prints the device and its labour.
-    if (transaction.items.length === 0) {
+    if (!receiptData && transaction.items.length === 0) {
       return { ok: false, status: 400, error: 'Receipt has no item lines' };
     }
 
-    const printer = createPrinter();
-    const fmt = (v) => formatCurrency(v, currency);
-
-    // ---- Logo (if provided) ----
-    if (logo) {
-      await printLogoFromBase64(printer, logo);
-    }
-
-    // ---- Store Header ----
-    printer.alignCenter();
-    printer.bold(true);
-    printer.setTextSize(1, 1);
-    printer.println(storeName || 'PhoneShop Pro');
-    printer.bold(false);
-    printer.setTextNormal();
-
-    if (headerMessage) {
-      printer.println(headerMessage);
-    }
-
-    printer.drawLine();
-
-    // ---- Date & Order ID ----
-    printer.alignCenter();
-    printer.println(formatDate(transaction.date));
-    printer.println(`${t('order', 'Order:')} ${transaction.id}`);
-
-    // ---- Customer & Cashier ----
-    if (transaction.customerName || transaction.processedByName) {
-      printer.drawLine();
-      printer.alignLeft();
-      if (transaction.customerName) {
-        printer.println(twoColumnRow(t('customer', 'Customer:'), transaction.customerName));
-      }
-      if (transaction.processedByName) {
-        printer.println(twoColumnRow(t('cashier', 'Cashier:'), transaction.processedByName));
-      }
-    }
-
-    printer.drawLine();
-
-    // ---- Items Header ----
-    printer.bold(true);
-    printer.alignLeft();
-    printer.println(twoColumnRow(t('item', 'Item'), t('price', 'Price')));
-    printer.bold(false);
-
-    // ---- Items ----
-    for (const item of transaction.items) {
-      const isReturn = Boolean(item.isReturn);
-      const unitPrice = item.customReturnPrice !== undefined ? item.customReturnPrice : item.product.price;
-      const name = `${isReturn ? `[${t('returnItem', 'RETURN')}] ` : ''}${item.quantity}x ${item.product.name} ${item.product.model || ''}`.trim();
-      const lineTotal = unitPrice * item.quantity;
-      const price = isReturn ? `-${fmt(Math.abs(lineTotal))}` : fmt(lineTotal);
-      printer.println(twoColumnRow(name, price));
-    }
-
-    printer.drawLine();
-
-    // ---- Subtotal ----
-    printer.alignLeft();
-    printer.println(twoColumnRow(t('subtotal', 'Subtotal'), fmt(transaction.subtotal)));
-
-    // ---- Discount ----
-    let discountAmount = 0;
-    let discountLabel = t('discount', 'Discount');
-    if (transaction.discount && Number(transaction.discount.value) > 0) {
-      discountLabel = transaction.discount.type === 'percent'
-        ? `${t('discount', 'Discount')} (${transaction.discount.value}%)`
-        : t('discount', 'Discount');
-      const base = transaction.exchangeSummary?.purchasedTotal ?? transaction.subtotal;
-      discountAmount = transaction.discount.type === 'percent'
-        ? base * (Number(transaction.discount.value) / 100)
-        : Number(transaction.discount.value);
-    } else if (!transaction.exchangeSummary && transaction.subtotal > transaction.total && transaction.total >= 0) {
-      discountAmount = transaction.subtotal - transaction.total;
-    }
-
-    if (discountAmount > 0) {
-      printer.println(twoColumnRow(discountLabel, `-${fmt(discountAmount)}`));
-    }
-
-    // ---- Refund Status ----
-    if (transaction.status === 'refunded') {
-      printer.bold(true);
-      printer.println(t('fullyRefunded', '*** FULLY REFUNDED ***'));
-      printer.bold(false);
-    } else if (transaction.status === 'partially_refunded') {
-      printer.bold(true);
-      printer.println(t('partiallyRefunded', '*** PARTIALLY REFUNDED ***'));
-      printer.bold(false);
-    }
-
-    // ---- Total ----
-    printer.drawLine();
-    printer.bold(true);
-    printer.setTextSize(1, 1);
-    printer.println(twoColumnRow(t('total', 'TOTAL'), fmt(transaction.total)));
-    printer.setTextNormal();
-    printer.bold(false);
-
-    printer.drawLine();
-
-    // ---- Payment Method ----
-    printer.alignCenter();
-    const paymentsText = transaction.payments
-      .map((p) => `${p.method.toUpperCase()} ${fmt(p.amount)}`)
-      .join(' + ');
-    printer.println(`${t('payment', 'Payment:')} ${paymentsText}`);
-
-    // ---- Footer ----
-    printer.newLine();
-    printer.bold(true);
-    printer.println(t('thanks', 'Thank you for your purchase!'));
-    printer.bold(false);
-
-    if (footerMessage) {
-      printer.println(footerMessage);
-    }
-
-    // ---- Feed & Cut ----
-    printer.newLine();
-    printer.newLine();
-    printer.newLine();
-
-    if (HAS_CUTTER) {
-      printer.cut();
-    } else {
-      // Extra feed for manual tear
-      printer.newLine();
-      printer.newLine();
-    }
-
-    // ---- Execute Print ----
+    const { printer, ticketCode } = buildReceiptPrinter(body);
     await executePrint(printer);
-    console.log(`[✓] Receipt printed — Order ${transaction.id}`);
+    console.log(`[✓] Receipt printed — Ticket ${ticketCode}`);
 
     return { ok: true, message: 'Receipt printed successfully' };
   } catch (err) {
+    if (err.status === 400) {
+      return { ok: false, status: 400, error: err.message };
+    }
     console.error('[✗] Print failed:', err.message);
     return printFailure(err);
   }
@@ -3221,6 +3427,12 @@ module.exports = {
     wrapFreeTextLines,
     buildCustomFreeTextTSPL,
     buildInventoryProductLabelTSPL,
+    buildReceiptPrinter,
+    formatReceiptAmount,
+    formatReceiptDateTime,
+    formatTicketCode,
+    threeColumnRowLines,
+    receiptSummaryParts,
     getCenteredX,
     partsLabelText,
     wrapTsplToWidth,

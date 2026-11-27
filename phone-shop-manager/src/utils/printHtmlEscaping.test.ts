@@ -72,6 +72,34 @@ describe('print HTML builders escape user data', () => {
     expect(html).toContain('&lt;img src=x');
   });
 
+  it('renders the French 80mm receipt sections and escapes address/cashier fields', () => {
+    const html = receipt({
+      invoiceNumber: 'INV-261126-002977',
+      customerName: 'hmed phone',
+      customerAddress: hostile,
+      customerPhone: '0561475540',
+      processedByName: 'VENDEUR',
+      balanceSnapshot: {
+        previousBalance: 38000,
+        purchaseTotal: 5000,
+        paymentAmount: 5000,
+        newBalance: 38000,
+      },
+    });
+    expect(html).not.toContain('<img src=x');
+    expect(html).toContain('&lt;img src=x');
+    expect(html).toContain('LIBELLE');
+    expect(html).toContain('QTE');
+    expect(html).toContain('P.U');
+    expect(html).toContain('NBRE ARTICLE :');
+    expect(html).toContain('TTC A PAYER:');
+    expect(html).toContain('Anc. solde:');
+    expect(html).toContain('38 000.00');
+    expect(html).toContain('Ticket : 261126-002977');
+    expect(html).toContain('Caissier : VENDEUR');
+    expect(html).toContain('<svg');
+  });
+
   it('a hostile product name cannot inject markup into a sale receipt', () => {
     const html = receipt({
       items: [{ product: { name: hostile, model: 'X1', price: 5000 }, quantity: 1 }],

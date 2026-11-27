@@ -6,30 +6,49 @@ import { Input } from '../../components/ui/Input';
 import { useCustomerStore } from '../../store/customerStore';
 import { usePrivacyStore } from '../../store/privacyStore';
 import { useAuthStore } from '../../store/authStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import { useToast } from '../../components/ui/Toast';
 import { endOfDayService, type EndOfDayRecord } from '../../services/endOfDayService';
-import type { CustomerDebtEntry, PaymentMethod } from '../../types';
+import type { Customer, CustomerDebtEntry, PaymentMethod } from '../../types';
 import { formatCurrency, formatPrivateCurrency } from '../../utils/formatCurrency';
-import { AlertCircle } from 'lucide-react';
+import { FrenchThermalReceipt } from '../../components/receipts/FrenchThermalReceipt';
+import { printReceiptDirect } from '../../utils/printWindow';
+import {
+  formatReceiptDateTime,
+  formatTicketCode,
+  type UnifiedReceiptData,
+} from '../../utils/frenchReceiptFormat';
+import { AlertCircle, Printer } from 'lucide-react';
 import styles from '../inventory/ProductForm.module.css';
 
 interface RecordPaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   debt: CustomerDebtEntry | null;
+  customer?: Customer | null;
+  currentTotalDebt?: number;
 }
 
-export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, onClose, debt }) => {
+export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
+  isOpen,
+  onClose,
+  debt,
+  customer,
+  currentTotalDebt,
+}) => {
   const { t } = useTranslation();
   usePrivacyStore(s => s.isPrivacyActive);
   const user = useAuthStore(s => s.user);
+  const settings = useSettingsStore();
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
   const [sealedOnDate, setSealedOnDate] = useState<EndOfDayRecord | null>(null);
+  const [recordedReceipt, setRecordedReceipt] = useState<UnifiedReceiptData | null>(null);
 
   useEffect(() => {
     if (!isOpen || !date) {
@@ -53,6 +72,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
       setDate(new Date().toISOString().slice(0, 10));
       setNote('');
       setError(null);
+      setRecordedReceipt(null);
     }
   }, [isOpen, debt]);
 
@@ -74,20 +94,54 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
     setError(null);
     setIsSubmitting(true);
 
+    const beforeTotalDebt = Math.max(
+      debt.remainingBalance,
+      currentTotalDebt ?? customer?.totalDebt ?? debt.remainingBalance
+    );
+    const paymentIso = date
+      ? new Date(`${date}T${new Date().toTimeString().slice(0, 8)}`).toISOString()
+      : new Date().toISOString();
+    const cashierName = user?.name || 'VENDEUR';
+
     try {
-      await recordDebtPayment(debt.id, {
+      const updatedDebt = await recordDebtPayment(debt.id, {
         amount: payAmount,
         method,
-        date: date ? new Date(date).toISOString() : new Date().toISOString(),
+        date: paymentIso,
         note: note.trim() || undefined,
-        receivedByName: user?.name || 'Staff',
+        receivedByName: cashierName,
+      });
+
+      const lastPayment = updatedDebt.payments?.[updatedDebt.payments.length - 1];
+      const ticketCode = formatTicketCode(
+        lastPayment?.id ? `PAY-${lastPayment.id.slice(-6)}` : `PAY-${Date.now().toString().slice(-6)}`
+      );
+      const afterTotalDebt = Math.max(0, Math.round((beforeTotalDebt - payAmount) * 100) / 100);
+
+      setRecordedReceipt({
+        storeName: (settings.storeName || 'PhoneShop Pro').toUpperCase(),
+        storePhone: (settings.storePhone || '').trim(),
+        clientName: (customer?.shopName || customer?.name || debt.customerName || 'Client comptoir').trim(),
+        clientAddress: (customer?.address || '').trim(),
+        clientPhone: (customer?.phone || debt.customerPhone || '').trim(),
+        items: [{ label: 'credit', qty: 1, unitPrice: 0 }],
+        articleCount: 1,
+        totalBeforeDiscount: 0,
+        discountAmount: 0,
+        netPayable: 0,
+        previousBalance: Math.round(beforeTotalDebt * 100) / 100,
+        purchaseTotal: 0,
+        paymentAmount: Math.round(payAmount * 100) / 100,
+        newBalance: afterTotalDebt,
+        ticketCode,
+        formattedDate: formatReceiptDateTime(paymentIso),
+        cashierName,
       });
 
       toast.success(
         isFullPayment ? t('customers.debtFullySettled', 'Debt Fully Settled! 🎉') : t('customers.paymentRecorded', 'Payment Recorded'),
         t('customers.paymentRecordedDesc', { amount: formatCurrency(payAmount), item: debt.productOrService, defaultValue: `${formatCurrency(payAmount)} paid against ${debt.productOrService}.` })
       );
-      onClose();
     } catch (err) {
       toast.error(
         t('customers.paymentFailed', 'Payment Failed'),
@@ -97,6 +151,81 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({ isOpen, 
       setIsSubmitting(false);
     }
   };
+
+  const handlePrintRecordedReceipt = async () => {
+    if (!recordedReceipt) return;
+    setIsPrinting(true);
+    try {
+      const result = await printReceiptDirect(
+        {
+          id: recordedReceipt.ticketCode,
+          invoiceNumber: recordedReceipt.ticketCode,
+          date: new Date().toISOString(),
+          customerName: recordedReceipt.clientName,
+          customerPhone: recordedReceipt.clientPhone,
+          customerAddress: recordedReceipt.clientAddress,
+          processedByName: recordedReceipt.cashierName,
+          items: [{ product: { name: 'credit', model: '', price: 0 }, quantity: 1 }],
+          subtotal: 0,
+          total: 0,
+          payments: [{ method, amount: recordedReceipt.paymentAmount }],
+          balanceSnapshot: {
+            previousBalance: recordedReceipt.previousBalance,
+            purchaseTotal: recordedReceipt.purchaseTotal,
+            paymentAmount: recordedReceipt.paymentAmount,
+            newBalance: recordedReceipt.newBalance,
+          },
+        },
+        settings.storeName || 'PhoneShop Pro',
+        settings.currency || 'DZD',
+        {
+          storePhone: settings.storePhone,
+          receiptData: recordedReceipt,
+        }
+      );
+      if (result.method === 'direct' && result.error) {
+        toast.error(t('statementModal.printError', 'Print error'), result.error);
+        return;
+      }
+      if (result.method === 'direct') {
+        toast.success(t('statementModal.receiptPrinted', 'Receipt Printed'), t('customers.paymentRecorded', 'Payment receipt sent to printer.'));
+      }
+      onClose();
+    } catch {
+      toast.error(t('statementModal.printError', 'Print error'), 'Could not print payment receipt.');
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
+  if (recordedReceipt) {
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        title={t('customers.paymentRecorded', 'Payment Recorded')}
+        subtitle={t('statementModal.checkBeforePrint', 'Preview or print credit settlement receipt')}
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose}>
+              {t('common.close', 'Close')}
+            </Button>
+            <Button
+              onClick={handlePrintRecordedReceipt}
+              leftIcon={<Printer size={15} />}
+              isLoading={isPrinting}
+              disabled={isPrinting}
+            >
+              {t('statementModal.printReceipt', 'Print Receipt')}
+            </Button>
+          </>
+        }
+      >
+        <FrenchThermalReceipt data={recordedReceipt} />
+      </Modal>
+    );
+  }
 
   return (
     <Modal

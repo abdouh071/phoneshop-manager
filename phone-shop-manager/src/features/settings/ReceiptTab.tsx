@@ -6,12 +6,13 @@ import { Upload, Save, Trash2, Printer, RefreshCw } from 'lucide-react';
 import styles from './Settings.module.css';
 import { useToast } from '../../components/ui/Toast';
 import { useSettingsStore } from '../../store/settingsStore';
-import { formatCurrency } from '../../utils/formatCurrency';
 import { printReceiptDirect } from '../../utils/printWindow';
+import { FrenchThermalReceipt } from '../../components/receipts/FrenchThermalReceipt';
+import { formatReceiptDateTime } from '../../utils/frenchReceiptFormat';
 import { errorMessage } from '../../utils/errorUtils';
 
 export const ReceiptTab = () => {
-  const { receiptHeader, receiptFooter, storeName, currency, logoUrl: savedLogoUrl, error: settingsError, updateSettingsBulk } = useSettingsStore();
+  const { receiptHeader, receiptFooter, storeName, storePhone, currency, logoUrl: savedLogoUrl, error: settingsError, updateSettingsBulk } = useSettingsStore();
   const [headerText, setHeaderText] = useState(receiptHeader !== undefined ? receiptHeader : 'Thank you for shopping with us!');
   const [footerText, setFooterText] = useState(receiptFooter !== undefined ? receiptFooter : 'Returns accepted within 14 days with original receipt.');
   const [logoUrl, setLogoUrl] = useState(savedLogoUrl || '');
@@ -156,9 +157,12 @@ export const ReceiptTab = () => {
     try {
       const sampleTx = {
         id: `TEST-${Date.now().toString().slice(-4)}`,
+        invoiceNumber: 'INV-261126-002977',
         date: new Date().toISOString(),
-        customerName: 'Test Customer',
-        processedByName: 'Admin',
+        customerName: 'hmed phone',
+        customerAddress: 'jama3 zemmouri',
+        customerPhone: '0561475540',
+        processedByName: 'VENDEUR',
         items: [
           { product: { name: 'iPhone 15 Pro', model: '128GB Black Titanium', price: 999 }, quantity: 1 },
           { product: { name: 'Silicone Case', model: 'MagSafe Black', price: 49 }, quantity: 1 },
@@ -167,6 +171,12 @@ export const ReceiptTab = () => {
         discount: { type: 'flat' as const, value: 48 },
         total: 1000,
         payments: [{ method: 'cash', amount: 1000 }],
+        balanceSnapshot: {
+          previousBalance: 38000,
+          purchaseTotal: 1000,
+          paymentAmount: 1000,
+          newBalance: 38000,
+        },
       };
 
       const result = await printReceiptDirect(
@@ -174,6 +184,7 @@ export const ReceiptTab = () => {
         storeName,
         currency,
         {
+          storePhone: useSettingsStore.getState().storePhone,
           headerMessage: headerText,
           footerMessage: footerText,
           logoUrl: logoUrl || undefined,
@@ -325,52 +336,29 @@ export const ReceiptTab = () => {
       <div className={styles.receiptPreviewPanel}>
         <Card>
           <CardHeader title="Live Thermal Preview" subtitle="Real-time look on standard 80mm roll" />
-          <div className={styles.receiptPreview}>
-            {logoUrl && (
-              <div className={styles.previewLogoImgContainer}>
-                <img src={logoUrl} alt="Store Logo" className={styles.previewLogoImg} />
-              </div>
-            )}
-            <div className={styles.previewLogo}>{storeName || 'PhoneShop Pro'}</div>
-            <div className={styles.previewHeader}>{headerText || 'Header text appears here'}</div>
-            
-            <div className={styles.previewDivider} />
-            <div style={{ textAlign: 'center', fontSize: '11px', color: '#666', marginBottom: '4px' }}>
-              <div>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
-              <div>Order: #TEST-0042</div>
-            </div>
-            <div className={styles.previewDivider} />
-
-            <div className={styles.previewItem}>
-              <span>1x iPhone 15 Pro (128GB)</span>
-              <span>{formatCurrency(999)}</span>
-            </div>
-            <div className={styles.previewItem}>
-              <span>1x MagSafe Silicone Case</span>
-              <span>{formatCurrency(49)}</span>
-            </div>
-            
-            <div className={styles.previewDivider} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#666' }}>
-              <span>Subtotal</span>
-              <span>{formatCurrency(1048)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#047857', fontWeight: 600, margin: '2px 0' }}>
-              <span>Discount</span>
-              <span>−{formatCurrency(48)}</span>
-            </div>
-            <div className={styles.previewTotal}>
-              <span>Total</span>
-              <span>{formatCurrency(1000)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#555', marginTop: '2px' }}>
-              <span>Payment: CASH</span>
-              <span>{formatCurrency(1000)}</span>
-            </div>
-            <div className={styles.previewDivider} />
-            
-            <div className={styles.previewFooter}>{footerText || 'Footer text appears here'}</div>
-          </div>
+          <FrenchThermalReceipt
+            data={{
+              storeName: (storeName || 'ZH MOBILE ZEMMOURI').toUpperCase(),
+              storePhone: storePhone || '0776 66 42 42',
+              clientName: 'hmed phone',
+              clientAddress: 'jama3 zemmouri',
+              clientPhone: '0561475540',
+              items: [
+                { label: 'credit', qty: 1, unitPrice: 0 },
+              ],
+              articleCount: 1,
+              totalBeforeDiscount: 0,
+              discountAmount: 0,
+              netPayable: 0,
+              previousBalance: 38000,
+              purchaseTotal: 0,
+              paymentAmount: 30000,
+              newBalance: 8000,
+              ticketCode: '002977',
+              formattedDate: formatReceiptDateTime(new Date().toISOString()),
+              cashierName: 'VENDEUR',
+            }}
+          />
         </Card>
       </div>
     </div>

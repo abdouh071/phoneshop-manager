@@ -42,10 +42,11 @@ export interface LedgerEvent {
   netChange: number;  // debit - credit
   method?: string;
   rawTimestamp: number;
+  runningBalance?: number;
   rawTicket?: RepairTicket;
   rawTransaction?: SaleTransaction;
   rawDebt?: CustomerDebtEntry;
-  rawPayment?: { id: string; amount: number; date: string; method: string; note?: string };
+  rawPayment?: { id: string; amount: number; date: string; method: string; note?: string; receivedByName?: string };
 }
 
 export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
@@ -369,7 +370,7 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
           method: pay.method,
           rawTimestamp: new Date(pay.date).getTime(),
           rawDebt: debt,
-          rawPayment: pay,
+          rawPayment: { ...pay, receivedByName: pay.receivedByName },
         });
       });
     });

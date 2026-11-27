@@ -1,13 +1,18 @@
-import React, { useState } from 'react';
-import { Printer, CheckCircle2, Share2, MessageCircle } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Printer, Share2, MessageCircle } from 'lucide-react';
 import { normalizePhoneDigits, formatWhatsAppUrl } from '../../utils/phoneUtils';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import type { SaleTransaction } from '../../types';
 import { useSettingsStore } from '../../store/settingsStore';
+import { useCustomerStore } from '../../store/customerStore';
 import { printReceiptDirect } from '../../utils/printWindow';
 import { useToast } from '../../components/ui/Toast';
-import styles from './ReceiptModal.module.css';
+import { FrenchThermalReceipt } from '../../components/receipts/FrenchThermalReceipt';
+import {
+  buildUnifiedReceiptFromSale,
+  formatReceiptAmount,
+} from '../../utils/frenchReceiptFormat';
 import { formatCurrency } from '../../utils/formatCurrency';
 
 interface ReceiptModalProps {
@@ -36,32 +41,29 @@ const methodLabel = (m: string) => {
 
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose, mode = 'checkout' }) => {
   const settings = useSettingsStore();
+  const customers = useCustomerStore(s => s.customers);
   const toast = useToast();
   const [isPrinting, setIsPrinting] = useState(false);
 
-  if (!transaction) return null;
+  const customerLookup = useMemo(() => {
+    if (!transaction?.customerId) return null;
+    return customers.find(c => c.id === transaction.customerId) ?? null;
+  }, [customers, transaction?.customerId]);
 
-  const discount = transaction.discount;
-  let discountAmount = 0;
-  if (discount && Number(discount.value) > 0) {
-    const base = transaction.exchangeSummary?.purchasedTotal ?? transaction.subtotal;
-    discountAmount =
-      discount.type === 'percent'
-        ? (base * Number(discount.value)) / 100
-        : Number(discount.value);
-  } else if (!transaction.exchangeSummary && transaction.subtotal > transaction.total && transaction.total >= 0) {
-    discountAmount = transaction.subtotal - transaction.total;
-  }
+  const unifiedReceipt = useMemo(() => {
+    if (!transaction) return null;
+    return buildUnifiedReceiptFromSale(
+      transaction,
+      { storeName: settings.storeName, storePhone: settings.storePhone },
+      customerLookup
+    );
+  }, [transaction, settings.storeName, settings.storePhone, customerLookup]);
+
+  if (!transaction || !unifiedReceipt) return null;
 
   const buildReceiptText = () => {
     const store = settings.storeName || 'PhoneShop Pro';
     const curr = settings.currency || 'USD';
-    /**
-     * One line of the share text. A line the shop took back is written with its minus
-     * and its money off, because this text is what the customer receives when there is
-     * no printer at the counter — and a corrected invoice that lists only what was sold
-     * would hand him a receipt that does not foot to its own total.
-     */
     const itemLine = (i: (typeof transaction.items)[number]) => {
       const units = Math.trunc(Number(i.quantity) || 0);
       const unit = i.isReturn
@@ -76,16 +78,17 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
     const itemsText = transaction.items.map(itemLine).join('\n');
     return [
       `🧾 *${store}*`,
-      `Receipt #${transaction.id.slice(-6)}`,
+      `Ticket : ${unifiedReceipt.ticketCode}`,
       `Date: ${formatDate(transaction.date)}`,
-      `Customer: ${transaction.customerName || 'Walk-in'}`,
+      `Client :${unifiedReceipt.clientName}`,
       `────────────────`,
       itemsText,
       `────────────────`,
-      `Total: *${formatCurrency(transaction.total, !!curr)}*`,
-      `Payment: ${methodLabel(transaction.paymentMethod ?? '')}`,
-      transaction.remainingBalance ? `Balance Due: ${formatCurrency(transaction.remainingBalance, !!curr)}` : null,
-      settings.receiptFooter ? `\n${settings.receiptFooter}` : '\nThank you for choosing us!',
+      `TTC A PAYER: *${formatReceiptAmount(unifiedReceipt.netPayable)}*`,
+      `Anc. solde: ${formatReceiptAmount(unifiedReceipt.previousBalance)}`,
+      `Versement : ${formatReceiptAmount(unifiedReceipt.paymentAmount)}`,
+      `Nouv. solde: *${formatReceiptAmount(unifiedReceipt.newBalance)}*`,
+      transaction.paymentMethod ? `Payment: ${methodLabel(transaction.paymentMethod)}` : null,
     ].filter(Boolean).join('\n');
   };
 
@@ -115,7 +118,15 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
   const handlePrint = async () => {
     setIsPrinting(true);
     try {
-      const result = await printReceiptDirect(transaction, settings.storeName, settings.currency);
+      const result = await printReceiptDirect(
+        transaction,
+        settings.storeName,
+        settings.currency,
+        {
+          storePhone: settings.storePhone,
+          receiptData: unifiedReceipt,
+        }
+      );
       if (result.method === 'direct') {
         // A direct path carrying an error was refused by the server (for example,
         // the printer is offline). The receipt never printed — keep the modal
@@ -172,161 +183,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ transaction, onClose
         </div>
       }
     >
-      <div className={`${styles.receipt} printable-receipt`}>
-
-        {/* ── Header ── */}
-        <div className={styles.header}>
-          {mode === 'checkout' && <CheckCircle2 size={40} className={styles.successIcon} />}
-          {settings.logoUrl && (
-            <img src={settings.logoUrl} alt="Store Logo" className={styles.logo} />
-          )}
-          <h2 className={styles.storeName}>{settings.storeName || 'PhoneShop'}</h2>
-          {settings.receiptHeader && (
-            <p className={styles.headerMsg}>{settings.receiptHeader}</p>
-          )}
-          <p className={styles.date}>{formatDate(transaction.date)}</p>
-          <p className={styles.orderId}>#{transaction.id}</p>
-        </div>
-
-        <div className={styles.rule} />
-
-        {/* ── Meta ── */}
-        {(transaction.customerName || transaction.processedByName) && (
-          <>
-            <div className={styles.meta}>
-              {transaction.customerName && (
-                <div className={styles.metaRow}>
-                  <span className={styles.metaLabel}>Customer</span>
-                  <span className={styles.metaValue}>{transaction.customerName}</span>
-                </div>
-              )}
-              {transaction.processedByName && (
-                <div className={styles.metaRow}>
-                  <span className={styles.metaLabel}>Cashier</span>
-                  <span className={styles.metaValue}>{transaction.processedByName}</span>
-                </div>
-              )}
-            </div>
-            <div className={styles.rule} />
-          </>
-        )}
-
-        {/* ── Status badges ── */}
-        {transaction.status === 'refunded' && (
-          <div className={styles.statusBadge} data-variant="danger">
-            FULLY REFUNDED
-          </div>
-        )}
-        {transaction.status === 'partially_refunded' && (
-          <div className={styles.statusBadge} data-variant="warning">
-            PARTIALLY REFUNDED
-          </div>
-        )}
-
-        {/* ── Items ── */}
-        <div className={styles.items}>
-          <div className={styles.itemHeader}>
-            <span>Item</span>
-            <span>Total</span>
-          </div>
-          {transaction.items.map((item, idx) => {
-            const isReturn = Boolean(item.isReturn);
-            const unitPrice = item.customReturnPrice ?? item.product.price;
-            const lineTotal = unitPrice * item.quantity;
-            return (
-              <div key={`${item.product.id}-${idx}`} className={styles.itemRow}>
-                <div className={styles.itemLeft}>
-                  <span className={styles.itemName}>
-                    {isReturn && <span className={styles.returnTag}>RETURN</span>}
-                    {item.product.name} {item.product.model}
-                  </span>
-                  <span className={styles.itemMeta}>
-                    <span className={styles.itemQty}>{item.quantity}</span>
-                    {' × '}
-                    {formatCurrency(unitPrice)}
-                  </span>
-                </div>
-                <span className={isReturn ? styles.negativeAmt : undefined}>
-                  {isReturn ? '−' : ''}{formatCurrency(Math.abs(lineTotal))}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className={styles.rule} />
-
-        {/* ── Totals ── */}
-        <div className={styles.totals}>
-          <div className={styles.totalRow}>
-            <span>Subtotal</span>
-            <span>{formatCurrency(transaction.subtotal)}</span>
-          </div>
-
-          {/* Discount row — always show when discount exists */}
-          {discountAmount > 0 && (
-            <div className={`${styles.totalRow} ${styles.discountRow}`}>
-              <span>
-                Discount
-                {discount?.type === 'percent' && (
-                  <span className={styles.discountBadge}>{discount.value}%</span>
-                )}
-              </span>
-              <span>−{formatCurrency(discountAmount)}</span>
-            </div>
-          )}
-
-          {/* Exchange summary */}
-          {transaction.exchangeSummary && (
-            <div className={`${styles.totalRow} ${styles.exchangeRow}`}>
-              <span>Exchange adj.</span>
-              <span>
-                {formatCurrency(
-                  transaction.exchangeSummary.purchasedTotal -
-                    transaction.exchangeSummary.returnedTotal,
-                )}
-              </span>
-            </div>
-          )}
-
-          <div className={styles.grandTotalRow}>
-            <span>{transaction.total < 0 ? 'Refund Due' : 'Total'}</span>
-            <span>
-              {transaction.total < 0
-                ? `−${formatCurrency(Math.abs(transaction.total))}`
-                : formatCurrency(transaction.total)}
-            </span>
-          </div>
-        </div>
-
-        <div className={styles.rule} />
-
-        {/* ── Payment methods ── */}
-        <div className={styles.paymentSection}>
-          <p className={styles.paymentLabel}>Payment</p>
-          <div className={styles.payment}>
-            {transaction.payments.map((p, idx) => (
-              <div key={idx} className={styles.paymentRow}>
-                <div className={styles.paymentMethod}>
-                  <span className={styles.paymentDot} />
-                  <span>{p.method === 'cash' && p.amount < 0 ? 'Cash Refund' : methodLabel(p.method)}</span>
-                </div>
-                <span className={p.amount < 0 ? styles.negativeAmt : undefined}>
-                  {p.amount < 0
-                    ? `−${formatCurrency(Math.abs(p.amount))}`
-                    : formatCurrency(p.amount)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* ── Footer ── */}
-        <div className={styles.ruleDashed} />
-        <p className={styles.footerMsg}>
-          {settings.receiptFooter || 'Thank you for your purchase!'}
-        </p>
-      </div>
+      <FrenchThermalReceipt data={unifiedReceipt} />
     </Modal>
   );
 };
