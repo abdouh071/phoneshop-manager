@@ -1,7 +1,7 @@
 /**
  * The public tracking mirror contract (A2).
  *
- * The three id vectors below are shared VERBATIM with technician-app's
+ * The three id vectors below are shared VERBATIM with android-management-app's
  * trackingMirror.test.ts: both apps must derive the identical document id or a
  * ticket written by one app becomes untrackable when the other refreshes it.
  * The whitelist test is the security boundary — anything not on the /track page

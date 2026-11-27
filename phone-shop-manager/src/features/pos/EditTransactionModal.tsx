@@ -2,7 +2,7 @@
  * Correcting a settled invoice at the counter.
  *
  * One control per SKU, and a line only climbs as far as the shelf can give. The
- * technician phone mirrors this screen (`technician-app/src/components/EditSaleSheet.tsx`),
+ * technician phone mirrors this screen (`android-management-app/src/components/EditSaleSheet.tsx`),
  * so a rule that changes here has to change there.
  *
  * The control holds **what the customer leaves with**, not the quantity written on the

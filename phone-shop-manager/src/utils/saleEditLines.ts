@@ -20,7 +20,7 @@
  * literal `-1` into `quantity` would flip twice on the way through the subtraction
  * that prices returns, and every "units sold" sum in both apps reads that field.
  *
- * The technician phone keeps a copy of this file (`technician-app/src/utils/saleEditLines.ts`).
+ * The technician phone keeps a copy of this file (`android-management-app/src/utils/saleEditLines.ts`).
  * A rule that changes here has to change there.
  */
 import type { CartItem, PhoneModel } from '../types';

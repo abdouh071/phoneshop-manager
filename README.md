@@ -35,7 +35,7 @@ A powerful, all-in-one, production-grade management suite built specifically for
   - [9. Financial Reports & Analytics](#9--financial-reports--analytics)
   - [10. Audit & Activity Trail](#10--audit-trail--activity-log)
   - [11. Roles & Permissions (RBAC Matrix)](#11--granular-role-based-access-control-rbac)
-  - [12. Android Management App](#12--android-management-app-technician-app)
+  - [12. Android Management App](#12--android-management-app-android-management-app)
 - [🖨️ Thermal Printing & Hardware Integration](#-thermal-printing--hardware-integration)
 - [🏗️ Repository Architecture](#-repository-architecture)
 - [🚀 Quick Start & Installation](#-quick-start--installation)
@@ -97,7 +97,7 @@ Ready-to-use binaries for demonstration and sandbox evaluation are published und
 | **`PhoneShopPro-1.1.0-mac-x64.dmg`** | macOS | Intel x86_64 Macs | Standalone desktop application with embedded silent print server |
 | **`PhoneShopPro-Setup-1.1.0-win-x64.exe`** | Windows | 64-bit (Windows 10 & 11) | Desktop installer with auto-spawning background thermal printing service |
 | **`PhoneShopPro-Setup-1.1.0-win-ia32.exe`** | Windows | 32-bit (Windows 7, 8, 10 & 11) | Lightweight legacy Windows desktop installer |
-| **`PhoneShop-Technician-1.1.0.apk`** | Android | Android 8.0+ Devices | Standalone mobile management app with camera barcode scanner & pattern lock |
+| **`android-management-app-1.1.0.apk`** | Android | Android 8.0+ Devices | Standalone mobile management app with camera barcode scanner & pattern lock |
 
 <details>
 <summary><b>🛠️ Installation Notes (macOS Gatekeeper, Windows SmartScreen & Android APK)</b></summary>
@@ -220,7 +220,7 @@ Manage staff members and assign roles directly in-app under **Settings ⚙️ �
 | 💰 **Cashier** | Daily Cash Closing | Basic Claim Checks | High-Speed Counter POS | View Only | ❌ | Mobile Counter POS |
 | 🔧 **Technician** | Personal Workload | Assigned Workbench Queue | Service Labor Lines | Parts Allocation | ❌ | Workbench Queue & Barcode Scanner |
 
-### 12. 📲 Android Management App (`technician-app`)
+### 12. 📲 Android Management App (`android-management-app`)
 - **Native Cross-Platform**: Built with **React Native & Expo SDK 57** for standalone deployment on Android smartphones and tablets.
 - **Biometric Authentication**: Fast unlock with **Fingerprint / Face ID** at the workbench or counter without repeatedly typing passwords.
 - **Dynamic Role Experience**: Automatically tailors screens and capabilities to the signed-in staff role (Owners, Managers, Cashiers, Technicians).
@@ -303,7 +303,7 @@ phoneshop-manager/
 │   ├── package.json
 │   ├── vite.config.ts
 │   └── .env.example
-├── technician-app/            # Android Management App (Multi-Role Mobile App)
+├── android-management-app/            # Android Management App (Multi-Role Mobile App)
 │   ├── src/
 │   │   ├── screens/           # Mobile screens (repairs, details, pos, profile)
 │   │   ├── components/        # Mobile UI elements
@@ -458,13 +458,13 @@ Compile the standalone native Android `.apk` for shop owners, managers, and tech
    ```bash
    npm install -g eas-cli
    eas login
-   cd technician-app
+   cd android-management-app
    eas init
    ```
    *(Select **Yes / Create new project** to link `app.json` to your personal Expo account).*
 
 2. **Configure Firebase Credentials**:
-   Create `technician-app/.env` (copy from `.env.example`) and fill in your Firebase project parameters:
+   Create `android-management-app/.env` (copy from `.env.example`) and fill in your Firebase project parameters:
    ```env
    EXPO_PUBLIC_FIREBASE_API_KEY=AIzaSyA1234567890abcdef
    EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=my-phone-shop.firebaseapp.com
@@ -474,7 +474,7 @@ Compile the standalone native Android `.apk` for shop owners, managers, and tech
    EXPO_PUBLIC_FIREBASE_APP_ID=1:123456789012:web:abcdef123456
    ```
 
-   Also set these credentials inside the `preview` profile `env` block of `technician-app/eas.json`.
+   Also set these credentials inside the `preview` profile `env` block of `android-management-app/eas.json`.
 
 3. **Launch the Cloud Build**:
    ```bash

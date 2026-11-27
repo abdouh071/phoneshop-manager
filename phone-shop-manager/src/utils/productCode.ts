@@ -13,7 +13,7 @@
  * claimant, and two claimants means the cashier is told instead of guessed at: at a
  * counter, silently ringing up the wrong item is worse than one extra click.
  *
- * The phone app keeps a copy of this file (technician-app/src/utils/productCode.ts);
+ * The phone app keeps a copy of this file (android-management-app/src/utils/productCode.ts);
  * the two must resolve a scan the same way or the same sticker means two products.
  */
 import type { PhoneModel } from '../types';
